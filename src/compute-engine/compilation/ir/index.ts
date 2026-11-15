@@ -32,6 +32,7 @@ import {
 import { GLSL, printGlsl, type GlslResult } from './print-glsl.js';
 import {
   INTERVAL_ROWS,
+  dropClosedForms,
   intervalRefusal,
   JS_INTERVAL,
   printInterval,
@@ -489,6 +490,7 @@ export function sliceProgram(
     objectVars: Object.keys(options.vars ?? {}).filter((n) =>
       readsVarsObject(options.vars![n])
     ),
+    ...(interval ? { varsTexts: options.vars } : {}),
   });
   verify(p, rows);
   // The interval mode draws nothing: a frame has no warning.
@@ -529,16 +531,25 @@ export function sliceProgram(
   const where = interval
     ? 'interval-js'
     : `${options.target}${bigint ? ' in the bigint mode' : ''}`;
-  const refused = admits(
-    p,
-    {
-      ...profile,
-      lanes,
-      syntax,
-      ...(interval ? { recursion: false } : {}),
-    },
-    rows
-  );
+  const checked: Profile = {
+    ...profile,
+    lanes,
+    syntax,
+    ...(interval ? { recursion: false } : {}),
+  };
+  // The interval mode: a closed form that the mode does not print leaves
+  // the enclosure alone.
+  if (interval)
+    dropClosedForms(
+      p,
+      (r) =>
+        admits(
+          { ...p, functions: [{ ...entryOf(p), body: { ...r, params: [] } }] },
+          checked,
+          rows
+        ) === undefined
+    );
+  const refused = admits(p, checked, rows);
   if (refused !== undefined)
     throw new Decline(
       refused.site ?? refused.head ?? 'program',

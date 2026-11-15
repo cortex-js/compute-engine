@@ -350,6 +350,12 @@ export function shadowedOperandSymbols(
   return result;
 }
 
+/** What `closedFormIntegral()` reads of a target: its `vars` rule. */
+export type ClosedFormTarget = Pick<
+  CompileTarget<Expression>,
+  'varsKeys' | 'var' | 'foldExcludedOps' | 'foldReachMemo'
+>;
+
 /**
  * Whether any operand of the integral reaches a `vars`-mapped symbol — one
  * the caller pinned to a runtime input — directly or through an assigned
@@ -371,7 +377,7 @@ export function shadowedOperandSymbols(
  */
 export function referencesVarsSymbol(
   args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
+  target: ClosedFormTarget
 ): boolean {
   const vars = target.varsKeys;
   if (vars !== undefined && vars.size > 0) {
@@ -518,7 +524,7 @@ export function integrandLambda(
  */
 export function closedFormIntegral(
   args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
+  target: ClosedFormTarget
 ): Expression | undefined {
   const engine = args[0].engine;
   // A bound that is a name with no

@@ -484,8 +484,8 @@ and `Choose` (also of real operands, `binomial.real`, a row of the mode),
 verdicts), `If`, `Which`, a `Block` with locals, user functions that are
 not recursive, `Sum` and `Product` with `Limits`, `Random()` and
 `WithRandomSeed` of a number seed, a root function literal, and the lists
-below. `Haversine`, `Zeta`, the complex and colour operations and the region
-`integrate` (`Integrate`) have no spelling and decline; a `Loop` declines with the cause "the interval mode does not
+below, and integrals (below). `Haversine`, `Zeta` and the complex and
+colour operations have no spelling and decline; a `Loop` declines with the cause "the interval mode does not
 compile it yet" (`intervalRefusal()`; a cause of the mode ends with "on
 interval-js"). A string seed and `Random` of a domain decline in the
 lowering.
@@ -537,6 +537,63 @@ of `compile-conditions.ts`): `(x + 1)^2 < 0` and `Equal(x, x)` of a real `x`
 are `'false'` and `'true'`, and `x < y` is computed. A condition that is
 such a verdict, or a constant, takes its arm in the lowering, and the other
 arm is not lowered (`fold` is off in the mode).
+
+Integrals. The region `integrate` (`Integrate` of one `Limits`,
+`NIntegrate`) is `_IA.integrate((t) => { …; return y; }, a, b, n)`, the
+enclosure of the existing interval target (`interval/integrate.ts`): `t`
+is the interval of one of `n` pieces, the integrand is a region body of
+the mode, and the bounds are intervals. `n` is the count of the existing
+target for the same expression (`intervalQuadratureSize()` of
+`compilation/interval-quadrature.ts`): the lowering measures it at the
+outermost integral of a body, from the `Integrate` nodes of its subtree,
+and every integral in its bounds and its integrand takes it
+(`Instr.pieces`; an `NIntegrate` node is a level in the mode, not on the
+existing target, which does not compile it); an integral in a user function has the count of its own
+subtree, and the library's run-time budget bounds the integrals nested
+through calls. A count under 4 declines with the reason of the existing
+target. A part of the integrand that does not read the variable and whose
+heads are all pure rows of the library (no reduction, loop, call,
+conditional or integral, which could throw or run where the integrand
+would not), found through the operands of rows and of calls, is
+lowered once before the region (the memo of `value()` reads it there), as
+the existing target computes the invariants of an integrand once; unlike a
+value that reads no input, which the printer computes once per artifact,
+such a part can read an input and is computed once per call.
+
+The closed form is the existing target's rule: the engine's antiderivative
+(`intervalClosedForm()`, which calls `closedFormIntegral()` of the shared
+layer of the old compilers, under the antiderivative budget of the
+compilation and with no fold of a `vars` name that holds a value; none
+with an angular unit other than radians, because that function reads
+operands written in radians and the lowering scales the closed form
+again, where an indefinite integral declines with that reason; none when
+the operands reach an `NIntegrate`, directly or through the value of a
+symbol or the body of a user function, which the engine would evaluate by
+quadrature to a number that the closed form holds as exact). A
+definite integral with a closed form has a second region, of no parameter,
+whose yield is the closed form, and is printed as
+`_IA.integrateClosed(() => closed, f, a, b, n)`: the library gives the
+closed form when its scan of the integrand finds no pole, gap or
+unbounded stretch (`∫ dt/t²` from −1 to 1 closes to −2 and is `singular`),
+and with an infinite bound, and the enclosure otherwise. A closed form
+that the lowering declines (`SinIntegral`, `FresnelS`: no row), that is not
+real, or that holds a loop or a call (a function lowered in a discarded
+region would stay defined) is not lowered, and one that the mode does not
+print is removed before `admits()` (`dropClosedForms()`): the enclosure,
+of the same `n`, stands alone. The reads of `vars` entries in a closed form
+are not counted as effects (in the mode they read the inputs object). An
+indefinite integral (no bounds, or a bound `Nothing`) is its closed form,
+and declines with none; its variable is then an input of the closed form,
+of the type that the closed form's use of it gives (`Integrate(x^2, x)` of
+an undeclared `x` compiles as `x^3/3` does, where the existing target,
+whose walk sees `x` as bound, refuses it as an input with no type). `compileWithIrProfileInterval()` resets the budget
+of the antiderivatives at its entry, so a public compilation with the
+shadow measure or with `fallback` can search twice for one integral, once
+per target; a search that timed out is recorded, and the second one ends
+at once. What the lowering declines on every target stays declined:
+several `Limits`, an integrand of several variables, an integrand that is
+not real, and an integrand with an effect (a read of a `vars` entry is
+one).
 
 Conditionals. An `if` is printed with each arm once (`Syntax.verdictIf`):
 the condition is bound to a name, the first arm runs unless it is

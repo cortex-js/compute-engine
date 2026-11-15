@@ -182,8 +182,22 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
       }
       case 'region': {
         const row = regionRow(i.op) ?? fail(`no region row ${i.op}`);
-        if (i.args.length !== row.args.length || i.regions.length !== 1)
+        // An `integrate` of the interval mode has a second region, its
+        // closed form: no parameter, one real yield.
+        const closed = i.op === 'integrate' ? i.regions[1] : undefined;
+        if (
+          i.args.length !== row.args.length ||
+          i.regions.length !== (closed === undefined ? 1 : 2)
+        )
           fail(`${i.op}: ${i.args.length} operands`);
+        if (
+          closed !== undefined &&
+          (closed.params.length > 0 ||
+            closed.yields.length !== 1 ||
+            !isSubLane(type(closed.yields[0]).lane, 'real') ||
+            type(closed.yields[0]).shape.length > 0)
+        )
+          fail(`${i.op}: its closed form`);
         i.args.forEach((a, k) => sub(a, scalarType(row.args[k]), i.op));
         const [r] = i.regions;
         if (r.params.length !== row.params.length)

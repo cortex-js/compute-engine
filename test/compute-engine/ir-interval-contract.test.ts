@@ -256,13 +256,18 @@ describe('the interval mode: the result contract', () => {
   });
 
   test('a decline: outside-profile with fallback false, the existing target with it', () => {
-    const integral = ['Integrate', ['Sin', 't'], ['Limits', 't', 0, 'x']];
-    const e = declineOf(() => mode(integral));
+    const loop = [
+      'Block',
+      ['Declare', 's', 'real', 0],
+      ['Loop', ['Assign', 's', ['Add', 's', 'e']], ['Element', 'e', ['Range', 1, 3]]],
+      ['Multiply', 's', 'x'],
+    ];
+    const e = declineOf(() => mode(loop));
     expect(e.diagnostic.code).toBe('outside-profile');
-    expect(e.message).toMatch(/the region integrate/);
+    expect(e.message).toMatch(/a Loop/);
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const r = compile(ce.box(integral as never), IR as never) as unknown as Result;
+      const r = compile(ce.box(loop as never), IR as never) as unknown as Result;
       expect(r.success).toBe(true);
       expect(r.profile).toBeUndefined();
       expect(r.run({ x: { lo: 1, hi: 2 } }).kind).toBe('interval');
@@ -325,7 +330,7 @@ describe('the interval mode: the declines', () => {
     [['Add', 'Z', 'x'], /the lane complex/],
     [['fact', 3], /a recursive function \(.*fact.*\)/],
     [['Zeta', 'x'], /Zeta \(the operation zeta\)/],
-    [['Integrate', ['Sin', 't'], ['Limits', 't', 0, 'x']], /the region integrate/],
+    // Integrals compile since batch 6 (`ir-interval-integrals.test.ts`).
     [
       ['Block', ['Declare', 's', 'real', 0], ['Loop', ['Assign', 's', ['Add', 's', 'e']], ['Element', 'e', ['Range', 1, 3]]], ['Multiply', 's', 'x']],
       /a Loop/,

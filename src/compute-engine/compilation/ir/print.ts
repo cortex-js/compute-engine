@@ -33,13 +33,21 @@ export type Spelling =
   string | { readonly text: string; readonly helpers: readonly string[] };
 
 /** The lines of a region instruction, around the lines of its body (the
- *  printer indents them): its results, operands and parameters by name. */
+ *  printer indents them): its results, operands and parameters by name,
+ *  its `pieces`, and whether it has a second region (`closed`), whose
+ *  lines `between` separates from those of the first. */
 export type RegionSpelling = (r: {
   outs: string[];
   types: IRType[];
   args: string[];
   params: string[];
-}) => { open: string[]; close: (yields: string[]) => string[] };
+  pieces?: number;
+  closed?: boolean;
+}) => {
+  open: string[];
+  between?: (yields: string[]) => string[];
+  close: (yields: string[]) => string[];
+};
 
 export type Syntax = {
   /** The spelling of each IR operation. An operation `add.int` with no
@@ -442,10 +450,17 @@ export function printProgram(
           types: i.outs.map(type),
           args: i.args.map(use),
           params: inner.params.map(name),
+          pieces: i.pieces,
+          ...(i.regions.length > 1 ? { closed: true } : {}),
         });
         s.open.forEach((x) => line(x));
         lines.push(...body(inner, depth + 1));
-        s.close(inner.yields.map(use)).forEach((x) => line(x));
+        const last = i.regions[i.regions.length - 1];
+        if (last !== inner) {
+          s.between!(inner.yields.map(use)).forEach((x) => line(x));
+          lines.push(...body(last, depth + 1));
+        }
+        s.close(last.yields.map(use)).forEach((x) => line(x));
       } else if (i.k === 'call' && i.outs.length === 2) {
         // The list, then its length (`lower-functions.ts`).
         const [n, list] = i.outs.map(name);

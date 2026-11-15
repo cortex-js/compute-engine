@@ -146,10 +146,15 @@
   reads no input is computed once: each constant when the code is loaded
   (`preambleOnce`), and a call of constant arguments that runs at every
   call (`b(3π)`) at the first call; if it throws there, every call is
-  `entire`, as when it is computed at each call. Any other program
-  declines, and with `fallback` the existing target then compiles it: an
-  integral, a `Loop`, a recursive function, a `Range` of real operands.
-  Without the option `profile`, nothing changes.
+  `entire`, as when it is computed at each call. An integral of one
+  variable (`Integrate` with one `Limits`, `NIntegrate`) is the enclosure
+  of the existing target, with the same number of pieces, or the closed
+  form of the engine's antiderivative where the existing target uses one
+  (an indefinite integral is its closed form); with an angular unit other
+  than radians it is the enclosure only. Any other program declines, and
+  with `fallback` the existing target then compiles it: an integral of
+  several `Limits`, a `Loop`, a recursive function, a `Range` of real
+  operands. Without the option `profile`, nothing changes.
 - **With the profile `'ir'`, two calls of a user function with the same
   arguments are one call** on every target (JavaScript, GLSL,
   `interval-js`), when the function draws no random number, directly or

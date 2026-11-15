@@ -17,6 +17,7 @@ import {
 } from '../../kernel-pool.js';
 import { createIntervalRuntime } from '../interval-runtime.js';
 import { readsVarsObject } from '../vars-inputs.js';
+import { resetIntervalClosedFormBudgets } from '../interval-quadrature.js';
 import { isBooleanBindingType } from '../compiler-type-facts.js';
 import { ALL_PASSES } from './passes.js';
 import { compileSlice } from './index.js';
@@ -66,6 +67,8 @@ export function compileWithIrProfileInterval(
   expr: Expression,
   options: IrOptions | undefined
 ): CompilationResult<'interval-js', IntervalValue> {
+  // A fresh antiderivative budget for the closed forms of the integrals.
+  resetIntervalClosedFormBudgets();
   try {
     const refused = optionDecline(options, IR_INTERVAL_OPTIONS);
     if (refused !== undefined)

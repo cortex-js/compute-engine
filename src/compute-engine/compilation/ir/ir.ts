@@ -105,7 +105,8 @@ export type Instr =
       passes?: boolean;
     }
   | { k: 'call'; outs: V[]; fn: string; args: V[] }
-  /** The region row `op`; `site` is the source text, for a warning. */
+  /** The region row `op`; `site` is the source text, for a warning.
+   *  `pieces`: the interval mode, the partition of an `integrate`. */
   | {
       k: 'region';
       outs: V[];
@@ -113,6 +114,7 @@ export type Instr =
       args: V[];
       regions: Region[];
       site?: string;
+      pieces?: number;
     };
 
 export type IRFunction = {

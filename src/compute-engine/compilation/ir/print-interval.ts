@@ -183,6 +183,29 @@ export const JS_INTERVAL: Syntax = Object.freeze({
   regions: {
     build: fill('build'),
     filter: fill('filter'),
+    // The enclosure of the existing interval target, of the count of
+    // pieces that the lowering chose (`intervalQuadratureSize()`): the
+    // integrand is a function of the interval of one piece. With a closed
+    // form (the second region), `_IA.integrateClosed` runs it when its scan
+    // of the integrand finds no pole, and the enclosure otherwise.
+    integrate: ({ outs: [out], args: [a, b], params: [t], pieces, closed }) =>
+      closed === true
+        ? {
+            open: [`const ${out}_f = (${t}) => {`],
+            between: ([y]) => [
+              `  return ${y};`,
+              '};',
+              `const ${out} = _IA.integrateClosed(() => {`,
+            ],
+            close: ([c]) => [
+              `  return ${c};`,
+              `}, ${out}_f, ${a}, ${b}, ${pieces});`,
+            ],
+          }
+        : {
+            open: [`const ${out} = _IA.integrate((${t}) => {`],
+            close: ([y]) => [`  return ${y};`, `}, ${a}, ${b}, ${pieces});`],
+          },
     seeded: ({ outs }) => ({
       open: [...outs.map((o) => `let ${o};`), '{'],
       close: (ys) => [...ys.map((y, j) => `  ${outs[j]} = ${y};`), '}'],
@@ -266,6 +289,21 @@ export const INTERVAL_ROWS: readonly OperatorRow[] = Object.freeze([
   ),
   ...PLAIN_ROWS,
 ]);
+
+/** The closed form of each `integrate` of `p` (its second region) that
+ *  `admitted` refuses, removed: the enclosure stands alone. */
+export function dropClosedForms(
+  p: Program,
+  admitted: (closed: Region) => boolean
+): void {
+  const walk = (r: Region): void =>
+    r.body.forEach((i) => {
+      if (i.k === 'region' && i.regions.length === 2 && !admitted(i.regions[1]))
+        i.regions.pop();
+      regionsOf(i).forEach(walk);
+    });
+  p.functions.forEach((f) => walk(f.body));
+}
 
 /** The construct of `p` that the mode does not compile yet (a `Loop`,
  *  whose passes the budget counts), or `undefined`. A region other than a

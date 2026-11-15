@@ -91,6 +91,7 @@ import {
   type OperatorRow,
 } from './operators.js';
 import {
+  Decline,
   decline,
   hasOwnLowering,
   isUntyped,
@@ -103,6 +104,11 @@ import {
 } from './lower-context.js';
 import { toBigint } from '../../boxed-expression/numerics.js';
 import { listLowering, parameterName } from './lower-lists.js';
+import {
+  intervalClosedForm,
+  intervalQuadratureRefusal,
+  intervalQuadratureSize,
+} from '../interval-quadrature.js';
 import {
   functionLowering,
   inputType,
@@ -187,6 +193,9 @@ export type LowerOptions = {
   /** The names of `vars` whose text reads the inputs object
    *  (`readsVarsObject()`): a function body reads one as an input. */
   readonly objectVars?: readonly string[];
+  /** The interval mode: the text of each `vars` name, for the closed form
+   *  of an integral (`intervalClosedForm()`). */
+  readonly varsTexts?: Readonly<Record<string, string>>;
   /** `false` (GLSL): a list parameter of a user function of no stated
    *  length takes the stated length of its argument at the first call. */
   readonly runtimeLengths?: boolean;
@@ -1470,7 +1479,9 @@ export function lower(
     args: V[],
     params: V[],
     f: () => V[],
-    site: Expression
+    site: Expression,
+    pieces?: number,
+    closed?: Region
   ): V[] => {
     const r = regionRow(op)!;
     const body = b.region(params, f);
@@ -1481,7 +1492,15 @@ export function lower(
     r.results(args, ys, outs)!.forEach((t, k) => (b.types[outs[k]] = t));
     // A build of tuples is a list of tuples.
     keep(body.yields[body.yields.length - 1], outs[outs.length - 1], 1);
-    b.emit({ k: 'region', outs, op, args, regions: [body], site: text(site) });
+    b.emit({
+      k: 'region',
+      outs,
+      op,
+      args,
+      regions: closed === undefined ? [body] : [body, closed],
+      site: text(site),
+      ...(pieces === undefined ? {} : { pieces }),
+    });
     return outs;
   };
 
@@ -1753,6 +1772,48 @@ export function lower(
     return undefined;
   };
 
+  /** The interval mode: the pieces of the integral being lowered, and the
+   *  function whose body holds it. */
+  let quadrature: { n: number; fn?: string } | undefined;
+  /** The interval mode: the region of the closed form `c` of an integral,
+   *  or `undefined` when the lowering declines it, when it is not real,
+   *  and when it holds a loop or a call, whose function would stay defined
+   *  after the region is discarded. Its only effects are reads of `vars`
+   *  entries, which in the mode read the inputs object: they are not
+   *  counted. */
+  const closedRegion = (c: Expression | undefined): Region | undefined => {
+    if (c === undefined || facts(c).loop || !facts(c).slice) return undefined;
+    const effects = b.effects;
+    try {
+      const r = b.region([], () => [scalar(c)]);
+      return isSubLane(type(r.yields[0]).lane, 'real') ? r : undefined;
+    } catch (error) {
+      if (!(error instanceof Decline)) throw error;
+      return undefined;
+    } finally {
+      b.effects = effects;
+    }
+  };
+  /** The interval mode: `x` is safe to compute before an integral whose
+   *  integrand holds it (an invariant): every head is a pure row of the
+   *  library, which lowers to operations only (no reduction, loop, call,
+   *  conditional or integral, which can throw or run where the integrand
+   *  would not). */
+  const early = new WeakMap<Expression, boolean>();
+  const speculatable = (x: Expression): boolean => {
+    if (!isFunction(x)) return true;
+    let known = early.get(x);
+    if (known === undefined) {
+      known =
+        isLibrary(x) &&
+        !CONSTRUCTS.has(x.operator) &&
+        !REDUCTIONS.has(x.operator) &&
+        rowOfHead(rows, x.operator)?.effect === 'pure' &&
+        x.ops.every(speculatable);
+      early.set(x, known);
+    }
+    return known;
+  };
   /** `Integrate(f, Limits(t, a, b))` or `NIntegrate(f, a, b)`, of real
    *  bounds and a real integrand (a function literal of one parameter, or
    *  a body in the name of the `Limits`): the region `integrate`, whose
@@ -1761,6 +1822,28 @@ export function lower(
    *  samples. */
   const integral = (e: Fn): V => {
     const [f, limits] = e.ops;
+    // The interval mode: an indefinite integral (no bounds, or a bound
+    // `Nothing`) is its closed form, as on the existing interval target;
+    // with none it is a function, not a number.
+    if (
+      interval &&
+      e.operator === 'Integrate' &&
+      (e.nops === 1 ||
+        (e.nops === 2 &&
+          isFunction(limits, 'Limits') &&
+          (limits.nops < 3 ||
+            limits.ops.slice(1).some((x) => isSymbol(x, 'Nothing')))))
+    ) {
+      const c = intervalClosedForm(e.ops, options.varsTexts ?? {});
+      if (c === undefined)
+        decline(
+          e,
+          e.engine.angularUnit !== 'rad'
+            ? 'an indefinite integral with an angular unit other than radians (its closed form is not used)'
+            : 'an indefinite integral with no closed form (a function, not a number)'
+        );
+      return scalar(c);
+    }
     const bounds =
       e.operator === 'NIntegrate'
         ? e.nops === 3
@@ -1781,6 +1864,16 @@ export function lower(
         : undefined;
     if (name === undefined || name === 'Nothing')
       decline(e, 'an integrand that is not a function of one variable');
+    // The interval mode: the pieces of the partition, measured by the
+    // outermost integral of a body (`intervalQuadratureSize()`) and taken
+    // by every integral in its bounds and its integrand.
+    const outer = quadrature;
+    if (interval && (outer === undefined || outer.fn !== cx.inFunction)) {
+      const size = intervalQuadratureSize(e.ops, 1, true);
+      const refusal = intervalQuadratureRefusal(size);
+      if (refusal !== undefined) decline(e, refusal);
+      quadrature = { n: size.n, fn: cx.inFunction };
+    }
     const [lo, hi] = bounds.map((x) => {
       const v = scalar(x);
       if (!isSubLane(type(v).lane, 'real'))
@@ -1788,6 +1881,35 @@ export function lower(
       return v;
     });
     const effects = b.effects;
+    // The interval mode: a part of the integrand that does not read its
+    // variable and is safe to compute early (`speculatable()`) is lowered
+    // once before the region, and the memo of `value()` reads it there, as
+    // the existing interval target computes the invariants of an integrand
+    // once. Only the operands of rows and of calls are searched: a part of
+    // an arm or of a scope stays in place.
+    const invariant = (x: Expression): void => {
+      if (!isFunction(x)) return;
+      const k = facts(x);
+      if (!k.names.has(name) && k.writes.size === 0 && speculatable(x))
+        value(x);
+      else if (
+        (x.operator === 'Block' && x.nops === 1) ||
+        userBinding(x) !== undefined ||
+        (isLibrary(x) &&
+          !CONSTRUCTS.has(x.operator) &&
+          !REDUCTIONS.has(x.operator) &&
+          rowOfHead(rows, x.operator) !== undefined)
+      )
+        x.ops.forEach(invariant);
+    };
+    if (interval) invariant(literal?.ops[0] ?? f);
+    // The interval mode: the closed form of the existing interval target,
+    // which `_IA.integrateClosed` gives when its scan of the integrand
+    // finds no pole (`print-interval.ts`); otherwise the enclosure.
+    const closed =
+      interval && e.operator === 'Integrate'
+        ? closedRegion(intervalClosedForm(e.ops, options.varsTexts ?? {}))
+        : undefined;
     const t = b.newValue(scalarType('real'));
     const [out] = region(
       'integrate',
@@ -1801,9 +1923,12 @@ export function lower(
             decline(e, 'an integrand that is not real');
           return [y];
         }),
-      e
+      e,
+      interval ? quadrature!.n : undefined,
+      closed
     );
     if (b.effects !== effects) decline(e, 'an integrand with an effect');
+    quadrature = outer;
     return out;
   };
 

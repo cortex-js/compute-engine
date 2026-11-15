@@ -430,7 +430,6 @@ describe('the interval mode, lists: declines', () => {
     [['At', 'Q', ['Floor', x]], /an index that can be out of range/],
     [['Linspace', 0, 1, 5], /the operator Linspace is not in the slice/],
     [['RandomChoice', 'L', 2], /the operator RandomChoice is not in the slice/],
-    [['Integrate', ['Sin', 't'], ['Limits', 't', 0, x]], /the region integrate/],
     [['Comprehension', ['Multiply', 'j', 'k'], ['Element', 'j', ['Range', 1, 3]], ['Element', 'k', ['Range', 1, 3]]], /not of one clause/],
     [['Block', ['Declare', 'q', "'real'", 0], ['Loop', ['Assign', 'q', ['Add', 'q', 't']], ['Element', 't', 'L']], 'q'], /a Loop: the interval mode does not compile it yet on interval-js/],
   ])('%j', (json, cause) => {

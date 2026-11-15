@@ -317,7 +317,10 @@ export function mentionsExcludedName(
  */
 export function reachesExcludedName(
   expr: Expression,
-  target: CompileTarget<Expression>
+  target: Pick<
+    CompileTarget<Expression>,
+    'varsKeys' | 'foldExcludedOps' | 'foldReachMemo'
+  >
 ): boolean {
   const vars = target.varsKeys;
   const ops = target.foldExcludedOps;
