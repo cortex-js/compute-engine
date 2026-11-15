@@ -56,6 +56,12 @@ Delete this file when parts 2 and 3 are done or have their own record.
   - `319f00e0f595994f267bc39d3df2d1d37eff6ab7`, CE-1280: a fold of `Power`
     and `Divide` reads only the declared facts of a variable
     (`staticFact()`); source +104 −19.
+  - `df1a175d66b43913af343da5f27726b0477d9e0d`, CE-1303 (part 3): an Epsil
+    `while` with an undecided condition ends with an error; source +84 −15.
+  - `2e09c2d140eef80c8c26fdb04c2b6ae10c3e78a9`, the rollback frame, step 1:
+    an overload trial opens no frame; source +158 −179. Tycho's gates were
+    not run on these two.
+- CE-1317 is closed by the user's decision (documented; `issues/CLOSED.md`).
 - `src/api.md` still lists `TypeProvenanceEntry.epoch` and is regenerated at
   release.
 
@@ -86,16 +92,22 @@ not confirmed it item by item.
    applied to every canonical read the rule changes 122 tests, 19 of them a
    value (`~/dev/compute-engine-recovery/ce1280/report.md`).
 3. **The rollback frame** (about 900 lines, estimated). In this order:
-   - the same store for block locals and binder variables that D18 gave
-     parameters (about the size of D18). MEASURED 2026-11-14, not built
-     (`~/dev/compute-engine-recovery/m3a-census/report.md`): a binder has no
-     frame (6,790 of the 7,186 direct writes of a boxing are binder
-     variables, 1,793 of them after the binder's scope is popped), and the
-     direct-write branch keeps its rollback record for the Epsil static
-     check (about 12,900 writes with a frame open). The step adds a binder
-     frame and removes no writer family whole. Open with the user: start
-     from the two USERS of the frame (the overload trials, the Epsil static
-     check) and not from its writers;
+   - NOT by its writers: the store for block locals and binder variables
+     was measured and dropped (`~/dev/compute-engine-recovery/m3a-census/report.md`:
+     a binder has no frame, and the Epsil static check keeps the rollback
+     record of the direct-write branch).
+   - By its USERS (user decision 2026-11-14; census and plan in
+     `~/dev/compute-engine-recovery/rollback-users/report.md`). Step 1, the
+     overload trial, is done (state above). Left, the Epsil static check
+     (8,113 frames and 116,240 records in one suite; all but 344 records
+     target a scope that the check pushes itself): step 2, the check copies
+     into its own scope each outer definition that a statement redefines or
+     narrows (169 records; about +100 to 200 lines); step 3, a copy-based
+     rollback point for the provisional registry around the check (175
+     records; about +30 to 50); step 4, the check runs with no frame; step
+     5, delete the frame, its 25 hooks and their bookkeeping (about 650 to
+     700 lines, estimated). Steps 2 and 3 add code before step 5 removes it:
+     ask the user before building them.
    - the three sites of `library/core.ts`;
    - operator-signature inference moved out of host definitions;
    - then the provisional registry (below).
@@ -104,7 +116,17 @@ not confirmed it item by item.
    declaration entries all land in the scope that it pushes and pops
    itself.
 4. **The provisional registry and forward-call references** (about 1,300
-   lines, estimated). They wait for stored function bodies as units, and
+   lines, estimated). FIRST STEP BUILT, NOT LANDED (2026-11-14): leftover 2
+   is removed and the forward-call reference mechanism deleted in the
+   worktree `/tmp/wt-ce-desk-l2` (patch and report in
+   `~/dev/compute-engine-recovery/leftover2/`; source about −150 net). It
+   waits for its review rounds and for one decision of the user: a function
+   that calls, with no argument, a function defined later has its inferred
+   effects derived again when the callee is defined (`effects-contracts`
+   test 10 pins that they stay `any`; EFFECTS-MODEL item 10). A declared
+   contract stays trusted. `provisional-application.ts` itself stays: every
+   free-head call is now noted in it for re-derivation.
+   The earlier text: They wait for stored function bodies as units, and
    for the decision on leftover 2. Cheapest first step: remove leftover 2
    again and rerun `tycho-item-182`, which hung before (`6dbc33b11`
    changed how the effects of an undeclared call head are read). Against
