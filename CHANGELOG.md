@@ -43,7 +43,9 @@
   are not checked at the entry: a row of another length gives an unspecified
   result.
 
-## 0.191.0 _2026-11-15_
+## 0.192.0 _2026-11-15_
+
+This is the content first numbered 0.191.0, a version that was not published.
 
 ### Breaking Changes
 
