@@ -1029,6 +1029,13 @@ Value-producing iteration over a collection belongs to the library functions
 while x > 0 { x }
 ```
 
+A condition that is neither `true` nor `false` ends the loop with an
+`incompatible-type` error, reported as a runtime error: in
+`let i = 1; while i <= n { i = i + 1 }` with `n` free, `i <= n` has no
+value, and the loop stops with `i` still `1`. The condition must be decided at
+each turn, the first one included: the body does not run to give a name its
+value, so initialize each variable that the condition reads.
+
 `while let pattern = subject { … }` is the loop form of [`if let`](#if-let):
 each turn matches the subject against the pattern and runs the body with the
 pattern's bindings in scope, and the first turn on which the subject does not

@@ -103,6 +103,18 @@
 
 ### Resolved Issues
 
+- **An Epsil `while` whose condition is undecided stops.** In
+  `let i = 1; while i <= n { i = i + 1 }` with `n` free, the condition
+  `i <= n` is neither `true` nor `false`, and `executeEpsil` never returned.
+  The loop now ends with an `incompatible-type` error (expected `boolean`, at
+  the condition), reported as a runtime error, and `i` keeps the value `1`.
+  The condition must be decided at each turn, the first one included: an
+  undecided condition ends the loop before the body runs, so initialize each
+  variable that the condition reads. A host `Loop(Block(If(c, Break), body))`,
+  the form of a `while`, gets the same treatment: with `x` declared `integer`
+  and no value, `Loop(Block(If(Not(x ≠ 5), Break), Block(x := 5)))` assigned
+  `x` and ended, and now gives the error with `x` unassigned. An `If(c,
+  Break)` in a `Loop` of another form is held as before (CE-1303).
 - **The value of a function does not depend on the order in which its body
   uses an untyped parameter.** `(A, B) ↦ (A·B − B·A, Determinant(A),
   Determinant(B))` applied to `[[1, 2], [3, 4]]` and `[[0, 1], [1, 0]]` gave

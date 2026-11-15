@@ -645,7 +645,11 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // (`surplusOperandError`), whatever the condition.
       evaluate: (ops, options) =>
         surplusOperandError(options.engine, 'If', ops, options.expression, 3) ??
-        evaluateIf(ops, options),
+        whileGuardResult(
+          options.engine,
+          options.expression,
+          evaluateIf(ops, options)
+        ),
       evaluateAsync: async (ops, options) =>
         surplusOperandError(options.engine, 'If', ops, options.expression, 3) ??
         evaluateIfAsync(ops, options),
@@ -5905,6 +5909,55 @@ function* parallelPassValues(
   }
 }
 
+/** The guards of the `while` loops that `runLoop` is running
+ * (`whileGuard`), each with the number of runs of its loop that have not
+ * ended: a loop in a recursive function runs inside itself. */
+const WHILE_GUARDS = new WeakMap<Expression, number>();
+
+/**
+ * The guard `If(g, Break)` of `body` when a bare `Loop` with this body is a
+ * `while` loop: the body is `Block(If(g, Break), b)`, the form that the Epsil
+ * parser gives to `while c { b }` (`g` is `Not(c)`, or its canonical form).
+ * Otherwise `undefined`.
+ */
+function whileGuard(body: Expression): Expression | undefined {
+  if (!isFunction(body, 'Block') || body.nops !== 2) return undefined;
+  const guard = body.op1;
+  if (!isFunction(guard, 'If') || guard.nops !== 2) return undefined;
+  const control = guard.op2;
+  return isFunction(control, 'Break') && control.nops === 0 ? guard : undefined;
+}
+
+/**
+ * The value of the `If` `expr`, of value `result`. When `expr` is the guard
+ * of a `while` loop and its condition is neither `True` nor `False` (a
+ * comparison with a name that has no value), the value is the
+ * `incompatible-type` error, which ends the loop: the `If` would be held,
+ * and the loop would never end. Any other `If` is not changed.
+ */
+function whileGuardResult(
+  ce: ComputeEngine,
+  expr: Expression | undefined,
+  result: Expression | undefined
+): Expression | undefined {
+  if (!isFunction(expr, 'If') || !WHILE_GUARDS.has(expr)) return result;
+  // The condition was `True` (`Break`), `False` (`Missing`: an `If` with a
+  // statement arm and no else branch), or an error.
+  if (
+    result !== undefined &&
+    (isFunction(result, 'Break') ||
+      result.operator === 'Error' ||
+      sym(result) === 'Missing')
+  )
+    return result;
+  const g = expr.op1;
+  return ce.typeError(
+    'boolean',
+    undefined,
+    isFunction(g, 'Not') ? g.op1 : ce._fn('Not', [g])
+  );
+}
+
 /**
  * Imperative `Loop`, evaluated **for effect**.
  *
@@ -5930,20 +5983,36 @@ function* runLoop(
 
   if (elements.length === 0) {
     // Bare infinite imperative loop.
-    let i = 0;
-    while (true) {
-      const result = body.evaluate();
-      if (isFunction(result, 'Break'))
-        return result.ops.length > 0 ? result.op1 : ce.Nothing;
-      if (result.operator === 'Return') return result;
-      // An `Error` value — the body's statement list short-circuited on a
-      // fault (see `evaluateStatements`). Stop and surface it as the loop's
-      // value rather than iterating past it forever.
-      if (result.operator === 'Error') return result;
-      i += 1;
-      yield result;
-      if (i > ce.iterationLimit)
-        throw new CancellationError({ cause: 'iteration-limit-exceeded' });
+    // The guard of a `while` is marked while this loop runs, and only then.
+    // The `finally` runs when the loop ends, returns or throws, and when the
+    // driver closes the generator before its end (`run`, `runAsync` and
+    // `withEvaluationEffects` close it in a `finally`). A generator that a
+    // consumer drops without closing keeps the mark until it is collected.
+    const guard = whileGuard(body);
+    if (guard !== undefined)
+      WHILE_GUARDS.set(guard, (WHILE_GUARDS.get(guard) ?? 0) + 1);
+    try {
+      let i = 0;
+      while (true) {
+        const result = body.evaluate();
+        if (isFunction(result, 'Break'))
+          return result.ops.length > 0 ? result.op1 : ce.Nothing;
+        if (result.operator === 'Return') return result;
+        // An `Error` value — the body's statement list short-circuited on a
+        // fault (see `evaluateStatements`). Stop and surface it as the loop's
+        // value rather than iterating past it forever.
+        if (result.operator === 'Error') return result;
+        i += 1;
+        yield result;
+        if (i > ce.iterationLimit)
+          throw new CancellationError({ cause: 'iteration-limit-exceeded' });
+      }
+    } finally {
+      if (guard !== undefined) {
+        const n = (WHILE_GUARDS.get(guard) ?? 1) - 1;
+        if (n > 0) WHILE_GUARDS.set(guard, n);
+        else WHILE_GUARDS.delete(guard);
+      }
     }
   }
 
