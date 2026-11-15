@@ -1,7 +1,6 @@
 // Calls of user and local functions: emission, parameter types, inlining of
 // collection-valued calls, and operand types in context.
 
-import { assertScalarFragmentCall } from './javascript-fragment-facts.js';
 import {
   describe as describeOperand,
   describeType,
@@ -33,7 +32,6 @@ import {
   resolveTypeAlias,
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
   stripMissingFromType,
-  typeContainsMissing,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { factsOf } from '../../common/type/facts.js';
@@ -162,7 +160,7 @@ export function complexWrapCode(
  *   and `L = [1, 2, 3]` is `[3, 5, 7]`). The depth of the map over each
  *   argument is its rank (`callArgumentMapRank()`), written into the code
  *   by the compiler: `_SYS.mapFn(name, [1, 0], L, x)` on JavaScript,
- *   `_IA.mapFn(…)` on interval-js, a comprehension on Python;
+ *   `_IA.mapFn(…)` on interval-js;
  * - a decline, when an argument at a scalar parameter has no settled
  *   shape (rule R3): the code would have to test the value at run time to
  *   know whether to map. The decline names the argument.
@@ -202,8 +200,6 @@ export function emitUserFunctionCall(
    */
   held: ReadonlyArray<string> = []
 ): TargetSource {
-  if (assertScalarFragmentCall(target, args, held))
-    return `${name}(${args.map((arg) => compileValueOperand(arg, target)).join(', ')})`;
   const coerceToComplex = realLaneArguments(
     name,
     args,
@@ -265,18 +261,6 @@ export function emitUserFunctionCall(
 
   if (!ranks.some((r) => r! > 0))
     return `${name}(${[...compiledArgs.map(coerce), ...held].join(', ')})`;
-
-  if (target.language === 'python')
-    return pythonMapCall(
-      name,
-      ranks as number[],
-      compiledArgs,
-      held,
-      target,
-      args.map((a, i) =>
-        admitsAbsentAtMappedLevel(core.staticTypeOf(a, target), ranks[i]!)
-      )
-    );
 
   const helper =
     target.language === 'javascript'
@@ -408,104 +392,6 @@ export function unsettledArgumentDecline(
       `known only at run time.`,
     value: argName,
   });
-}
-
-/**
- * The static map of a call on the Python target: a nested list
- * comprehension, one level per rank. Every argument is bound once by a
- * `lambda`, so an argument is evaluated once, in source order, as in the
- * direct call. Several lists at one level are read in step with `zip`.
- *
- * `absent[j]`: the argument `j` can be absent (`None`) at a mapped level,
- * the whole argument (`L: list<real> | missing`) or an element above the
- * rank-0 level (`list<list<real> | missing>`). At each mapped level, the
- * code then tests that value: an absent value is not iterated, and reaches
- * the function as it is, as an argument of rank 0 does. This is what
- * `mapWith` in `javascript-runtime.ts` does, and the interpreter applies
- * the function to the absent value (`Apply(t ↦ 7, L)` is 7 for an absent
- * `L`). Without the test, the comprehension iterated `None` and raised a
- * `TypeError`.
- */
-export function pythonMapCall(
-  name: string,
-  ranks: ReadonlyArray<number>,
-  codes: ReadonlyArray<string>,
-  held: ReadonlyArray<string>,
-  target: CompileTarget<Expression>,
-  absent: ReadonlyArray<boolean> = []
-): string {
-  // A callee that is not a name (a `lambda`) is bound once too, so it is
-  // not built again at each element.
-  const fn = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : tempVar(target);
-  const bound = codes.map(() => tempVar(target));
-  const level = (vars: string[], rs: ReadonlyArray<number>): string => {
-    const mapped = rs.map((r, j) => (r > 0 ? j : -1)).filter((j) => j >= 0);
-    if (mapped.length === 0) return `${fn}(${[...vars, ...held].join(', ')})`;
-    return guard(
-      vars,
-      rs,
-      mapped,
-      mapped.filter((j) => absent[j] === true)
-    );
-  };
-  // The test of each argument of `pending` that can be absent at this
-  // level: when it is `None`, the code continues with the rank 0 for it.
-  const guard = (
-    vars: string[],
-    rs: ReadonlyArray<number>,
-    mapped: ReadonlyArray<number>,
-    pending: ReadonlyArray<number>
-  ): string => {
-    if (pending.length > 0) {
-      const [j, ...more] = pending;
-      const whole = level(
-        vars,
-        rs.map((r, i) => (i === j ? 0 : r))
-      );
-      return `(${whole} if ${vars[j]} is None else ${guard(vars, rs, mapped, more)})`;
-    }
-    const elements = mapped.map(() => tempVar(target));
-    const inner = vars.slice();
-    mapped.forEach((j, k) => (inner[j] = elements[k]));
-    const body = level(
-      inner,
-      rs.map((r) => (r > 0 ? r - 1 : 0))
-    );
-    const source =
-      mapped.length === 1
-        ? vars[mapped[0]]
-        : `zip(${mapped.map((j) => vars[j]).join(', ')})`;
-    return `[${body} for ${elements.join(', ')} in ${source}]`;
-  };
-  const params = fn === name ? bound : [fn, ...bound];
-  const values = fn === name ? codes : [name, ...codes];
-  return (
-    `(lambda ${params.join(', ')}: ${level(bound, ranks)})` +
-    `(${values.join(', ')})`
-  );
-}
-
-/**
- * True when a value of type `t`, mapped over `rank` list levels, can be
- * absent at one of these levels: the value itself, or an element at a
- * level less than `rank` (`list<list<real> | missing>` with the rank 2).
- * An absent element at the level `rank` reaches the function, and is not
- * tested. When the element type is not known, the answer is true if `t`
- * holds `missing` anywhere.
- */
-export function admitsAbsentAtMappedLevel(
-  t: Readonly<Type>,
-  rank: number
-): boolean {
-  if (rank <= 0) return false;
-  if (isSubtype('missing', t)) return true;
-  if (rank === 1) return false;
-  // `t` does not admit `missing` here, so its element type is read as it
-  // is: `stripMissingFromType()` also removes `missing` from the elements.
-  const element = collectionElementType(t);
-  return element === undefined
-    ? typeContainsMissing(t)
-    : admitsAbsentAtMappedLevel(element, rank - 1);
 }
 
 /**

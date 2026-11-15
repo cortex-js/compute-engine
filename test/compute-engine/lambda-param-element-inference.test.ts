@@ -8,7 +8,6 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { applicable } from '../../src/compute-engine/function-utils';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { lowerLevel } from '../../src/compute-engine/library/map-broadcast-shape';
 import { lowerMapSpine } from '../../src/compute-engine/library/map-lowering';
 import {
@@ -293,7 +292,7 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
     expect(expr.evaluate().toString()).toBe('1');
   });
 
-  test('a stamped CountIf still compiles on JS and on Python', () => {
+  test('a stamped CountIf still compiles on JS', () => {
     // The stamp is provably satisfied by the source's element type, so
     // `assertCallbackAnnotations` admits it and the codegen is unchanged (the
     // annotation is not emitted).
@@ -319,15 +318,10 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
     );
     expect(r.preamble).toContain('const _val_cs = [1, 2, 3];');
     expect((r.run as () => unknown)()).toBe(2);
-    expect(
-      new PythonTarget().compile(expr, { constantFold: false })?.code
-    ).toBe(
-      '(lambda _f: sum(1 for _x in [1, 2, 3] if _f(_x)))((lambda n: 1 < n))'
-    );
     expect(expr.evaluate().toString()).toBe('2');
   });
 
-  test('a NARROWING annotation still declines to compile, both targets', () => {
+  test('a NARROWING annotation still declines to compile', () => {
     // The fail-closed gate is untouched: an annotation the source's element
     // type does not provably satisfy cannot be enforced by the emitted code.
     const ce = new ComputeEngine();
@@ -344,7 +338,6 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
     expect(() => compile(expr, { fallback: false })).toThrow(
       /Could not compile/
     );
-    expect(() => new PythonTarget().compile(expr)).toThrow(/Could not compile/);
   });
 });
 
@@ -457,9 +450,6 @@ describe('the multi-collection (zip) form does not stamp its n-ary callback', ()
     });
     expect(js.success).toBe(true);
     expect(js.run({})).toEqual([4, 6]);
-    const py = new PythonTarget().compile(expr, { constantFold: false });
-    expect(py.success).toBe(true);
-    expect(py.code).toContain('zip(*_ls)');
   });
 
   test('the sharing pin holds for the multi-collection form too', () => {

@@ -111,19 +111,6 @@ describe('Compiled jump function of a closed exact operand, no constant fold', (
 });
 
 describe('Compiled jump function of a closed exact operand, other targets', () => {
-  test('Python, no constant fold', () => {
-    expect(
-      compile(box(['Floor', nearInt]), { to: 'python', ...NO_FOLD }).code
-    ).toBe('24');
-  });
-
-  test('Python comparison, default and no constant fold', () => {
-    // The structural code was `25 < 25`, which is `False`.
-    const e = box(['Less', nearInt, 25]);
-    expect(compile(e, { to: 'python' }).code).toBe('True');
-    expect(compile(e, { to: 'python', ...NO_FOLD }).code).toBe('True');
-  });
-
   test('GLSL, no constant fold', () => {
     const e = box(['Floor', nearInt]);
     expect(compile(e, { to: 'glsl', ...NO_FOLD }).code).toBe('24.0');

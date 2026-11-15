@@ -407,14 +407,8 @@ export function assertCompilationOptionsContract(
     );
   }
 
-  if (
-    options.profile !== undefined &&
-    options.profile !== 'numeric-kernel' &&
-    options.profile !== 'ir'
-  ) {
-    throw new Error(
-      'Invalid compilation option "profile": expected "numeric-kernel" or "ir"'
-    );
+  if (options.profile !== undefined && options.profile !== 'ir') {
+    throw new Error('Invalid compilation option "profile": expected "ir"');
   }
 
   if (

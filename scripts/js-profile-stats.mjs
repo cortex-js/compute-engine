@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Sum the counters of the `numeric-kernel` switch of `implicitCompile()`
+// Sum the counters of the switch of `implicitCompile()` (the profile `ir`)
 // over the files that the instances of the module wrote, and print one table.
 //
-//   CE_JS_PROFILE=numeric-kernel CE_JS_PROFILE_STATS=<dir> npx jest ...
+//   CE_JS_PROFILE=ir CE_JS_PROFILE_STATS=<dir> npx jest ...
 //   node scripts/js-profile-stats.mjs <dir>
 //
 // Each file `<dir>/<pid>-<suffix>.json` holds `{ pid, consumers }`, the
@@ -11,17 +11,16 @@
 // has one row per consumer: attempts, admitted, declined, failed, then the
 // five most frequent messages of a decline or a failure of that consumer.
 //
-// The counters of the shadow measure (`CE_JS_PROFILE_SHADOW=1`), under
+// The counters of the shadow measure (`CE_JS_PROFILE_SHADOW=ir`), under
 // `shadow` in each file, are printed after it: per consumer, the
 // compilations, those that the existing compiler compiled (baseline), how
 // many of these the profile admitted, declined or failed on, and how many of
 // the compilations the existing compiler declined and the profile admitted;
 // then the declines and failures of all its consumers, grouped by the
 // normalized message, with one example of each, and the declines of the
-// existing compiler that the profile admitted, by message.
-// `CE_JS_PROFILE=ir` and `CE_JS_PROFILE_SHADOW=ir` measure the profile `ir`
-// in the same format. The GLSL compilations (`CE_JS_PROFILE_SHADOW=ir` only,
-// the consumer `glsl:public`) have a total and messages of their own.
+// existing compiler that the profile admitted, by message. The GLSL
+// compilations (the consumer `glsl:public`) have a total and messages of
+// their own.
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

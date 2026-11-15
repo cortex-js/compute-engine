@@ -233,8 +233,7 @@ describe('the value `If` that ends a function body', () => {
   });
 
   test('a value `If` in a loop body keeps the statement form', () => {
-    // A block in a loop body is evaluated for effect, and Python writes an
-    // `If` there as an if-statement: its branches are statement lists.
+    // A block in a loop body is evaluated for effect.
     const ce = new ComputeEngine();
     const e = ['Exp', ['Multiply', 3, 'k']];
     const expr = ce.box([
@@ -251,53 +250,11 @@ describe('the value `If` that ends a function body', () => {
       ],
       's',
     ]);
-    for (const to of ['javascript', 'python', 'interval-js'])
+    for (const to of ['javascript', 'interval-js'])
       expect(compile(expr, { to } as any).success).toBe(true);
     expect(compile(expr, { to: 'javascript' }).run!({})).toBeCloseTo(
       Math.exp(3) + Math.exp(6) + Math.exp(9),
       8
     );
-  });
-});
-
-describe('Python keeps the statement-form harvest of a body `If`', () => {
-  test('an `If` that ends a block in a statement branch still compiles', () => {
-    // Python writes `If(c, Block(…), 0)` as an if-statement, and the inner
-    // block's last `If` as an if-statement too: its branches must not be
-    // harvested as regions that bind a temporary.
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    const big = [
-      'Multiply',
-      ['Sin', ['Add', 'x', 1]],
-      ['Cos', ['Add', 'x', 2]],
-    ];
-    const expr = ce.box([
-      'If',
-      ['Less', 0, 'x'],
-      [
-        'Block',
-        ['Declare', 'a', "'real'", 1],
-        ['If', ['Less', 'a', 'x'], ['Add', big, ['Multiply', 2, big]], 0],
-      ],
-      0,
-    ]);
-    const result = compile(expr, { to: 'python' });
-    expect(result.success).toBe(true);
-    // Python has no block scope, so the block local `a` is spelled with a
-    // fresh name (`compilePythonStatements`).
-    expect(result.code).toContain('if _tv1 < x:');
-  });
-});
-
-describe('Python keeps a repeated power inline', () => {
-  test('`np.e ** x` is one operation, cheaper than a temporary', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('y', 'real');
-    const result = compile(ce.parse('e^{x}\\sin(y)+e^{x}\\cos(y)'), {
-      to: 'python',
-    });
-    expect(result.code).not.toContain('_cse');
   });
 });

@@ -427,16 +427,6 @@ describe('Compiled Distance and Norm of a restricted operand', () => {
   test('PointX of the absent point is NaN, not a TypeError', () => {
     expect(run(['PointX', 'Missing'], 2)).toBeNaN();
   });
-
-  test.each([RL, ['List', RP, ['Tuple', 6, 8]]])(
-    'Norm of the list of points %j fails closed on Python',
-    (operand) => {
-      const r = compile(ce.box(['Norm', operand] as never), {
-        to: 'python',
-      } as never);
-      expect(r.success).toBe(false);
-    }
-  );
 });
 
 describe('A threaded operand whose present result type is unknown', () => {

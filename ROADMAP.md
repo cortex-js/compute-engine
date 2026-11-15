@@ -589,8 +589,6 @@ the user.
 - **CE-715.4** (low) A binding typed `integer | infinity` as a lane input.
 - **CE-715.5** (medium) A `bigint` output form for `broadcast()`,
   `broadcastAsync()` and the stored batch loaders.
-- **CE-715.7** (low) The Python target's `Rational` lowering as an exact
-  `fractions.Fraction`.
 - **CE-715.8** (medium) Control and comparison shapes that the lane analysis
   declines in the first version (user decision 2026-10-31): `Piecewise` (its
   engine type is not a number type, so its branches need their own refined
@@ -715,7 +713,7 @@ compiler that never folds a pole into a plain JavaScript number.
 
 On the `javascript` and `interval-js` targets, a symbol's compound pure value is
 emitted once as a preamble local (`ensureFoldedValueEmitted`,
-`base-compiler.ts`). The inline targets (Python) still fold a value into the
+`base-compiler.ts`). The inline target (GLSL) still folds a value into the
 emission at each reference, so `MAX_FOLD_EXPANDED_NODES = 20 000`
 (`expandedFoldSize` / `assertFoldableSize`, `base-compiler.ts`; fail closed by
 decision 2026-08-23) refuses a pathological DAG-shared tower there. The public

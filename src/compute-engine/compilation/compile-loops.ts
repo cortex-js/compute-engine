@@ -254,7 +254,7 @@ function loopSource(
 /**
  * The name of the object that holds the helpers of the pass count in the code
  * of `target`, or `undefined` when the code of the target cannot keep the count:
- * a shader cannot throw, Python declines the loop (`compilePythonLoop`), and a
+ * a shader cannot throw, and a
  * custom target has no such helpers.
  */
 function loopPassHelpers(
@@ -429,7 +429,7 @@ export function compileComprehension(
   // never ran must not have its subexpressions evaluated (an error they
   // raise would be new). The flag test costs one boolean read per body
   // evaluation.
-  const binders = elementClauseBinders(elements, target);
+  const binders = elementClauseBinders(elements);
   const binderNames = binders.flatMap((b) => b.names);
   let flag: string | undefined;
   const { bindings, result: inner } = hoistLoopInvariants(
@@ -473,10 +473,8 @@ export function compileComprehension(
 
 /**
  * The validated binders of a loop's `Element` clauses — what a `for`
- * header binds on each turn, in a form every target can spell. Shared by
- * the JavaScript lowerings (`compileElementLoops`) and the Python ones
- * (`compilePythonLoop`, `compilePythonComprehension`), so the two targets
- * accept the same clauses and refuse the same ones.
+ * header binds on each turn, in a form every target can spell. Used by
+ * the JavaScript lowerings (`compileElementLoops`).
  *
  * A binder is a bare name, or a DESTRUCTURING tuple pattern (`for (p, q) in
  * pairs`): a `Tuple` of names, `_` positions, and nested patterns. The
@@ -515,8 +513,7 @@ export function compileComprehension(
  *   so that narrowing declines with the disjoint case.
  */
 export function elementClauseBinders(
-  elements: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
+  elements: ReadonlyArray<Expression>
 ): ElementBinder[] {
   const binders: ElementBinder[] = [];
   for (let i = 0; i < elements.length; i++) {
@@ -535,11 +532,10 @@ export function elementClauseBinders(
         clause,
         names: [pattern.symbol],
         jsPattern: pattern.symbol,
-        pyPattern: pattern.symbol,
         leaves: [[pattern, eltType]],
       };
     } else if (isFunction(pattern, 'Tuple')) {
-      const spelled = spellTuplePattern(pattern, eltType, i, target);
+      const spelled = spellTuplePattern(pattern, eltType, i);
       // A name bound twice in one pattern (`(a, a)`) is a JavaScript
       // syntax error in a `const` destructuring; the interpreter binds the
       // leaves in order and the last one wins. Decline rather than emit a
@@ -587,17 +583,12 @@ export function elementClauseBinders(
  * elements have the static type `eltType`, or a fail-closed throw when the
  * type does not prove a tuple of the pattern's arity at every nesting (see
  * `elementClauseBinders`). A `_` position binds nothing: it spells as an
- * array hole in JavaScript, and as a generated temporary in Python, where
- * a literal `_` would be an ordinary assignment target and overwrite an
- * enclosing variable of that name on every turn. A one-position Python
- * pattern needs its trailing comma (`(x,)`): `(x)` is the bare name and
- * would bind the whole one-tuple.
+ * array hole in JavaScript.
  */
 export function spellTuplePattern(
   pattern: Expression & { ops: ReadonlyArray<Expression> },
   eltType: Type | undefined,
-  clauseIndex: number,
-  target: CompileTarget<Expression>
+  clauseIndex: number
 ): Omit<ElementBinder, 'clause'> {
   const decline = (why: string): never => {
     throw new Error(
@@ -620,35 +611,30 @@ export function spellTuplePattern(
   const names: string[] = [];
   const leaves: ElementBinder['leaves'] = [];
   const js: string[] = [];
-  const py: string[] = [];
   for (let i = 0; i < pattern.ops.length; i++) {
     const p = pattern.ops[i];
     const componentType = t.elements[i].type;
     if (isFunction(p, 'Tuple')) {
-      const nested = spellTuplePattern(p, componentType, clauseIndex, target);
+      const nested = spellTuplePattern(p, componentType, clauseIndex);
       names.push(...nested.names);
       leaves.push(...nested.leaves);
       js.push(nested.jsPattern);
-      py.push(nested.pyPattern);
       continue;
     }
     if (!isSymbol(p))
       return decline(`has a position that is neither a name nor a pattern`);
     if (p.symbol === '_') {
       js.push('');
-      py.push(tempVar(target));
       continue;
     }
     names.push(p.symbol);
     leaves.push([p, componentType]);
     js.push(p.symbol);
-    py.push(p.symbol);
   }
   return {
     names,
     leaves,
     jsPattern: `[${js.join(', ')}]`,
-    pyPattern: py.length === 1 ? `(${py[0]},)` : `(${py.join(', ')})`,
   };
 }
 
@@ -771,7 +757,7 @@ export function compileElementLoops(
    * guard of the clause (`loopPassCount`). */
   passCount = ''
 ): string {
-  const binders = validated ?? elementClauseBinders(elements, target);
+  const binders = validated ?? elementClauseBinders(elements);
   const narrowedElements = binders.map((b) => b.clause);
 
   // For wrapping targets (e.g. interval-js where `target.number(0)` is

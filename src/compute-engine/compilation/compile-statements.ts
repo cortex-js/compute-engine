@@ -19,7 +19,6 @@ import type {
   CseRegionInstance,
   TargetSource,
 } from './types.js';
-import { declareValueOperand } from './compile-declarations.js';
 import { BINARY_INFIX_VALUE_OPERATORS } from './compiler-tables.js';
 import { userFunctionLiteral } from './compile-assignment-checks.js';
 import { core } from './compiler-core-hooks.js';
@@ -32,16 +31,14 @@ import { poolStatementCode } from './pool-async.js';
  * The STATEMENT head `expr` lowers to at a body position — `'Assign'` or
  * `'Declare'` — or `undefined` when the body is (or reduces to) an expression.
  *
- * The structural half of the expression-only contract, shared by the GPU and
- * Python targets (each applies its own language policy to the answer: GLSL
- * assignment is an OPERATOR and stays legal, Python assignment is a
- * STATEMENT; a declaration is a statement on both GLSL and Python).
+ * The structural half of the expression-only contract of the GPU targets
+ * (GLSL assignment is an OPERATOR and stays legal; a declaration is a
+ * statement).
  *
  * Structural, on the body BEFORE it is compiled, deliberately — the two
  * emitted-source scans those targets already run (a newline, a `return` token)
  * are blind to both shapes: `Assign(s, x)` emits the single line `s = x` and a
- * root `Declare(s, 'number', x)` emits the single line `float s`
- * (Python: the EMPTY string), each with the initializer silently dropped. A
+ * root `Declare(s, 'number', x)` emits the single line `float s`, each with the initializer silently dropped. A
  * textual `=` scan cannot replace this without re-deriving the emitters'
  * precedence rules — it would false-positive on `==`/`<=`/`>=`/`!=`.
  *
@@ -60,30 +57,6 @@ export function statementBodyHead(
   if (isFunction(body, 'Assign')) return 'Assign';
   if (isFunction(body, 'Declare')) return 'Declare';
   return undefined;
-}
-
-/**
- * Whether `expr` is a `Block` whose last statement is an `Assign` to a name,
- * or a `Declare` with an initializer: `Block(s ≔ x; t ≔ s)`. The value of
- * such a block is `Nothing`, and a compilation that uses it declines
- * (`'nothing-value'`, `assertAdmitted()`). The function-body entry points of
- * the targets where assignment is a STATEMENT (Python) let such a body
- * through their checks before the compilation, so that this decline is the
- * reason that the result reports.
- *
- * Not such a block: a last statement that is a nested `Block`, a `Declare`
- * without an initializer, and an assignment to anything else than a name.
- */
-export function isTailAssignmentBlock(expr: Expression | undefined): boolean {
-  if (expr === undefined || !isFunction(expr, 'Block') || expr.nops === 0)
-    return false;
-  const last = expr.ops[expr.nops - 1];
-  if (isFunction(last, 'Assign')) return isSymbol(last.ops[0]);
-  return (
-    isFunction(last, 'Declare') &&
-    isSymbol(last.ops[0]) &&
-    declareValueOperand(last.ops) !== undefined
-  );
 }
 
 /**
@@ -213,8 +186,6 @@ export function compileValueOperand(
   target: CompileTarget<Expression>,
   prec = 0
 ): TargetSource {
-  if (isFunction(expr, 'Assign') && isSymbol(expr.ops[0]))
-    assertAssignmentIsStatement(expr.ops[0].symbol, target);
   const code = core.compile(expr, target, prec);
   if (
     target.bareStatementBlocks &&
@@ -232,26 +203,6 @@ export function compileValueOperand(
   }
   assertNoStatementOperand(expr, code, target);
   return code;
-}
-
-/**
- * Fail closed on a target where an assignment is a statement and has no
- * expression form — Python — when an assignment to `name` is
- * compiled as an operand of an expression: an operand of an operator, or
- * an argument of a function. Python read `np.sin(t = 1)` as a keyword
- * argument. JavaScript and GLSL have an assignment expression.
- */
-export function assertAssignmentIsStatement(
-  name: string,
-  target: CompileTarget<Expression>
-): void {
-  if (target.language !== 'python') return;
-  throw new Error(
-    `Could not compile \`Assign\`: the assignment to "${name}" is an ` +
-      `operand of an expression, and an assignment is a statement in ` +
-      `'${target.language}', with no expression form. Assign the value in ` +
-      `a statement of its own first.`
-  );
 }
 
 /**
@@ -444,22 +395,16 @@ export function compileFunctionBody(
 /**
  * Join the statements of a list that has no value on a
  * `bareStatementBlocks` target: one per line, with the `;` terminator of
- * the shader targets (`joinShaderStatements`), or with no terminator on
- * Python, where a statement ends at the end of its line.
+ * the shader targets (`joinShaderStatements`).
  */
-export function statementLines(
-  target: CompileTarget<Expression>,
-  lines: ReadonlyArray<string>
-): string {
-  return target.language === 'python'
-    ? lines.join('\n')
-    : joinShaderStatements(lines);
+export function statementLines(lines: ReadonlyArray<string>): string {
+  return joinShaderStatements(lines);
 }
 
 /**
  * Refuse the compiled value `code` of an `Assign` or of a `Declare` of
  * `name` when it is not one expression, on a target that writes a block
- * as a bare statement sequence (Python, the shader targets).
+ * as a bare statement sequence (the shader targets).
  *
  * A value that compiles to several statements, or to a `return`, cannot
  * be the right side of an assignment: splicing `u = s\nreturn 2 * u`
@@ -467,8 +412,7 @@ export function statementLines(
  * function with the value of the inner block. The shader targets move
  * such a block into the enclosing statement list when they can
  * (`valueBlock`), and its value then compiles to a single temporary;
- * where no statement list is available, and on Python, which has no such
- * lowering, the assignment declines.
+ * where no statement list is available, the assignment declines.
  */
 export function assertExpressionValue(
   code: TargetSource,

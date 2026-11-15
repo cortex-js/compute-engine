@@ -63,13 +63,6 @@ describe('CE-1273 a compilation reads the scope the expression was boxed in', ()
     ce.popScope();
   });
 
-  test('python', () => {
-    const { ce, expr } = shadowedWitness();
-    const result = compile(expr, { to: 'python', fallback: false });
-    expect(result.code).toBe('10 + x');
-    ce.popScope();
-  });
-
   test('a user function called by the expression is the one it was boxed with', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');

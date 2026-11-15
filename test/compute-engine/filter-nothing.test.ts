@@ -172,7 +172,7 @@ describe('Filter and Nothing', () => {
     });
   });
 
-  test.each(['javascript', 'python'] as const)(
+  test.each(['javascript'] as const)(
     '%s refuses a source that can hold Nothing',
     (to) => {
       const ce = new ComputeEngine();
@@ -187,7 +187,7 @@ describe('Filter and Nothing', () => {
     }
   );
 
-  test.each(['javascript', 'python'] as const)(
+  test.each(['javascript'] as const)(
     '%s checks every collection alternative for a possible Nothing',
     (to) => {
       const ce = new ComputeEngine();

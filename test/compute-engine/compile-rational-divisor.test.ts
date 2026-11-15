@@ -19,12 +19,10 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
-// The tests check the division, not how an input is read. Python reads an
-// input with an INFERRED `number` type through a `None` test (ROADMAP
-// CE-460), and a DECLARED `number` as is. So `x` is declared.
+// The tests check the division, not how an input is read, so `x` is declared.
 ce.declare('x', 'number');
 
-function codeOf(latex: string, to: 'javascript' | 'glsl' | 'python'): string {
+function codeOf(latex: string, to: 'javascript' | 'glsl'): string {
   const r = compile(ce.parse(latex), { to });
   expect(r.success).toBe(true);
   return r.code!;
@@ -75,7 +73,6 @@ describe('COMPILE a rational factor as a division', () => {
   test('`x / 49` divides on every target', () => {
     expect(codeOf('\\frac{x}{49}', 'javascript')).toBe('_.x / 49');
     expect(codeOf('\\frac{x}{49}', 'glsl')).toBe('x / 49.0');
-    expect(codeOf('\\frac{x}{49}', 'python')).toBe('x / 49');
     // A constant point divisor divides through the point-dividing kernel,
     // which answers the same endpoints as the general division with half the
     // corner quotients (`interval/arithmetic.ts`).
@@ -148,7 +145,6 @@ describe('COMPILE a rational factor as a division', () => {
     // float that limit is about 1e38.
     expect(codeOf('\\frac{3x}{49}', 'javascript')).toBe('_.x / 49 * 3');
     expect(codeOf('\\frac{3x}{49}', 'glsl')).toBe('x / 49.0 * 3.0');
-    expect(codeOf('\\frac{3x}{49}', 'python')).toBe('x / 49 * 3');
     // The interval target divides first here too. Its numerator factor is a
     // constant point, so the product is emitted as the point-scaling kernel,
     // whose point operand comes FIRST — the quotient is the operand being

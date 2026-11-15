@@ -1,7 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 /**
  * The step form of `Floor`, `Ceil` and `Truncate`: with a second argument,
@@ -252,18 +251,6 @@ describe('compiled code', () => {
     expect(() =>
       new GLSLTarget().compile(ce.box(['Floor', 'x', 0]), {})
     ).toThrow(/no NaN literal/);
-  });
-
-  test('Python binds the operand and the step as arguments', () => {
-    const python = new PythonTarget();
-    // A declared `number` input is read as is; an inferred one is read
-    // through a `None` test (ROADMAP CE-460).
-    const e = new ComputeEngine();
-    e.declare('x', 'number');
-    e.declare('a', 'number');
-    const code = python.compileLambda(e.box(['Floor', 'x', 'a']), ['x', 'a']);
-    expect(code.startsWith('lambda x, a: (lambda _ce_x, _ce_k: ')).toBe(true);
-    expect(code.endsWith('(np.asarray(x, dtype=float), np.abs(a))')).toBe(true);
   });
 
   test('a tiny quotient is not taken to be 0, and an extreme quotient keeps its value', () => {

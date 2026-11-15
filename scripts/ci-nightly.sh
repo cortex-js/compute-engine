@@ -427,12 +427,6 @@ cmd_run() {
     # test.sh stops at the first failing step (set -e); its exit code is
     # what tells a pass. CE_NIGHTLY=1 turns on the nightly suites
     # (test/compute-engine/nightly/README.md), which every other run skips.
-    # The tests that run compiled Python code look for a venv in their own
-    # checkout, and the worktree has none: point them at the main tree's.
-    if [ -z "${CE_PYTHON:-}" ] && [ -x "$REPO/venv/bin/python3" ]; then
-      export CE_PYTHON="$REPO/venv/bin/python3"
-    fi
-    npm run test:python || echo "ci-nightly: failed job: python"
     CE_NIGHTLY=1 bash scripts/test.sh || echo "ci-nightly: failed job: tests"
     # The growth guard of the compiler
     # (docs/plans/2026-11-02-compiler-contraction-plan.md §5): its code

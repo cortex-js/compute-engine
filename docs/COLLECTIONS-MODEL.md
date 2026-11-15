@@ -58,8 +58,8 @@ to `nothing`; a distinct unit/empty-tuple type remains a design question.
 
 Compilation refuses tuple construction with possible `Nothing` coordinates and
 `Zip` sources with possible immediate `Nothing`: the targets cannot
-distinguish it from missing data. JavaScript and Python preserve explicitly constructed
-all-missing tuples in their existing tuple representations.
+distinguish it from missing data. JavaScript preserves explicitly constructed
+all-missing tuples in its existing tuple representation.
 
 ## Map types and compilation of omission
 

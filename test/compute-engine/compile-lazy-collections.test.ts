@@ -298,17 +298,6 @@ describe('COMPILE lazy infinite collections', () => {
       );
       expect(r?.success).toBe(false);
     });
-
-    it('the Python target fails closed on a non-finite Range bound', () => {
-      // `constantFold: false`: the pipeline is closed (no free variables), so
-      // compile-time constant folding would emit the literal `[1, 2, 3]` and
-      // the Python target's non-finite-bound gate would never run.
-      const r = compile(ce.parse(String.raw`\mathrm{Take}(1..\infty, 3)`), {
-        to: 'python',
-        constantFold: false,
-      });
-      expect(r?.success ?? false).toBe(false);
-    });
   });
 });
 

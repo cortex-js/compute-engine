@@ -5,12 +5,11 @@
  * Two defects are pinned here:
  *
  *  A. The unary fan-out used to be a hardcoded JavaScript `.map((v) => …)`
- *     arrow emitted into EVERY target — `sin(vec4(…)).map(…)` for GLSL,
- *     `([1,2,3]).map(…)` for Python — behind `success: true`. It is now
- *     target-mediated (`CompileTarget.broadcastUnary`): the shader targets do
- *     not fan out at all (their builtins are componentwise on a `vecN`),
- *     Python emits a list comprehension, and a target with no such lowering
- *     fails closed.
+ *     arrow emitted into EVERY target — `sin(vec4(…)).map(…)` for GLSL —
+ *     behind `success: true`. It is now target-mediated
+ *     (`CompileTarget.broadcastUnary`): the shader targets do not fan out at
+ *     all (their builtins are componentwise on a `vecN`), and a target with
+ *     no such lowering fails closed.
  *
  *  B. A *string*-mapped broadcastable head (`Sign` → `Math.sign`, `Arctan2` →
  *     `Math.atan2`, `Hypot` → `Math.hypot`) used to fail closed on the
@@ -20,7 +19,6 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
@@ -29,13 +27,6 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 const ce = new ComputeEngine();
 ce.declare('L', 'list<number>');
 ce.declare('Z', 'list<complex>');
-// A collection whose elements are not scalars, and an operand that is only
-// possibly a collection: the two shapes the Python fan-out must still refuse.
-ce.declare('M', 'matrix<2x2>');
-ce.declare('B', 'broadcastable<number>');
-// A scalar input. Python reads an input with an INFERRED `number` type
-// through a `None` test (ROADMAP CE-460), and a DECLARED `number` as is.
-ce.declare('x', 'number');
 // A SET-typed operand: it matches neither `list<any>` nor
 // `indexed_collection<any>`, so a guard written with those spellings lets it
 // through — `Add(SN, 1)` emitted `SN + 1` on both scalar-infix targets where
@@ -44,7 +35,6 @@ ce.declare('x', 'number');
 ce.declare('SN', 'set<number>');
 
 const glsl = new GLSLTarget();
-const python = new PythonTarget();
 const intervalJs = new IntervalJavaScriptTarget();
 
 // `constantFold: false` throughout: what is under test is the LOWERING of a
@@ -55,10 +45,8 @@ const intervalJs = new IntervalJavaScriptTarget();
 // instead, short-circuiting the very code path being pinned.
 const g = (expr: any): string =>
   glsl.compile(ce.box(expr), { constantFold: false }).code!;
-const p = (expr: any): string =>
-  python.compile(ce.box(expr), { constantFold: false }).code!;
 
-describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
+describe('BROADCAST UNARY OVER A COLLECTION — three-target matrix', () => {
   let warn: jest.SpyInstance;
   beforeAll(() => {
     warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -135,141 +123,16 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
     });
   });
 
-  describe('Python — list comprehension', () => {
-    it('fans out with a comprehension, not `.map`', () => {
-      const code = p(['Sin', ['List', 1, 2, 3, 4]]);
-      expect(code).toBe('[np.sin(_tv1) for _tv1 in [1, 2, 3, 4]]');
-      expect(code).not.toContain('.map(');
-      expect(code).not.toContain('=>');
-      expect(code).not.toContain('_SYS.');
-    });
-
-    it('is not limited to a vecN width (a 5-element list compiles)', () => {
-      expect(p(['Sin', ['List', 1, 2, 3, 4, 5]])).toBe(
-        '[np.sin(_tv1) for _tv1 in [1, 2, 3, 4, 5]]'
-      );
-    });
-
-    it('the element variable compiles bare, not as a vars lookup', () => {
-      // `np.sqrt`: the default `strict` mode keeps a radical of a real
-      // operand on the real lane; the point here is the bare `_tv1`.
-      const code = p(['Sqrt', ['List', 1, 4, 9]]);
-      expect(code).toBe('[np.sqrt(_tv1) for _tv1 in [1, 4, 9]]');
-      expect(code).not.toContain('_.');
-    });
-
-    it('fans out an OPERATOR-lowered unary head (`Negate`) too', () => {
-      // The collection-arithmetic guard used to reject every arithmetic head
-      // with a collection operand before function dispatch, so the fan-out was
-      // unreachable for exactly this shape. `[(-(x)) for x in […]]` is valid
-      // Python and evaluates to `[-1, -2, -3]` — element-wise for a plain list
-      // as well as for an ndarray.
-      const code = p(['Negate', ['List', 1, 2, 3]]);
-      expect(code).toBe('[(-(_tv1)) for _tv1 in [1, 2, 3]]');
-      expect(code).not.toContain('.map(');
-      expect(code).not.toContain('=>');
-    });
-
-    it('leaves scalar `Negate` on the prefix-operator path', () => {
-      expect(p(['Negate', 'x'])).toBe('-x');
-    });
-
-    it('parenthesizes the operand of the `Negate` element lowering', () => {
-      // Python's unary `-` binds tighter than `+`, and the function-codegen
-      // path is precedence-blind, so an unparenthesized operand would emit
-      // `-w + 1` — sign-wrong — for `-(w + 1)`.
-      ce.declare('W', 'complex');
-      expect(p(['Negate', ['Add', 'W', 1]])).toBe('(-(W + 1))');
-    });
-
-    it('fans a BINARY arithmetic head out over its one collection operand', () => {
-      // The scalar operand is spliced into the comprehension body, so the
-      // arity of the head does not change the spelling. A comprehension
-      // iterates a plain list, a tuple and an ndarray alike, which the infix
-      // lowering does not: `2 * [1,2,3]` REPEATS a Python list.
-      expect(p(['Multiply', 2, ['List', 1, 2, 3]])).toBe(
-        '[2 * _tv1 for _tv1 in [1, 2, 3]]'
-      );
-      expect(p(['Power', ['List', 1, 2, 3], 2])).toBe(
-        '[_tv1 ** 2 for _tv1 in [1, 2, 3]]'
-      );
-      // A collection in the EXPONENT position keeps compiling too.
-      expect(p(['Power', 2, 'L'])).toBe('[2 ** _tv1 for _tv1 in L]');
-    });
-
-    it('declines a NEGATIVE INTEGER exponent over a collection base', () => {
-      // This is the one element lowering whose result depends on the container
-      // the caller binds, which is what the comprehension exists to avoid.
-      // Python's `**` answers a float for a negative integer exponent of an
-      // `int` (`2 ** -2` is `0.25`), while NumPy refuses the same operation on
-      // an integer array element: `np.int64(2) ** -2` raises `ValueError:
-      // Integers to negative integer powers are not allowed` (measured, NumPy
-      // 2.4.2). A `list<number>` operand admits an integer ndarray, so the
-      // artifact would compute for one binding and throw for another, and the
-      // interpreter answers `[1, 1/4, 1/16]` for both. Fail closed instead.
-      expect(() => p(['Power', 'L', -2])).toThrow(
-        /arithmetic over a possibly-collection-typed operand/
-      );
-      expect(() => p(['Power', ['List', 1, 2, 4], -2])).toThrow(
-        /arithmetic over a possibly-collection-typed operand/
-      );
-      // The two exponents both containers agree on stay admitted: a
-      // non-negative integer, and a provably non-integer one (`v ** 0.5` is a
-      // float on a plain list and on an integer ndarray alike). The float
-      // exponent `0.5` stays a `Power`: only the exact `1/2` canonicalizes to
-      // `Sqrt` (user decision 2026-09-27: a float operand is kept). In the
-      // default `strict` mode both stay on the real lane.
-      expect(p(['Power', 'L', 3])).toBe('[_tv1 ** 3 for _tv1 in L]');
-      expect(p(['Power', 'L', 0.5])).toBe('[_tv1 ** 0.5 for _tv1 in L]');
-      expect(p(['Power', 'L', ['Rational', 1, 2]])).toBe('np.sqrt(L)');
-    });
-
-    it('fans out over a merely collection-TYPED operand as well', () => {
-      // The comprehension does not assume a container, so the artifact no
-      // longer has to constrain what the caller binds to `L`.
-      expect(p(['Negate', 'L'])).toBe('[-_tv1 for _tv1 in L]');
-      expect(p(['Add', 'L', 1])).toBe('[_tv1 + 1 for _tv1 in L]');
-    });
-
-    it('still fails closed on the shapes no comprehension expresses', () => {
-      // Two collection operands: the interpreter answers
-      // `Error("incompatible-dimensions")` when the lengths disagree, and no
-      // Python form reproduces that — NumPy recycles a length-1 axis and a
-      // `zip` comprehension truncates to the shorter operand.
-      expect(() => p(['Add', ['List', 1, 2, 3], ['List', 4, 5, 6]])).toThrow(
-        /arithmetic over a possibly-collection-typed operand/
-      );
-      // A collection of NON-scalars: one level of fan-out would hand a whole
-      // row to a scalar operator.
-      expect(() => p(['Add', 'M', 1])).toThrow(
-        /arithmetic over a possibly-collection-typed operand/
-      );
-      // An operand that is only POSSIBLY a collection: it may still bind to a
-      // list at run time, which is the repeat/concatenate divergence itself.
-      expect(() => p(['Multiply', 2, 'B'])).toThrow(
-        /arithmetic over a possibly-collection-typed operand/
-      );
-      // A SET-typed operand: unordered, so a comprehension has no defined
-      // order — and the interpreter answers `incompatible-type` anyway. It
-      // used to ESCAPE the guard entirely (a set matches neither `list<any>`
-      // nor `indexed_collection<any>`) and emitted `SN + 1`.
-      expect(() => p(['Add', 'SN', 1])).toThrow(
-        /arithmetic over a possibly-collection-typed operand/
-      );
-    });
-
-    it('a set-typed operand fails closed on the JavaScript target too', () => {
-      // Paired guard: the JavaScript scalar-infix gate had the identical
-      // list/indexed spelling and the identical escape (`_.SN + 1`, string
-      // concatenation or garbage at run time). Both guards read the
-      // collection shape top together.
-      expect(() =>
-        compile(ce.box(['Add', 'SN', 1]), {
-          constantFold: false,
-          fallback: false,
-        })
-      ).toThrow(/scalar arithmetic over a list-valued operand/);
-    });
+  it('a set-typed operand fails closed on the JavaScript target', () => {
+    // The JavaScript scalar-infix gate read only the list/indexed shapes, so
+    // a set escaped it (`_.SN + 1`, string concatenation or garbage at run
+    // time). The gate reads the collection shape top.
+    expect(() =>
+      compile(ce.box(['Add', 'SN', 1]), {
+        constantFold: false,
+        fallback: false,
+      })
+    ).toThrow(/scalar arithmetic over a list-valued operand/);
   });
 
   describe('JavaScript — the element-wise lanes, never `.map`', () => {
@@ -361,8 +224,8 @@ describe('BROADCAST OF A STRING-MAPPED HEAD (JavaScript)', () => {
     expect(r.success).toBe(true);
     // The element source `-4` is parenthesized before it is spliced into the
     // head's scalar codegen: a negative literal is not a primary expression
-    // everywhere the same splice runs (in Python `**` binds tighter than
-    // unary minus), so the wrap is applied to every non-atomic element.
+    // everywhere the same splice runs, so the wrap is applied to every
+    // non-atomic element.
     expect(r.code).toBe('[Math.sign(3), Math.sign((-4)), Math.sign(0)]');
     expect(r.run!({})).toEqual([1, -1, 0]);
   });

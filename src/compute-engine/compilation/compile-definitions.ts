@@ -1,7 +1,6 @@
 // Emission of function definitions: multi-clause functions, parameter guards,
 // definition bodies, builtin callbacks and the helpers preamble.
 
-import { bindScalarFragmentDefinition } from './javascript-fragment-facts.js';
 import {
   isLibraryOperator,
   isShadowOf,
@@ -655,11 +654,11 @@ export function builtinCallbackValueRef(
   if (passed === undefined) return name;
   const ranks = callbackArgumentRanks(s, passed, arity);
   if (!ranks.some((r) => r > 0)) return name;
-  const mapName = `${name}$m${mapWrapperSuffix(ranks, passed.types, target)}`;
+  const mapName = `${name}$m${mapWrapperSuffix(ranks)}`;
   if (!registry.defs.has(mapName))
     registry.defs.set(
       mapName,
-      `const ${mapName} = ${staticMapCallback(name, ranks, target, passed.types)};`
+      `const ${mapName} = ${staticMapCallback(name, ranks, target)};`
     );
   return mapName;
 }
@@ -695,7 +694,7 @@ export function builtinCallbackValueRef(
  * Returns `undefined`, and the caller emits the ordinary recursive arrow,
  * when:
  *  - the target is not plain JavaScript (the shader targets forbid
- *    recursion and fail closed; Python has no definition lowering);
+ *    recursion and fail closed);
  *  - the caller overrides `Which`, `Tuple`, `Join`, `ListJoin` or `List`
  *    (`target.unrollSkipHeads`): the step is built from `Tuple` control
  *    records and drops the body's `Join`, so an override of those heads
@@ -869,7 +868,6 @@ export function prepareUserFunctionBody(
     // leak in), replacing whatever the spread copied from `root`.
     declaredVarTypes: literalDeclaredParamTypes(literal),
   };
-  bindScalarFragmentDefinition(target, bodyTarget, literal, bodyExpr, h);
   bodyTarget.checkDefinitionBody?.(bodyExpr, bodyTarget, true);
   return { params, bodyExpr, bodyTarget };
 }

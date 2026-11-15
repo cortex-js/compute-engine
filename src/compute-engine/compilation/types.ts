@@ -461,8 +461,7 @@ export interface CompileTarget<Expr = unknown> {
    * counting them — needs grapheme-cluster awareness the target may not have.
    * A target that omits this makes every character-valued expression fail
    * closed, which is why it is a separate capability from `string` rather
-   * than a reuse of it: Python has string literals but no stdlib grapheme
-   * segmentation, and GLSL has no text at all.
+   * than a reuse of it: GLSL has no text at all.
    */
   character?: (str: string) => string;
 
@@ -475,7 +474,7 @@ export interface CompileTarget<Expr = unknown> {
    * a parameter default `{}` is compiled to it, and a caller that changes the
    * dictionary of one call must not change the default of the next call. The
    * value has the run-time form that the target's host supplies for an input
-   * of type `dictionary` (a plain object in JavaScript, a `dict` in Python),
+   * of type `dictionary` (a plain object in JavaScript),
    * and each key is an own key of that value, whatever its spelling.
    */
   dictionary?: (entries: [key: string, value: string][]) => string;
@@ -548,8 +547,7 @@ export interface CompileTarget<Expr = unknown> {
    * The infix operator used to conjoin the pairs of a chained relational
    * expression (e.g. `Less(a, b, c)` → `(a < b) && (b < c)`). Default: `'&&'`
    * (JavaScript / GLSL). Word-operator targets set this to their
-   * language keyword (e.g. Python `'and'`), so the emitted source is valid in
-   * that language.
+   * language keyword, so the emitted source is valid in that language.
    */
   chainOp?: string;
 
@@ -567,7 +565,7 @@ export interface CompileTarget<Expr = unknown> {
    * sub-expression — safe when it is deterministic, the only case those targets
    * support (their `Random` requires an explicit deterministic seed).
    *
-   * JavaScript emits an IIFE; Python a `lambda`.
+   * JavaScript emits an IIFE.
    */
   bindExpr?: (
     bindings: Array<[name: string, value: string]>,
@@ -589,11 +587,6 @@ export interface CompileTarget<Expr = unknown> {
    *
    * - **javascript / interval-js** — a sequential-`const` IIFE:
    *   `(() => { const _cse1 = …; const _cse2 = …_cse1…; return body; })()`.
-   * - **python** — a flat sequential binding comprehension,
-   *   `[body for _cse1 in [rhs1] for _cse2 in [rhs2]][0]`: later `for` clauses
-   *   see earlier names, the nesting depth is constant (nested lambdas would
-   *   grow with the candidate count and could break a previously-compilable
-   *   expression), and each right-hand side evaluates exactly once.
    *
    * ## Emitter-author contract
    *
@@ -692,14 +685,13 @@ export interface CompileTarget<Expr = unknown> {
    * same spelling whatever the arity.
    *
    * Targets differ in KIND here, not just in syntax, which is why this is a
-   * hook rather than a default: Python fans the scalar lowering out over the
-   * elements (a list comprehension), while GLSL does not fan out at all —
+   * hook rather than a default: a target may fan the scalar lowering out over
+   * the elements, while GLSL does not fan out at all —
    * shader builtins and operators are already componentwise on a `vecN`, so
    * `lowering.element(lowering.collection())` (`sin(vec4(…))`, `-vec4(…)`) is
    * the correct lowering, gated on the operand having a static `vec2`–`vec4`
    * shape. (Before this hook the base compiler emitted a JavaScript
-   * `.map((v) => …)` arrow into GLSL and Python alike, behind
-   * `success: true`.)
+   * `.map((v) => …)` arrow into GLSL, behind `success: true`.)
    *
    * Return `undefined` to decline; the base compiler then fails closed
    * naming the head and the target. A target may also throw to fail closed
@@ -749,8 +741,7 @@ export interface CompileTarget<Expr = unknown> {
    * (`functions(head)`).
    *
    * The same head can be real-only on one target and take a complex operand
-   * on another (`Erf` is `_SYS.erf` on JavaScript and `scipy.special.erf`
-   * on Python), so each target declares its own. A statically non-real
+   * on another, so each target declares its own. A statically non-real
    * operand of a real-only lowering fails closed; an operand that may be
    * complex takes the run-time rule (the lowering runs on the real part when
    * the imaginary part is exactly zero, and the value is NaN otherwise).
@@ -1011,8 +1002,7 @@ export interface CompileTarget<Expr = unknown> {
    *
    * On the JavaScript and `interval-js` targets it also limits the passes of a
    * `Loop` in one call of the compiled code (`loopPassCount()`,
-   * `docs/COMPILATION-MODEL.md`, "A limit on `Loop` passes"). The Python target
-   * declines a `Loop` when it is set.
+   * `docs/COMPILATION-MODEL.md`, "A limit on `Loop` passes").
    */
   iterationBudget?: number;
 
@@ -1151,9 +1141,7 @@ export interface CompileTarget<Expr = unknown> {
    * target that can declare a local where the bindings belong: the interval
    * target, where each interval operation allocates; the JavaScript target,
    * whose loop otherwise re-evaluates the invariant once per iteration; and
-   * the shader targets, whose loop runs per fragment. The Python target does
-   * not set it — its unrolled sum is a single generator expression with no
-   * statement position ahead of the terms.
+   * the shader targets, whose loop runs per fragment.
    */
   hoistScalarInvariants?: boolean;
 
@@ -1162,10 +1150,8 @@ export interface CompileTarget<Expr = unknown> {
    * square of a bare symbol (`x^2`, `x·x`) below the ordinary size and
    * benefit thresholds. Every target that lowers a square to two reads and a
    * multiplication, or to an allocating interval routine, gains from the
-   * binding, so the exemption is on by default. The Python target sets
-   * `false`: it spells `x^2` as the single operation `x ** 2`, and it binds a
-   * temporary as a one-element list comprehension, which allocates a list
-   * and runs a loop — more work than the operation it would save. A compound
+   * binding, so the exemption is on by default. A target sets `false` when
+   * its temporary binding costs more than the square it would save. A compound
    * square (`sin(x)^2`) is not affected by this flag: it is subject to the
    * ordinary thresholds on every target.
    */
@@ -1176,11 +1162,8 @@ export interface CompileTarget<Expr = unknown> {
    * a block in value position (a function body) as an if-statement, whose
    * condition and branches share nothing, instead of as an expression. Every
    * target compiles such an `If` as an expression by default, so the default
-   * is `true`. The Python target sets `false`: it writes an `If` with a
-   * statement in a branch as an if-statement even in value position, which
-   * would compile the nested block's last `If` as an if-statement too, and
-   * its conditional expression compiles the branches before the condition,
-   * so the condition's temporary would not reach them.
+   * is `true`. A target sets `false` when it may write such an `If` as an
+   * if-statement even in value position.
    */
   valueTailSelections?: boolean;
 
@@ -1247,7 +1230,7 @@ export interface CompileTarget<Expr = unknown> {
    * values live in shader storage of the given kind. Stamped per call by the
    * shader targets — an omitted option resets the field, like
    * `constantFold`, so a reused target never carries a previous call's hints.
-   * The JavaScript, interval and Python targets never set it: the hint is
+   * The JavaScript and interval targets never set it: the hint is
    * validated there and then ignored.
    */
   storage?: ReadonlyMap<MathJsonSymbol, StorageKind>;
@@ -1274,9 +1257,8 @@ export interface CompileTarget<Expr = unknown> {
 
   /**
    * The compile modes this target offers (default `['strict']`). The built-in
-   * `javascript` target declares all three (`'bigint'` is JavaScript only),
-   * `python` declares `'strict'` and `'complex'`; `interval-js` and `glsl`
-   * declare `['strict']` (intervals are real; a shader has one static
+   * `javascript` target declares all three (`'bigint'` is JavaScript only);
+   * `interval-js` and `glsl` declare `['strict']` (intervals are real; a shader has one static
    * shape per value). A custom target that declares `'complex'` must also
    * provide `complexLift` and `complexIsReal` (checked when the target is
    * passed to `compile()`). Only the built-in JavaScript target offers `'bigint'`: a custom target
@@ -1288,8 +1270,8 @@ export interface CompileTarget<Expr = unknown> {
   /**
    * The idempotent number → complex lift, as target source: given code for a
    * value that may be a plain number or already complex, return code that
-   * yields the complex representation (`_SYS.cplx(x)` on JavaScript,
-   * `complex(x)` on Python). Required of a target that offers `'complex'`;
+   * yields the complex representation (`_SYS.cplx(x)` on JavaScript).
+   * Required of a target that offers `'complex'`;
    * complex mode lifts every wide numeric operand AT ITS USE
    * through this hook.
    */
@@ -1308,7 +1290,7 @@ export interface CompileTarget<Expr = unknown> {
    * The real projection of a value that may be complex, as target source:
    * given code for a value that is a plain number or a `{re, im}` object,
    * return code yielding the number itself or the object's real part
-   * (`_SYS.creal(x)` on JavaScript, `complex(x).real` on Python). Used with
+   * (`_SYS.creal(x)` on JavaScript). Used with
    * `complexIsReal` by the D2/D6 runtime rule: under the guard that the
    * imaginary part is exactly zero, the real lowering runs on this
    * projection. Optional; a target without it keeps the compile-time
@@ -1321,8 +1303,7 @@ export interface CompileTarget<Expr = unknown> {
    * value that is a plain number, a `{re, im}` object, or a (possibly
    * nested) array of such values, return code yielding the same shape with
    * every exactly-real element replaced by its real part and every other
-   * element by the target's NaN (`_SYS.crealElements(x)` on JavaScript,
-   * `_ce_creal_elems(x)` on Python). Used by the element-wise form of the
+   * element by the target's NaN (`_SYS.crealElements(x)` on JavaScript). Used by the element-wise form of the
    * D2/D6 runtime rule: a real-only head over an array operand whose
    * elements may be complex (`⌊√L⌋`, `min(√L)`, `√L < 1`) runs its real
    * lowering over this projection, so a complex element yields NaN (or
@@ -1338,8 +1319,7 @@ export interface CompileTarget<Expr = unknown> {
    * `complexIsReal` test; possibly empty — then the body is unconditional),
    * `body` the real lowering, and `kind` the shape of the value when a guard
    * fails: `'boolean'` → the target's `false`, `'number'` → its NaN.
-   * JavaScript emits `((g1 && g2) ? (body) : NaN)`, Python `((body) if (g1
-   * and g2) else float('nan'))`. Required, with the three hooks above, for a
+   * JavaScript emits `((g1 && g2) ? (body) : NaN)`. Required, with the three hooks above, for a
    * target that offers `'complex'`; a target without it keeps the
    * compile-time fail-closed decline for a maybe-complex operand of a
    * real-only head.
@@ -1556,7 +1536,7 @@ export interface CompileTarget<Expr = unknown> {
    * entry, and {@link reboundFunctions} lists the name.
    *
    * Only set for targets that lower a `Declare` as a value binding — i.e.
-   * those with no `declare` hook (the JavaScript family). Python and the GPU
+   * those with no `declare` hook (the JavaScript family). The GPU
    * targets declare a local separately from its assignment and have no
    * function-valued local at all, so they keep failing closed.
    */
@@ -1607,8 +1587,8 @@ export interface CompileTarget<Expr = unknown> {
    * The identifier this target binds its VARS OBJECT to, when it reads free
    * symbols through one. The JavaScript family compiles a free `k` to the
    * member access `_.k` and binds the caller's `vars` argument to `_`, so it
-   * sets `'_'`; targets that spell a free symbol as a bare identifier (Python,
-   * the shader languages) leave this undefined.
+   * sets `'_'`; targets that spell a free symbol as a bare identifier (the
+   * shader languages) leave this undefined.
    *
    * Declared so a function literal can avoid SHADOWING it. `_` is also the
    * spelling of an implicit lambda parameter, and `_ => _ + k` therefore
@@ -1706,8 +1686,7 @@ export interface CompileTarget<Expr = unknown> {
    *   whatever its spelling (R3 of
    *   `docs/plans/2026-11-01-absent-value-contract.md`), and an
    *   object-domain position can hold the numeric marker at run time (an
-   *   element that `_SYS.atWithValueMarker` returns as it is, a written
-   *   `Missing` on the Python target).
+   *   element that `_SYS.atWithValueMarker` returns as it is).
    */
   absence?: {
     numeric: {
@@ -1764,8 +1743,7 @@ export interface CompileTarget<Expr = unknown> {
      * How a WRITTEN absence symbol (`Missing`) is spelled when
      * the target has both axes. The default is the object null, which keeps
      * an absent list cell distinct from a `NaN` cell for the collection
-     * equality rule. A target whose numeric library raises on its null (the
-     * Python target: `np.cos(None)` is a `TypeError`) and whose
+     * equality rule. A target whose numeric library raises on its null and whose
      * collection-equality helper cannot express the distinction anyway
      * declares `'numeric'` and spells the numeric marker instead (decided
      * 2026-09-22).
@@ -2182,8 +2160,7 @@ export interface CompileTarget<Expr = unknown> {
        * `isContradictedScalarFunctionBody`.
        *
        * Absent ⇒ the emitted definition carries no return type (the JS arrow
-       * form, and any future dynamically-typed lowering such as a Python
-       * `def`), so there is nothing for the body to contradict and the
+       * form), so there is nothing for the body to contradict and the
        * definition keeps compiling. Only the CONSUMING positions are gated
        * there, by `assertNoContradictedScalarOperand`.
        */
@@ -2475,8 +2452,8 @@ export interface CompilationOptions<Expr = unknown> {
    * The arithmetic discipline to compile under — `'strict'` (the default),
    * `'complex'` or, on the `javascript` target only, `'bigint'` (see
    * `CompileMode`). Effective mode = this option ?? the target's `mode` ??
-   * `'strict'`. The `javascript` target offers all three and `python` offers
-   * the first two; `interval-js` and `glsl` offer `'strict'` only.
+   * `'strict'`. The `javascript` target offers all three;
+   * `interval-js` and `glsl` offer `'strict'` only.
    * Requesting a mode the target does not offer is a `capability` decline
    * (`success: false`, `diagnostic.code === 'unsupported-mode'`), never a
    * silent coercion. The removed mode `'auto'` is such a decline on every
@@ -2595,7 +2572,6 @@ export interface CompilationOptions<Expr = unknown> {
    * Code that counts passes and whose value is a function, other than a
    * `Function` literal at the root, declines. Its calls would share one total.
    *
-   * The Python target declines a program with a `Loop` when this option is set.
    * Without the option, the code of a `Loop` on the JavaScript and
    * `interval-js` targets has no check.
    *
@@ -2685,8 +2661,8 @@ export interface CompilationOptions<Expr = unknown> {
    * A sampler-backed symbol can be read ONLY through a positional access; any
    * other reference to it (as an operand, in a reduction, as a bare value) is
    * a compile error on the shader targets, because a texture has no shader
-   * value of its own. The hint is IGNORED on the JavaScript, interval and
-   * Python targets — one options bag serves every lane — but it is VALIDATED
+   * value of its own. The hint is IGNORED on the JavaScript and interval
+   * targets — one options bag serves every lane — but it is VALIDATED
    * on every target: an unknown storage kind, or a hint naming a symbol that
    * is not a free symbol of the expression being compiled, throws an
    * option-contract error before compilation starts (never an interpreter
@@ -2772,36 +2748,6 @@ export interface CompilationOptions<Expr = unknown> {
   strictTypes?: boolean;
 
   /**
-   * **Experimental.** The `javascript` target only. With
-   * `'numeric-kernel'`, the expression is compiled by the structured
-   * compiler of the JavaScript target, which admits a list of numeric forms:
-   * scalar arithmetic, conditionals, calls of user functions with declared
-   * signatures, captured numbers, loops over an integer range, and lists of
-   * numbers made with a comprehension and updated with `ReplaceAt`. The
-   * list, with an example of each decline, is in `docs/COMPILATION-MODEL.md`,
-   * "The `numeric-kernel` profile of the JavaScript target".
-   *
-   * A program outside the profile declines with the diagnostic code
-   * `'outside-profile'`, which names the first node outside it (its head in
-   * `operator`, or the name in `binding`); the `fallback` option then
-   * applies as for any other decline. The ordinary compiler is never used
-   * for a part of such a compilation. An internal error of the structured
-   * compiler is a `'compile-error'` whose message names the phase.
-   *
-   * Under the profile, `cse` and `constantFold` are ignored: the structured
-   * compiler does neither. The modes are `'strict'` and `'complex'`. The
-   * options `functions`, `operators`, `vars`, `imports`, `preamble`,
-   * `broadcast` and `mode: 'bigint'` are not in the profile: a compilation
-   * with one of them declines with `'outside-profile'`, and the message names
-   * the option; an empty object of `functions`, `operators` or `vars` is
-   * an absent option. With another target than `javascript`, with a direct
-   * target (`target`), or in the `compile()` method of a target object
-   * (`new JavaScriptTarget().compile()`), the option is an error, thrown
-   * whatever `fallback` says.
-   *
-   * The result reports `profile`, `pure` and `shippable`
-   * (`CompilationResult`). `canCompile()` answers for the profile.
-   *
    * **Experimental, and may change or be removed without notice.** With
    * `'ir'`, the expression is compiled by the IR compiler of
    * `src/compute-engine/compilation/ir` ("Selecting the pipeline" in its
@@ -2813,10 +2759,15 @@ export interface CompilationOptions<Expr = unknown> {
    * `'compile-error'`. The result reports
    * `profile: 'ir'`, the fields of stored code (`runtimeVersion`,
    * `preambleOnce`, `entryPlan`) and `shippable` (false for code that
-   * draws or integrates), and no `pure`. The result of an expression has
+   * draws or integrates). The result of an expression has
    * `broadcast()`, `broadcastAsync()`, `willUsePool()`, `runAsync()` and
    * `willParallelize()`, with or without `broadcast: true`; `runAsync()`
    * runs `run()`, and in the mode `'bigint'` a batch is refused.
+   *
+   * With another target than `javascript` or `glsl`, with a direct target
+   * (`target`), or in the `compile()` method of a target object
+   * (`new JavaScriptTarget().compile()`), the option is an error, thrown
+   * whatever `fallback` says. `canCompile()` answers for the profile.
    *
    * `'ir'` is also defined for the `glsl` target, for a scalar result
    * (real, integer or boolean) of scalar inputs: the result has the fields
@@ -2830,7 +2781,7 @@ export interface CompilationOptions<Expr = unknown> {
    * mode other than `'strict'`, and `iterationBudget` with a `Loop`; with
    * `fallback`, the existing GLSL target then compiles the expression.
    */
-  profile?: 'numeric-kernel' | 'ir';
+  profile?: 'ir';
 }
 
 /**
@@ -2859,7 +2810,6 @@ export type FreeSymbolType = {
    *   numbers of a fixed width), `color`, `array` (a list), or `function`.
    * - `interval-js`: `interval` for a real number (a number or a
    *   `{ lo, hi }` interval), else as for `javascript`.
-   * - `python`: `float`, `complex`, `bool`, `str`, `tuple` or `list`.
    *
    * `unknown` when the target has no single static type for the value.
    *
@@ -3541,8 +3491,8 @@ export type ParallelLoopRecord =
  * }
  *
  * // no run (source-only target)
- * const py = compile(expr, { to: 'python' });
- * py.code; // string
+ * const glsl = compile(expr, { to: 'glsl' });
+ * glsl.code; // string
  * ```
  */
 export type CompilationResult<
@@ -3908,15 +3858,6 @@ export type CompilationResult<
    * caller `preamble`). A result that is not shippable always runs on the
    * calling thread. Present where `broadcastAsync` is.
    *
-   * With the `numeric-kernel` profile, it is also present on a result of a
-   * `Function` literal (`calling: 'lambda'`), and it is `true` when every
-   * function that the code calls is compiled into the same program, every
-   * captured value is a number written into the code, and no operation has
-   * an effect or an effect that its definition does not state (an
-   * operation with an unknown effect can call a closure of the host, which
-   * a worker does not have). It does not say that the arguments can be sent
-   * to a worker at a low cost.
-   *
    * With the `ir` profile, it is present on every result, which has no
    * `broadcastAsync`: it says whether the stored code can run on a worker
    * (a kernel pool loads it), `false` for code that draws or integrates.
@@ -3928,46 +3869,7 @@ export type CompilationResult<
    * compilation with it (`CompilationOptions.profile`). Absent otherwise,
    * also on a decline.
    */
-  profile?: 'numeric-kernel' | 'ir';
-
-  /**
-   * **Experimental.** Present on a result with `profile`. Whether the
-   * compiled function is pure: two calls, with any arguments, give the same
-   * results whether they run one after the other or at the same time in two
-   * workers, and a call changes nothing that the host can observe. It is
-   * `true` when no operation of the program, or of a function that it
-   * calls, has an effect or an effect that its definition does not state,
-   * and no array that the host passed in is written (a list argument is
-   * only read; an update in place writes only into a list that the call
-   * made). A captured value is a number copied at compile time, so no call
-   * can change it.
-   *
-   * It is the meaning of `pure` in a function declaration and of `isPure`
-   * on an expression. It does not say that the host may change an input
-   * array while a call reads it, that calls will run in parallel, or
-   * anything about a function passed at run time. The `iterationBudget`
-   * option does not change it: a call that goes over the budget throws, and
-   * each thread counts the passes of its own calls.
-   */
-  pure?: boolean;
-
-  /**
-   * **Experimental.** On a result with `profile`: the names of the
-   * parameters of the compiled `Function` literal, or of the free symbols of
-   * the compiled expression, that have no declared type and took the
-   * default type of the mode: a real number in the `strict` mode, a complex
-   * number in the `complex` mode (the compiled function then accepts a
-   * number or a `{ re, im }` value for it). The type that the engine
-   * inferred for such a name is not read. Parameters in their order, free
-   * symbols in the order of their first read. A host reads it to find a
-   * name that it did not mean to leave undeclared (`x + u` with a typo `u`
-   * compiles, and `u` is an input). Then the name of each user function
-   * that the code calls and that has a parameter with no declared type,
-   * which took the default type too. Absent when every name has a declared
-   * type. A symbol with a value and no declared type is not listed: the code
-   * holds a copy of its value.
-   */
-  defaultedSymbols?: string[];
+  profile?: 'ir';
 
   /**
    * Whether `broadcastAsync()` would send a batch of `cells` cells to the

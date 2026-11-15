@@ -87,9 +87,6 @@ describe('CE-423: the batch body is built on request', () => {
     const interval = compile(expr, { to: 'interval-js', broadcast: true });
     expect(interval.success).toBe(true);
     expect(interval.batch).toBeUndefined();
-    const python = compile(expr, { to: 'python', broadcast: true });
-    expect(python.success).toBe(true);
-    expect(python.batch).toBeUndefined();
   });
 
   test('a value that is not a boolean is refused', () => {

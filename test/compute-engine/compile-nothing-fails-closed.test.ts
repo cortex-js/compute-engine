@@ -6,8 +6,7 @@
  * canonicalization (`Add(Nothing, x)`), and the bare symbol can still reach
  * a compiler. The JavaScript target refused it in its own `var` hook; the shader targets
  * emitted the undefined identifier `Nothing` behind `success: true` (a
- * driver-side compile error), Python the undefined name `Nothing`, and the
- * interval target a `_.Nothing` vars-object read that is `undefined` at run
+ * driver-side compile error), and the interval target a `_.Nothing` vars-object read that is `undefined` at run
  * time. The refusal now lives on the symbol route all targets share
  * (`BaseCompiler.compile`), so each target declines with the same message
  * and the code `possible-nothing`.
@@ -18,7 +17,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
-const TARGETS = ['javascript', 'glsl', 'python', 'interval-js'] as const;
+const TARGETS = ['javascript', 'glsl', 'interval-js'] as const;
 
 function compileOn(to: (typeof TARGETS)[number], json: unknown) {
   return compile(ce.box(json as never), { to } as never) as unknown as {

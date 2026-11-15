@@ -358,7 +358,7 @@ target — `docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` Part B,
 `test/compute-engine/sum-compile.test.ts`. The reframing below is the shipped
 rule. Fail-closed scope, all deliberate in v1: hand-assembled unions of
 nominals (no sum identity to key a policy on) keep erased constructors and a
-`match` that fails closed; the Python / GPU / interval targets decline both
+`match` that fails closed; the GPU / interval targets decline both
 constructor patterns and tagged emissions; and a compiled unit whose *result*
 type is a tagged sum declines rather than leak `{_tag}` objects across the
 engine⇄compiled boundary (sum-typed *parameters* are supported — an in-unit
@@ -3394,7 +3394,7 @@ own short ruling list —
   contain objects or arrays forces `ListFrom` onto the deep walk
   (`DictionaryFrom`'s detachment rule), and that is statically knowable
   from `T` — the fast path is a type check, not a scan.
-- **Compilation.** JS/Python arrays have native reference semantics;
+- **Compilation.** JS arrays have native reference semantics;
   the GPU target and the engine⇄compiled result boundary follow the
   object rules (B9).
 
@@ -3430,7 +3430,7 @@ subscript?), and neither the object core nor `array` depends on it.
 
 - **Broadcast**: an object is a single value; it is never iterated into
   or broadcast over (the same atomicity ruling as sum values).
-- **Compilation**: JavaScript and Python have native reference
+- **Compilation**: JavaScript has native reference
   semantics, so objects compile naturally there. The GPU target has no
   references and declines, fail-closed like its other capability gates.
   At the engine⇄compiled boundary, the tagged-sum rule of §3 is

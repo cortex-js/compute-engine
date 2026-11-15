@@ -5,7 +5,6 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import type { Expression } from '../../src/compute-engine/global-types';
 
@@ -85,7 +84,6 @@ describe('A TEMPORARY IS AN ORDINARY SYMBOL', () => {
       expect(iv.success).toBe(true);
       expect(iv.code).toContain(`_.${n}`);
       expect(new GLSLTarget().compile(e, NO_FOLD).code).toBe(`${n} + 1.0`);
-      expect(new PythonTarget().compile(e, NO_FOLD).code).toBe(`${n} + 1`);
 
       // A parameter of a function.
       expect(

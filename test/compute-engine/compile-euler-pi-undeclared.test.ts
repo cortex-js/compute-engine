@@ -10,11 +10,8 @@
  * `Negate` after canonicalization, and the angle is `−x`.
  */
 import { ComputeEngine, compile } from '../../src/compute-engine';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { shaderFunctions } from './gpu-shader-f32-eval';
-import { TEST_PYTHON } from './test-python';
-import { execFileSync } from 'child_process';
 
 const iPiX = (scale: any, x: any) => [
   'Multiply',
@@ -103,42 +100,6 @@ describe('JAVASCRIPT: e^{iπx} WITH x UNDECLARED', () => {
     const c = compile(ce.parse('e^{i\\pi z}'), { fallback: false }) as any;
     expect(c.code).not.toContain('cexppi');
   });
-});
-
-describe('PYTHON: e^{iπx} WITH x UNDECLARED', () => {
-  (TEST_PYTHON === undefined ? it.skip : it)(
-    'each case agrees with the interpreter',
-    () => {
-      const ce = new ComputeEngine();
-      const py = new PythonTarget({ includeImports: true });
-      let program = '';
-      CASES.forEach(([, make], k) => {
-        program += py.compileFunction(ce.box(make('x')), `f${k}`, ['x', 'y']);
-        program += '\n';
-      });
-      program += 'import json\nout = []\n';
-      program += `for x in ${JSON.stringify(POINTS.map(([x]) => x))}:\n`;
-      CASES.forEach((_, k) => {
-        program += `  r = complex(f${k}(float(x), 0.0))\n  out.append([r.real, r.imag])\n`;
-      });
-      program += 'print(json.dumps(out))\n';
-      const values = JSON.parse(
-        execFileSync(TEST_PYTHON!, ['-c', program], { encoding: 'utf8' })
-      ) as [number, number][];
-      const failures: string[] = [];
-      let n = 0;
-      for (const [x, exact] of POINTS)
-        for (const [name, make] of CASES) {
-          const [re, im] = values[n++];
-          const i = interpreted(ce, make, exact);
-          if (!same({ re, im }, i))
-            failures.push(
-              `${name} at ${x}: ${re} + ${im}i, expected ${i.re} + ${i.im}i`
-            );
-        }
-      expect(failures).toEqual([]);
-    }
-  );
 });
 
 describe('GPU: e^{iπx} WITH x UNDECLARED', () => {

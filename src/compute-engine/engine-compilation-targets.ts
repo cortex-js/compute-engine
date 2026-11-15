@@ -20,18 +20,18 @@ import { IntervalJavaScriptTarget } from './compilation/interval-javascript-targ
  * - `interval-js`, which the solver's domain enumeration asks for
  *   (`intervalFunction` in `boxed-expression/solve-domain.ts`).
  *
- * The GPU target (`glsl`) and the source-only `python` target are
+ * The GPU target (`glsl`) is
  * NOT imported here, so that the `@cortex-js/compute-engine/core` entry does
- * not carry them (measured on 0.169.2: 316 KB minified for the GPU targets,
- * 93 KB for Python). The full package entry (`src/compute-engine.ts`) adds
- * them to this table with `addDefaultCompilationTarget()` when it is
+ * not carry it (measured on 0.169.2: 316 KB minified for the GPU targets).
+ * The full package entry (`src/compute-engine.ts`) adds
+ * it to this table with `addDefaultCompilationTarget()` when it is
  * imported. This table is one value for the whole program (every entry
  * shares the engine chunk), and a registry reads it on each lookup, so an
  * engine has these three targets as soon as the full entry, `./epsil` or the
  * CLI has been loaded anywhere in the program, whichever entry made the
  * engine and in whichever order: the default engine that the free functions
  * of `./core` cache is not left behind. A program that loads `./core` alone
- * has the two built-in targets, and registers one of the others with
+ * has the two built-in targets, and registers the GPU target with
  * `ce.registerCompilationTarget(name, target)` after importing the target
  * class from `@cortex-js/compute-engine/compile`. Design:
  * `docs/plans/2026-10-26-esm-only-build-and-opt-in-targets.md`.

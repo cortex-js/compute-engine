@@ -12,7 +12,7 @@ import {
 } from '../../src/compute-engine/library/map-auto-compile';
 
 // The shadow measure: each compilation for the `javascript` target is also
-// tried with the `numeric-kernel` profile, and only the outcome is counted
+// tried with the profile `ir`, and only the outcome is counted
 // (docs/plans/2026-11-10-js-profile-first-consumer.md, "Shadow measure").
 
 /** An engine with the shadow measure on or off. The setting is set
@@ -20,7 +20,7 @@ import {
 function engine(shadow: boolean): ComputeEngine {
   const ce = new ComputeEngine({ precision: 'machine' });
   ce._jsProfile = undefined;
-  ce._jsProfileShadow = shadow;
+  ce._jsProfileShadow = shadow ? 'ir' : false;
   return ce;
 }
 
@@ -206,7 +206,7 @@ describe('the counters', () => {
       ).toThrow();
       // Not measured: another target, a profile asked for.
       compile(ce.parse('x^2 + 1'), { to: 'interval-js' });
-      compile(ce.parse('x^2 + 1'), { profile: 'numeric-kernel' });
+      compile(ce.parse('x^2 + 1'), { profile: 'ir' });
     } finally {
       warn.mockRestore();
     }
@@ -221,7 +221,7 @@ describe('the counters', () => {
       baselineDeclinedAdmitted: 0,
     });
     expect(stats.public.declinedMessages).toEqual({
-      "Could not compile with the profile 'numeric-kernel': unsupported head BetaRegularized": 1,
+      "Could not compile with the profile 'ir': BetaRegularized(x, <n>, <n>): the operator BetaRegularized is not in the slice": 1,
     });
     // The counters of the switch are separate.
     expect(_jsProfileStats(ce)).toEqual({});
@@ -235,7 +235,7 @@ describe('the counters', () => {
     expect(stats.declined).toBe(2);
     const keys = Object.keys(stats.declinedMessages);
     expect(keys).toEqual([
-      "Could not compile with the profile 'numeric-kernel': the function form of the option `operators` is not in the profile.",
+      "Could not compile with the profile 'ir': the option `operators` is not supported by the profile 'ir'",
     ]);
     expect(stats.examples[keys[0]]).toBe(keys[0]);
   });
@@ -256,7 +256,7 @@ describe('the counters', () => {
 
   test('a program over the limit of the profile is counted as declined', () => {
     // A node in both branches of an `If` is lowered once per branch: at
-    // depth 14 the program is over the limit of operations. (The existing
+    // depth 14 the program is over the limit of nodes. (The existing
     // compiler is slow on this shape with its CSE pass.)
     const ce = engine(true);
     const x = ce.symbol('x');
@@ -271,7 +271,7 @@ describe('the counters', () => {
     const stats = _jsProfileShadowStats(ce).public;
     expect(stats).toMatchObject({ attempts: 1, declined: 1, failed: 0 });
     expect(Object.keys(stats.declinedMessages)).toEqual([
-      expect.stringMatching(/operations, the limit of the profile$/),
+      expect.stringMatching(/more than <n> nodes to lower$/),
     ]);
   });
 
@@ -285,7 +285,7 @@ describe('the counters', () => {
 
   test('a compilation that follows an attempt of the switch is not measured', () => {
     const ce = engine(true);
-    ce._jsProfile = { profile: 'numeric-kernel' };
+    ce._jsProfile = {};
     expect(implicitCompile(ce, ce.box(['BetaRegularized', 'x', 2, 3]), 'nd')?.success).toBe(
       true
     );
@@ -296,8 +296,10 @@ describe('the counters', () => {
   test('the environment variable', () => {
     const saved = process.env.CE_JS_PROFILE_SHADOW;
     try {
+      process.env.CE_JS_PROFILE_SHADOW = 'ir';
+      expect(new ComputeEngine()._jsProfileShadow).toBe('ir');
       process.env.CE_JS_PROFILE_SHADOW = '1';
-      expect(new ComputeEngine()._jsProfileShadow).toBe(true);
+      expect(new ComputeEngine()._jsProfileShadow).toBe(false);
       delete process.env.CE_JS_PROFILE_SHADOW;
       expect(new ComputeEngine()._jsProfileShadow).toBe(false);
     } finally {

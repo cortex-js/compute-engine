@@ -128,18 +128,6 @@ describe('an impure branch condition is lowered three-valued', () => {
     expect(draws(String(r!.code))).toBe(2);
   });
 
-  test('Python: no impure head lowers, so the condition fails closed', () => {
-    // The Python lowering takes the same analysis, but no effectful operator
-    // has a Python spelling today (`Random` declines), so an impure
-    // condition never reaches it; the whole compile fails closed instead.
-    expect(() =>
-      compile(ce.box(['If', ['Greater', ['Random'], 'x'], 1, -1]), {
-        to: 'python',
-        fallback: false,
-      } as any)
-    ).toThrow(/Could not compile/);
-  });
-
   test('a GPU target keeps its own selection', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real | signed_infinity | nan');

@@ -282,7 +282,7 @@ describe('COMPILE Match — GPU targets', () => {
   });
 });
 
-describe('COMPILE Match — interval-js and Python fail closed', () => {
+describe('COMPILE Match — interval-js fails closed', () => {
   const m: MathJsonExpression = [
     'Match',
     'x',
@@ -293,12 +293,6 @@ describe('COMPILE Match — interval-js and Python fail closed', () => {
   it('interval-js reports failure (no interval-Which treatment invented, §5)', () => {
     const r = compile(ce.box(m), { to: 'interval-js' });
     expect(r.success).toBe(false);
-  });
-
-  it('Python fails closed', () => {
-    expect(() => compile(ce.box(m), { to: 'python', fallback: false })).toThrow(
-      /not supported by the Python/
-    );
   });
 });
 

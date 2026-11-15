@@ -24,7 +24,7 @@ expressions. Its capabilities fall into a few categories:
   arbitrary precision).
 - **Simplify**, **expand**, **factor**, **solve**, differentiate, and integrate.
 - **Reason** about expressions using assumptions and a type system.
-- **Compile** expressions to executable JavaScript (and GLSL/WGSL/Python).
+- **Compile** expressions to executable JavaScript (and GLSL/WGSL).
 - **Serialize** back to LaTeX, MathASCII, or MathJSON.
 
 ## The big picture: three representations and one engine
@@ -105,7 +105,7 @@ src/
     ├── rubi/                 Rubi rule-based integrator (loader, matcher, driver)
     ├── numerics/             Numeric algorithms (primes, rationals, special functions)
     ├── numeric-value/        NumericValue abstraction (exact / machine / bignum)
-    ├── compilation/          Expression → JS/GLSL/WGSL/Python code generation
+    ├── compilation/          Expression → JS/GLSL/WGSL code generation
     ├── interval/             Interval arithmetic
     └── tensor/               Vectors, matrices, multi-dimensional arrays
 ```
@@ -1029,12 +1029,12 @@ for two different tolerances:
      (above it, and for an angle with a rational term), `exactEulerN`
      (`boxed-expression/arithmetic-power.ts`) and `hyperbolicOfImaginaryAngle`;
      in compiled code by `cosSinPi()` (`numerics/numeric-complex.ts`) through
-     `_SYS.sinpi`/`cospi`/`tanpi`/ `cexppi`, `_gpu_cossinpi` and an inline NumPy
-     form for Python, for an angle `π·u` and an exponent `a + iπu` written with
-     the symbol `Pi`. So `sin(π).N()` is `0` and `e^{iπ}.N()` is `−1` at every
-     precision. Only these functions are covered: another kernel at an exact
-     argument can still leave roundoff in a part whose value is `0`
-     (`erf(i).N()` has a real part of `2.2·10⁻¹⁶`; ROADMAP).
+     `_SYS.sinpi`/`cospi`/`tanpi`/ `cexppi` and `_gpu_cossinpi`, for an angle
+     `π·u` and an exponent `a + iπu` written with the symbol `Pi`. So
+     `sin(π).N()` is `0` and `e^{iπ}.N()` is `−1` at every precision. Only these
+     functions are covered: another kernel at an exact argument can still leave
+     roundoff in a part whose value is `0` (`erf(i).N()` has a real part of
+     `2.2·10⁻¹⁶`; ROADMAP).
    - The machine kernels give an exact zero part where the value has one: the
      inverse trigonometric and hyperbolic functions use the formulas of W. Kahan
      (`complexAsin()` and the others), `complexPow()` uses repeated squaring for
@@ -1160,7 +1160,6 @@ language-agnostically and delegates formatting to a `LanguageTarget` /
   `gpu-shader-target.ts` (shared target class), `gpu-functions.ts` (operator
   handlers), `gpu-at.ts`, `gpu-points.ts`, `gpu-reduce.ts`, `gpu-random.ts`,
   `gpu-preambles.ts`, `gpu-shapes.ts`, `gpu-finite-proof.ts` and others.
-- `python-target.ts` — Python 3.
 - `interval-javascript-target.ts` — JavaScript with interval arithmetic.
 
 Built-in targets are registered in the engine's internal compilation-target
@@ -1192,7 +1191,7 @@ the worker script.
 | `…/latex-syntax`            | `src/latex-syntax.ts`      | Standalone LaTeX parser/serializer                                                                                                                  |
 | `…/numerics`                | `src/numerics.ts`          | Numeric primitives (BigDecimal, rationals, special functions)                                                                                       |
 | `…/interval`                | `src/interval.ts`          | Interval arithmetic                                                                                                                                 |
-| `…/compile`                 | `src/compile.ts`           | The `compile()` function and every target class (`GLSLTarget`, `WGSLTarget`, `PythonTarget`, …)                                                     |
+| `…/compile`                 | `src/compile.ts`           | The `compile()` function and every target class (`GLSLTarget`, `WGSLTarget`, …)                                                                     |
 | `…/identities`              | `src/identities.ts`        | Fungrim identities loader (rules-as-data plugin)                                                                                                    |
 | `…/integration-rules`       | `src/integration-rules.ts` | Rubi rule-based integration plugin                                                                                                                  |
 

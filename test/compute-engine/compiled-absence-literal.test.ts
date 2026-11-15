@@ -7,9 +7,8 @@
  * `freeSymbols: ["Missing"]` and answered `false` against the interpreter's
  * `True`.
  *
- * The lowering is the target's OBJECT-domain null (`undefined` on JavaScript;
- * the Python target opts for its numeric marker `math.nan`, because numpy
- * raises on `None`). It cannot be the numeric marker, because a list cell
+ * The lowering is the target's OBJECT-domain null (`undefined` on JavaScript).
+ * It cannot be the numeric marker, because a list cell
  * holding the numeric marker is a number that equals nothing, which the
  * whole-collection equality rule of 2026-09-21 must keep distinct from an
  * ABSENT cell. On a target with no object axis — the shader targets and the

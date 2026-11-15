@@ -2,7 +2,7 @@
  * `Smoothstep(e0, e1, x)`: t²(3 − 2t) with t = Clamp((x − e0)/(e1 − e0), 0,
  * 1), the formula of the GLSL built-in. The library definition is
  * in `library/arithmetic.ts`. With `e0 = e1` the built-in is undefined; the
- * interpreter and the `javascript` and `python` targets give the step
+ * interpreter and the `javascript` target give the step
  * function there (0 when `x < e0`, else 1).
  */
 
@@ -82,16 +82,6 @@ describe('Smoothstep compiles', () => {
     expect(Number.isNaN(f.run!({ a: 0, b: 1, x: NaN }) as number)).toBe(true);
   });
 
-  it('on the python target, through a helper', () => {
-    const r = compile(ce.parse('\\operatorname{Smoothstep}(0, 1, x)'), {
-      to: 'python',
-      fallback: false,
-    } as never);
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('def _ce_smoothstep(');
-    expect(r.code).toMatch(/_ce_smoothstep\(0, 1, /);
-  });
-
   it('on the shader targets, to the NaN-safe built-in', () => {
     for (const to of ['glsl'] as const) {
       const r = compile(ce.parse('\\operatorname{Smoothstep}(0, 1, x)'), {
@@ -135,18 +125,6 @@ describe('Smoothstep at its edge cases', () => {
       expect(b.type.toString()).toBe('nan | real');
     }
     expect(ce.box(['Smoothstep', 0, 1, 0.5]).type.toString()).toBe('real');
-  });
-
-  it('broadcasts positionally on the python target', () => {
-    const ce2 = new ComputeEngine();
-    ce2.declare('L', 'list<real>');
-    const r = compile(ce2.box(['Smoothstep', 0, 1, 'L']), {
-      to: 'python',
-      fallback: false,
-    } as never);
-    expect(r.success).toBe(true);
-    expect(r.code).toContain("_ce_bcast('smoothstep', 0, 1, L)");
-    expect(r.code).toContain('def _ce_smoothstep(');
   });
 
   it('gives the interpreter value on the shader targets for e0 >= e1', () => {

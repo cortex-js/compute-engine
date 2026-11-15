@@ -19,9 +19,9 @@ import {
 } from '../../common/type/utils.js';
 
 // Analyses of a compiled fold (`Reduce`/`Scan`, which `Fold` becomes) that
-// the JavaScript and Python targets share: whether the step can update its
+// the JavaScript target uses: whether the step can update its
 // accumulator in place, and whether the step was typed for the seed it
-// receives. Each target emits its own code.
+// receives.
 
 /**
  * The operators whose value never holds the list they read: an element, a
@@ -70,8 +70,7 @@ const NON_RETAINING_READS = new Set([
  * it to a function, or mention it in a function literal, which could be
  * called after the update. A read inside an index or a value of the chain is
  * allowed: the emitted code computes them before the first write
- * (`_SYS.replaceAtInPlace` on the JavaScript target,
- * `_ce_replaceat_inplace` on the Python target).
+ * (`_SYS.replaceAtInPlace` on the JavaScript target).
  *
  * Lean calls this "functional but in place", and Clojure's transients do the
  * same. Expressions stay immutable; only the emitted code changes. Requested
@@ -497,9 +496,8 @@ export function copyingUpdateWarnings(
  * step is then compiled for a list of numbers, and `Sum(acc)` added two rows
  * with the scalar `+`, which joins them as a string (`"01,23,4"` where the
  * interpreter answers `[4, 6]`). The interpreter does not depend on that
- * type, so refusing lets it answer. Shared by the JavaScript and Python
- * `Reduce`/`Scan` lowerings (on Python, `Mean(acc)` became `np.mean` over the
- * rows).
+ * type, so refusing lets it answer. Used by the JavaScript
+ * `Reduce`/`Scan` lowerings.
  *
  * Only that case is refused: the elements of the seed are collections and
  * the step was typed for number elements. The seed's type is read, not the
@@ -586,8 +584,7 @@ export function mayBeCollectionType(t: Type | undefined): boolean {
  * When `tensorsReadByOwnRule` is true (the JavaScript target), an operand
  * that is a tensor of unknown rank or a `broadcastable<T>`, whose elements
  * are `T | tensor<T>`, is not counted: each JavaScript lowering reads such
- * an operand by its own rule. The Python target has no such rule, and
- * passes `false`.
+ * an operand by its own rule. When it is false, such an operand counts.
  */
 export function elementsMayBeCollections(
   t: Type,

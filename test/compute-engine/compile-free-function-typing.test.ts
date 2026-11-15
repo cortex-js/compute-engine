@@ -94,8 +94,8 @@ describe('root compile() export typing', () => {
   });
 
   test('source-only target: run is not callable unguarded', () => {
-    const r = compile(ce.parse('x + 1'), { to: 'python' });
-    // @ts-expect-error — python is source-only; `run` types optional there,
+    const r = compile(ce.parse('x + 1'), { to: 'glsl' });
+    // @ts-expect-error — glsl is source-only; `run` types optional there,
     // so an unguarded call must not typecheck.
     const call = () => r.run({ x: 1 });
     void call;

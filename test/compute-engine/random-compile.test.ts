@@ -2170,29 +2170,11 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
     expect(run(0, 0)).toEqual({ value: 'false', log: 'w' });
   });
 
-  test('Python keeps the caller provenance in the loop body of a Sum', () => {
-    // The statement body of `Sum` is compiled with common-subexpression
-    // sharing off; the `vars` entry is still caller code there.
-    const ce = new ComputeEngine();
-    ce.declare('W', 'real');
-    const body = [
-      'Block',
-      ['Declare', 't', "'unknown'", ['Multiply', 2, 'k']],
-      ['Boole', ['Less', 't', 'W', 30]],
-    ];
-    const code = compile(ce.box(['Sum', body, ['Tuple', 'k', 1, 3]]), {
-      to: 'python',
-      fallback: false,
-      vars: { W: 'next_value()' },
-    })!.code;
-    expect(code.split('next_value()').length - 1).toBe(1);
-  });
-
-  test('interval-js and Python bind the caller code of a chain', () => {
+  test('interval-js binds the caller code of a chain', () => {
     const ce = new ComputeEngine();
     ce.declare('W', 'real');
     const count = (code: string) => code.split('nextValue()').length - 1;
-    for (const to of ['interval-js', 'python'] as const)
+    for (const to of ['interval-js'] as const)
       for (const h of ['Less', 'Equal'])
         expect(
           count(
@@ -2203,17 +2185,6 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
             })!.code
           )
         ).toBe(1);
-    ce.declare('y', 'real');
-    // A Python pair with the `None` guard reads its left operand twice.
-    expect(
-      count(
-        compile(ce.box(['Equal', 'W', 'y']), {
-          to: 'python',
-          fallback: false,
-          vars: { W: 'nextValue()' },
-        })!.code
-      )
-    ).toBe(1);
   });
 
   test('an earlier operand keeps the value it had before later caller code runs', () => {
@@ -2237,16 +2208,13 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
       [['If', ['Less', 0, 'y', 'W'], true, false], 1, 2],
     ] as const)
       expect(run(json, y, w)).toEqual({ compiled: true, interpreted: true });
-    // Python and interval-js read the temporary of the earlier operand.
+    // interval-js reads the temporary of the earlier operand.
     const ce = new ComputeEngine();
     ce.declare('y', 'real');
     ce.declare('W', 'real');
-    const code = (to: 'python' | 'interval-js', json: any) =>
+    const code = (to: 'interval-js', json: any) =>
       compile(ce.box(json), { to, fallback: false, vars: { W: 'nv()' } })!
         .code;
-    expect(code('python', ['Equal', 0, ['Add', 'y', 1], 'W'])).toBe(
-      '((lambda _tv1: ((0) == (_tv1)) and (lambda _tv2: ((_tv1) == (_tv2)))(nv()))(y + 1))'
-    );
     expect(code('interval-js', ['Less', 0, 'y', 'W'])).toContain(
       '_IA.less(_tv1, _tv2))(nv())'
     );

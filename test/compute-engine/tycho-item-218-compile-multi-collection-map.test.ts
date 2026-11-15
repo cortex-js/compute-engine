@@ -17,7 +17,7 @@ import type { Expression } from '../../src/compute-engine/global-types';
  * and `T = Map(Z ↦ Σ_{j=1}^{Z} c[j], 1..N)` — which compiles `c`'s bound
  * value — declined with it.
  *
- * The zip form now lowers on both the JavaScript and the Python target: each
+ * The zip form now lowers on the JavaScript target: each
  * source is materialized once, the callback receives one element from each
  * source per position, and the result is as long as the SHORTEST source —
  * the interpreter's `count` for the form, and what `Zip` does.
@@ -242,8 +242,6 @@ describe('Tycho item 218: shapes the zip lowering must refuse (fail closed, the 
     const r = js(ce, json);
     expect(r.success).toBe(false);
     expect(r.diagnostic?.message).toMatch(/operator symbol 'Add'/);
-    const py = compile(ce.box(json), { to: 'python' });
-    expect(py.success).toBe(false);
   });
 
   test('a bare binary operator symbol over exactly two sources compiles', () => {
@@ -269,10 +267,6 @@ describe('Tycho item 218: shapes the zip lowering must refuse (fail closed, the 
       expect(r.diagnostic?.message).toMatch(
         /Could not compile `Map`: operand 3/
       );
-      const py = compile(ce.box(['Map', F2, ['Range', 1, 'N'], 'S']), {
-        to: 'python',
-      });
-      expect(py.success).toBe(false);
     }
   );
 
@@ -310,20 +304,5 @@ describe('Tycho item 218: shapes the zip lowering must refuse (fail closed, the 
       [1, 2],
       [2, 3],
     ]);
-  });
-});
-
-describe('Tycho item 218: the Python target lowers the zip form too', () => {
-  test('B5 emits a zip over the sources', () => {
-    const ce = engine();
-    const r = compile(
-      ce.box(['Map', F2, ['Range', 1, 'N'], ['Range', 2, 'N']]),
-      {
-        to: 'python',
-      }
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('zip(*_ls)');
-    expect(r.code).toContain('_f(*_t)');
   });
 });

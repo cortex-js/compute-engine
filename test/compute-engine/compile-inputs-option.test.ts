@@ -88,7 +88,7 @@ describe('COMPILE the inputs option', () => {
     expect(result.success).toBe(true);
   });
 
-  test.each(['glsl', 'interval-js', 'python'] as const)(
+  test.each(['glsl', 'interval-js'] as const)(
     'the option on %s',
     (to) => {
       const ce = new ComputeEngine();

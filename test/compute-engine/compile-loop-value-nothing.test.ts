@@ -27,7 +27,7 @@ const ce = new ComputeEngine();
 ce.declare('x', 'real');
 ce.declare('y', 'real');
 
-const TARGETS = ['javascript', 'interval-js', 'python', 'glsl'];
+const TARGETS = ['javascript', 'interval-js', 'glsl'];
 const NOTHING = /evaluates to `Nothing`, the erasure marker/;
 
 const range = (a: number, b: number) => ['Range', a, b];
@@ -50,7 +50,7 @@ describe('A Loop whose value is used declines', () => {
     [
       'a loop that is the whole expression',
       ['Loop', ['Add', 'k', 'x'], ['Element', 'k', range(1, 3)]],
-      ['javascript', 'python', 'glsl'],
+      ['javascript', 'glsl'],
     ],
     [
       'a loop whose body is a block with a destructuring declaration',
@@ -71,7 +71,7 @@ describe('A Loop whose value is used declines', () => {
         ['Declare', 's', "'unknown'", 'x'],
         ['Loop', ['Assign', 's', ['Add', 's', 'k']], ['Element', 'k', range(1, 3)]],
       ],
-      ['javascript', 'python'],
+      ['javascript'],
     ],
     [
       'a loop with a Break that carries a value',
@@ -80,7 +80,7 @@ describe('A Loop whose value is used declines', () => {
         ['If', ['Greater', 'k', 'x'], ['Break', ['Multiply', 10, 'k']]],
         ['Element', 'k', range(1, 5)],
       ],
-      ['javascript', 'python'],
+      ['javascript'],
     ],
     [
       'a loop with a Break with no value and no indexing set',
@@ -96,7 +96,7 @@ describe('A Loop whose value is used declines', () => {
           ],
         ],
       ],
-      ['javascript', 'python'],
+      ['javascript'],
     ],
     [
       'a loop that is the body of a function literal',
@@ -170,7 +170,6 @@ describe('A Loop that is a statement compiles', () => {
         kind: 'interval',
         value: { lo: 8, hi: 8 },
       });
-    if (to === 'python') expect(r.code).toMatch(/^return s \+ x$/m);
   });
 
   test('a loop in the body of a loop', () => {
@@ -289,9 +288,6 @@ describe('A used Loop with a Return that is not in tail position', () => {
     ['If', ['Greater', 'k', 'x'], ['Return', 1]],
     ['Element', 'k', range(1, 5)],
   ];
-  // The check of a `Return` in a loop with code after it
-  // (`returnInLoopIn()`) does not run on Python: the check of the value of
-  // the loop declines there.
   test.each([
     [
       'the value of an Assign',
@@ -304,21 +300,9 @@ describe('A used Loop with a Return that is not in tail position', () => {
     ],
     ['the value of a Declare', ['Block', ['Declare', 'z', "'real'", loop], 'z']],
     ['an operand', ['Add', loop, 1]],
-  ])('%s declines on Python and JavaScript', (_label, json) => {
-    for (const to of ['python', 'javascript'])
+  ])('%s declines on JavaScript', (_label, json) => {
+    for (const to of ['javascript'])
       expect([to, compileTo(json, to).success]).toEqual([to, false]);
-  });
-
-  test('a loop in a statement branch compiles on Python', () => {
-    const json = [
-      'Block',
-      ['Declare', 'z', "'unknown'", 0],
-      ['If', ['Greater', 'x', 0], loop, ['Assign', 'z', 1]],
-      'z',
-    ];
-    const r = compileTo(json, 'python');
-    expect(r.success).toBe(true);
-    expect(r.code).toMatch(/return 1/);
   });
 });
 
@@ -327,7 +311,7 @@ describe('A tail loop with an indexing set and a Return declines', () => {
   // gives the value of the function. When no `Return` runs, the loop ends
   // at the end of its indexing set and the interpreter gives `Nothing`,
   // which has no compiled representation: the compiled function gave
-  // `undefined` (JavaScript) or `None` (Python). The loop declines on every
+  // `undefined` (JavaScript). The loop declines on every
   // target, and the fallback gives the value of the interpreter.
   const tailLoop = (body: unknown, n: number, param: string) => [
     'Function',
@@ -373,7 +357,7 @@ describe('A tail loop with an indexing set and a Return declines', () => {
       [9, 0],
     ])
       expect(ce.box(json as any).subs({ x }).evaluate().re).toBe(value);
-    for (const to of ['javascript', 'interval-js', 'python'])
+    for (const to of ['javascript', 'interval-js'])
       expect([to, compileTo(json, to).success]).toEqual([to, true]);
     const r = compileTo(json, 'javascript');
     expect(r.run!({ x: 2 })).toBe(3);

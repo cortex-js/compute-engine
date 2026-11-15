@@ -62,7 +62,7 @@ describePerf('COMPILATION PERFORMANCE', () => {
    * Count the compiler node visits performed by `fn`.
    *
    * `BaseCompiler.compile` is the recursive entry point: every target emitter
-   * (JavaScript, GLSL, Python, …) descends into operands by calling it on the
+   * (JavaScript, GLSL, …) descends into operands by calling it on the
    * `BaseCompiler` class object, so temporarily replacing that static method
    * observes the whole traversal regardless of target. The count is a pure
    * function of the expression and the options — no timers involved — so the

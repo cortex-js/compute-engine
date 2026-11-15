@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 //
 // A collection operator that keeps the elements of its operand as they are
@@ -102,17 +101,6 @@ describe('FLATTEN', () => {
     const result = expr.evaluate();
     expect(result.toString()).toBe(value);
     expect(result.type.matches(expr.type)).toBe(true);
-  });
-
-  // The Python `Zip` makes its rows with `list()`, and the Python `Flatten`
-  // opens every list, so it declines as the JavaScript `Flatten` does.
-  test('the Python `Flatten` declines when a tuple can be reached', () => {
-    expect(() =>
-      new PythonTarget().compile(ce.box(['Flatten', ['Zip', 'xs', 'xs']]))
-    ).toThrow(/Flatten/);
-    expect(new PythonTarget().compile(ce.box(['Flatten', 'll'])).success).toBe(
-      true
-    );
   });
 
   test('`Max` of two elements of a flattened list compiles (issue #512)', () => {

@@ -1525,7 +1525,7 @@ export interface IComputeEngine {
    * @internal */
   _debugBindings: boolean;
 
-  /** When set, `implicitCompile()` tries the `numeric-kernel` profile of the
+  /** When set, `implicitCompile()` tries the profile `ir` of the
    * JavaScript target first, for the consumers in `consumers` (all of them
    * when it is absent), and uses the existing compiler when the profile
    * declines (`js-profile-switch.ts`). Off (`undefined`) by default; the
@@ -1534,14 +1534,13 @@ export interface IComputeEngine {
    * @internal */
   _jsProfile: JsProfileSwitch | undefined;
 
-  /** When true, each compilation for the `javascript` target that asks for
-   * no profile also compiles the expression with the `numeric-kernel`
-   * profile (with the profile `ir` when it is `'ir'`), discards that result
-   * and counts its outcome (the shadow measure, `js-profile-switch.ts`).
-   * Off by default; the initial value comes from the
-   * `CE_JS_PROFILE_SHADOW` environment variable.
+  /** When `'ir'`, each compilation for the `javascript` target that asks
+   * for no profile also compiles the expression with the profile `ir`,
+   * discards that result and counts its outcome (the shadow measure,
+   * `js-profile-switch.ts`). Off (`false`) by default; the initial value
+   * comes from the `CE_JS_PROFILE_SHADOW` environment variable.
    * @internal */
-  _jsProfileShadow: boolean | 'ir';
+  _jsProfileShadow: false | 'ir';
 
   /** True when an operation (`evaluate()`, `simplify()`, `compile()`, …)
    * that starts now opens an environment of its own (rule 8 of
@@ -2207,11 +2206,11 @@ export interface IComputeEngine {
    * and `compile()`.
    *
    * Every engine has `javascript` and `interval-js`. Every engine also has
-   * `glsl` and `python` once the full package entry,
+   * `glsl` once the full package entry,
    * `@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
    * the program, whichever entry made the engine and in whichever order. A
    * program that loads only `@cortex-js/compute-engine/core` has the two
-   * built-in targets: import `GLSLTarget` or `PythonTarget`
+   * built-in targets: import `GLSLTarget`
    * from `@cortex-js/compute-engine/compile` and register it here.
    */
   registerCompilationTarget(

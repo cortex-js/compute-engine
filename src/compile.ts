@@ -14,7 +14,6 @@ export type { CanCompileResult } from './compute-engine/compilation/compile-expr
 export { JavaScriptTarget } from './compute-engine/compilation/javascript-target.js';
 export { GPUShaderTarget } from './compute-engine/compilation/gpu-target.js';
 export { GLSLTarget } from './compute-engine/compilation/glsl-target.js';
-export { PythonTarget } from './compute-engine/compilation/python-target.js';
 export { IntervalJavaScriptTarget } from './compute-engine/compilation/interval-javascript-target.js';
 export { BaseCompiler } from './compute-engine/compilation/base-compiler.js';
 

@@ -1,7 +1,6 @@
-import { TEST_PYTHON } from './test-python';
 /**
  * The compiled inverse trigonometric and inverse hyperbolic functions of a
- * complex argument on the GLSL and Python targets agree with the
+ * complex argument on the GLSL target agree with the
  * interpreter: the same value, and the same side of each branch cut.
  *
  * GPU: the helpers `_gpu_casin` and the others (`compilation/gpu-target.ts`)
@@ -12,19 +11,10 @@ import { TEST_PYTHON } from './test-python';
  * now use the formulas of W. Kahan, as the interpreter does. Shader text
  * cannot run under jest: `gpu-shader-f32-eval.ts` runs the EMITTED shader
  * text with every operation rounded to f32.
- *
- * Python: `cmath` picks the side of a cut from the sign of a zero part, so
- * `cmath.asin(complex(2, 0))` was `π/2 + 1.317i`, and the interpreter gives
- * `π/2 − 1.317i`. The compiled code now gives a zero part the sign that
- * selects the interpreter's side. The Python part runs the emitted code with
- * the repo's `./venv/bin/python3`, and is skipped when that is not
- * available.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { shaderFunctions } from './gpu-shader-f32-eval';
-import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -213,162 +203,4 @@ describe('GPU: the language checks of the f32 shader interpreter', () => {
       )
     ).not.toThrow();
   });
-});
-
-// The Python with NumPy: `CE_PYTHON` when it is set (a git worktree has no
-// `venv` of its own), else the repo's `./venv/bin/python3`.
-const VENV_PYTHON = TEST_PYTHON;
-
-describe('PYTHON: inverse trigonometric functions of a complex argument', () => {
-  const HEADS = [
-    'Arcsin',
-    'Arccos',
-    'Arctan',
-    'Arsinh',
-    'Arcosh',
-    'Artanh',
-    'Arccsc',
-    'Arcsec',
-    'Arccot',
-    'Arcsch',
-    'Arsech',
-    'Arcoth',
-  ];
-
-  // On each cut (the real axis and the imaginary axis), on both sides of it,
-  // at the branch points, at a large and a tiny modulus, and off the axes.
-  const POINTS: [number, number][] = [];
-  for (const v of [0.5, 1, 1.5, 2, 10, 1e6, 1e200])
-    for (const s of [1, -1])
-      for (const e of [0, 1e-12, -1e-12]) POINTS.push([s * v, e], [e, s * v]);
-  POINTS.push([0.3, 0.4], [-2, 1], [-1, 1], [1, -2], [-0.5, -0.25]);
-  POINTS.push([1e-300, 0], [0, -1e-300], [1e200, 1e-12], [-1e200, 1e-12]);
-  POINTS.push([0, 0]);
-
-  // The points where the compiled value differs from the interpreter's on
-  // purpose. The poles of `arccot` (±i): the interpreter gives the unsigned
-  // infinity `~oo`, held with the parts `0 ∓ ∞i`; the compiled code spells
-  // `~oo` as `∞ + ∞i`, which is also the parts of the interpreter's `~oo` at
-  // the poles of `atan`.
-  // `z = 0`: the interpreter gives `NaN` (with a zero imaginary part) for
-  // `Arccsc` and `Arcsec`, and `~oo` for `Arcsch`; the compiled code answers
-  // `nan + nan·i`.
-  const OVERRIDES: Record<string, [number, number]> = {
-    'Arccot(0, 1)': [Infinity, Infinity],
-    'Arccot(0, -1)': [Infinity, Infinity],
-    'Arccsc(0, 0)': [NaN, NaN],
-    'Arcsec(0, 0)': [NaN, NaN],
-    'Arcsch(0, 0)': [NaN, NaN],
-  };
-  const expected = (h: string, x: number, y: number): [number, number] =>
-    OVERRIDES[`${h}(${x}, ${y})`] ?? reference(h, x, y);
-
-  function run(program: string): any {
-    const out = execFileSync(VENV_PYTHON!, ['-c', program], {
-      encoding: 'utf8',
-    });
-    return JSON.parse(
-      out
-        .replace(/-Infinity/g, '-1e999')
-        .replace(/Infinity/g, '1e999')
-        .replace(/NaN/g, 'null')
-    );
-  }
-
-  // A finite value within a relative error of 1e-12; a NaN or an infinity
-  // exactly.
-  const same = (a: number | null, b: number) =>
-    a === null
-      ? Number.isNaN(b)
-      : Number.isFinite(b)
-        ? Math.abs(a - b) <= 1e-12 * Math.abs(b)
-        : a === b;
-
-  (VENV_PYTHON === undefined ? it.skip : it)(
-    'every head agrees with the interpreter, on each side of each cut',
-    () => {
-      const py = new PythonTarget({ includeImports: true });
-      let program = '';
-      for (const h of HEADS)
-        program +=
-          py.compileFunction(ce.function(h, ['z']), `f_${h}`, ['z']) + '\n';
-      program += 'import json\nout = []\n';
-      program += `for h in ${JSON.stringify(HEADS)}:\n`;
-      program += `  for (x, y) in ${JSON.stringify(POINTS)}:\n`;
-      program += `    r = complex(globals()['f_' + h](complex(x, y)))\n`;
-      program += `    out.append([r.real, r.imag])\n`;
-      program += 'print(json.dumps(out))\n';
-      const values = run(program);
-      const failures: string[] = [];
-      let i = 0;
-      for (const h of HEADS)
-        for (const [x, y] of POINTS) {
-          const [re, im] = values[i++];
-          const [er, ei] = expected(h, x, y);
-          if (!same(re, er) || !same(im, ei))
-            failures.push(
-              `${h}(${x} + ${y}i): ${re} + ${im}i, expected ${er} + ${ei}i`
-            );
-        }
-      expect(failures).toEqual([]);
-    }
-  );
-
-  (VENV_PYTHON === undefined ? it.skip : it)(
-    'arctan and arccot have the value of mpmath on each half of their cut',
-    () => {
-      const py = new PythonTarget({ includeImports: true });
-      let program = '';
-      for (const h of ['Arctan', 'Arccot'])
-        program +=
-          py.compileFunction(ce.function(h, ['z']), `f_${h}`, ['z']) + '\n';
-      program += 'import json\nout = []\n';
-      program += `for (h, y) in ${JSON.stringify(ODD_ON_CUT.map(([h, y]) => [h, y]))}:\n`;
-      program += `  r = complex(globals()['f_' + h](complex(0, y)))\n`;
-      program += `  out.append([r.real, r.imag])\n`;
-      program += 'print(json.dumps(out))\n';
-      const values = run(program);
-      ODD_ON_CUT.forEach(([, , re, im], k) => {
-        expect(same(values[k][0], re)).toBe(true);
-        expect(same(values[k][1], im)).toBe(true);
-      });
-    }
-  );
-
-  (VENV_PYTHON === undefined ? it.skip : it)(
-    'a list of complex values takes the same code on each element',
-    () => {
-      const py = new PythonTarget({ includeImports: true });
-      const xs: [number, number][] = [
-        [2, 0],
-        [-2, 0],
-        [0, 2],
-        [0, -2],
-        [-1, 1],
-        [0, 0],
-      ];
-      let program = '';
-      for (const h of HEADS)
-        program +=
-          py.compileFunction(ce.function(h, ['L']), `f_${h}`, ['L']) + '\n';
-      program += 'import json\nout = []\n';
-      program += `L = [complex(x, y) for (x, y) in ${JSON.stringify(xs)}]\n`;
-      program += `for h in ${JSON.stringify(HEADS)}:\n`;
-      program += `  out.append([[complex(r).real, complex(r).imag] for r in globals()['f_' + h](L)])\n`;
-      program += 'print(json.dumps(out))\n';
-      const values = run(program);
-      const failures: string[] = [];
-      HEADS.forEach((h, k) =>
-        xs.forEach(([x, y], j) => {
-          const [re, im] = values[k][j];
-          const [er, ei] = expected(h, x, y);
-          if (!same(re, er) || !same(im, ei))
-            failures.push(
-              `${h}(${x} + ${y}i): ${re} + ${im}i, expected ${er} + ${ei}i`
-            );
-        })
-      );
-      expect(failures).toEqual([]);
-    }
-  );
 });

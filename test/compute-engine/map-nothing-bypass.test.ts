@@ -263,7 +263,7 @@ describe('Map applies its callback to a Nothing element', () => {
     expect(calls).toBe(3);
   });
 
-  test.each(['javascript', 'python'] as const)(
+  test.each(['javascript'] as const)(
     'compilation refuses a source that can hold Nothing on %s',
     (to) => {
       const ce = new ComputeEngine();

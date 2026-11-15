@@ -183,8 +183,6 @@ describe('COMPILE: folded symbol values are bound once', () => {
     expect(ce.box('b').evaluate().toString()).toBe('b + 1');
     const js = ce._getCompilationTarget('javascript')!;
     expect(() => js.compile(ce.box('b'))).toThrow(/refers to itself/);
-    const py = ce._getCompilationTarget('python')!;
-    expect(() => py.compile(ce.box('b'))).toThrow(/refers to itself/);
     // The public route degrades to the interpreter, whose numeric answer for
     // the unevaluable symbol is NaN.
     const result = compile(ce.box('b'));

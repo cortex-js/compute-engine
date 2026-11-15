@@ -19,7 +19,7 @@ import {
 // - A function body, the root or a `Loop` whose values (each `Return` or
 //   `Break` value and the last value) have conflicting shapes declines.
 
-const TARGETS = ['javascript', 'interval-js', 'glsl', 'python'];
+const TARGETS = ['javascript', 'interval-js', 'glsl'];
 
 const silence = jest.spyOn(console, 'warn').mockImplementation(() => {});
 afterAll(() => silence.mockRestore());
@@ -397,8 +397,7 @@ describe('A Tycho document function (signature `(unknown) -> unknown`)', () => {
     ] as MathJsonExpression[]) {
       const r = compile(ce.box(json), { to });
       expect(r.diagnostic?.code).not.toBe('untyped-input');
-      // The python target has no lowering of a user-function call.
-      if (to !== 'python') expect(r.success).toBe(true);
+      expect(r.success).toBe(true);
     }
   });
 
@@ -443,12 +442,11 @@ describe('A value with no settled shape declines (R3)', () => {
   // The admission checks decline after the code was generated, so a target
   // whose code generation declines for a more specific reason reports that
   // reason: a shader array in an arithmetic operation or in a selection, a
-  // list operand on the interval target, arithmetic over a list in Python,
+  // list operand on the interval target,
   // and on the shader targets a read of the input `L`, whose type
   // `list<real>` has no static length, so no shader can declare it.
   const OWN_REASON = new Set([
     'If(x > 0, [1, 2], 3) + 1 glsl',
-    'If(x > 0, [1, 2], 3) + 1 python',
     'If(x > 0, (1, 2), [(1, 2), (3, 4)]) glsl',
     'If(x > 0, L, x) interval-js',
     'If(x > 0, L, x) glsl',
@@ -559,14 +557,8 @@ describe('A value with no settled shape declines (R3)', () => {
       );
       const r = compile(ce.box(['Add', ['h', 'x'], 1]), { to });
       expect(r.success).toBe(false);
-      // Python declines the arithmetic over a list in the code generation,
-      // a more specific reason.
       expect(r.diagnostic?.code).toBe(
-        to === 'python'
-          ? 'compile-error'
-          : to === 'glsl'
-            ? 'outside-fragment'
-            : 'unsettled-shape'
+        to === 'glsl' ? 'outside-fragment' : 'unsettled-shape'
       );
     }
   );
@@ -643,12 +635,6 @@ describe('A condition known at compile time selects its branch (R3)', () => {
     const r = compile(ce.box(json), { fallback: false });
     expect(r.success).toBe(true);
     expect(r.run!({ x: 1 })).toEqual(expected);
-  });
-
-  test.each(KNOWN)('%s is not refused by R3 on python', (_label, json) => {
-    const ce = engine();
-    const r = compile(ce.box(json), { to: 'python' });
-    expect(r.diagnostic?.code).not.toBe('unsettled-shape');
   });
 
   // The shader code keeps both branches of an `If` whose condition is the
@@ -748,11 +734,7 @@ describe('A branch that the code drops is not checked', () => {
       );
       expect(r.success).toBe(false);
       expect(r.diagnostic?.code).toBe(
-        to === 'python'
-          ? 'compile-error'
-          : to === 'glsl'
-            ? 'outside-fragment'
-            : 'unsettled-shape'
+        to === 'glsl' ? 'outside-fragment' : 'unsettled-shape'
       );
     }
   );
@@ -1095,11 +1077,6 @@ describe('A conditional in a statement position (R3)', () => {
     const r = compile(engine().box(json), { fallback: false });
     expect(r.success).toBe(true);
     for (const x of [2, -1]) expect(r.run!({ x })).toEqual(interpret(json, x));
-  });
-
-  test.each(STATEMENTS)('%s compiles on python', (_label, json) => {
-    const r = compile(engine().box(json), { to: 'python' });
-    expect(r.success).toBe(true);
   });
 
   // The shader code of a conditional in a statement position is a
@@ -1473,8 +1450,7 @@ describe('Assigned names and the shapes of their values', () => {
   // `Assign(x, 2x)` writes the loop index, not the input `x`, which the
   // code only reads after the loop. The input `x` has a type, and is not
   // refused. (JavaScript declines a loop whose body assigns its index, for
-  // another reason; the Python target compiles it, as
-  // `ce-583-block-local-list-no-copy.test.ts` checks.)
+  // another reason.)
   test('an assignment to a loop index does not write the input', () => {
     const json: MathJsonExpression = [
       'Block',
@@ -1700,7 +1676,7 @@ describe('Assigned names and the shapes of their values', () => {
 
   // The `p` that the nested block declares is another variable: its
   // numbers are not compared with the list of the outer `p`.
-  test.each(['javascript', 'glsl', 'python'])(
+  test.each(['javascript', 'glsl'])(
     'a nested local of the same name is another variable on %s',
     (to) => {
       const json: MathJsonExpression = [
@@ -2931,26 +2907,6 @@ describe('Assignments in a function literal (R3)', () => {
     expect(d.code).toBe('unsettled-shape');
     expect(d.error).toMatch(/the value of this `Loop` is used/);
     expect(compile(engine().box(tail)).run!()).toBe(5);
-  });
-
-  // The Python target emits the loop inline, as a `for` statement in the
-  // compiled function: the `return` in it ends that function, as the
-  // `Return` ends it in the interpreter. The case compiles there.
-  test('a Return inside a Loop that has code after it compiles on Python', () => {
-    const json = B(
-      ['Declare', 'q', "'unknown'", 0],
-      [
-        'Loop',
-        ['If', ['Greater', 'i', 1], B(['Assign', 'q', 7], ['Return', 5])],
-        ['Element', 'i', 'L'],
-      ],
-      ['Add', 100, 'q']
-    );
-    const r = compile(engine().box(json), { to: 'python', fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.code).toMatch(/^for i in L:\n/m);
-    expect(r.code).toMatch(/^ {8}return 5$/m);
-    expect(r.code).toMatch(/^return q \+ 100$/m);
   });
 
   // The compiled code of the body of a `Sum` or a `Product` is an

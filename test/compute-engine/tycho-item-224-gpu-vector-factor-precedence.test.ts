@@ -123,17 +123,6 @@ describe('a single-statement Block keeps its grouping as a sub-expression', () =
     } as any);
     expect(js.success).toBe(true);
     expect(js.code).toBe('_.x * (_.t + 1)');
-    // Python reads an input with an INFERRED `number` type through a `None`
-    // test, and a DECLARED `number` as is (ROADMAP CE-460).
-    const pe = new ComputeEngine();
-    pe.declare('x', 'number');
-    pe.declare('t', 'number');
-    const py = compile(pe.box(expr as any), {
-      to: 'python',
-      constantFold: false,
-    } as any);
-    expect(py.success).toBe(true);
-    expect(py.code).toBe('x * (t + 1)');
   });
 
   test('under a Negate', () => {
@@ -184,15 +173,5 @@ describe('controls: emissions that were already correct are unchanged', () => {
     );
     expect(result.run!({ t: 2, x: 5 })).toEqual([15, 0]);
     expect(expr.subs({ t: 2, x: 5 }).N().toString()).toBe('(15, 0)');
-  });
-
-  test('the python target fails closed on arithmetic over a point', () => {
-    // Python's `*` repeats a list instead of broadcasting, so the target
-    // declines rather than emitting a wrong answer — it never had this hole.
-    const result = compile(
-      ce.box(['Multiply', ['Add', 't', 1], ['Tuple', 'x', 0]] as any),
-      { to: 'python', constantFold: false } as any
-    );
-    expect(result.success).toBe(false);
   });
 });

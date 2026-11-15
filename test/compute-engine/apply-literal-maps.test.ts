@@ -1057,7 +1057,7 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
       expect(result.success).toBe(false);
     });
 
-    test.each([['javascript'], ['interval-js'], ['python']])(
+    test.each([['javascript'], ['interval-js']])(
       'target %s declines a nested list at the function literal',
       (to) => {
         const ce = new ComputeEngine();
@@ -1253,7 +1253,7 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
       'the %s function compiled as a value is declined',
       (route) => {
         const ce = setup(route);
-        for (const to of ['javascript', 'interval-js', 'python', 'glsl'])
+        for (const to of ['javascript', 'interval-js', 'glsl'])
           expect(compile(ce.box('h'), { to } as never)!.success).toBe(false);
       }
     );
@@ -1287,7 +1287,7 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
     // (`callOnlyLocalFunctionLiterals`): over a list of reals the local
     // compiles, and over a list of lists, or when the block returns the
     // local, it is declined. `Map` of a local does not compile on
-    // interval-js and Python for other reasons, so these tests are on JS.
+    // interval-js for other reasons, so these tests are on JS.
     describe('a block-local function used as a callback', () => {
       const G = [
         'Declare',
@@ -1517,7 +1517,7 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
       expect(result.run!(VARS)).toEqual([[2, 4]]);
     });
 
-    test.each([['interval-js'], ['python']])(
+    test.each([['interval-js']])(
       'target %s compiles the literal over a list of reals',
       (to) => {
         const ce = setup('named');
@@ -1529,9 +1529,7 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
     );
 
     // Over a list of lists, interval-js compiles the variant typed by the
-    // row, and gives the interpreter's values as point intervals. Python
-    // declines (`assertPyCallbackWideParams` in `python-target.ts`): its
-    // lambda reads a parameter declared `expression` as a scalar.
+    // row, and gives the interpreter's values as point intervals.
     test('the literal over a list of lists', () => {
       const ce = setup('named');
       const options = { constantFold: false } as never;
@@ -1548,12 +1546,6 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
         [point(2), point(4)],
         [point(6), point(8)],
       ]);
-      expect(
-        compile(ce.box(['Map', LITERAL, 'rows'] as never), {
-          ...(options as object),
-          to: 'python',
-        } as never)!.success
-      ).toBe(false);
     });
   });
 

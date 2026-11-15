@@ -1,7 +1,5 @@
-import { execFileSync } from 'child_process';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { TEST_PYTHON } from './test-python';
 
 /**
  * A quotient by the number 0 folds to `ComplexInfinity` only when the
@@ -125,30 +123,6 @@ describe('x/0 with a numerator that may be zero', () => {
     expect(f.success).toBe(true);
     expect([-1, 0, 1].map((x) => f.run!({ x }))).toEqual([0, 0, 1]);
   });
-
-  (TEST_PYTHON === undefined ? test.skip : test)(
-    'the compiled Python branch is 0 at x = 0',
-    () => {
-      // Compiled Python runs on NumPy values: `x / 0` is `±inf`, or `nan`
-      // at `x = 0`, as in JavaScript. (A plain Python float raises
-      // `ZeroDivisionError` for any division by zero, `1/x` included.)
-      const ce = new ComputeEngine();
-      ce.declare('x', 'real');
-      const py = compile(
-        ce.parse(
-          '\\begin{cases} 1 & \\frac{x}{0} > 0 \\\\ 0 & \\text{otherwise}\\end{cases}'
-        ),
-        { to: 'python' } as never
-      );
-      expect(py.success).toBe(true);
-      const script = `import numpy as np\nnp.seterr(all='ignore')\nprint([float((lambda x: ${py.code})(np.float64(v))) for v in (-1.0, 0.0, 1.0)])\n`;
-      expect(
-        execFileSync(TEST_PYTHON!, ['-I', '-c', script], {
-          encoding: 'utf8',
-        }).trim()
-      ).toBe('[0.0, 0.0, 1.0]');
-    }
-  );
 
   test('a limit does not read a kept quotient as its value', () => {
     // The substitution `x = a` gives `a/0`; the sign of `a` is unknown.

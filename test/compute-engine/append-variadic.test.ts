@@ -1,7 +1,6 @@
 import { Expression } from '../../src/math-json/types.ts';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 /**
  * Change 2 of `docs/COLLECTIONS-MODEL.md`:
@@ -503,17 +502,9 @@ describe('Append: the compile targets follow the variadic form', () => {
   test('JavaScript', () =>
     expect(compile(ce.box(flat), NO_FOLD)?.code).toBe('[...(_.xs), 3, 4]'));
 
-  test('Python', () =>
-    expect(new PythonTarget().compile(ce.box(flat), NO_FOLD)?.code).toBe(
-      '[*xs, 3, 4]'
-    ));
-
   test('the binary form is unchanged', () => {
     const binary: Expression = ['Append', 'xs', 3];
     expect(compile(ce.box(binary), NO_FOLD)?.code).toBe('[...(_.xs), 3]');
-    expect(new PythonTarget().compile(ce.box(binary), NO_FOLD)?.code).toBe(
-      '[*xs, 3]'
-    );
   });
 });
 
@@ -756,8 +747,5 @@ describe('Append: the 1-ary identity form (non-strict)', () => {
     // constant folding would emit `[1, 2]` and the identity lowering under test
     // would never run.
     expect(compile(e, { constantFold: false })?.code).toBe('[...([1, 2])]');
-    expect(new PythonTarget().compile(e, { constantFold: false })?.code).toBe(
-      '[*[1, 2]]'
-    );
   });
 });

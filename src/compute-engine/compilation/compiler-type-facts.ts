@@ -448,11 +448,10 @@ export function isProvablyTupleParticipant(x: Expression): boolean {
  * and requiring every member of a union to qualify.
  *
  * The other half of the ADMISSION side of the tuple-equality carve-out, paired
- * with `isProvablyTupleParticipant` — see `compileJSEquality` and
- * `compilePythonEquality`. Tuple-ness alone is not enough on EITHER target,
- * because the element leaf of the whole-value comparison is numeric and coerces
- * a boolean: `_SYS.eq`'s tolerance test makes `Math.abs(true - 1)` zero, and
- * Python's `==` makes `True == 1` true, so `Equal(Tuple(True, 2), Tuple(1, 2))`
+ * with `isProvablyTupleParticipant` — see `compileJSEquality`. Tuple-ness
+ * alone is not enough, because the element leaf of the whole-value comparison
+ * is numeric and coerces a boolean: `_SYS.eq`'s tolerance test makes
+ * `Math.abs(true - 1)` zero, so `Equal(Tuple(True, 2), Tuple(1, 2))`
  * answered `True` where the interpreter answers `False`. Anything but a provable
  * number — a boolean, a string, `unknown`, a union with a non-numeric member, or
  * a bare `tuple` with no component information at all — disqualifies, and the
@@ -617,7 +616,7 @@ export function isFlatAllStringComparisonParticipant(x: Expression): boolean {
  * True when a comparison PARTICIPANT's static type ADMITS a collection at run
  * time — not only when the whole type is one.
  *
- * `x.type.matches('collection<any>')` (and Python's `isPyCollectionOperand`) answer
+ * `x.type.matches('collection<any>')` answers
  * the SUBTYPE question, so a general UNION with a collection arm slips through:
  * `string | list<string>` is not a subtype of `collection`, yet the run-time
  * value can be a list. That blind spot let the tier-2 scalar string-equality
@@ -668,10 +667,8 @@ export function couldBeCollectionParticipant(x: Expression): boolean {
 }
 
 /**
- * The MIXED-string ORDERING rule, shared by every site that must agree on it:
- * the two infix diverts below (`orderingOverString` for JavaScript,
- * `pyOrderingUnfaithful` for Python) and the Python target's ordering gate
- * (`assertPyNoMixedStringOrdering`). At least one participant carries string
+ * The MIXED-string ORDERING rule, shared by every site that must agree on it
+ * (`orderingOverString` for JavaScript). At least one participant carries string
  * evidence, but not every one is a provably FLAT string — the only all-string
  * shape whose parity with interpretation is verified. The `some` and `every`
  * sides deliberately use DIFFERENT predicates; see each for why.
@@ -829,7 +826,7 @@ export function isGatedIndexedCollection(a: Expression): boolean {
  * compilation also declines when a tuple type is an arm of the type of `a`,
  * or of its element type at any depth. The same applies to a string: the
  * interpreter gives `"ab"` the shape `(2)`, but at run time it is a
- * JavaScript or Python string, which is not an array.
+ * JavaScript string, which is not an array.
  */
 export function shapeOperandRefusal(a: Expression): string | undefined {
   if (a.isFiniteCollection === false) return 'is an infinite collection';
@@ -1025,7 +1022,7 @@ export function exactRationalDivisor(
  * for a consumer that declares every parameter `any`. A call of a user
  * function typed `any` and a `broadcastable<T>` type keep their reading.
  *
- * The JavaScript, Python and `interval-js` targets decline an arithmetic site
+ * The JavaScript and `interval-js` targets decline an arithmetic site
  * over such a symbol (`assertNoDeclaredTopOperands()`, `compile-admission.ts`),
  * because its value can be a list.
  *

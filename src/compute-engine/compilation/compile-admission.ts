@@ -2056,7 +2056,7 @@ function hasKeptBreak(
  * loop with an indexing set declines also when it has a `Return` and is the
  * last statement of its function: when no `Return` runs, the loop ends at
  * the end of its indexing sets and the interpreter gives `Nothing`, where
- * the compiled function gave `undefined` (JavaScript) or `None` (Python).
+ * the compiled function gave `undefined` (JavaScript).
  */
 function isUnrepresentableLoopValue(
   loop: Expression,
@@ -2402,11 +2402,8 @@ export function unsettledShapeIn(
     }
   }
 
-  // The Python target emits a `Loop` inline, as a `for` or a `while`
-  // statement in the function that contains it: a `Return` in the loop
-  // ends that function, as in the interpreter. The other targets need the
-  // check (`returnInLoopIn()`).
-  for (const body of target.language === 'python' ? [] : [root, ...roots]) {
+  // A `Return` in a loop (`returnInLoopIn()`).
+  for (const body of [root, ...roots]) {
     const loopReturn = returnInLoopIn(body, target);
     if (loopReturn !== undefined)
       return { node: loopReturn, reason: 'return-in-loop' };

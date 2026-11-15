@@ -49,7 +49,7 @@ import {
  *
  * `consumer` names the caller (`map`, `integrand`, `nd`, …). With the
  * internal switch `ce._jsProfile` on for this consumer, the compilation is
- * tried with the `numeric-kernel` profile first, and the existing compiler
+ * tried with the profile `ir` first, and the existing compiler
  * runs when the profile does not give code (`tryProfile()`).
  *
  * With the shadow measure `ce._jsProfileShadow` on, the compilation of the
@@ -163,7 +163,7 @@ function tryProfile(
       ...options,
       ...(attemptDeps === undefined ? {} : { symbolDeps: attemptDeps }),
       ...(attemptRefs === undefined ? {} : { varsObjectRefs: attemptRefs }),
-      profile: ce._jsProfile?.profile ?? 'numeric-kernel',
+      profile: 'ir',
       fallback: false,
       entryChecks: false,
     });

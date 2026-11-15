@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 //
 // A guarded `Element` clause in `Comprehension` and `Loop`:
@@ -133,48 +132,6 @@ describe('COMPREHENSION GUARD — compiled', () => {
     expect(result.success).toBe(true);
     expect(result.run!()).toBe(27);
   });
-
-  test('Python: the guard is the `if` of the comprehension clause', () => {
-    const engine = new ComputeEngine();
-    engine.declare('n', 'integer');
-    const python = new PythonTarget();
-    const code = python.compileFunction(
-      engine.box([
-        'Comprehension',
-        ['Square', 'x'],
-        ['Element', 'x', ['Range', 1, 'n'], ['Equal', ['Mod', 'x', 2], 1]],
-      ]),
-      'fn',
-      ['n'],
-      undefined,
-      {}
-    );
-    // The guard is the decided-true test of the three-valued condition
-    // lowering, not a bare truthiness test.
-    // The `Mod` operands go through the safe-integer-range check of the
-    // Python target (`_ce_int_operands`), so the pattern reads through it.
-    expect(code).toMatch(/\[x \*\* 2 for x in .* if .*np\.mod\(.*x.*, 2\).*\]/);
-  });
-
-  test('Python: a guarded Loop statement declines', () => {
-    const python = new PythonTarget();
-    // `s` is declared before the loop, so the assignment in the loop body
-    // writes it (otherwise it is the error `assignment-to-undeclared-variable`).
-    ce.declare('s', 'integer');
-    expect(() =>
-      python.compileFunction(
-        ce.box([
-          'Loop',
-          ['Block', ['Assign', 's', ['Add', 's', 'k']]],
-          ['Element', 'k', ['Range', 1, 10], ['Greater', 'k', 7]],
-        ]),
-        'fn',
-        [],
-        undefined,
-        {}
-      )
-    ).toThrow(/guarded/);
-  });
 });
 
 describe('COMPREHENSION GUARD — infinite and undecidable domains', () => {
@@ -240,16 +197,6 @@ describe('COMPREHENSION GUARD — decided-true semantics and clause scope', () =
     const js = compile(comp);
     expect(js.success).toBe(true);
     expect(js.run!({ n: 3 })).toEqual([]);
-    const py = new PythonTarget().compileFunction(
-      comp,
-      'fn',
-      ['n'],
-      undefined,
-      {}
-    );
-    // Not a bare `if x`: the value is tested for a boolean that is true.
-    expect(py).not.toMatch(/ if x\]/);
-    expect(py).toContain('isinstance(_g, (bool, np.bool_))');
     engine.assign('n', 3);
     expect(comp.evaluate().toString()).toBe('[]');
   });
@@ -268,14 +215,6 @@ describe('COMPREHENSION GUARD — decided-true semantics and clause scope', () =
     const js = compile(comp, { fallback: false });
     expect(js.success).toBe(true);
     expect(js.run!({ L: [1, 2] })).toEqual([]);
-    const py = new PythonTarget().compileFunction(
-      comp,
-      'fn',
-      ['L'],
-      undefined,
-      {}
-    );
-    expect(py).toContain('isinstance(_g, (bool, np.bool_))');
     engine.assign('L', engine.box(['List', 1, 2]));
     expect(comp.evaluate().toString()).toBe('[]');
   });
@@ -299,11 +238,6 @@ describe('COMPREHENSION GUARD — decided-true semantics and clause scope', () =
     expect(js.success).toBe(true);
     expect(js.run!({ y: 2 })).toEqual([1, 1]);
     expect(js.run!({ y: 3 })).toEqual([1, 1, 2, 2]);
-    // A Python comprehension is one scope, where `y` would be the later
-    // loop's unassigned local: the Python route declines the shape.
-    expect(() =>
-      new PythonTarget().compileFunction(comp, 'fn', ['y'], undefined, {})
-    ).toThrow(/later clause binds/);
     engine.assign('y', 2);
     expect(comp.evaluate().toString()).toBe('[1,1]');
   });

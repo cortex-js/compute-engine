@@ -304,8 +304,8 @@ describe('a list-valued call inside a big-op body is element-wise, not scalar (i
 });
 
 // Tycho item 171, residue on the NON-JS targets (2026-08-12). The JS fix above
-// routes the shape into the element-wise `_SYS.bcast` fold, but GLSL,
-// Python and interval-js call `BaseCompiler.assertScalarBigOpBody` directly and
+// routes the shape into the element-wise `_SYS.bcast` fold, but GLSL
+// and interval-js call `BaseCompiler.assertScalarBigOpBody` directly and
 // have NO element-wise arm — correct emission is not on the table there, so the
 // only sound answer is to decline (D6).
 //
@@ -331,7 +331,7 @@ describe('a list-valued call inside a big-op body is element-wise, not scalar (i
 // `Function`-literal body has a type that MATCHES a collection. Absence of
 // evidence stays admitted, per the item-121 closure.
 describe('list-valued big-op bodies decline on the non-JS targets (item 171 residue)', () => {
-  const NON_JS = ['glsl', 'python', 'interval-js'] as const;
+  const NON_JS = ['glsl', 'interval-js'] as const;
 
   const setup = (hBody: any = 'i') => {
     const ce = new ComputeEngine();
@@ -387,14 +387,11 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
       constantFold: false,
     } as any);
     expect(r?.success ?? false).toBe(false);
-    // The MESSAGE is pinned on the direct form above, not here: Python has no
-    // user-function lowering at all, so the wrapper declines earlier, at the
-    // outer `A` call ("Unknown operator `A`"), and never reaches the big-op
-    // gate. That decline is pre-existing and independent of this fix.
+    // The MESSAGE is pinned on the direct form above, not here.
     // The GLSL fragment refuses the untyped `t` first.
     if (to === 'glsl')
       expect((r as any).diagnostic?.code).toBe('outside-fragment');
-    else if (to !== 'python')
+    else
       expect((r as any).error).toMatch(
         /collection-valued body has no compiled form/
       );
@@ -452,9 +449,7 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
     (to) => {
       // The shader idiom the `broadcastable<T>` exemption exists for: an open
       // `(unknown) -> unknown` helper that is scalar at run time. Only the
-      // collection-constructing body is new evidence. (Python is omitted: it
-      // has no user-function lowering at all and declines with
-      // "Unknown operator `q`" independently of this change.)
+      // collection-constructing body is new evidence.
       const ce = new ComputeEngine();
       ce.declare('q', { signature: '(unknown) -> unknown' });
       ce.assign(
@@ -480,7 +475,6 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
 //               "1,00.5403…,0.8414…-0.4161…,0.9092…" (JS `+` over arrays)
 //   glsl        the same shape → a `vec2` sum returned from a `float` function,
 //               i.e. shader source that does not even compile
-//   python      declined for an unrelated reason ("Unknown operator `a`")
 //   interval-js declined for an unrelated reason (no `List` lowering)
 //
 // The assignment of a list-constructing body to `a`, declared
@@ -496,7 +490,7 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
 // affected, because `matches('number')` is disjoint from every one of them.
 // Tycho ledger row 491.
 describe('a declaration contradicted by its body is refused, or declines everywhere through a helper assigned later (2026-08-12 ruling)', () => {
-  const ALL = ['javascript', 'glsl', 'python', 'interval-js'] as const;
+  const ALL = ['javascript', 'glsl', 'interval-js'] as const;
   const CONTRADICTED =
     /says it returns a scalar .* but its body constructs a collection/;
 
@@ -591,7 +585,7 @@ describe('a declaration contradicted by its body is refused, or declines everywh
     expect(v[1]).toBeCloseTo(y!, 10);
   });
 
-  test.each(['glsl', 'python', 'interval-js'] as const)(
+  test.each(['glsl', 'interval-js'] as const)(
     '%s declines the (formerly open) collection shape on its OWN message, not the contradicted one',
     (to) => {
       const ce = new ComputeEngine();
@@ -633,9 +627,7 @@ describe('a declaration contradicted by its body is refused, or declines everywh
   );
 
   // A TRUTHFUL `-> number` head over a scalar body is the ordinary case and
-  // must keep compiling. (Python is omitted: it has no user-function lowering
-  // at all and declines with "Unknown operator `a`" independently of this
-  // change — the same carve-out the exemption tests above use.)
+  // must keep compiling.
   test.each(['javascript', 'glsl', 'interval-js'] as const)(
     '%s still compiles a TRUTHFUL `-> number` scalar body',
     (to) => {
@@ -681,7 +673,7 @@ describe('a declaration contradicted by its body is refused, or declines everywh
     expect(v[1]).toBeCloseTo(y!, 10);
   });
 
-  test.each(['glsl', 'python', 'interval-js'] as const)(
+  test.each(['glsl', 'interval-js'] as const)(
     '%s declines a truthful `-> list<number>` on the FIRST clause',
     (to) => {
       const r = compile(
@@ -722,8 +714,8 @@ describe('a declaration contradicted by its body is refused, or declines everywh
 //   `a(u) = 1`         the wrong scalar `false`           same
 //   `If(a(u)<1, 1, 2)` the WRONG branch (`2`)             same
 //
-// Python and interval-js already declined all of them, for their own unrelated
-// reasons (no user-function lowering / no `List` lowering).
+// interval-js already declined all of them, for its own unrelated reason
+// (no `List` lowering).
 //
 // The gate is ONE policy point — `BaseCompiler.assertNoContradictedScalarOperand`,
 // in `compileExpr`, target-agnostic — because the contradiction is a property of
@@ -735,7 +727,7 @@ describe('a declaration contradicted by its body is refused, or declines everywh
 // A direct assignment of such a body is refused when it is made. The compiler
 // declines are reached through a helper assigned later.
 describe('a contradicted scalar declaration is refused, or declines in every scalar position through a helper assigned later (2026-08-12 ruling, wave 2)', () => {
-  const ALL_TARGETS = ['javascript', 'glsl', 'python', 'interval-js'] as const;
+  const ALL_TARGETS = ['javascript', 'glsl', 'interval-js'] as const;
 
   /** The wave-2 message: same two halves, its own second sentence. */
   const CONTRADICTED_SCALAR_POSITION =
@@ -872,7 +864,7 @@ describe('a contradicted scalar declaration is refused, or declines in every sca
 // Tycho item 171, wave 3 — the DEFINITION-SITE hole waves 1–2 could not reach.
 // Waves 1–2 gate CONSUMING positions, so the one shape left was the bare
 // application as the WHOLE compiled expression: no head consumes it, so nothing
-// fired. Since CE-707 (the declared result binds the body) JavaScript, Python
+// fired. Since CE-707 (the declared result binds the body) JavaScript
 // and interval-js decline that call too, because the interpreter refuses it with
 // an `incompatible-type` error. The shader targets keep the definition-emission
 // gate below, because: the definition is still
@@ -891,9 +883,7 @@ describe('a contradicted scalar declaration is refused, or declines in every sca
 // shared emission path (`emitFunctionLiteralDefinition`) and keyed on a property
 // the TARGET declares — `userFunctions.lowering.staticReturnType`. Only a
 // lowering that synthesizes a static return type has the hole, so JavaScript and
-// interval-js (untyped arrow form, no lowering) are structurally untouched, and
-// Python — which has no user-function lowering at all — could only ever gain a
-// dynamically-typed `def`, with no return type to contradict.
+// interval-js (untyped arrow form, no lowering) are structurally untouched.
 //
 // It runs AFTER `define`, so every more specific target diagnostic (the
 // `no static GLSL type` return check, the `At` aggregate-index decline, the
@@ -1276,7 +1266,7 @@ describe('a contradicted scalar declaration of a MULTI-CLAUSE function is refuse
 // declines are reached through a body whose last statement calls a helper
 // assigned later.
 describe('a contradicted scalar declaration is refused, or seen through a MULTI-STATEMENT body that calls a helper assigned later (2026-08-12 ruling, wave 5)', () => {
-  const ALL_TARGETS = ['javascript', 'glsl', 'python', 'interval-js'] as const;
+  const ALL_TARGETS = ['javascript', 'glsl', 'interval-js'] as const;
 
   const CONTRADICTED_SCALAR_POSITION =
     /says it returns a scalar .* but its body constructs a collection.*this scalar position would consume a run-time collection as a number/s;
@@ -1520,7 +1510,7 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
 // it is made. The compiler declines are reached through a helper assigned
 // later.
 describe('a contradicted BOOLEAN declaration is refused, or declines in every scalar position through a helper assigned later (2026-08-12 ruling, wave 6)', () => {
-  const ALL_TARGETS = ['javascript', 'glsl', 'python', 'interval-js'] as const;
+  const ALL_TARGETS = ['javascript', 'glsl', 'interval-js'] as const;
 
   const CONTRADICTED_CONDITION =
     /says it returns a scalar .* but its body constructs a collection.*this branch condition would select on the truthiness of a run-time collection/s;

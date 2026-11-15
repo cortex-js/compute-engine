@@ -1880,29 +1880,6 @@ describe('COMPILE COMPLEX - Reduce/Scan ACCUMULATOR lane (combinerPlan)', () => 
     expect(real.run!({ R: [1, 2] })).toBe(3);
   });
 
-  test('the shared isComplexValued fold verdict is honored by the Python target', () => {
-    // `isComplexValued(Reduce…)` is a BaseCompiler verdict every target reads;
-    // Python's `Ln` picks `cmath.log` from it. Python's native `complex`
-    // auto-promotes under `+`/`*`, so the fold itself needs no lane binding
-    // there — but the parent's kernel choice must follow the verdict.
-    const engine = makeEngine();
-    engine.declare('M', 'list<complex>');
-    const r = compile(
-      engine.box([
-        'Ln',
-        [
-          'Reduce',
-          'M',
-          ['Function', ['Add', 'a', ['Multiply', 2, 'x']], 'a', 'x'],
-          0,
-        ],
-      ]),
-      { ...opts, to: 'python' }
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('cmath.log(');
-  });
-
   // The frame `compileCombinerLiteral` pushes for the combiner is the
   // AUTHORITATIVE description of its parameters: the same `combinerPlan` that
   // fills it also decides which operands the fold's wrapper lifts to

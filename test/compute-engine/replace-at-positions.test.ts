@@ -758,14 +758,14 @@ describe('the other targets decline a form with more than one position', () => {
   ce.declare('X', 'matrix<2x2>');
   const json = ['ReplaceAt', 'X', 1, 1, 9];
 
-  test.each([
-    ['python', /this target writes at one position/],
-    ['glsl', /The head `ReplaceAt` is outside the GLSL fragment/],
-  ])('%s', (to, message) => {
-    expect(() =>
-      compile(ce.box(json as never), { to, fallback: false } as never)
-    ).toThrow(message);
-  });
+  test.each([['glsl', /The head `ReplaceAt` is outside the GLSL fragment/]])(
+    '%s',
+    (to, message) => {
+      expect(() =>
+        compile(ce.box(json as never), { to, fallback: false } as never)
+      ).toThrow(message);
+    }
+  );
 
   test('interval-js', () => {
     const r = compile(ce.box(json as never), {
@@ -799,15 +799,6 @@ describe('the other targets decline a form with more than one position', () => {
     expect((r.run as (v: unknown) => unknown)({ B2: [1n, 2n], n: 4n })).toEqual(
       [1n, 9n]
     );
-  });
-
-  test('python keeps the form with one position', () => {
-    ce.declare('V', 'list<number>');
-    const r = compile(ce.box(['ReplaceAt', 'V', 1, 9] as never), {
-      to: 'python',
-      fallback: false,
-    } as never);
-    expect(r.success).toBe(true);
   });
 });
 

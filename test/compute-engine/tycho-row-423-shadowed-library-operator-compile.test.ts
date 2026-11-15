@@ -38,8 +38,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // Not renamed, so still declined: a node bound to the LIBRARY operator
 // while the current scope shadows the name; the arithmetic, comparison,
 // logic and control-flow heads, which the canonical forms and the compiler
-// build by name; a multi-clause function; the Python target, which compiles
-// no user function.
+// build by name; a multi-clause function.
 //
 
 /** The two ways Tycho's document manager declares a document function. */
@@ -295,21 +294,6 @@ describe('the other targets', () => {
     // the library lowering of `Gamma` is not used.
     expect(result.code).toMatch(/_fn_Gamma\w*\(x\)/);
     expect(result.code).not.toMatch(/gamma\(/);
-  });
-
-  test('python declines, and the interpreter runs the user function', () => {
-    // The Python target compiles no user function (a call of `G` declines
-    // with "Unknown operator" too), so the call is not renamed for it.
-    const ce = engine();
-    const { result, warnings } = compiled(
-      ce.box(['Add', ['Gamma', 'x'], 1]),
-      'python'
-    );
-    expect(result.success).toBe(false);
-    expect(warnings.join('\n')).toContain(
-      'a user definition shadows the library operator `Gamma`'
-    );
-    expect(result.run({ x: 1 })).toBe(102);
   });
 });
 

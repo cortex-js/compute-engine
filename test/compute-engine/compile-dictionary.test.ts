@@ -1,20 +1,14 @@
 // Compilation of a dictionary literal, `["Dictionary", ["Tuple", "'a'", 1]]`
 // (`{a -> 1}` in Epsil, `{}` for the empty dictionary).
 //
-// The JavaScript target spells it as an object literal and the Python target
-// as a `dict` display, with each value compiled. Each evaluation makes a new
-// value, in the run-time form that the host supplies for an input of type
-// `dictionary`: a plain object in JavaScript, a `dict` in Python. A value
-// whose type is `unknown` declines, and so does a dictionary on a target that
-// has no dictionary value (interval-js, GLSL).
+// The JavaScript target spells it as an object literal, with each value
+// compiled. Each evaluation makes a new value, in the run-time form that the
+// host supplies for an input of type `dictionary`: a plain object in
+// JavaScript. A value whose type is `unknown` declines, and so does a
+// dictionary on a target that has no dictionary value (interval-js, GLSL).
 
-import { execFileSync } from 'node:child_process';
-import * as fs from 'node:fs';
-import * as os from 'node:os';
-import * as path from 'node:path';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { TEST_PYTHON } from './test-python';
 import { typeHoldsKeyedValue } from '../../src/compute-engine/compilation/compiler-type-facts';
 import { parseType } from '../../src/common/type/parse';
 
@@ -139,7 +133,7 @@ describe('COMPILE A DICTIONARY: JAVASCRIPT', () => {
   });
 
   test('a value of type `unknown` declines with a reason', () => {
-    for (const to of ['javascript', 'python']) {
+    for (const to of ['javascript']) {
       expect(() =>
         compiled(['Dictionary', entry('a', ['g', 'x'])], to)
       ).toThrow(/the value of the key "a" has the type `unknown`/);
@@ -147,7 +141,7 @@ describe('COMPILE A DICTIONARY: JAVASCRIPT', () => {
   });
 
   test('an untyped input in a value is refused by name, as elsewhere', () => {
-    for (const to of ['javascript', 'python']) {
+    for (const to of ['javascript']) {
       expect(() => compiled(['Dictionary', entry('a', 'zz')], to)).toThrow(
         /the input `zz` has no type/
       );
@@ -174,13 +168,12 @@ describe('COMPILE A DICTIONARY: JAVASCRIPT', () => {
     expect(compiled(expr, 'javascript').run({ x: 1 })).toEqual(
       interpreted(expr)
     );
-    expect(compiled(expr, 'python').success).toBe(true);
   });
 
   test('a value that can be `Nothing` declines with a reason', () => {
     const local = new ComputeEngine();
     local.declare('n', 'integer | nothing');
-    for (const to of ['javascript', 'python']) {
+    for (const to of ['javascript']) {
       expect(() =>
         compile(
           local.box(['Dictionary', entry('a', 'n')]) as any,
@@ -203,9 +196,9 @@ describe('COMPILE A DICTIONARY: JAVASCRIPT', () => {
         'q',
       ],
     ];
-    for (const to of ['javascript', 'python'])
+    for (const to of ['javascript'])
       expect(() => compiled(expr, to)).toThrow(
-        /an assignment or a declaration is a statement, and its value is used|an assignment is a statement in 'python'/
+        /an assignment or a declaration is a statement, and its value is used/
       );
   });
 
@@ -222,7 +215,7 @@ describe('COMPILE A DICTIONARY: JAVASCRIPT', () => {
 
   test('an untyped parameter or local in a value declines', () => {
     // Input admission refuses only free inputs: a bound name is not one.
-    for (const to of ['javascript', 'python']) {
+    for (const to of ['javascript']) {
       expect(() =>
         compiled(['Function', ['Dictionary', entry('a', 'u')], 'u'], to)
       ).toThrow(/the value of the key "a" has the type `unknown`/);
@@ -298,25 +291,6 @@ describe('COMPILE A DICTIONARY: JAVASCRIPT', () => {
     expect(r.run({ x: 1 })).toEqual(interpreted(expr));
   });
 
-  test('a temporary is not named as a symbol that only a value reads', () => {
-    const local = new ComputeEngine();
-    local.declare('x', 'real');
-    local.declare('_cse1', 'real');
-    const shared = ['Add', ['Sin', 'x'], 1];
-    const expr = [
-      'List',
-      shared,
-      ['Multiply', 2, shared],
-      ['Dictionary', entry('a', '_cse1')],
-    ];
-    const r: any = compile(
-      local.box(expr) as any,
-      { to: 'python', fallback: false } as any
-    );
-    expect(r.code).not.toMatch(/for _cse1 in/);
-    expect(r.code).toContain('{"a": _cse1}');
-  });
-
   test('a dictionary input with the keys `re` and `im` is accepted as it is', () => {
     // The input was checked as a real number, and refused as a complex one.
     expect(compiled('d', 'javascript').run({ d: { re: 1, im: 0 } })).toEqual({
@@ -331,43 +305,6 @@ describe('COMPILE A DICTIONARY: JAVASCRIPT', () => {
       re: 1,
       im: 0,
     });
-  });
-});
-
-describe('COMPILE A DICTIONARY: PYTHON', () => {
-  test('a dictionary is a `dict` display of the compiled values', () => {
-    expect(compiled(['Dictionary'], 'python').code).toBe('{}');
-    expect(compiled(MIXED, 'python').code).toBe(
-      '{"a": x + 1, "__proto__": 2, "b": [1, 3 * x], "c": {"s": "text"}}'
-    );
-    expect(compiled(ESCAPED, 'python').code).toBe('{"q\\"\\\\\\n é": 1}');
-  });
-
-  const python = TEST_PYTHON ?? '';
-  const pythonTest = fs.existsSync(python) ? test : test.skip;
-
-  pythonTest('the emitted Python agrees with the interpreter', () => {
-    const empty = compiled(['Dictionary'], 'python').code;
-    const program = [
-      'import json',
-      'x = 1',
-      `f = lambda: ${empty}`,
-      `print(json.dumps([${compiled(MIXED, 'python').code}, ` +
-        `${compiled(ESCAPED, 'python').code}, f() is not f()]))`,
-    ].join('\n');
-    const file = path.join(os.tmpdir(), `ce-py-dictionary-${process.pid}.py`);
-    fs.writeFileSync(file, program, 'utf8');
-    let out = '';
-    try {
-      out = execFileSync(python, [file], { encoding: 'utf8' });
-    } finally {
-      fs.unlinkSync(file);
-    }
-    expect(JSON.parse(out)).toEqual([
-      interpreted(MIXED),
-      interpreted(ESCAPED),
-      true,
-    ]);
   });
 });
 

@@ -43,7 +43,7 @@ export const INVERSE_TRIG_OPERATORS = new Set([
   'InverseHaversine',
   // The phase angle of a complex number is in the engine's unit, as the
   // result of `Arctan2` is. Every target lowers it to a radian value
-  // (`Math.atan2`, `_IA.atan2`, `atan`, `np.angle`, or `0`/`π` for a real
+  // (`Math.atan2`, `_IA.atan2`, `atan`, or `0`/`π` for a real
   // operand), so the compiled result is scaled the same way.
   'Argument',
 ]);

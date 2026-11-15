@@ -3,7 +3,6 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 /**
  * `PointList` compile handler (Tycho item 25 follow-up).
@@ -43,7 +42,6 @@ describe('PointList compile — scalar parity with Tuple', () => {
   const targets: Array<[string, { compile: (e: any, o?: any) => any }]> = [
     ['javascript', new JavaScriptTarget()],
     ['glsl', new GLSLTarget()],
-    ['python', new PythonTarget()],
   ];
 
   const componentSets = [
@@ -72,11 +70,6 @@ describe('PointList compile — scalar parity with Tuple', () => {
   it('glsl: PointList(x,y) emits vec2(x, y)', () => {
     const r = new GLSLTarget().compile(ce.box(['PointList', 'x', 'y']));
     expect(r.code).toBe('vec2(x, y)');
-  });
-
-  it('python: PointList(x,y) emits the Python tuple', () => {
-    const r = new PythonTarget().compile(ce.box(['PointList', 'x', 'y']));
-    expect(r.code).toBe('(x, y)');
   });
 });
 
@@ -349,27 +342,12 @@ describe('PointList compile — the all-scalar opaque-slot guard', () => {
     expect(Number.isNaN(pt[1])).toBe(true);
   });
 
-  it('the shader and Python targets keep the plain point — they have no run-time list value to guard against', () => {
-    // A free input of type `unknown` is refused on every target. The shader
-    // targets compile no function literal, so the plain point is checked on
-    // Python only, with `u` and `v` parameters of the root function.
+  it('GLSL refuses a free input of type `unknown` in a point', () => {
+    // A free input of type `unknown` is refused on every target.
     const ce = opaqueEngine();
     expect(() =>
       new GLSLTarget().compile(ce.box(['PointList', 'u', 'v']))
     ).toThrow(/has no type in the GLSL fragment/);
-    expect(() =>
-      new PythonTarget().compile(ce.box(['PointList', 'u', 'v']))
-    ).toThrow(/have no type/);
-    expect(
-      new PythonTarget().compile(
-        ce.box([
-          'Function',
-          ['PointList', 'u', 'v'],
-          ['Typed', 'u', { str: 'unknown' }],
-          ['Typed', 'v', { str: 'unknown' }],
-        ] as any)
-      ).code
-    ).toBe('(lambda u, v: (u, v))');
   });
 });
 
@@ -512,15 +490,6 @@ describe('Dot over points — compile targets (Tycho item 158)', () => {
     expect(r.success).toBe(true);
     expect(r.run!({})).toBe(11);
     expect(expr.evaluate().toString()).toBe('11');
-  });
-
-  it('python: Dot(Tuple, Tuple) emits np.dot', () => {
-    const r = new PythonTarget().compile(
-      ce.box(['Dot', ['Tuple', 1, 2], ['Tuple', 3, 4]]),
-      { constantFold: false }
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('np.dot((1, 2), (3, 4))');
   });
 });
 

@@ -141,32 +141,6 @@ describe('issue #369: an annotated accumulator', () => {
     ];
     expect(run(ce, scan)).toEqual([[6], [6, 2], [6, 2, 4]]);
   });
-
-  it('is judged the same way on the Python target', () => {
-    const ce = engine();
-    const admitted = compile(
-      ce.box(
-        fold(
-          ['Function', BODY, ['Typed', 'acc', 'list<integer | nan>'], 'i'],
-          ['List']
-        ) as any
-      ),
-      { to: 'python', fallback: false }
-    );
-    expect(admitted.success).toBe(true);
-    expect(admitted.code).toContain('functools');
-    expect(() =>
-      compile(
-        ce.box(
-          fold(
-            ['Function', BODY, ['Typed', 'acc', 'list<integer>'], 'i'],
-            ['List', 'True']
-          ) as any
-        ),
-        { to: 'python', fallback: false }
-      )
-    ).toThrow(/callback parameter 'acc' is annotated 'list<integer>'/);
-  });
 });
 
 describe('issue #369: the consumers of a list-building fold compile', () => {

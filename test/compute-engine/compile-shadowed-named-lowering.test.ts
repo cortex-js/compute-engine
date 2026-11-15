@@ -97,7 +97,7 @@ describe('a redeclared If', () => {
     expect(f.run({ x: 0.7 })).toBe(100);
   });
 
-  test.each(['python', 'glsl', 'interval-js'])(
+  test.each(['glsl', 'interval-js'])(
     'a copy with a new `evaluate` fails closed on %s',
     (to) => {
       const ce = engineWithCopy('If', HUNDRED);
@@ -128,7 +128,6 @@ describe('a redeclared If', () => {
         10
       );
     }
-    expect(compiled(ce, IF, 'python').success).toBe(true);
   });
 
   test('the `compile` handler of a redeclared If is not consulted', () => {

@@ -1380,7 +1380,7 @@ export function callerSpliceSources(
   if (keys === undefined || resolve === undefined) return [];
   const sources: string[] = [];
   for (const key of keys) {
-    // A `var` hook throws for a mapping it refuses (a GPU or Python reserved
+    // A `var` hook throws for a mapping it refuses (a GPU reserved
     // word). Such a key is skipped here: it gives no splice to protect, and
     // a key the expression does not read must not make the compilation
     // fail. If the expression reads the symbol, the same error is raised

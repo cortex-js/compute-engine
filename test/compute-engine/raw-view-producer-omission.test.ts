@@ -1,4 +1,3 @@
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { collectionElementType } from '../../src/common/type/utils';
@@ -134,26 +133,18 @@ describe('a producer whose callback gives Nothing', () => {
 });
 
 describe('producer compilation refuses a possible Nothing', () => {
-  test.each(['javascript', 'python'] as const)(
+  test.each(['javascript'] as const)(
     'callbacks with an any result on %s',
     (target) => {
       // The result type `any` has no explicit `nothing` arm, so no
       // callback declines for a possible `Nothing`. The other declines come
-      // from the forms of the callbacks: Python has a form only for a
-      // function literal or an operator symbol, and the JavaScript `Scan`
-      // has none for a declared function with no value.
+      // from the forms of the callbacks: the JavaScript `Scan` has none for a
+      // declared function with no value.
       const ce = new ComputeEngine();
       ce.declare('generator', '(integer) -> any');
       ce.declare('reducer', '(any, integer) -> any');
       const tabulate = ce.box(['Tabulate', 'generator', 3]);
       const scan = ce.box(['Scan', ['List', 1, 2], 'reducer', 0]);
-      if (target === 'python') {
-        for (const view of [tabulate, scan])
-          expect(() => new PythonTarget().compile(view)).toThrow(
-            /has no Python form/
-          );
-        return;
-      }
       const t = compile(tabulate);
       expect(t.success).toBe(true);
       expect(

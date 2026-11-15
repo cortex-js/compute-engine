@@ -514,21 +514,6 @@ describe('MCP server compile tool', () => {
     expect(result.diagnostics).toEqual([]);
   });
 
-  test('compiles an Epsil program to Python', async () => {
-    // `x` is declared: Python reads an input with an inferred `number` type
-    // through a `None` test, and a declared one as is (ROADMAP CE-460).
-    const [response] = await runServer([
-      callTool(1, 'compile', {
-        source: 'x^2 + 1',
-        to: 'python',
-        declarations: { x: 'number' },
-      }),
-    ]);
-    const result = payload(response);
-    expect(result.ok).toBe(true);
-    expect(result.code).toBe('x ** 2 + 1');
-  });
-
   // A declaration changes what the target reads the symbol as: a complex
   // symbol is a `vec2` uniform on GLSL.
   test('applies declarations before the source is parsed', async () => {
@@ -571,7 +556,7 @@ describe('MCP server compile tool', () => {
   // The `bigint` mode is offered on `javascript` only. The result holds the
   // generated code as a string, so a `bigint` value is never serialized.
   test('compiles in the bigint mode on javascript only', async () => {
-    const [js, python] = await runServer([
+    const [js, glsl] = await runServer([
       callTool(1, 'compile', {
         source: 'n! + 2^{70}',
         format: 'latex',
@@ -581,7 +566,7 @@ describe('MCP server compile tool', () => {
       callTool(2, 'compile', {
         source: 'n! + 1',
         format: 'latex',
-        to: 'python',
+        to: 'glsl',
         mode: 'bigint',
         declarations: { n: 'integer' },
       }),
@@ -591,7 +576,7 @@ describe('MCP server compile tool', () => {
     expect(result.mode).toBe('bigint');
     expect(result.code).toContain('_SYS.bfactorial');
     expect(result.code).toContain('1180591620717411303424n');
-    const declined = payload(python);
+    const declined = payload(glsl);
     expect(declined.ok).toBe(false);
     expect(declined.diagnostic.code).toBe('unsupported-mode');
   });

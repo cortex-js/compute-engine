@@ -553,20 +553,4 @@ describe('Composition review fixes', () => {
     expect(made.toString()).toBe('Composition(sin, exp)');
     expect(ce.box(['Apply', made, 0]).evaluate().toString()).toBe('sin(1)');
   });
-
-  test('a composition callback of Map lowers to Python as its function literal', () => {
-    const local = new ComputeEngine();
-    local.declare('L', 'list<real>');
-    const composed = compile(
-      local.box(['Map', ['Composition', 'Sin', 'Exp'], 'L']),
-      { to: 'python' }
-    );
-    const literal = compile(
-      local.box(['Map', ['Function', ['Sin', ['Exp', 'y']], 'y'], 'L']),
-      { to: 'python' }
-    );
-    expect(composed.success).toBe(true);
-    expect(literal.success).toBe(true);
-    expect(composed.code).toBe(literal.code.replace(/\by\b/g, '_x'));
-  });
 });

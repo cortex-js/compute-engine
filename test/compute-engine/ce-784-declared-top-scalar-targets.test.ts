@@ -3,13 +3,12 @@ import type { CompilationResult } from '../../src/compute-engine';
 
 // A parameter declared `any` or `value` can hold a number or a list, and
 // compiled code does not test the shape of a value at run time. The scalar
-// code of the Python and interval-js targets gives a wrong result for a list:
-// `(lambda t: 2 * t)` gives `[1, 2, 1, 2]` for `[1, 2]`, and
+// code of the interval-js target gives a wrong result for a list:
 // `(t) => _IA.scale(_k1, t)` gives an `empty` interval, where the interpreter
-// gives `[2, 4]`. These targets now decline as the JavaScript target does, and
+// gives `[2, 4]`. This target now declines as the JavaScript target does, and
 // the host declares the shape to compile the program.
 
-const TARGETS = ['javascript', 'python', 'interval-js'] as const;
+const TARGETS = ['javascript', 'interval-js'] as const;
 
 function typed(name: string, type: string): unknown {
   return ['Typed', name, `'${type}'`];

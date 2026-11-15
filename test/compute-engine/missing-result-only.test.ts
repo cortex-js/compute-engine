@@ -666,11 +666,6 @@ describe('THE READERS READ A NAN POINT AS ABSENT', () => {
     });
     expect(r.code).toContain('Number.isNaN(_c[0]) && Number.isNaN(_c[1])');
     expect(r.code).not.toMatch(/typeof|Array\.isArray/);
-    const py = compile(typed(['IsMissing', ['At', 'qs', 'j']]), {
-      to: 'python',
-    });
-    expect(py.success).toBe(true);
-    expect(py.code).toContain('cmath.isnan(_c[0]) and cmath.isnan(_c[1])');
   });
 
   test('an absent base of a nested read: interpreter and JavaScript agree', () => {
@@ -1310,15 +1305,6 @@ describe('A FALSE RESTRICTION OF A POINT IS A NAN POINT', () => {
       [1, 2],
       [NaN, NaN],
     ]);
-  });
-
-  test('compiled Python spells it as a tuple of nan', () => {
-    const r = compile(
-      ce.box(['Function', ['If', C, ['Tuple', 1, 2]], 't'] as any),
-      { to: 'python' }
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('(np.nan, np.nan)');
   });
 });
 

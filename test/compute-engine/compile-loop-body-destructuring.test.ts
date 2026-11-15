@@ -15,15 +15,8 @@
  * `run()`.
  */
 
-import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { TEST_PYTHON } from './test-python';
-
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 
 /** The interpreted and the compiled value of an Epsil program. */
@@ -146,18 +139,16 @@ s + a`,
 });
 
 /**
- * The Python and GLSL targets lower a loop body with their own
- * statement routines (`compilePythonStatements`, `compileStatementList`).
- * The Python routine desugared a destructuring declaration in no position,
- * and the shader routine desugared it only inside a `Block` body. A bare
- * destructuring declaration as the whole loop body, and on Python one in a
- * `Block` body too, reached the value-position `Declare` lowering and the
+ * The GLSL target lowers a loop body with its own statement routine
+ * (`compileStatementList`). The shader routine desugared a destructuring
+ * declaration only inside a `Block` body. A bare destructuring declaration as
+ * the whole loop body reached the value-position `Declare` lowering and the
  * program declined with "Could not compile a destructuring declaration in
  * value position". A destructuring declaration that is the whole loop body,
  * not a statement of a `Block`, is the error `declaration-below-statement`,
  * and every target declines it.
  */
-describe('Destructuring let in a loop body on Python and GLSL', () => {
+describe('Destructuring let in a loop body on GLSL', () => {
   const loop = (body: unknown): unknown => [
     'Loop',
     body,
@@ -254,7 +245,7 @@ describe('Destructuring let in a loop body on Python and GLSL', () => {
       expect(JSON.stringify(expr.json)).toContain(
         'declaration-below-statement'
       );
-      for (const to of ['javascript', 'python'] as const)
+      for (const to of ['javascript'] as const)
         expect(() => compile(expr, { to, fallback: false })).toThrow(
           /invalid expression/
         );
@@ -266,7 +257,7 @@ describe('Destructuring let in a loop body on Python and GLSL', () => {
     expect(ce.box(json as any).evaluate().re).toBe(expected);
   });
 
-  for (const to of ['python', 'glsl'] as const)
+  for (const to of ['glsl'] as const)
     test.each(CASES)(`$name: compiles on ${to}`, ({ json }) => {
       const ce = new ComputeEngine();
       const result = compile(ce.box(json as any), { to, fallback: false });
@@ -282,77 +273,7 @@ describe('Destructuring let in a loop body on Python and GLSL', () => {
       })
     ).toThrow(/GLSL fragment/);
   });
-
-  // The emitted Python runs only with `CE_TEST_PYTHON=1` (`test-python.ts`).
-  const describePython = TEST_PYTHON === undefined ? describe.skip : describe;
-  describePython('Python execution', () => {
-    test('the emitted Python gives the interpreter value', () => {
-      const ce = new ComputeEngine();
-      const python = new PythonTarget();
-      const programs: Array<{ name: string; expr: any; expected: number }> = [
-        ...CASES.map((c) => ({
-          name: c.name,
-          expr: ce.box(c.json as any),
-          expected: c.expected,
-        })),
-        ...EPSIL_PROGRAMS.map(([source, expected]) => ({
-          name: source,
-          expr: ce.box(parseEpsil(source)[0]),
-          expected,
-        })),
-      ];
-      let program = 'import cmath, math, json\n\n';
-      programs.forEach((p, i) => {
-        program += `${python.compileFunction(p.expr, `fn_${i}`, [])}\n`;
-      });
-      program += `print(json.dumps([${programs.map((_, i) => `fn_${i}()`).join(', ')}]))\n`;
-      const file = path.join(os.tmpdir(), `ce-py-loop-body-${process.pid}.py`);
-      fs.writeFileSync(file, program);
-      let out = '';
-      try {
-        out = execFileSync(TEST_PYTHON!, [file], { encoding: 'utf8' });
-      } finally {
-        fs.unlinkSync(file);
-      }
-      const actual = JSON.parse(out) as number[];
-      programs.forEach((p, i) => {
-        expect([p.name, actual[i]]).toEqual([p.name, p.expected]);
-        expect([p.name, p.expr.evaluate().N().re]).toEqual([
-          p.name,
-          p.expected,
-        ]);
-      });
-    });
-  });
 });
-
-/**
- * Epsil programs with a destructuring `let` in a loop body, and their
- * value, for the Python execution test. A tuple-valued call (`f(k)`) is
- * left out: on Python it declines for a different reason (the lowering
- * through one temporary is admitted on JavaScript only,
- * `destructureViaTemp()`).
- */
-const EPSIL_PROGRAMS: Array<[string, number]> = [
-  ['let n = 0\nwhile n < 4 { let (a, x) = (2, 3); n = n + a }\nn', 4],
-  ['let n = 0\nwhile n < 4 { n = n + 1; let (a, x) = (2, 3) }\nn', 4],
-  [
-    'let s = 0\nlet i = 0\nwhile i < 3 { i = i + 1; let (a, (b, c)) = (i, (2, 3)); let (d, e) = (a, 1); s = s + a + b + c + d + e }\ns',
-    30,
-  ],
-  ['let s = 0\nfor k in [1, 2, 3] { let (a, b) = (k, 2 * k); s = s + a + b }\ns', 18],
-  ['let s = 0\nfor k in [1, 2, 3] { s = s + k; let (a, b) = (k, 2 * k) }\ns', 6],
-  [
-    'let s = 0\nfor k in [1, 2, 3] { if k > 1 { let (a, b) = (k, 10); s = s + a * b } }\ns',
-    50,
-  ],
-  [
-    'let a = 100\nlet s = 0\nfor k in [1, 2] { let (a, b) = (k, 1); s = s + a + b }\ns + a',
-    105,
-  ],
-  ['let s = 0\nfor k in 1..3 { let (a, b, c) = (k, 2, 3); s = s + a + b + c }\ns', 21],
-  ['let s = 0\nfor k in 1..3 { s = s + k; let (a, b, c) = (k, 2, 3) }\ns', 6],
-];
 
 /**
  * The interpreter evaluates the whole value of a destructuring `let` before
@@ -426,7 +347,7 @@ describe('A destructuring let whose value reads a name of the pattern', () => {
       's',
     ] as any);
     expect(expr.isValid).toBe(false);
-    for (const to of ['javascript', 'python', 'glsl'] as const)
+    for (const to of ['javascript', 'glsl'] as const)
       expect(() => compile(expr, { to, fallback: false })).toThrow(
         to === 'glsl' ? /GLSL fragment/ : /invalid expression/
       );
@@ -437,7 +358,7 @@ describe('A destructuring let whose value reads a name of the pattern', () => {
     expect(ce.box(json as any).evaluate().re).toBe(expected);
   });
 
-  for (const to of ['javascript', 'python', 'glsl'] as const)
+  for (const to of ['javascript', 'glsl'] as const)
     test.each(CASES)(`$name: declines on ${to}`, ({ json }) => {
       const ce = new ComputeEngine();
       expect(() =>

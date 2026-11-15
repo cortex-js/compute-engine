@@ -28,7 +28,6 @@
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -304,40 +303,5 @@ describe('an absent cell makes an element-wise comparison undecided', () => {
     // A scalar piecewise tests its condition's operands itself, and compiles
     // the comparison inside that test, with no test of its own.
     expect(js(c, ['Equal', 'u', 'v']).run({ u: 1, v: 1 })).toBe(true);
-  });
-});
-
-describe('compiled Equal/NotEqual is exact (Python)', () => {
-  const ce = engine();
-  const py = new PythonTarget();
-  const code = (e: unknown): string => {
-    const r = py.compile(ce.box(e as any));
-    if (!r.success) throw new Error(r.error?.message ?? 'declined');
-    return r.code;
-  };
-
-  test('scalar pairs', () => {
-    expect(code(['Equal', 'a', 'b'])).toBe('((a) == (b))');
-    expect(code(['NotEqual', 'a', 'b'])).toBe('((a) != (b))');
-    expect(code(['Equal', 'a', 3])).toBe('((a) == (3))');
-    expect(code(['NotEqual', 'a', 3])).toBe('((a) != (3))');
-    expect(code(['Equal', ['Add', 'a', 1], ['Multiply', 'b', 2]])).toBe(
-      '((a + 1) == (2 * b))'
-    );
-    expect(code(['KroneckerDelta', 'a', 'b'])).toBe(
-      '(lambda *_v: 1 if all(_x == _v[0] for _x in _v) else 0)(a, b)'
-    );
-    expect(code(['KroneckerDelta', 'a'])).toBe('(1 if a == 0 else 0)');
-  });
-
-  test('the collection helper carries no tolerance', () => {
-    const c = new ComputeEngine();
-    c.declare('L', 'list<number>');
-    c.declare('M', 'list<number>');
-    const r = py.compile(c.box(['Equal', 'L', 'M']));
-    if (!r.success) throw new Error(r.error?.message);
-    expect(r.code).toContain('_ce_eqcoll(L, M)');
-    expect(r.code).toContain('def _ce_eqcoll(_a, _b):');
-    expect(r.code).not.toMatch(/_tol|abs\(/);
   });
 });

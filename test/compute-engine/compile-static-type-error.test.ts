@@ -8,7 +8,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 // `ADD = (x, y) ↦ x + y`, `ADD("ab", u)` gave `"ab2"` at `u = 2` on
 // `javascript`, where the interpreter gives an error.
 
-const TARGETS = ['javascript', 'interval-js', 'glsl', 'python'];
+const TARGETS = ['javascript', 'interval-js', 'glsl'];
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();

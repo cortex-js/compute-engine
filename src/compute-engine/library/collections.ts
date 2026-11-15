@@ -521,9 +521,7 @@ function takeDropCount(
   else {
     // A real count whose magnitude is larger than every safe integer: an
     // infinity, or a float such as `1e20` (every float that large has an
-    // integer value). The compiled Python code clamps a constant count of
-    // this size in the same way (`pyTakeDropSlice()` in
-    // `compilation/python-target.ts`).
+    // integer value).
     const value = isNumber(op) ? op : op.evaluate();
     if (!isNumber(value) || value.im !== 0) return null;
     const re = value.re;
@@ -8696,7 +8694,6 @@ const MAX_ABSENCE_MARKER_PROBE = 10;
  */
 const POINT_LIST_COMPILE_LANGUAGES: ReadonlySet<string> = new Set([
   'javascript',
-  'python',
   'glsl',
 ]);
 
@@ -12345,7 +12342,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // it is an eager `List` of `Tuple`s; past the threshold it is the lazy
   // `Map` form (consumable via `at`/`each`/`count`). Note a large
   // MULTI-collection `PointList` evaluated first and THEN compiled is a
-  // multi-source `Map`, which the JS/Python compile targets reject — compile
+  // multi-source `Map`, which the JS compile target rejects — compile
   // the canonical `PointList` form (its own compile handler) instead. With
   // no collection component it is just a plain point (`Tuple`). An empty
   // collection component yields an empty `List`. A component whose length is
@@ -12369,8 +12366,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // expression-level value on JS (nested arrays), so a `PointList` with one or
   // more list SOURCES compiles to an IIFE zip (shortest-zip, scalars
   // broadcast), and the shapes that still have no lowering throw from there
-  // with a per-component diagnostic. On every other language (`glsl`,
-  // `python`) a provably non-scalar component keeps failing closed here, and
+  // with a per-component diagnostic. On every other language (`glsl`) a provably non-scalar component keeps failing closed here, and
   // `interval-javascript` (no `Tuple` lowering at all) keeps returning
   // `undefined`.
   //
@@ -12752,7 +12748,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           )
           .join(', ')}]`;
       }
-      if (language === 'python') return `(${parts.join(', ')})`;
       return undefined;
     },
   } as OperatorDefinition,
@@ -13746,7 +13741,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // no element, no iterator and no members, so that every read of it
     // (`Sum`, `Count`, `Max`, `At`, `Element`, a loop) stays unevaluated, as
     // for a symbolic endpoint. Its samples cannot be computed: the step is an
-    // infinity or `NaN`. The compiled targets give `NaN` (JavaScript, Python)
+    // infinity or `NaN`. The compiled targets give `NaN` (JavaScript)
     // or `empty` (`interval-js`) for it. See `linspaceHasNoValue()`.
     collection: {
       isEnumerable: (expr) =>
@@ -17108,8 +17103,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return undefined;
         }
 
-        if (language === 'javascript' || language === 'python')
-          return `${compile(base)}[${i}]`;
+        if (language === 'javascript') return `${compile(base)}[${i}]`;
         if (language === 'glsl' && i < 4)
           return `${compile(base)}.${'xyzw'[i]}`;
       }
@@ -22242,10 +22236,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (language === 'javascript') {
         if (args.every(isProvablyScalar)) return `[${parts.join(', ')}]`;
         return `[${parts.join(', ')}].flatMap((_x) => Array.isArray(_x) ? _x : [_x])`;
-      }
-      if (language === 'python') {
-        if (args.every(isProvablyScalar)) return `[${parts.join(', ')}]`;
-        return `[_y for _x in [${parts.join(', ')}] for _y in (_x if isinstance(_x, list) else [_x])]`;
       }
 
       // The GPU targets have no runtime splice: their lists are fixed-size

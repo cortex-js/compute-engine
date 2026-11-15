@@ -155,7 +155,6 @@ describe('A SUM OR PRODUCT WITH ONE BOUND STAYS UNEVALUATED', () => {
         ce.parse('\\sum^{10} k'),
       ]) {
         expect(compile(expr).success).toBe(false);
-        expect(compile(expr, { to: 'python' }).success).toBe(false);
       }
     } finally {
       warn.mockRestore();

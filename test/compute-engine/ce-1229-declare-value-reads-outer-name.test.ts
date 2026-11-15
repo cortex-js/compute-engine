@@ -41,7 +41,7 @@ describe('CE-1229: a declaration whose value reads the outer name', () => {
       expect(js.code).toMatch(/let _tv\d+ = _\.Z \+ _\.z/);
       expect(js.code).not.toContain('let z');
       expect(js.run!({ z: 2, Z: 10 })).toBe(36);
-      for (const to of ['glsl', 'python', 'interval-js'] as const)
+      for (const to of ['glsl', 'interval-js'] as const)
         expect(compile(block, { to, fallback: false }).success).toBe(true);
     }
   );

@@ -10,8 +10,8 @@ import {
 // grid in exact arithmetic can fall one rounding error short of it:
 // `0.3 / 0.1` is 2.9999999999999996, and `(2 − 2/500)π ÷ (2π/500)` is
 // 498.99999999999994. Those ranges must count their end point (4 and 500
-// elements), on every route: the interpreter, and the `javascript`,
-// `interval-js` and `python` compile targets.
+// elements), on every route: the interpreter, and the `javascript` and
+// `interval-js` compile targets.
 
 const ce = new ComputeEngine();
 
@@ -298,14 +298,5 @@ describe('RANGE COUNT: COMPILE ROUTES', () => {
     const assigned = compile(lengthOfWitness(e), { to: 'interval-js' });
     expect(assigned.success).toBe(true);
     expect(assigned.run!({})).toEqual({ kind: 'entire' });
-  });
-
-  test('python emission uses the tolerance', () => {
-    const e = new ComputeEngine();
-    const fn = compile(e.box(['Range', 0, 'h', 's']), { to: 'python' });
-    expect(fn.success).toBe(true);
-    expect(fn.code).toContain('1e-12 * (1 + abs(_q))');
-    const unit = compile(e.box(['Range', 'a', 'b']), { to: 'python' });
-    expect(unit.code).toContain('1e-12 * (1 + abs(_q))');
   });
 });

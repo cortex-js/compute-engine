@@ -1,7 +1,5 @@
-import { execFileSync } from 'child_process';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { TEST_PYTHON } from './test-python';
 
 /**
  * A NaN operand of a branch condition.
@@ -11,13 +9,13 @@ import { TEST_PYTHON } from './test-python';
  * `GreaterEqual`) or an `Equal` whose operand is an undefined numeric value
  * (`NaN`, `NaN`) is `False`, in a branch condition as everywhere
  * else, so the `If`/`Which` takes its next arm. This holds on the interpreter
- * and on the `javascript`, `python` and `interval-js` targets (on
+ * and on the `javascript` and `interval-js` targets (on
  * `interval-js`, for an operand that is `empty` over the whole cell).
  *
  * User decision of 2026-10-23: `NotEqual` follows the same reading. `NaN ≠ 0`
  * is `True` (IEEE), the negation of `NaN = 0`, in a branch condition as in a
  * cell of an element-wise condition, so the `If`/`Which` takes its first arm
- * on the interpreter and on the `javascript` and `python` targets. `Missing`
+ * on the interpreter and on the `javascript` target. `Missing`
  * keeps its Kleene reading.
  *
  * History: from 2026-09-03 to 2026-10-20 a NaN operand of any of the six
@@ -376,23 +374,6 @@ describe('Tycho rows 411 and 413: an undefined operand makes a comparison false'
     expect(ne.run!({ x: NaN } as never)).toBe(1);
   });
 
-  (TEST_PYTHON === undefined ? test.skip : test)(
-    'row 413: the python target takes the else arm at x = nan',
-    () => {
-      const run = (latex: string): string => {
-        const c = compile(ce.parse(latex), { to: 'python' } as never);
-        expect(c.success).toBe(true);
-        const script = `import numpy as np\nx = float('nan')\nprint(float(${c.code}))\n`;
-        return execFileSync(TEST_PYTHON!, ['-I', '-c', script], {
-          encoding: 'utf8',
-        }).trim();
-      };
-      expect(run('\\left\\{x > 0: 1, 0\\right\\}')).toBe('0.0');
-      expect(run('\\left\\{x = 0: 1, 0\\right\\}')).toBe('0.0');
-      expect(run('\\left\\{x \\ne 0: 1, 0\\right\\}')).toBe('1.0');
-    }
-  );
-
   test('row 411: on interval-js an empty operand gives a definite false', () => {
     const c = compile(ce.parse('0<\\sqrt{x}'), { to: 'interval-js' } as never);
     expect(c.success).toBe(true);
@@ -408,7 +389,7 @@ describe('Tycho rows 411 and 413: an undefined operand makes a comparison false'
       expect(r.run!({ x: { lo: -1, hi: -1 } } as never)).toBe('false');
     }
     // `≠` is the negation of `=`: `'true'`, as the interpreter and the
-    // `javascript` and `python` targets answer `True` for `NaN ≠ 0` (user
+    // `javascript` target answer `True` for `NaN ≠ 0` (user
     // decision 2026-10-25, ROADMAP CE-396).
     const ne = compile(ce.parse('\\sqrt{x} \\ne 0'), {
       to: 'interval-js',
@@ -534,26 +515,6 @@ describe('a compiled branch comparison over an absent or nested value', () => {
     expect(e.box(sum).evaluate().re).toBe(0);
     expect(compiled(sum, { c: -1 })).toBe(0);
   });
-
-  (TEST_PYTHON === undefined ? test.skip : test)(
-    'a nested else-less If that selects no arm, python',
-    () => {
-      const c = compile(ce.box(NESTED_ELSELESS), { to: 'python' } as never);
-      expect(c.success).toBe(true);
-      const run = (v: string): string =>
-        execFileSync(
-          TEST_PYTHON!,
-          [
-            '-I',
-            '-c',
-            `import math\nimport numpy as np\nc = ${v}\nprint(float(${c.code}))\n`,
-          ],
-          { encoding: 'utf8' }
-        ).trim();
-      expect(run('-1')).toBe('0.0');
-      expect(run('2')).toBe('1.0');
-    }
-  );
 
   test('a variable read only by a nested arm is not tested', () => {
     const e = new ComputeEngine();
@@ -816,7 +777,7 @@ describe('Tycho row 413 (a): a value with no order makes a comparison false', ()
   });
 
   test('compiled routes: the pole of a variable is Infinity on javascript (a lane difference)', () => {
-    // Not changed by the decision: on `javascript` (and `python`, with NumPy)
+    // Not changed by the decision: on `javascript`
     // `1/0` is the IEEE `Infinity`, which is ordered, so the branch at x = 0
     // takes the then arm. See `docs/ERROR-MODEL.md`.
     const c = compile(ce.parse('\\left\\{\\frac{1}{x} > 0: 1, 0\\right\\}'), {
@@ -838,21 +799,6 @@ describe('Tycho row 413 (a): a value with no order makes a comparison false', ()
       fallback: false,
     } as never);
     expect(root.run!({ x: -1 } as never)).toBe(0);
-    if (TEST_PYTHON !== undefined) {
-      // The same lane difference on `python`: with a NumPy `x`, `1 / x` at
-      // `x = 0` is `inf` (a plain Python float raises ZeroDivisionError).
-      const py = compile(
-        ce.parse('\\left\\{\\frac{1}{x} > 0: 1, 0\\right\\}'),
-        { to: 'python' } as never
-      );
-      expect(py.success).toBe(true);
-      const script = `import numpy as np\nnp.seterr(all='ignore')\nx = np.float64(0.0)\nprint(float(${py.code}))\n`;
-      expect(
-        execFileSync(TEST_PYTHON, ['-I', '-c', script], {
-          encoding: 'utf8',
-        }).trim()
-      ).toBe('1.0');
-    }
     // On interval-js `1/x` over the point [0, 0] is `empty`, so the
     // comparison is `'false'` and the branch takes the else arm.
     const iv = compile(ce.parse('\\left\\{\\frac{1}{x} > 0: 1, 0\\right\\}'), {
@@ -1016,12 +962,6 @@ describe('Tycho row 413 (a): the edges of the rule', () => {
         } as never);
         expect(js.code).toBe(String(value));
         expect(js.run!({} as never)).toBe(value);
-        const py = compile(ce.parse(latex), {
-          to: 'python',
-          fallback: false,
-          constantFold,
-        } as never);
-        expect(py.code).toBe(value ? 'True' : 'False');
       }
     }
   });

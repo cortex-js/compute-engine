@@ -261,16 +261,6 @@ describe('freeSymbolTypes', () => {
     ).toBeCloseTo(Math.PI, 12);
   });
 
-  it('Python', () => {
-    const ce = new ComputeEngine();
-    ce.declare('n', 'real');
-    const r = run(ce, 'python', 'x^2 + \\sin(n)');
-    expect(r.freeSymbolTypes).toEqual({
-      x: { type: 'number', lowered: 'float', provenance: 'inferred' },
-      n: { type: 'real', lowered: 'float', provenance: 'declared' },
-    });
-  });
-
   it('interval-js: a real number is an interval', () => {
     const ce = new ComputeEngine();
     ce.declare('t', 'real');

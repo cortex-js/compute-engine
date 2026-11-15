@@ -1,18 +1,10 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { TEST_PYTHON } from './test-python';
 
 // `Root(z, n)` of a COMPLEX radicand. The JavaScript lowering chose its
 // complex branch from the node's type only, and `Root(x + iy, 3)` types
 // `number`, so it emitted `Math.cbrt({re, im})` and answered NaN at every
 // point, `y = 0` included. The enclosing expression's analysis reads the
-// operands and expected a `{re, im}` value from the node. The Python lowering
-// emitted `np.sign(z) * np.power(np.abs(z), 1/3)`, which is wrong for a
-// complex `z`: `np.sign(z)` is `z / |z|` and `np.abs(z)` drops the argument.
+// operands and expected a `{re, im}` value from the node.
 //
 // The interpreter's convention: a radicand whose imaginary part is zero,
 // under an odd integer degree, has the REAL root (`Root(-8, 3)` is `-2`); any
@@ -85,66 +77,5 @@ describe('COMPILED ROOT OF A COMPLEX RADICAND', () => {
     expect(re).toBeCloseTo(0.8139559382747513, 14);
     expect(im).toBeCloseTo(0.1268074709786297, 14);
     expect(interpreted(ce, CASES[1])).toEqual([-2, 0]);
-  });
-});
-
-const VENV_PYTHON =
-  TEST_PYTHON ?? '';
-
-function venvHasNumpy(): boolean {
-  try {
-    if (!fs.existsSync(VENV_PYTHON)) return false;
-    execFileSync(VENV_PYTHON, ['-c', 'import numpy'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-const describeNumpy = venvHasNumpy() ? describe : describe.skip;
-
-describeNumpy('COMPILED ROOT OF A COMPLEX RADICAND — Python (venv)', () => {
-  it('answers the interpreter value', () => {
-    const ce = engine();
-    const python = new PythonTarget();
-    let program = 'import numpy as np\nimport cmath, json\n\n';
-    const params = CASES.map((c) => Object.keys(c.vars));
-    CASES.forEach((c, i) => {
-      program += `${python.compileFunction(ce.parse(c.latex), `fn_${i}`, params[i])}\n`;
-    });
-    program += 'out = []\n';
-    CASES.forEach((c, i) => {
-      const args = params[i]
-        .map((k) => {
-          const v = c.vars[k];
-          return Array.isArray(v) ? `complex(${v[0]}, ${v[1]})` : String(v);
-        })
-        .join(', ');
-      program += `r = complex(fn_${i}(${args}))\nout.append([r.real, r.imag])\n`;
-    });
-    program += 'print(json.dumps(out))\n';
-
-    const file = path.join(os.tmpdir(), `ce-py-croot-${process.pid}.py`);
-    fs.writeFileSync(file, program);
-    let stdout = '';
-    try {
-      stdout = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
-    } finally {
-      fs.unlinkSync(file);
-    }
-    const actual = JSON.parse(stdout) as [number, number][];
-    CASES.forEach((c, i) => {
-      const [eRe, eIm] = interpreted(ce, c);
-      expect([c.latex, i, actual[i][0]]).toEqual([
-        c.latex,
-        i,
-        expect.closeTo(eRe, 12),
-      ]);
-      expect([c.latex, i, actual[i][1]]).toEqual([
-        c.latex,
-        i,
-        expect.closeTo(eIm, 12),
-      ]);
-    });
   });
 });

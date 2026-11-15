@@ -12,8 +12,6 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  *   with complex entries is the length of the vector of the entries' moduli.
  * - `interval-js` computes with real intervals only, so a complex symbol
  *   fails closed.
- * - Python computes `Artanh`, `Arsinh` and `Sign` of a non-real value with
- *   the complex value the interpreter computes, not `nan`.
  *
  * Every test builds its OWN engine: a use of an undeclared symbol can narrow
  * its type for the lifetime of the engine.
@@ -226,53 +224,5 @@ describe('interval-js: a complex symbol fails closed', () => {
     const r = compile(ce.parse('|y|'), { to: 'interval-js' } as any) as any;
     expect(r.success).toBe(true);
     expect(r.code).toBe('_IA.abs(_.y)');
-  });
-});
-
-describe('Python: Artanh, Arsinh and Sign of a complex value', () => {
-  // A complex value takes `cmath`, after a zero part of the argument is
-  // given the sign that selects the interpreter's side of the branch cut.
-  test('Artanh: cmath with the side of the cut of the interpreter', () => {
-    const ce = engine();
-    expect(value(run(ce, 'python', ['Artanh', 'z']))).toBe(
-      "(lambda _tv1: (complex(_tv1.real * float('inf'), 0.0) if _tv1.imag == 0 and abs(_tv1.real) == 1 else cmath.atanh((complex(_tv1.real, -0.0 if _tv1.real > 0 else 0.0) if _tv1.imag == 0 else _tv1))))(z)"
-    );
-  });
-
-  test('Arsinh: cmath with the side of the cut of the interpreter', () => {
-    const ce = engine();
-    expect(value(run(ce, 'python', ['Arsinh', 'z']))).toBe(
-      '(lambda _tv1: cmath.asinh((complex(-0.0 if _tv1.imag < 0 else 0.0, _tv1.imag) if _tv1.real == 0 else _tv1)))(z)'
-    );
-  });
-
-  test('Artanh of a value that is certainly not real compiles', () => {
-    const ce = engine();
-    const r = run(ce, 'python', ['Artanh', ['Add', 'x', 'ImaginaryUnit']]);
-    expect(r.success).toBe(true);
-    expect(value(r)).toBe(
-      "(lambda _tv1: (complex(_tv1.real * float('inf'), 0.0) if _tv1.imag == 0 and abs(_tv1.real) == 1 else cmath.atanh((complex(_tv1.real, -0.0 if _tv1.real > 0 else 0.0) if _tv1.imag == 0 else _tv1))))(x + complex(0, 1))"
-    );
-    // The interpreter evaluates it.
-    expect(
-      ce
-        .box(['Artanh', ['Complex', 1, 2]])
-        .N()
-        .toString()
-    ).toMatch(/^\(0\.1732\d+ \+ 1\.1780\d+i\)$/);
-  });
-
-  test('Sign: `z / |z|` for a non-real value, whatever the NumPy version', () => {
-    const ce = engine();
-    expect(value(run(ce, 'python', ['Sign', 'z']))).toBe(
-      '(lambda _tv1: (np.sign(_ce_creal(_tv1)) if _ce_cisreal(_tv1) else _tv1 / abs(_tv1)))(z)'
-    );
-  });
-
-  test('a real operand is unchanged', () => {
-    const ce = engine();
-    expect(run(ce, 'python', ['Artanh', 't']).code).toBe('np.arctanh(t)');
-    expect(run(ce, 'python', ['Arsinh', 't']).code).toBe('np.arcsinh(t)');
-    expect(run(ce, 'python', ['Sign', 't']).code).toBe('np.sign(t)');
   });
 });

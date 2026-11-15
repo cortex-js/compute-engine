@@ -1,9 +1,7 @@
-import { execFileSync } from 'child_process';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { shaderFunctions } from './gpu-shader-f32-eval';
 import type { Value } from './gpu-shader-f32-eval';
-import { TEST_PYTHON } from './test-python';
 
 /**
  * ROADMAP CE-588: a selection with a written `Missing` (or `NaN`) value beside
@@ -20,11 +18,6 @@ import { TEST_PYTHON } from './test-python';
  *   `If(c, [x, y])` ("object-domain absent
  *   position"); the list lowers to a `vec2`, as a point does, and these now
  *   compile with a `vec2` NaN.
- * - Python: the written `Missing` compiled to `math.nan` beside a point or a
- *   list, where the interpreter gives `Missing`, which is `None` on this
- *   target, and the undecided condition gave `float('nan')`. Both are now
- *   `None`. Beside a complex value the marker stays `nan`, as for the
- *   else-less `If`.
  * - interval-js: an `If` with a point or a list value declined ("no lowering
  *   for `Tuple`"), with or without a `Missing` value, where `Which`
  *   compiled. An `If` is now spelled as the `Which` of the same
@@ -37,7 +30,7 @@ import { TEST_PYTHON } from './test-python';
  * the other, so the shape of its value is known only at run time: the
  * compilation declines with `unsettled-shape` on every target
  * (`docs/COMPILATION-MODEL.md`, "Fail closed"). Before, the written `NaN`
- * stayed `NaN` on JavaScript and Python and took the shape of the other
+ * stayed `NaN` on JavaScript and took the shape of the other
  * value on the shader targets.
  */
 
@@ -406,77 +399,6 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
 
   it('a scalar value beside Missing keeps the scalar NaN', () => {
     expectDeclined(['If', 'c', 'x', 'Missing'], /has no type in the GLSL fragment/);
-  });
-});
-
-describe('CE-588 — python', () => {
-  const py = (json: unknown): string => {
-    const ce = engine();
-    const r = compile(ce.box(json as never), {
-      to: 'python',
-      fallback: false,
-    } as never);
-    expect(r.success).toBe(true);
-    return r.code;
-  };
-
-  it('the emitted code', () => {
-    // A `boolean` input is read by its truthiness.
-    expect(py(['If', 'c', POINT, 'Missing'])).toBe(
-      '(((x, y)) if (c) else (None))'
-    );
-    expect(py(['If', 'c', 'Missing', POINT])).toBe(
-      '((None) if (c) else ((x, y)))'
-    );
-    expect(py(['If', ['Greater', 'x', 0], POINT, 'Missing'])).toBe(
-      '(((x, y)) if (0 < x) else (None))'
-    );
-    // The same code as the else-less `If` for a list. The else-less `If` of
-    // a point gives the point of `NaN` coordinates (user decision
-    // 2026-11-03), where the written `Missing` stays `None`.
-    expect(py(['If', 'c', LIST, 'Missing'])).toBe(py(['If', 'c', LIST]));
-    expect(py(['If', 'c', POINT])).toBe(
-      '(((x, y)) if (c) else ((np.nan, np.nan)))'
-    );
-    // A scalar or complex value keeps the numeric marker.
-    expect(py(['If', 'c', 'x', 'Missing'])).not.toContain('None');
-    expect(py(['If', 'c', COMPLEX, 'Missing'])).not.toContain('None');
-  });
-
-  const run = TEST_PYTHON === undefined ? it.skip : it;
-  run('the compiled code agrees with the interpreter', () => {
-    // `None` for an absent point or list; `nan` for an absent complex value.
-    // A written `NaN` beside a point declines.
-    const expected = (k: Case, c: 'True' | 'False'): string => {
-      const present = c === (k.presentWhen ? 'True' : 'False');
-      if (present)
-        return k.shape === 'point'
-          ? '(0.5, -2.0)'
-          : k.shape === 'list'
-            ? '[0.5, -2.0]'
-            : '(0.5-2j)';
-      return k.nan || k.shape === 'complex' ? 'nan' : 'None';
-    };
-    // `d` decides only `Which(c, (x, y), d, Missing)`, whose value is absent
-    // when `c` is not `True` whatever `d` is: with `d` false no clause is
-    // selected, and that absence is `None` too.
-    for (const k of CASES) {
-      if (k.nan) {
-        expectUnsettled(k.json, 'python');
-        continue;
-      }
-      const code = py(k.json);
-      for (const c of ['True', 'False'] as const)
-        for (const d of ['True', 'False']) {
-          const out = execFileSync(TEST_PYTHON!, [
-            '-c',
-            `import math\nimport numpy as np\nx = 0.5\ny = -2.0\nd = ${d}\nc = ${c}\nv = ${code}\nprint(repr(v) if not isinstance(v, float) else ('nan' if math.isnan(v) else repr(v)))`,
-          ])
-            .toString()
-            .trim();
-          expect([k.label, c, d, out]).toEqual([k.label, c, d, expected(k, c)]);
-        }
-    }
   });
 });
 

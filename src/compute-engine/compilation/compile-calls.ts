@@ -47,7 +47,7 @@ export function compileExprFunctionCall(
   if (typeof fn === 'function') {
     // The same real-only rule the string-mapped branch below applies, for
     // the heads whose lowering is real-only but spelled as function codegen
-    // (`Math.floor`, `sign(x)·round(|x|)`, `Math.max`, `np.floor`, …). See
+    // (`Math.floor`, `sign(x)·round(|x|)`, `Math.max`, …). See
     // `REAL_ONLY_BY_DEFINITION` for the families and the NaN each one was
     // measured producing behind `success: true`, and `isRealOnlyLowering`
     // for the heads each target declares real-only.
@@ -89,12 +89,12 @@ export function compileExprFunctionCall(
     // A `broadcastable` head over a single finite indexed collection:
     // apply the head's scalar element lowering across the collection. How
     // that is spelled is a property of the TARGET LANGUAGE, not of the base
-    // compiler — Python fans out with a comprehension, the shader languages
-    // are already componentwise on a `vecN` and do not fan out at all — so
+    // compiler — the shader languages are already componentwise on a
+    // `vecN` and do not fan out at all — so
     // it is delegated to the target's `broadcastUnary` hook. A target
     // without one fails closed; the base compiler used to emit a
     // JavaScript `.map((v) => …)` arrow here for EVERY target, which is not
-    // valid GLSL or Python.
+    // valid GLSL.
     //
     // A tuple operand of a head that declares the `'tuples'` broadcast
     // exemption is NOT a source of cells here: the head owns that shape and

@@ -8,8 +8,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * tests pin the fold itself, every safety gate that must DECLINE it, and the
  * `constantFold: false` opt-out that codegen-focused tests rely on.
  *
- * Also pins the literal-count peephole in the `Take`/`Drop` (and Python
- * `Tabulate`) handlers, which applies even where the subtree as a
+ * Also pins the literal-count peephole in the `Take`/`Drop` handlers, which applies even where the subtree as a
  * whole cannot fold (a list-valued result never folds).
  */
 
@@ -56,11 +55,6 @@ describe('COMPILE constant folding - whole expression', () => {
     expect(r.code).toBe('true');
     expect(r.run?.()).toBe(true);
   });
-
-  it('folds on the Python target too', () => {
-    const r = compile(ce.box(SUM_SQUARES_1_TO_5 as any), { to: 'python' });
-    expect(r.code).toBe('55');
-  });
 });
 
 describe('COMPILE constant folding - subtree inside a live expression', () => {
@@ -106,11 +100,6 @@ describe('COMPILE constant folding - constant collections', () => {
     expect(r.code).toBe('_lit_1');
     expect(r.preambleOnce).toBe('const _lit_1 = [1, 4, 9, 16, 25, 36];\n');
     expect(r.run?.()).toEqual([1, 4, 9, 16, 25, 36]);
-  });
-
-  it('folds on the Python target too', () => {
-    const r = compile(ce.box(MAP_SQUARES(6) as any), { to: 'python' });
-    expect(r.code).toBe('[1, 4, 9, 16, 25, 36]');
   });
 
   it('folds a Filter pipeline, agreeing with the interpreter', () => {
@@ -188,22 +177,6 @@ describe('COMPILE constant folding - constant collections', () => {
     });
     expect(r.code).toContain('_SYS.rangeCount(');
     expect(r.run?.({ k: 3 })).toBe(9);
-  });
-
-  it('a folded Tuple stays a Tuple, not a List', () => {
-    // A Python list is not a Python tuple — it is mutable, unhashable, and
-    // `(1, 2) == [1, 2]` is `False` — so rebuilding a folded tuple through
-    // the List lowering would silently change the value's type. The folded
-    // emission must match the unfolded one.
-    for (const mj of [['Tuple'], ['Tuple', 5], ['Tuple', 1, 2]] as any[]) {
-      const e = ce.box(mj);
-      const folded = compile(e, { to: 'python' }).code;
-      const structural = compile(e, {
-        to: 'python',
-        constantFold: false,
-      }).code;
-      expect(folded).toBe(structural);
-    }
   });
 
   it('a complex-typed call with a real folded value folds; an indexed read stays structural', () => {
@@ -795,33 +768,5 @@ describe('COMPILE Take/Drop - literal count peephole', () => {
     expect(compile(ce.box(['Drop', ['List', 1, 2, 3, 4], 2])).code).toBe(
       '[3, 4]'
     );
-  });
-});
-
-describe('COMPILE Python counts - rounding parity', () => {
-  it('Take rounds a fractional literal count (was truncated)', () => {
-    const r = compile(
-      ce.box(['Take', ['List', 1, 2, 3, 4], ['Divide', 5, 2]]),
-      { to: 'python', constantFold: false }
-    );
-    expect(r.code).toBe('[1, 2, 3, 4][:3]');
-  });
-
-  it('Take guards a runtime count with round-half-up, not int()', () => {
-    const r = compile(ce.box(['Take', ['List', 1, 2, 3, 4], 'n']), {
-      to: 'python',
-    });
-    expect(r.code).toBe(
-      '(lambda _l, _n: _l[_n:] if _n < 0 else _l[:_n])([1, 2, 3, 4], int(np.clip(np.floor((n) + 0.5), -9007199254740991, 9007199254740991)))'
-    );
-  });
-
-  it('Tabulate emits a bare literal dimension', () => {
-    const r = compile(
-      ce.box(['Tabulate', ['Function', ['Multiply', 'y', 2], 'y'], 3]),
-      { to: 'python', constantFold: false }
-    );
-    expect(r.code).toContain('range(3)');
-    expect(r.code).not.toContain('round');
   });
 });

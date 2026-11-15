@@ -6,7 +6,7 @@
  * numeric list live in a single-channel float texture that the host uploads,
  * and a positional read (`At(S, i)`) lowers to a texel fetch instead of a
  * uniform-array subscript. The hint changes only the shader-target lowering.
- * On the JavaScript, interval and Python targets it is IGNORED — the caller
+ * On the JavaScript and interval targets it is IGNORED — the caller
  * compiles one expression to several targets from one options bag, and the
  * hint describes the shader lane only.
  *

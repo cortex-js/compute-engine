@@ -54,14 +54,9 @@ const IMPURITY_LABELS: ReadonlySet<string> = new Set<EffectLabel>([
   'time',
 ]);
 
-/** True when `label` breaks referential transparency (the impurity axis). */
-export function isImpurityLabel(label: EffectLabel): boolean {
-  return IMPURITY_LABELS.has(label);
-}
-
 /**
  * True when an effect set contains **no impurity label** — the normative
- * definition of `pure`. NOT set-emptiness: see {@link isImpurityLabel}.
+ * definition of `pure`. NOT set-emptiness: see `IMPURITY_LABELS`.
  *
  * `'any'` means "unknown effects" and is conservative here: not pure.
  *

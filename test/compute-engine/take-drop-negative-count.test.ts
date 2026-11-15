@@ -1,7 +1,4 @@
-import * as fs from 'fs';
-import { execFileSync } from 'child_process';
 import { ComputeEngine } from '../../src/compute-engine';
-import { TEST_PYTHON } from './test-python';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { isFunction } from '../../src/compute-engine/boxed-expression/type-guards';
 
@@ -194,8 +191,7 @@ describe('a count that is not a safe integer, or is infinite', () => {
     ['-10^20', ['Negate', E20], '[1,2,3]', '[]'],
     ['+oo', 'PositiveInfinity', '[1,2,3]', '[]'],
     ['-oo', 'NegativeInfinity', '[1,2,3]', '[]'],
-    // A float count larger than every safe integer is clamped too, as the
-    // compiled Python code clamps it.
+    // A float count larger than every safe integer is clamped too.
     ['1e20', 1e20, '[1,2,3]', '[]'],
     ['-1e20', -1e20, '[1,2,3]', '[]'],
   ];
@@ -394,72 +390,6 @@ describe('compiled JavaScript matches the interpreter', () => {
     expect(drop.run!({ m: 0 })).toEqual([1, 2, 3]);
     expect(() => drop.run!({ m: -2 })).toThrow(/negative count/);
   });
-});
-
-describe('compiled Python', () => {
-  const ce2 = new ComputeEngine();
-  ce2.declare('xs', 'list<number>');
-  const py = (json: unknown) =>
-    compile(ce2.box(json as any), { to: 'python', fallback: false }).code;
-
-  test('a literal count chooses the slice at compile time', () => {
-    expect(py(['Take', 'xs', 2])).toBe('xs[:2]');
-    expect(py(['Take', 'xs', -2])).toBe('xs[-2:]');
-    expect(py(['Take', 'xs', 0])).toBe('xs[:0]');
-    expect(py(['Drop', 'xs', 2])).toBe('xs[2:]');
-    expect(py(['Drop', 'xs', -2])).toBe('xs[:-2]');
-    expect(py(['Drop', 'xs', 0])).toBe('xs[0:]');
-  });
-
-  test('a count past every length clamps without overflow', () => {
-    // A run-time count is clipped before `int()`: `int(inf)` raises
-    // `OverflowError`.
-    expect(py(['Take', 'xs', 'PositiveInfinity'])).toBe(
-      '(lambda _l, _n: _l[_n:] if _n < 0 else _l[:_n])(xs, int(np.clip(np.floor((np.inf) + 0.5), -9007199254740991, 9007199254740991)))'
-    );
-    // A literal float count past every length is clamped at compile time,
-    // as the interpreter clamps it.
-    expect(py(['Take', 'xs', 1e20])).toBe('xs[:]');
-    expect(py(['Drop', 'xs', 1e20])).toBe('xs[:0]');
-    expect(py(['Take', 'xs', -1e20])).toBe('xs[:]');
-    expect(py(['Drop', 'xs', -1e20])).toBe('xs[:0]');
-    expect(py(['Drop', 'xs', ['Power', 10, 20]])).toBe(
-      '(lambda _l, _n: _l[:_n] if _n < 0 else _l[_n:])(xs, int(np.clip(np.floor((100000000000000000000) + 0.5), -9007199254740991, 9007199254740991)))'
-    );
-  });
-
-  test('a run-time count chooses the slice at run time', () => {
-    expect(py(['Take', 'xs', 'n'])).toBe(
-      '(lambda _l, _n: _l[_n:] if _n < 0 else _l[:_n])(xs, int(np.clip(np.floor((n) + 0.5), -9007199254740991, 9007199254740991)))'
-    );
-    expect(py(['Drop', 'xs', 'n'])).toBe(
-      '(lambda _l, _n: _l[:_n] if _n < 0 else _l[_n:])(xs, int(np.clip(np.floor((n) + 0.5), -9007199254740991, 9007199254740991)))'
-    );
-  });
-
-  // A Python int too large for int64, such as `2 ** 100`, is a valid
-  // count: `np.clip` and `int()` accept it.
-  const runPython =
-    TEST_PYTHON !== undefined && fs.existsSync(TEST_PYTHON) ? test : test.skip;
-  runPython(
-    'the generated slice runs for a large integer count',
-    () => {
-      const fn = (op: string) =>
-        compile(ce2.box([op, ['List', 1, 2, 3], ['Power', 2, 'w']] as any), {
-          to: 'python',
-          fallback: false,
-        }).code;
-      const source =
-        'import numpy as np, json, math\n' +
-        `def take(w): return ${fn('Take')}\n` +
-        `def drop(w): return ${fn('Drop')}\n` +
-        'print(json.dumps([take(100), drop(100), take(1)]))\n';
-      const out = execFileSync(TEST_PYTHON!, ['-c', source], {
-        encoding: 'utf8',
-      });
-      expect(JSON.parse(out)).toEqual([[1, 2, 3], [], [1, 2]]);
-    }
-  );
 });
 
 describe('an operand that is the absent collection at run time', () => {

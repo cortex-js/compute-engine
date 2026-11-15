@@ -58,9 +58,7 @@ export const RANGE_COUNT_TOLERANCE_CAP = 1e-3;
  * helper `_SYS.rangeCount` (`compilation/javascript-target.ts`), and the
  * interval target's run-time range `_IA.range` (`interval/collections.ts`)
  * calls it directly. Code emitted for a custom target without `_SYS` calls a
- * copy, `RANGE_COUNT_JS_SOURCE` (below),
- * and the Python target emits the same formula (`pyRangeCount()` in
- * `compilation/python-target.ts`). Keep the three in agreement.
+ * copy, `RANGE_COUNT_JS_SOURCE` (below). Keep the three in agreement.
  */
 export function rangeCount(lower: number, upper: number, step: number): number {
   if (step === 0) return 0;

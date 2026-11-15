@@ -292,13 +292,13 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
     ];
 
     // Every target spells the boolean literals — `true` in JavaScript and both
-    // shader languages, `True` in Python, and the `BoolInterval` string
+    // shader languages, and the `BoolInterval` string
     // `'true'` on the interval target — so none of them reports one as an
     // input. Before this, GLSL emitted the undeclared identifier `True`
     // (a shader that fails to compile behind `success: true`) and the interval
     // target emitted a dangling `_.True` vars-object lookup that threw at run
     // time.
-    for (const to of ['javascript', 'python', 'glsl', 'interval-js']) {
+    for (const to of ['javascript', 'glsl', 'interval-js']) {
       for (const [label, expr] of booleanShapes) {
         it(`${to}: ${label}`, () => {
           const ce = new ComputeEngine();
@@ -314,7 +314,6 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       const src = (to: string) =>
         String(compile(ce.box('True'), { to: to as never }).code ?? '');
       expect(src('javascript')).toBe('true');
-      expect(src('python')).toBe('True');
       expect(src('glsl')).toBe('true');
       // The interval target's boolean domain is `BoolInterval`
       // (`'true' | 'false' | 'maybe'`), so the value is the STRING.
@@ -640,7 +639,7 @@ describe('COMPILE reference analysis of a declaration', () => {
       ['Declare', 'w', "'unknown'", ['Add', 't', 'i']],
       ['Assign', 't', 'w'],
     ];
-    for (const to of ['javascript', 'glsl', 'python'] as const) {
+    for (const to of ['javascript', 'glsl'] as const) {
       {
         const ce = new ComputeEngine();
         expect(
@@ -745,11 +744,11 @@ describe('COMPILE reference analysis of a function called inside a binder of one
 // A compilation that produced code lowered every operator, so its
 // `unsupported` list is empty. The static walk named the definition and the
 // name of a function that a statement list defines, which the JavaScript
-// targets and Python compile as a local function (Tycho row 508).
+// targets compile as a local function (Tycho row 508).
 describe('COMPILE: `unsupported` of a program that defines a function', () => {
   const program = (
     source: string,
-    to: 'javascript' | 'interval-js' | 'python' | 'glsl'
+    to: 'javascript' | 'interval-js' | 'glsl'
   ) => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
@@ -760,7 +759,7 @@ describe('COMPILE: `unsupported` of a program that defines a function', () => {
   };
 
   it('reports no unsupported operator for a program that compiled', () => {
-    for (const to of ['javascript', 'interval-js', 'python'] as const) {
+    for (const to of ['javascript', 'interval-js'] as const) {
       const r = program('function f(t) { t + 1 }\nf(x)', to);
       expect(r.success).toBe(true);
       expect(r.unsupported).toEqual([]);

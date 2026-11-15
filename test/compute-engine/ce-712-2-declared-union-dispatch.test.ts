@@ -25,12 +25,9 @@
  * `docs/plans/2026-10-31-static-shape-compilation.md`.
  */
 
-import { execFileSync } from 'node:child_process';
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { TEST_PYTHON } from './test-python';
 
 type Value = number | Value[];
 
@@ -89,7 +86,7 @@ function interpreted(
  */
 function declineCode(
   expr: Expression,
-  to: 'javascript' | 'interval-js' | 'python'
+  to: 'javascript' | 'interval-js'
 ): string | undefined {
   try {
     const r = compile(expr, { to, fallback: false });
@@ -217,38 +214,6 @@ describe('CE-712.2: an input declared with a union of shapes', () => {
     ]);
   });
 
-  test('python: the code tests the shape of the input once', () => {
-    const ce = engine();
-    const r = compile(ce.box(['Add', 'U', 1]), {
-      to: 'python',
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).toBe(
-      "([_tv1 + 1 for _tv1 in U] if hasattr(U, '__len__') else U + 1)"
-    );
-  });
-
-  const runPython = TEST_PYTHON === undefined ? test.skip : test;
-  runPython('python: the run gives the interpreter values', () => {
-    const ce = engine();
-    const expr = ce.box(['Multiply', 2, ['Add', 'U', 1]]);
-    const code = new PythonTarget().compileFunction(expr, 'g', ['U']);
-    const inputs: Value[] = [[1, 2, 3], 4, []];
-    const script =
-      `import math\n${code}\n` +
-      inputs
-        .map((U) => `print(repr(g(${JSON.stringify(U)})).replace(' ', ''))`)
-        .join('\n');
-    const lines = execFileSync(TEST_PYTHON!, ['-c', script], {
-      encoding: 'utf-8',
-    })
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line));
-    expect(lines).toEqual(inputs.map((U) => interpreted(ce, expr, { U })));
-  });
-
   test('an input declared `broadcastable<real>` is not dispatched', () => {
     // `broadcastable<T>` asks for the element-wise map of the operators,
     // not for one body per shape.
@@ -261,7 +226,7 @@ describe('CE-712.2: an input declared with a union of shapes', () => {
 });
 
 describe('CE-712.2: the declines of a declared union', () => {
-  test.each(['javascript', 'interval-js', 'python'] as const)(
+  test.each(['javascript', 'interval-js'] as const)(
     '%s: no run-time test tells the members apart',
     (to) => {
       // A point of two reals and a list of two reals are both `[a, b]`.
@@ -272,7 +237,7 @@ describe('CE-712.2: the declines of a declared union', () => {
     }
   );
 
-  test.each(['javascript', 'interval-js', 'python'] as const)(
+  test.each(['javascript', 'interval-js'] as const)(
     '%s: more than four bodies',
     (to) => {
       // Three inputs of two members each need eight bodies.
@@ -428,7 +393,7 @@ describe('CE-712.2: absent values and deeper lists at a declared union', () => {
       );
   });
 
-  test.each(['javascript', 'interval-js', 'python'] as const)(
+  test.each(['javascript', 'interval-js'] as const)(
     '%s: a list of lists with an empty first row and a list of depth 3 decline',
     (to) => {
       // `[[], [1, 2]]` is a value of `list<list<real>>`, and the test of
@@ -493,27 +458,7 @@ describe('CE-712.2: `nothing` in a declared union of a list and a number', () =>
       );
   });
 
-  const runPython = TEST_PYTHON === undefined ? test.skip : test;
-  runPython('python: x + 1 with x: list<integer> | integer | nothing', () => {
-    const ce = nothingEngine('list<integer> | integer | nothing');
-    const expr = ce.parse('x + 1');
-    const code = new PythonTarget().compileFunction(expr, 'g', ['x']);
-    const inputs: Value[] = [[1, 2], 3];
-    const script =
-      `import math\n${code}\n` +
-      inputs
-        .map((x) => `print(repr(g(${JSON.stringify(x)})).replace(' ', ''))`)
-        .join('\n');
-    const lines = execFileSync(TEST_PYTHON!, ['-c', script], {
-      encoding: 'utf-8',
-    })
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line));
-    expect(lines).toEqual(inputs.map((x) => interpreted(ce, expr, { x })));
-  });
-
-  test.each(['javascript', 'interval-js', 'python'] as const)(
+  test.each(['javascript', 'interval-js'] as const)(
     '%s: the decline names the members that are the same array',
     (to) => {
       const ce = engine();

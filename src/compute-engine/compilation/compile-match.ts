@@ -517,7 +517,7 @@ export function matchCaseTest(
  * dispatch is emitted as an `if` chain here, not the value form's
  * `switch`: a `break` inside a `switch` would end the `switch`, not the
  * loop. JavaScript only — the GPU targets override `Match` wholesale, and
- * the interval and Python targets decline the head.
+ * the interval target declines the head.
  */
 export function compileMatchStatement(
   expr: Expression & FunctionInterface,
@@ -609,7 +609,7 @@ export function compileMatchStatementBody(
  *   itself (unary payload) or `s[i]` (tuple payload).
  *
  * JS only. The GPU targets override `Match` wholesale and keep throwing on
- * tier 3; Python and interval-js decline the head outright (§B2).
+ * tier 3; interval-js declines the head outright (§B2).
  */
 export function emitMatchConstructorCaseJS(
   engine: ComputeEngine,

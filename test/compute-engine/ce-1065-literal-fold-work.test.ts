@@ -132,11 +132,6 @@ describe('the fold of a symbol value that is a list of literal tuples', () => {
     const js = compile(expr, { to: 'javascript' });
     expect(js.success).toBe(true);
     expect(js.code).toBe('[_lit_1, _lit_1, _.x]');
-    const py = compile(expr, { to: 'python' });
-    expect(py.success).toBe(true);
-    expect(py.code).toBe(
-      '[[1.5, 2, 3, 4, 5, 6, 7], [1.5, 2, 3, 4, 5, 6, 7], x]'
-    );
   });
 
   test('a tuple with an exact rational still gives its value', () => {

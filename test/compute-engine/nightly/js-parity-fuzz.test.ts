@@ -11,9 +11,7 @@ import { compile } from '../../../src/compute-engine/compilation/compile-express
  * regression sentinel for the CORRECTNESS-review compiled-vs-interpreter splits
  * (Mod / Round / Arccot / …) that Wave-4 fixed.
  *
- * The Python-target parity is a separate, venv-gated suite
- * (`test/compute-engine/compile-python-parity.test.ts`); this JS-only fuzz always
- * runs under CE_NIGHTLY (no external toolchain).
+ * This JS-only fuzz always runs under CE_NIGHTLY (no external toolchain).
  */
 
 const NIGHTLY = process.env.CE_NIGHTLY === '1';

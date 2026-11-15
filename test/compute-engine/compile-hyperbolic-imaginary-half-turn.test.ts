@@ -9,10 +9,7 @@
  */
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { shaderFunctions } from './gpu-shader-f32-eval';
-import { TEST_PYTHON } from './test-python';
-import { execFileSync } from 'child_process';
 
 const ce = new ComputeEngine();
 
@@ -114,40 +111,4 @@ describe('GPU: HYPERBOLIC FUNCTIONS OF iπu', () => {
           ]);
         }
       });
-});
-
-describe('PYTHON: HYPERBOLIC FUNCTIONS OF iπu', () => {
-  (TEST_PYTHON === undefined ? it.skip : it)(
-    'every head agrees with the interpreter, for a scalar and an array',
-    () => {
-      const py = new PythonTarget({ includeImports: true });
-      const points = [...EXACT_POINTS, ...GENERIC_POINTS];
-      let program = '';
-      for (const h of HEADS)
-        program +=
-          py.compileFunction(ce.box([h, arg('x')] as any), `f_${h}`, ['x']) +
-          '\n';
-      program += 'import json\nout = []\n';
-      program += `for h in ${JSON.stringify(HEADS)}:\n`;
-      program += `  f = globals()['f_' + h]\n`;
-      program += `  out.append([[complex(f(u)).real, complex(f(u)).imag] for u in ${JSON.stringify(points)}])\n`;
-      program += `  out.append([[complex(v).real, complex(v).imag] for v in f(np.array(${JSON.stringify(points)}, dtype=float))])\n`;
-      program += 'print(json.dumps(out))\n';
-      const out = JSON.parse(
-        execFileSync(TEST_PYTHON!, ['-c', program], { encoding: 'utf8' })
-          .replace(/-Infinity/g, '-1e999')
-          .replace(/Infinity/g, '1e999')
-      );
-      HEADS.forEach((h, k) => {
-        for (const values of [out[2 * k], out[2 * k + 1]])
-          points.forEach((u, i) => {
-            const [eRe, eIm] = reference(h, u);
-            const [re, im] = values[i];
-            expect([h, u, same(re, eRe, 1e-14), same(im, eIm, 1e-14)]).toEqual(
-              [h, u, true, true]
-            );
-          });
-      });
-    }
-  );
 });

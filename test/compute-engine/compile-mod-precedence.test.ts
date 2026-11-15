@@ -1,7 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { implicitCompile } from '../../src/compute-engine/implicit-compile';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 // Regression (2026-07-31): the `Mod` and `Remainder` compile templates spliced
@@ -54,21 +53,6 @@ describe('compiled Mod/Remainder operand parenthesization', () => {
     expect(code).toBe(
       '((x + 29.0) - (3.0) * _gpu_round_up((x + 29.0) / (3.0)))'
     );
-  });
-
-  it('Python Remainder parenthesizes the compiled dividend', () => {
-    const py = new PythonTarget();
-    // `x` is declared: Python reads an input with an inferred `number` type
-    // through a `None` test, and a declared one as is (ROADMAP CE-460).
-    const e = new ComputeEngine();
-    e.declare('x', 'number');
-    const code = py.compile(e.box(['Remainder', ['Add', 'x', 29], 9]), {
-      vars: { x: 'x' },
-    }).code;
-    // The dividend is an argument of the `_ce_remainder` helper, which
-    // checks each operand once against the safe integer range: a call
-    // argument needs no parentheses.
-    expect(code.split('\n').at(-1)).toBe('_ce_remainder(x + 29, 9)');
   });
 });
 

@@ -147,7 +147,7 @@ describe('UNEMITTABLE USER FUNCTION IN VALUE POSITION — fail closed', () => {
 // It now fails closed at compile time, and the interpreted fallback answers.
 //
 describe('HOST-DECLARED OPERATOR IN VALUE POSITION — fail closed', () => {
-  const TARGETS = ['javascript', 'python', 'glsl', 'interval-js'];
+  const TARGETS = ['javascript', 'glsl', 'interval-js'];
 
   function silent<T>(f: () => T): T {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -259,7 +259,7 @@ describe('HOST-DECLARED OPERATOR IN VALUE POSITION — fail closed', () => {
       evaluate: () => ce.number(100),
     });
     ce.declare('rs', 'list<real>');
-    for (const to of ['javascript', 'python']) {
+    for (const to of ['javascript']) {
       const r = silent(() => compile(ce.box(['Map', 'Sin', 'rs']), { to }));
       expect(r?.success).toBe(false);
       expect(r?.run?.({ rs: [2, 3] })).toEqual([100, 100]);
@@ -272,7 +272,7 @@ describe('HOST-DECLARED OPERATOR IN VALUE POSITION — fail closed', () => {
       evaluate: () => ce.number(7),
     });
     ce.declare('rs', 'list<real>');
-    for (const to of ['javascript', 'python']) {
+    for (const to of ['javascript']) {
       const r = silent(() =>
         compile(ce.box(['Reduce', 'rs', 'Comb', 0]), { to })
       );

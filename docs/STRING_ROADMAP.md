@@ -191,15 +191,14 @@ part of the Phase 1 contract.
     criterion).** The Phase 1 deliverable includes a target matrix — for
     each of {`Length`, `At`/indexing, iteration-derived operators, list-out
     operators, string-preserving operators, **and the `character` scalar
-    itself**} × {JavaScript, Python, GLSL}, each cell is either
+    itself**} × {JavaScript, GLSL}, each cell is either
     implemented grapheme-correctly or fails closed with a diagnostic. The
     `character` row is not implied by the string rows and must be decided
     per target on its own: `CharacterFrom`, narrowed character literals,
     `String(c)`, character equality/ordering/hashing, and
     `list<character>` values. (JavaScript's natural lowering is a
-    one-cluster JS string, making the distinction compile-time-only;
-    Python's string-collection type-gate does NOT by itself answer
-    whether `CharacterFrom("a")` compiles.) Per target:
+    one-cluster JS string, making the distinction compile-time-only.)
+    Per target:
     - **JavaScript**: `isIndexedCollectionOperand`
       (`compilation/javascript-target.ts`) currently excludes strings ONLY
       because `string` does not match `indexed_collection` — the lattice
@@ -210,12 +209,6 @@ part of the Phase 1 contract.
       (the target already has a grapheme segmenter helper) for the
       supported operator set. `Length` of a string must never lower to
       `.length`.
-    - **Python (v1 decision): type-gate, fail closed.** Python has no
-      stdlib grapheme segmentation (`len()` counts code points), so v1
-      does not compile string collection operations to Python — they fail
-      with a target-capability diagnostic. Vendoring a segmenter (or
-      depending on the third-party `regex` module) is a later upgrade if
-      consumer demand appears.
     - **GLSL**: this target has no string support at all, and that
       does not change. The requirement is only that string-typed operands
       CONTINUE to be rejected with the existing diagnostics, unaffected by
@@ -954,10 +947,9 @@ operator to land on.
 ### Feasibility notes (so the future estimate is honest)
 
 - **Hosts**: JS has `Intl.Collator` (comparator; no sort-key API — a
-  `CollationKey` would be JS-emulated or comparator-only at first). Python
-  needs PyICU or OS `locale` (non-portable) — so collation would be
-  interpreter-only or type-gated on compile targets, like grapheme
-  iteration (constraint 10).
+  `CollationKey` would be JS-emulated or comparator-only at first) — so
+  collation would be interpreter-only or type-gated on the other compile
+  targets (constraint 10).
 - **Determinism**: CLDR tailorings drift across ICU versions, exactly like
   grapheme segmentation (constraint 11) — same test policy applies, and
   it is one more reason collation can never participate in canonical
@@ -1080,8 +1072,8 @@ count is bounded by the subject length).
    delta is segment → operate → join
    on machinery Phase 0 already made kind-preserving); library signature
    audit under the String preservation rule; the compile-target matrix
-   (constraint 10: JS explicit exclusion + grapheme lowerings, Python
-   type-gate, GLSL rejection test); CHANGELOG entry + release-note
+   (constraint 10: JS explicit exclusion + grapheme lowerings, GLSL
+   rejection test); CHANGELOG entry + release-note
    guidance for the user-code impact; update
    `cortexjs.io/docs/compute-engine/97-reference-strings.md` (it currently states "Strings are not
    handled as collections" and documents `Characters` as `list<string>` —
@@ -1118,7 +1110,6 @@ count is bounded by the subject length).
      2026-08-16.
    - `character` compile row: JavaScript lowers a character as a one-cluster
      JS string with `===` equality and a code-point-sequence comparator;
-     Python fails closed on the whole string-collection AND character rows;
      GLSL now also fails closed on a bare string literal (a pre-existing
      hole: they emitted `"a"` as shader source).
    - Deferred to Phase 2 (filed in `ROADMAP.md`): string arms for
@@ -1175,7 +1166,7 @@ count is bounded by the subject length).
      grapheme-correctly except `NumberFrom` (fails closed) and `DeleteAt`
      (no list lowering exists); operands whose VALUE decides between a
      result and an error value (`from`, `count`, `n`, `pad`, an empty
-     `target`) must be literals or the call declines; Python/GLSL fail
+     `target`) must be literals or the call declines; GLSL fails
      closed by the target-capability default, now pinned per operator.
    - Promotions shipped: `RandomShuffle`, `RandomSample`, `DeleteAt` return
      `string` for a string source. Still awaiting a ruling (ROADMAP): inner
@@ -1190,8 +1181,7 @@ count is bounded by the subject length).
      `RandomChoice("abc", 5)` equals
      `StringJoin(RandomChoice(Characters("abc"), 5))`. The JavaScript target
      segments, draws and re-joins, matching the interpreter value for value
-     and draw for draw; GLSL throws (no indexing) and Python fails
-     closed, both unchanged. `Random(s)` — the single-draw form — keeps
+     and draw for draw; GLSL throws (no indexing), unchanged. `Random(s)` — the single-draw form — keeps
      answering a `character`.
    - Two Phase-1-induced regressions surfaced and were fixed by their
      owners in the same round: the Epsil pipe stage `xs |> Fold(Join,
@@ -1228,7 +1218,7 @@ const numberRE = RegExp(#"[0-9]+(\.[0-9]+)?"#)
   features (`v`-mode set operations, some lookbehind) that compiled-code
   parity is otherwise a trap.
 - **Resource safety is part of the dialect decision, not an afterthought.**
-  Host JS/Python regex engines backtrack, so an arbitrary user pattern
+  Host JS regex engines backtrack, so an arbitrary user pattern
   against attacker-controlled input is an unbounded ReDoS path — the
   `v`/`u` flags do not mitigate it, and a synchronous host regex cannot be
   interrupted by the engine's deadline checks (per `docs/TIMEOUT-MODEL.md`,

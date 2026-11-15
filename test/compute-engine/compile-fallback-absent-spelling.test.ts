@@ -159,69 +159,6 @@ describe('Compilation fallback: the spelling of an absent value', () => {
 });
 
 /**
- * The Python target spells a WRITTEN absence symbol with its numeric marker
- * (`math.nan`, since numpy raises on `None`), and an absent value in an
- * object-domain position (a point, a boolean) with `None`. Its fallback gives
- * the same answers (`NaN` and `undefined` in the JavaScript value of the
- * runner): before, every absent value in a position whose type admits
- * `missing` was `undefined`. The fallback is forced by a call of a user
- * function, which the Python target does not lower; `g` is the identity.
- */
-describe('Python fallback: the spelling of an absent value', () => {
-  let warn: jest.SpyInstance;
-  beforeAll(() => {
-    warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-  });
-  afterAll(() => warn.mockRestore());
-
-  const py = new ComputeEngine();
-  py.declare('t', 'real');
-  py.declare('P', 'list<tuple<number, number>>');
-  py.assign('P', py.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
-  py.assign('g', py.box(['Function', 'x', 'x']));
-
-  test.each([
-    // The compiled code of the argument, for the record of each spelling.
-    ['the written symbol (`math.nan`)', 'Missing', NaN],
-    [
-      'a number read from a list with a written absence (`math.nan`)',
-      ['First', ['List', 'Missing', 1]],
-      NaN,
-    ],
-    ['a number (`float(nan)`)', gated(['Add', 't', 1]), NaN],
-    [
-      'a point (`(math.nan, math.nan)`)',
-      gated(['Tuple', 't', 1]),
-      [NaN, NaN],
-    ],
-    [
-      'a point read from a list of points (`(math.nan, math.nan)`)',
-      ['At', 'P', 5],
-      [NaN, NaN],
-    ],
-    ['a boolean (`False`)', gated(['Less', 't', 1]), false],
-    [
-      'a list, written absence (`[1, math.nan]`)',
-      ['List', 1, 'Missing'],
-      [1, NaN],
-    ],
-    [
-      'a tuple, written absence (`(t, math.nan)`)',
-      ['Tuple', 't', 'Missing'],
-      [0, NaN],
-    ],
-  ])('%s', (_label, json, expected) => {
-    // The argument itself compiles on the Python target.
-    expect(
-      compile(py.box(json as never), { to: 'python' } as never).success
-    ).toBe(true);
-    const r = compile(py.box(['g', json] as never), { to: 'python' } as never);
-    expect(r.success).toBe(false);
-    expect(r.run!({ t: 0 } as never)).toStrictEqual(expected);
-  });
-});
-
-/**
  * The interval-js target has no object null. Its compiled code gives `empty`
  * where there is no value at run time — a restriction whose condition fails,
  * for a number, a point or a list alike, a written `Missing`, an `At` whose

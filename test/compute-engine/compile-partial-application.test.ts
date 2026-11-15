@@ -20,12 +20,9 @@
  * function. The interpreter keeps first-class functions and currying, so
  * only the compiled forms were removed.
  */
-import { execFileSync } from 'node:child_process';
 import { ComputeEngine } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { TEST_PYTHON } from './test-python';
 
 // `0·Random()` gives the body an effect (a random draw) and adds nothing to
 // its value, which stays exact.
@@ -85,7 +82,7 @@ function evaluated(json: MathJsonExpression, u: number): number {
     .N().re;
 }
 
-const TARGETS = ['javascript', 'interval-js', 'glsl', 'python'] as const;
+const TARGETS = ['javascript', 'interval-js', 'glsl'] as const;
 
 /**
  * Expect every target to decline `json` with `message`. A target declines by
@@ -96,10 +93,7 @@ function expectDeclines(json: MathJsonExpression, message: RegExp): void {
   for (const to of TARGETS) {
     let reason: string | undefined;
     try {
-      const r =
-        to === 'python'
-          ? new PythonTarget().compile(engine().box(json))
-          : compile(engine().box(json), { to, fallback: false });
+      const r = compile(engine().box(json), { to, fallback: false });
       expect(r.success).toBe(false);
       reason = (r as { error?: string }).error;
     } catch (e) {
@@ -297,35 +291,5 @@ describe('PARTIAL APPLICATION — a call with every argument compiles', () => {
         fallback: false,
       })
     ).toThrow(/`Apply` is in the GLSL fragment only as the application/);
-  });
-
-  test('python', () => {
-    const py = new PythonTarget();
-    const body = py.compile(engine().box(['Apply', PURE_ADD, 1, 'u'])).code;
-    expect(body).toBe('((lambda x, y: x + y))(1, u)');
-    if (TEST_PYTHON === undefined) return;
-    const out = execFileSync(
-      TEST_PYTHON,
-      ['-c', `import numpy as np\nimport math\nu = 1.5\nprint(float(${body}))`],
-      { encoding: 'utf8' }
-    );
-    expect(Number(out.trim())).toBe(2.5);
-  });
-
-  test.each<[string, MathJsonExpression, RegExp]>([
-    [
-      'too many arguments',
-      ['Apply', PURE_ADD, 1, 2, 3],
-      /the function takes 2 parameter\(s\) but 3 argument\(s\) are supplied\. The interpreter gives an `unexpected-argument` error/,
-    ],
-    [
-      'arguments to a function with no parameter',
-      ['Apply', ['Function', ['Sin', 'u']], 5],
-      /The interpreter ignores the arguments of a function with no parameter/,
-    ],
-  ])('python declines %s', (_, json, message) => {
-    expect(() => new PythonTarget().compile(engine().box(json))).toThrow(
-      message
-    );
   });
 });

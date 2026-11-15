@@ -359,7 +359,7 @@ export {
 export { BigDecimal } from '../big-decimal/index.js';
 
 // Only the two targets that every engine registers are exported from the
-// engine module. The GPU and Python targets are exported by the full entry
+// engine module. The GPU targets are exported by the full entry
 // (`src/compute-engine.ts`) and by `src/compile.ts`, so that the `./core`
 // entry does not bundle them (`engine-compilation-targets.ts` says why).
 export { JavaScriptTarget } from './compilation/javascript-target.js';
@@ -1538,7 +1538,7 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._jsProfileShadow`.
    * @internal
    */
-  _jsProfileShadow: boolean | 'ir' = jsProfileShadowDefault();
+  _jsProfileShadow: false | 'ir' = jsProfileShadowDefault();
 
   /** When true, a scope being discarded tombstones its value definitions and
    * the symbol resolution sites report a use of a dead binding with both
@@ -1950,11 +1950,11 @@ export class ComputeEngine implements IComputeEngine {
    * `createTarget()` and `compile()`; otherwise this throws.
    *
    * Every engine has `javascript` and `interval-js`. Every engine also has
-   * `glsl` and `python` once the full package entry,
+   * `glsl` once the full package entry,
    * `@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
    * the program, whichever entry made the engine and in whichever order. A
    * program that loads only `@cortex-js/compute-engine/core` has the two
-   * built-in targets: import `GLSLTarget` or `PythonTarget`
+   * built-in targets: import `GLSLTarget`
    * from `@cortex-js/compute-engine/compile` and register it here.
    */
   registerCompilationTarget(

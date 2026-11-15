@@ -1,12 +1,12 @@
 /**
- * The internal switch that makes `implicitCompile()` try the
- * `numeric-kernel` profile of the JavaScript target first, and its counters
+ * The internal switch that makes `implicitCompile()` try the profile `ir`
+ * of the JavaScript target first, and its counters
  * (`docs/plans/2026-11-10-js-profile-first-consumer.md`). The switch is off
  * by default. It is not a public option.
  *
  * The engine reads its initial value at construction
- * (`jsProfileSwitchDefault()`): `CE_JS_PROFILE=numeric-kernel` turns it on,
- * `CE_JS_PROFILE=ir` turns it on with the experimental profile `ir`, and `CE_JS_PROFILE_CONSUMERS=<names>` (separated by commas) limits it to
+ * (`jsProfileSwitchDefault()`): `CE_JS_PROFILE=ir` turns it on, and
+ * `CE_JS_PROFILE_CONSUMERS=<names>` (separated by commas) limits it to
  * these consumers. A test can set `ce._jsProfile` on an engine.
  *
  * The counters are kept per engine and per consumer (`_jsProfileStats()`).
@@ -15,11 +15,10 @@
  * `<directory>/<pid>-<time>.json` after each attempt
  * (`statsAccumulator()`); `scripts/js-profile-stats.mjs` sums these files.
  *
- * The shadow measure (`ce._jsProfileShadow`, `CE_JS_PROFILE_SHADOW=1`, or
- * `CE_JS_PROFILE_SHADOW=ir` to measure the profile `ir`) is a
- * second internal setting, also off by default: each compilation for the
+ * The shadow measure (`ce._jsProfileShadow`, `CE_JS_PROFILE_SHADOW=ir`) is
+ * a second internal setting, also off by default: each compilation for the
  * `javascript` target that asks for no profile also compiles the expression
- * with the profile, discards that result, and counts its outcome
+ * with the profile `ir`, discards that result, and counts its outcome
  * (`recordJsProfileShadow()`), per consumer: `implicit:<name>` for a
  * compilation of `implicitCompile()`, `public` for any other. Its counters
  * are separate from those of the switch (`_jsProfileShadowStats()`), and
@@ -39,9 +38,8 @@
  */
 
 /** The value of the switch: `undefined` is off. With no `consumers`, every
- * consumer tries the profile. */
+ * consumer tries the profile `ir`. */
 export type JsProfileSwitch = {
-  readonly profile: 'numeric-kernel' | 'ir';
   readonly consumers?: ReadonlySet<string>;
 };
 
@@ -103,23 +101,19 @@ function currentProcess(): ProcessLike | undefined {
 export function jsProfileSwitchDefault(): JsProfileSwitch | undefined {
   const env = currentProcess()?.env;
   const profile = env?.CE_JS_PROFILE;
-  if (profile !== 'numeric-kernel' && profile !== 'ir') return undefined;
+  if (profile !== 'ir') return undefined;
   const names = (env?.CE_JS_PROFILE_CONSUMERS ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-  return names.length === 0
-    ? { profile }
-    : { profile, consumers: new Set(names) };
+  return names.length === 0 ? {} : { consumers: new Set(names) };
 }
 
 /** The initial value of the shadow measure of an engine, from the
- * environment: on (`true`, the profile `numeric-kernel`) when
- * `CE_JS_PROFILE_SHADOW` is `1`, `'ir'` (the profile `ir`) when it is
- * `ir`. */
-export function jsProfileShadowDefault(): boolean | 'ir' {
-  const value = currentProcess()?.env?.CE_JS_PROFILE_SHADOW;
-  return value === 'ir' ? 'ir' : value === '1';
+ * environment: `'ir'` when `CE_JS_PROFILE_SHADOW` is `ir`, otherwise off
+ * (`false`). */
+export function jsProfileShadowDefault(): false | 'ir' {
+  return currentProcess()?.env?.CE_JS_PROFILE_SHADOW === 'ir' ? 'ir' : false;
 }
 
 let publicSwitch: boolean | undefined;

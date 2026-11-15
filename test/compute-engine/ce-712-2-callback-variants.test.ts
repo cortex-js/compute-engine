@@ -25,10 +25,8 @@
  * The cases below compare each compiled value with `evaluate()`.
  */
 
-import { execFileSync } from 'node:child_process';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { TEST_PYTHON } from './test-python';
 
 type Json = unknown;
 
@@ -259,56 +257,6 @@ describe('interval-js: the callback is the variant for the element shape', () =>
       intervalValue(r.run!(intervalInputs() as never)),
       interpreted(ce, expr)
     );
-  });
-});
-
-describe('python: the callback is the variant for the element shape', () => {
-  // The consumers of a callback that compile on Python: a literal, as the
-  // callback of `Map`, `Filter` and `Reduce`, and as the head of `Apply`.
-  // A named function has no Python lambda form (it declines at HEAD too).
-  const CASES: [string, Json][] = [
-    ['Map(t ↦ 2t, L)', ['Map', LIT, 'L']],
-    ['Map(t ↦ 2t, M)', ['Map', LIT, 'M']],
-    ['Map(p ↦ p₁ + p₂, P)', ['Map', POINT_LIT, 'P']],
-    ['Filter(L, t ↦ t > 0)', ['Filter', 'L', ['Function', ['Greater', 't', 0], 't']]],
-    [
-      'Filter(M, r ↦ r₁ > 0)',
-      ['Filter', 'M', ['Function', ['Greater', ['At', 'r', 1], 0], 'r']],
-    ],
-    ['Reduce(L, (a, b) ↦ a + b, 0)', ['Reduce', 'L', SUM_LIT, 0]],
-    ['Apply(t ↦ 2t, x)', ['Apply', LIT, 'x']],
-    ['Apply(t ↦ 2t, L)', ['Apply', LIT, 'L']],
-    ['Apply(t ↦ 2t, M)', ['Apply', LIT, 'M']],
-  ];
-  // The `isinstance` tests in the code of `At` are the bound checks of an
-  // index read, not a test of the value of a callback.
-  test.each(CASES)('%s compiles', (_label, expr) => {
-    const r = compileTo(makeEngine(), expr, 'python');
-    expect(r.success).toBe(true);
-  });
-
-  const runPython = TEST_PYTHON === undefined ? test.skip : test;
-  runPython.each(CASES)('%s gives the interpreter value', (_label, expr) => {
-    const ce = makeEngine();
-    const r = compileTo(ce, expr, 'python');
-    const src = [
-      'import json, math',
-      'import numpy as np',
-      `L = ${JSON.stringify(VALUES.L)}`,
-      `M = ${JSON.stringify(VALUES.M)}`,
-      `P = [tuple(p) for p in ${JSON.stringify(VALUES.P)}]`,
-      `x = ${VALUES.x}`,
-      r.preamble ?? '',
-      `v = ${r.code}`,
-      'def plain(v):',
-      '    if isinstance(v, (list, tuple)): return [plain(e) for e in v]',
-      '    return float(v)',
-      'print(json.dumps(plain(v)))',
-    ].join('\n');
-    const out = execFileSync(TEST_PYTHON!, ['-c', src], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }).toString();
-    expectClose(JSON.parse(out), interpreted(ce, expr));
   });
 });
 

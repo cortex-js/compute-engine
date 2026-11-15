@@ -1,15 +1,9 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { ownedLocalUpdateChains } from '../../src/compute-engine/compilation/in-place-update';
-import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { TEST_PYTHON } from './test-python';
 
 // The shape of the generated code for five optimizations of the JavaScript
-// and Python targets, and the agreement of the compiled results with the
+// target, and the agreement of the compiled results with the
 // interpreter. Each optimization removes a copy, an object or a wrapper that
 // the code built at run time.
 
@@ -25,10 +19,9 @@ function run(
   return (r.run as (v: unknown) => unknown)(vars);
 }
 
-function codeOf(ce: ComputeEngine, json: Json, to?: 'python'): string {
+function codeOf(ce: ComputeEngine, json: Json): string {
   const r = compile(ce.box(json as never), {
     fallback: false,
-    ...(to ? { to } : {}),
   });
   expect(r.success).toBe(true);
   return r.code;
@@ -55,10 +48,9 @@ function interpreted(
 const list = (xs: number[]): Json => ['List', ...xs];
 
 // The locals that the `copying-list-update` warnings of the compilation name.
-function copiedLocals(ce: ComputeEngine, json: Json, to?: 'python'): string[] {
+function copiedLocals(ce: ComputeEngine, json: Json): string[] {
   const r = compile(ce.box(json as never), {
     fallback: false,
-    ...(to ? { to } : {}),
   });
   expect(r.success).toBe(true);
   return (r.warnings ?? [])
@@ -238,82 +230,6 @@ describe('small unrolled JavaScript sums hoist their invariants (CE-339.1)', () 
     ).code;
     expect(code.match(/Math\.max/g)?.length).toBe(1);
   });
-});
-
-describe('the Python target hoists the invariants of a sum (CE-339.2)', () => {
-  const ce = new ComputeEngine();
-  ce.declare('L', 'list<real>');
-  ce.declare('n', 'integer');
-  const sumN = ce.parse(
-    '\\sum_{i=1}^{n} (i x + \\sin(\\operatorname{Max}(L)))'
-  );
-  const sum3 = ce.parse(
-    '\\sum_{i=1}^{3} (i x + \\sin(\\operatorname{Max}(L)))'
-  );
-
-  test('constant bounds: the temporary is bound once', () => {
-    expect(compile(sum3, { to: 'python' }).code).toBe(
-      `[sum(i * x + np.sin(_tv1) for i in range(1, 4)) for _tv1 in [np.max(L)]][0]`
-    );
-  });
-
-  test('symbolic bounds: the temporary is computed only for a range that is not empty', () => {
-    expect(compile(sumN, { to: 'python' }).code).toBe(
-      `([sum(i * x + np.sin(_tv1) for i in range(1, n + 1)) for _tv1 in [np.max(L)]][0] if 1 <= n else 0)`
-    );
-  });
-
-  test('an empty constant range keeps the generator', () => {
-    const code = compile(
-      ce.parse('\\sum_{i=3}^{1} (i x + \\sin(\\operatorname{Max}(L)))'),
-      { to: 'python' }
-    ).code;
-    expect(code).toBe(
-      "sum(i * x + np.sin(np.max(L)) for i in range(3, 2))"
-    );
-  });
-
-  const python = TEST_PYTHON;
-  const hasNumpy = (() => {
-    if (python === undefined) return false;
-    try {
-      execFileSync(python, ['-c', 'import numpy'], { stdio: 'ignore' });
-      return true;
-    } catch {
-      return false;
-    }
-  })();
-  (hasNumpy ? test : test.skip)(
-    'the Python code agrees with the interpreter, and an empty range raises nothing',
-    () => {
-      const target = new PythonTarget();
-      let src = 'import numpy as np\nimport math\nimport json\n\n';
-      src += `${target.compileFunction(sumN, 'fn_n', ['L', 'x', 'n'])}\n`;
-      src += `${target.compileFunction(sum3, 'fn_3', ['L', 'x'])}\n`;
-      src +=
-        'print(json.dumps([fn_n(np.array([3.0, 1.5, 7.0]), 0.5, 4), ' +
-        'fn_3(np.array([3.0, 1.5, 7.0]), 0.5), fn_n(np.array([]), 0.5, 0)]))\n';
-      const file = path.join(os.tmpdir(), `ce-py-hoist-${process.pid}.py`);
-      fs.writeFileSync(file, src);
-      let out = '';
-      try {
-        out = execFileSync(python!, [file], { encoding: 'utf8' });
-      } finally {
-        fs.unlinkSync(file);
-      }
-      const [a, b, c] = JSON.parse(out) as number[];
-      const L = list([3, 1.5, 7]);
-      expect(a).toBeCloseTo(
-        interpreted(ce, sumN.json, { L, x: 0.5, n: 4 }) as number,
-        12
-      );
-      expect(b).toBeCloseTo(
-        interpreted(ce, sum3.json, { L, x: 0.5 }) as number,
-        12
-      );
-      expect(c).toBe(0);
-    }
-  );
 });
 
 describe('a block local replaced element by element is written in place (CE-329)', () => {
@@ -548,24 +464,6 @@ describe('a block local replaced element by element is written in place (CE-329)
     expect(codeOf(ce, json)).not.toContain('replaceAtInPlace');
     expect(run(ce, json, { L: [1, 2, 3] })).toBe(612);
     expect(copiedLocals(ce, json)).toEqual(['xs']);
-  });
-
-  test('a Python fold whose step has a result type updates in place (CE-1009)', () => {
-    const e = new ComputeEngine();
-    e.declare('s', 'list<integer>');
-    const step = [
-      'Function',
-      [
-        'Typed',
-        ['ReplaceAt', 'acc', 'i', ['Add', ['At', 'acc', 'i'], 'i']],
-        "'list<integer>'",
-      ],
-      'acc',
-      'i',
-    ];
-    const code = codeOf(e, ['Fold', step, 's', ['Range', 1, 4]], 'python');
-    expect(code).toContain('lambda acc, i: _ce_replaceat_inplace(acc, i,');
-    expect(code).toContain('_ce_owned_copy(s)');
   });
 
   test('a last line that writes without assigning does not stop the in-place write', () => {
@@ -848,19 +746,6 @@ describe('a block local replaced element by element is written in place (CE-329)
     const json = ['Block', ['Declare', 'a', "'real'", 0], inner(), inner(), 'a'];
     expect(run(ce, json, { L: [1, 2, 3] })).toBe(24);
     expect(copiedLocals(ce, json)).toEqual(['xs', 'xs']);
-  });
-
-  test('the Python target always copies, and does not report it', () => {
-    ce.declare('zs', 'list<real>');
-    const json = [
-      'Block',
-      declare,
-      ['Declare', 'zs', "'list<real>'", ['List']],
-      ['Loop', ['Block', update, ['Assign', 'zs', 'xs']], range],
-      'xs',
-    ];
-    expect(copiedLocals(ce, json)).toEqual(['xs']);
-    expect(copiedLocals(ce, json, 'python')).toEqual([]);
   });
 
   test('a statement shared by several branches is walked once', () => {

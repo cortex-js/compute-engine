@@ -1,17 +1,11 @@
-import { execFileSync } from 'node:child_process';
-import { unlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { TEST_PYTHON } from './test-python';
 
 // CE-682: the samples of a `Linspace` with an endpoint that is an infinity or
 // `NaN` cannot be computed, because the step is an infinity or `NaN`. Such a
 // `Linspace` has no value: every read of it stays unevaluated in the
-// interpreter, as for a symbolic endpoint, and compiled JavaScript and Python
-// give `NaN`. A read must not give a value: a count of 3 with no elements for
+// interpreter, as for a symbolic endpoint, and compiled JavaScript
+// gives `NaN`. A read must not give a value: a count of 3 with no elements for
 // a sum, or a maximum of `+∞`. A count of 0 has no samples, so with an
 // infinite endpoint the `Linspace` is the empty list; with a `NaN` endpoint it
 // has no value.
@@ -138,57 +132,5 @@ describe('CE-682: compiled JavaScript', () => {
     expect(run(l, { a: Infinity })).toEqual([]);
     expect(run(l, { a: 1 })).toEqual([]);
     expect(run(l, { a: NaN })).toBeNaN();
-  });
-});
-
-describe('CE-682: compiled Python', () => {
-  const python = new PythonTarget();
-
-  test('the emitted code tests the endpoints', () => {
-    const code = python.compileFunction(
-      engine().box(['Linspace', 0, 'PositiveInfinity', 3]),
-      'fn',
-      []
-    );
-    expect(code).toContain(
-      "abs(_s) < float('inf') and abs(_e) < float('inf')"
-    );
-  });
-
-  const hasNumpy = (() => {
-    if (TEST_PYTHON === undefined) return false;
-    try {
-      execFileSync(TEST_PYTHON, ['-c', 'import numpy'], { stdio: 'ignore' });
-      return true;
-    } catch {
-      return false;
-    }
-  })();
-
-  (hasNumpy ? test : test.skip)('the emitted code runs', () => {
-    const ce = engine();
-    // The endpoint is the input `a`, so that no case is folded at compile
-    // time and each one runs the emitted test.
-    const cases: [string, unknown][] = [
-      ['three', ['Linspace', 0, 'a', 3]],
-      ['three_start', ['Linspace', 'a', 1, 3]],
-      ['zero', ['Linspace', 0, 'a', 0]],
-    ];
-    let src = 'import numpy as np\nimport math\n\n';
-    for (const [name, json] of cases)
-      src += `${python.compileFunction(ce.box(json as any), `fn_${name}`, ['a'])}\n`;
-    src +=
-      "inf, nan = float('inf'), float('nan')\n" +
-      'print(repr(math.isnan(fn_three(inf))), repr(math.isnan(fn_three_start(nan))), ' +
-      'repr(fn_three(1.0)), repr(fn_zero(inf)), repr(math.isnan(fn_zero(nan))))\n';
-    const file = join(tmpdir(), `ce-682-${process.pid}.py`);
-    writeFileSync(file, src);
-    let out = '';
-    try {
-      out = execFileSync(TEST_PYTHON!, [file], { encoding: 'utf8' });
-    } finally {
-      unlinkSync(file);
-    }
-    expect(out.trim()).toBe('True True [0.0, 0.5, 1.0] [] True');
   });
 });

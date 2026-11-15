@@ -455,7 +455,7 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
       ).toThrow());
 
   // `Map` of a function defined on the engine declines on these targets.
-  for (const to of ['python', 'glsl'] as const)
+  for (const to of ['glsl'] as const)
     test(`Map(gm, P) on ${to} declines`, () =>
       expect(() =>
         compile(ce.box(['Map', 'gm', 'P']), {
@@ -476,49 +476,6 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
     }
     expect(r?.success ?? false).toBe(false);
   });
-
-  // The call with a written point is evaluated at compile time.
-  test('g := p ↦ Max(p) + 1; g((1, 2)) on python', () => {
-    const r = compile(
-      ce.box([
-        'Block',
-        [
-          'Declare',
-          'g',
-          "'unknown'",
-          ['Function', ['Add', ['Max', 'p'], 1], 'p'],
-        ],
-        ['g', ['Tuple', 1, 2]],
-      ]),
-      { to: 'python', fallback: false }
-    )!;
-    expect(r.success).toBe(true);
-    expect(r.code).toMatch(/return 3\b/);
-  });
-  test('g := p ↦ Max(p) + 1; g(q) on python declines', () =>
-    expect(() =>
-      compile(
-        ce.box([
-          'Block',
-          [
-            'Declare',
-            'g',
-            "'unknown'",
-            ['Function', ['Add', ['Max', 'p'], 1], 'p'],
-          ],
-          ['g', 'q'],
-        ]),
-        { to: 'python', fallback: false }
-      )
-    ).toThrow(/binds the point whole/));
-
-  // Python has no definition of `gm` compiled for one point. `P[1]` is
-  // typed as a point (the absence marker of an accessor is implicit), so
-  // the call declines as for a point argument.
-  test('gm(P[1]) on python declines', () =>
-    expect(() =>
-      compile(ce.box(['gm', ['At', 'P', 1]]), { to: 'python', fallback: false })
-    ).toThrow(/argument 1 is a point/));
 
   for (const to of ['glsl'] as const)
     test(`gm(q) on ${to}`, () => {

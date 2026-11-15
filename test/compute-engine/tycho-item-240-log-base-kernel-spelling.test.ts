@@ -26,7 +26,7 @@ function js(
   return { code: r.code!, value: r.run!(vars) };
 }
 
-function code(latex: string, to: 'glsl' | 'python' | 'interval-js'): string {
+function code(latex: string, to: 'glsl' | 'interval-js'): string {
   const r = compile(ce.parse(latex), { to });
   expect(r.success).toBe(true);
   return r.code!;
@@ -94,12 +94,6 @@ describe('the other targets', () => {
   test('shaders take the log2 builtin for base 2', () => {
     expect(code('\\log_{2}(x)', 'glsl')).toBe('log2(x)');
     expect(code('\\log(x)', 'glsl')).toBe('(log(x) / log(10.0))');
-  });
-
-  test('python takes the dedicated numpy kernel', () => {
-    expect(code('\\log_{2}(p)', 'python')).toBe('np.log2(p)');
-    expect(code('\\log(p)', 'python')).toBe('np.log10(p)');
-    expect(code('\\log_{3}(p)', 'python')).toBe('(np.log(p) / np.log(3))');
   });
 
   test('the interval target takes the dedicated enclosure', () => {

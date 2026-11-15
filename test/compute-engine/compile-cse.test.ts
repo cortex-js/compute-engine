@@ -1,14 +1,8 @@
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
 import { engine as ce } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { harvestCse } from '../../src/compute-engine/compilation/cse';
 import type { CompileTarget } from '../../src/compute-engine/compilation/types';
 import type { Expression } from '../../src/compute-engine/global-types';
@@ -16,9 +10,7 @@ import type { Expression } from '../../src/compute-engine/global-types';
 const glsl = new GLSLTarget();
 
 // The tests check which subexpressions are bound, not how an input is read.
-// In Python, a free symbol with an INFERRED `number` type is read through a
-// `None` test (ROADMAP CE-460); a DECLARED `number` is read as is. So the
-// inputs are declared.
+// So the inputs are declared.
 for (const s of ['u', 'x', '_cse1']) ce.declare(s, 'number');
 for (const s of ['m', 'n']) ce.declare(s, 'real | signed_infinity | nan');
 
@@ -587,15 +579,6 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
 });
 
 describe('COMPILE CSE — other targets', () => {
-  it('binds with a flat comprehension on the Python target', () => {
-    const code = new PythonTarget().compileToSource(ce.parse(PROBE_LATEX));
-
-    expect(occurrences(code, 'np.sin')).toBe(1);
-    expect(code).toMatchInlineSnapshot(
-      `[_cse1 ** 2 + _cse1 / (_cse1 + 2) for _cse1 in [np.sin(6 * u)]][0]`
-    );
-  });
-
   it('binds with a sequential-const IIFE on the interval-js target', () => {
     const expr = ce.parse(PROBE_LATEX);
     const result = compile(expr, { to: 'interval-js', fallback: false });
@@ -728,21 +711,6 @@ describe('COMPILE CSE — capture', () => {
       )
     );
   });
-
-  it('never merges across a `Sum` binder on the Python target', () => {
-    const code = new PythonTarget().compileToSource(
-      ce.parse(
-        '\\sin(6n)^2+\\sin(6n)+\\sin(6n)+\\sum_{n=1}^{m}(\\sin(6n)^2+\\sin(6n)+\\sin(6n))'
-      )
-    );
-    // One binding clause, whose right-hand side reads the ENCLOSING `n` (the
-    // generator's `for n in range(...)` has its own scope in Python).
-    expect(occurrences(code, 'for _cse')).toBe(1);
-    // `n` is declared, so it is read with no `None` test.
-    expect(code).toContain('for _cse1 in [np.sin(6 * n)]');
-    const genexp = code.slice(code.indexOf('sum('), code.indexOf(') + _cse1'));
-    expect(genexp).not.toContain('_cse');
-  });
 });
 
 /**
@@ -789,16 +757,6 @@ describe('COMPILE CSE — `Match` is inert', () => {
     );
     expect(result.code).not.toMatch(/_cse/);
   });
-
-  it('keeps the Python fail-closed contract', () => {
-    expect(() =>
-      new PythonTarget().compileToSource(
-        ce.box(['Match', probe3('u'), ['MatchCase', '_a', 'a']])
-      )
-    ).toThrow(
-      /Could not compile `Match`: pattern matching is not supported by the Python compile target/
-    );
-  });
 });
 
 /**
@@ -829,14 +787,6 @@ describe('COMPILE CSE — statement regions', () => {
       result.code.indexOf('const _cse1')
     );
     expect(occurrences(result.code, 'Math.sin(6 * _.u)')).toBe(1);
-  });
-
-  it('deduplicates an Assign right-hand side inside a Loop body (Python)', () => {
-    const code = new PythonTarget().compileFunction(loopBlock(), 'f', ['u']);
-    expect(code).toContain('    for i in range(1, 4):');
-    expect(code).toContain(
-      'acc = [acc + _cse1 + _cse1 + _cse1 ** 2 for _cse1 in [np.sin(6 * u)]][0]'
-    );
   });
 
   it('never binds across two statements of one Block', () => {
@@ -1123,18 +1073,6 @@ describe('COMPILE CSE — name collisions', () => {
     expect(on.code).not.toMatch(/\b_tv1\b/);
     expect(on.code).toBe(off.code);
   });
-
-  it('does not capture a Python parameter named `_cse1`', () => {
-    const code = new PythonTarget().compileFunction(
-      ce.box(probe3('_cse1')),
-      'f',
-      ['_cse1']
-    );
-    expect(code).toBe(
-      'def f(_cse1):\n' +
-        '    return [_cse2 + _cse2 + _cse2 ** 2 for _cse2 in [np.sin(6 * _cse1)]][0]\n'
-    );
-  });
 });
 
 /**
@@ -1174,12 +1112,6 @@ describe('COMPILE CSE — threshold and the per-region cap', () => {
     expect(occurrences(first, 'Math.sin(66 * _.u)')).toBe(3);
     expect(second).toBe(first);
     parity(capped(), { u: 0.3 }, 9);
-  });
-
-  it('keeps the cap on the Python target too', () => {
-    const code = new PythonTarget().compileToSource(capped());
-    expect(occurrences(code, 'for _cse')).toBe(64);
-    expect(code).toContain('for _cse64 in [np.sin(65 * u)]');
   });
 });
 
@@ -1359,21 +1291,6 @@ describe('COMPILE CSE — options', () => {
         compile(expr, { fallback: false, cse: false }).code
       );
     }
-  });
-
-  it('gives the Python no-options entries a default-enabled session', () => {
-    // `compileFunction`/`compileLambda` take no options bag (a stated v1 gap):
-    // they get a default-enabled session (§4.2).
-    const python = new PythonTarget();
-    const expr = ce.parse(PROBE_LATEX);
-
-    expect(python.compileFunction(expr, 'f', ['u'])).toBe(
-      'def f(u):\n' +
-        '    return [_cse1 ** 2 + _cse1 / (_cse1 + 2) for _cse1 in [np.sin(6 * u)]][0]\n'
-    );
-    expect(python.compileLambda(expr, ['u'])).toBe(
-      'lambda u: [_cse1 ** 2 + _cse1 / (_cse1 + 2) for _cse1 in [np.sin(6 * u)]][0]'
-    );
   });
 });
 
@@ -2058,233 +1975,12 @@ describe('COMPILE CSE — determinism across targets', () => {
     }
   );
 
-  it('emits byte-identical source twice on python', () => {
-    const python = new PythonTarget();
-    const first = python.compileToSource(ce.parse(CHAINED));
-    const second = python.compileToSource(ce.parse(CHAINED));
-
-    expect(first).toContain('_cse1');
-    expect(first).toContain('_tv2');
-    expect(second).toBe(first);
-  });
-
   it('emits byte-identical GLSL twice with CSE', () => {
     const first = glsl.compile(ce.parse(CHAINED)).code;
     const second = glsl.compile(ce.parse(CHAINED)).code;
 
     expect(first).toMatch(/_cse/);
     expect(second).toBe(first);
-  });
-});
-
-/**
- * §8 pyexec — the Python target's emitted source is validated with the real
- * `ast` module, and (when a `python3` is on PATH) EXECUTED against a stub
- * `np` whose `sin` counts its calls. That is what proves the flat binding
- * comprehension `[body for _cse1 in [rhs1] for _cse2 in [rhs2]][0]` really
- * evaluates each right-hand side exactly once and makes earlier names visible
- * to later clauses — a shape no amount of source inspection can establish.
- *
- * The suite SKIPS, with a reason, when `python3` is unavailable. numpy is NOT
- * required: the harness supplies the `np.sin` the emitted source calls.
- */
-const PYTHON3: string | undefined = (() => {
-  try {
-    execFileSync('python3', ['--version'], { stdio: 'ignore' });
-    return 'python3';
-  } catch {
-    return undefined;
-  }
-})();
-
-if (PYTHON3 === undefined)
-  console.warn(
-    'COMPILE CSE — Python emitted source: SKIPPED, no `python3` on PATH ' +
-      '(the emitted-source shape assertions elsewhere still run).'
-  );
-
-const pyDescribe = PYTHON3 ? describe : describe.skip;
-
-pyDescribe('COMPILE CSE — Python emitted source (pyexec)', () => {
-  let dir: string;
-  beforeAll(() => {
-    dir = mkdtempSync(join(tmpdir(), 'ce-cse-py-'));
-  });
-  // The scratch `.py` files are only inputs to `python3`; clean them up rather
-  // than leaking a temp directory per run.
-  afterAll(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  /** `ast.parse` the emitted expression — a real Python parse, not a regexp. */
-  const astParse = (source: string, name: string): void => {
-    const file = join(dir, `${name}.py`);
-    writeFileSync(file, `_ = (\n${source}\n)\n`);
-    execFileSync(
-      PYTHON3!,
-      ['-c', 'import ast,sys; ast.parse(open(sys.argv[1]).read())', file],
-      { stdio: 'pipe' }
-    );
-  };
-
-  /**
-   * Execute the emitted expression against a stub `np` that counts `sin`
-   * calls, and return `{ calls, value }`.
-   */
-  const run = (
-    source: string,
-    name: string,
-    bindings: string
-  ): { calls: number; value: unknown } => {
-    const file = join(dir, `${name}.py`);
-    writeFileSync(
-      file,
-      [
-        'import math, json',
-        'class _NP:',
-        '    def __init__(self): self.calls = 0',
-        '    def sin(self, x):',
-        '        self.calls += 1',
-        '        return math.sin(x)',
-        'np = _NP()',
-        bindings,
-        `_value = (\n${source}\n)`,
-        'print(json.dumps({"calls": np.calls, "value": _value}))',
-      ].join('\n') + '\n'
-    );
-    const out = execFileSync(PYTHON3!, [file], { encoding: 'utf-8' });
-    return JSON.parse(out);
-  };
-
-  it('parses, and evaluates the bound right-hand side exactly once', () => {
-    const source = new PythonTarget().compileToSource(ce.parse(PROBE_LATEX));
-    astParse(source, 'probe');
-
-    const { calls, value } = run(source, 'probe-run', 'u = 0.3');
-    // ONE `np.sin` call for three occurrences — the point of the exercise.
-    expect(calls).toBe(1);
-    expect(value as number).toBeCloseTo(
-      compile(ce.parse(PROBE_LATEX), { fallback: false }).run!({
-        u: 0.3,
-      }) as number,
-      12
-    );
-  });
-
-  it('keeps later binding clauses able to see earlier ones', () => {
-    // `sin(6u)` occurs 3×, `cos(u)·sin(6u)²` 2×: two dependent temporaries, the
-    // second referencing the first.
-    const expr = ce.parse(
-      '\\frac{\\sin(6u)^2\\cos(u)}{1+\\sin(6u)^2\\cos(u)} + \\sin(6u)'
-    );
-    const source = new PythonTarget().compileToSource(expr);
-    expect(occurrences(source, 'for _cse')).toBe(2);
-    expect(source.indexOf('for _cse1 in')).toBeLessThan(
-      source.indexOf('for _cse2 in')
-    );
-    astParse(source, 'dependent');
-
-    const { calls, value } = run(
-      source,
-      'dependent-run',
-      'np.cos = math.cos\nu = 0.4'
-    );
-    expect(calls).toBe(1);
-    expect(value as number).toBeCloseTo(
-      compile(expr, { fallback: false }).run!({ u: 0.4 }) as number,
-      12
-    );
-  });
-
-  it('scopes a nested generator correctly (binder capture)', () => {
-    // The outer clause's right-hand side reads the ENCLOSING `n`; the inner
-    // `sum(… for n in range(…))` has its own Python scope.
-    const expr = ce.parse(
-      '\\sin(6n)^2+\\sin(6n)+\\sin(6n)+\\sum_{n=1}^{3}(\\sin(6n)^2+\\sin(6n)+\\sin(6n))'
-    );
-    const source = new PythonTarget().compileToSource(expr, {
-      constantFold: false,
-    });
-    astParse(source, 'capture');
-
-    const { calls, value } = run(source, 'capture-run', 'n = 0.3');
-    // 1 for the outer temp + 9 inside the (undeduplicated) generator body.
-    expect(calls).toBe(10);
-    expect(value as number).toBeCloseTo(
-      compile(expr, { fallback: false }).run!({ n: 0.3 }) as number,
-      10
-    );
-  });
-
-  it('emits a per-statement binding that parses and runs inside a def', () => {
-    const expr = ce.box([
-      'Block',
-      ['Declare', 'acc', "'unknown'", 0],
-      [
-        'Loop',
-        ['Assign', 'acc', ['Add', 'acc', probe3('u')]],
-        ['Element', 'i', ['Range', 1, 3]],
-      ],
-      'acc',
-    ]);
-    const source = new PythonTarget().compileFunction(expr, 'f', ['u']);
-    const file = join(dir, 'stmt.py');
-    writeFileSync(
-      file,
-      [
-        'import math, json',
-        'class _NP:',
-        '    def __init__(self): self.calls = 0',
-        '    def sin(self, x):',
-        '        self.calls += 1',
-        '        return math.sin(x)',
-        'np = _NP()',
-        source,
-        // `f` must run BEFORE `np.calls` is read: a dict literal evaluates its
-        // values left to right.
-        '_value = f(0.3)',
-        'print(json.dumps({"calls": np.calls, "value": _value}))',
-      ].join('\n') + '\n'
-    );
-    const out = JSON.parse(
-      execFileSync(PYTHON3!, [file], { encoding: 'utf-8' })
-    );
-    // Three iterations, ONE `np.sin` per iteration.
-    expect(out.calls).toBe(3);
-    // Three accumulated iterations of the deduplicated right-hand side.
-    expect(out.value as number).toBeCloseTo(
-      3 *
-        (compile(ce.box(probe3('u')), { fallback: false }).run!({
-          u: 0.3,
-        }) as number),
-      12
-    );
-  });
-
-  it('keeps a 64-binding stress source within the Python parser', () => {
-    // The per-region cap (§6.2) exists so a many-candidate region cannot grow
-    // source past what the parser accepts. The FLAT comprehension form is what
-    // keeps the nesting depth constant.
-    const terms: any[] = [];
-    for (let k = 0; k < 80; k++) {
-      const t = ['Sin', ['Multiply', k + 2, 'u']];
-      terms.push(t, t, t);
-    }
-    const source = new PythonTarget().compileToSource(
-      ce.box(['Add', ...terms])
-    );
-    expect(occurrences(source, 'for _cse')).toBe(64);
-    astParse(source, 'stress');
-
-    const { calls, value } = run(source, 'stress-run', 'u = 0.3');
-    // 64 bound right-hand sides + 16 uncapped candidates emitted inline (3× each).
-    expect(calls).toBe(64 + 16 * 3);
-    expect(value as number).toBeCloseTo(
-      compile(ce.box(['Add', ...terms]), { fallback: false }).run!({
-        u: 0.3,
-      }) as number,
-      9
-    );
   });
 });
 

@@ -231,9 +231,9 @@ export function bigintLaneError(payload: {
 
 /**
  * Throw when `options` has the `profile` option, in the `compile()` method
- * of a target (`JavaScriptTarget`, the shader targets, `PythonTarget`,
+ * of a target (`JavaScriptTarget`, the shader targets,
  * `IntervalJavaScriptTarget`). The profile is an option of the function
- * `compile()` with the target `javascript`, which selects another
+ * `compile()` with the target `javascript` or `glsl`, which selects another
  * compiler: a target called directly would compile with its own compiler
  * and ignore the option. It is an error of the options, thrown whatever
  * `fallback` says.
@@ -241,9 +241,9 @@ export function bigintLaneError(payload: {
 export function assertNoProfileOption(options: { profile?: unknown }): void {
   if (options.profile === undefined) return;
   throw new Error(
-    'Invalid compilation option "profile": the profile "numeric-kernel" is ' +
-      'an option of the function compile() with the target "javascript"; ' +
-      'the compile() method of a target does not take it'
+    'Invalid compilation option "profile": the option "profile" is an ' +
+      'option of the function compile() with the targets "javascript" and ' +
+      '"glsl"; the compile() method of a target does not take it'
   );
 }
 
@@ -296,7 +296,7 @@ export function compileDiagnosticOf(
 
 /**
  * The object of "Could not compile …" in a decline message raised by a check
- * of a compiled body (the GPU and Python targets check that a body emits as a
+ * of a compiled body (the GPU targets check that a body emits as a
  * single expression, or places its `return` correctly). Such a check
  * receives a `subject` that is one of four things: a user function name
  * (`f`), which is quoted; an API entry point (`compileToSource()`), which is

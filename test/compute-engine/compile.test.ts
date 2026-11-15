@@ -5,12 +5,6 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { TEST_PYTHON } from './test-python';
 
 describe('COMPILE', () => {
   describe('Expressions', () => {
@@ -605,8 +599,8 @@ describe('COMPILE', () => {
 
   describe('Cross-reference: target functions exist in ComputeEngine library', () => {
     // Functions that are target-specific and intentionally not in the CE library.
-    // These are GLSL graphics built-ins, Python-specific numpy/scipy functions,
-    // or control-flow constructs handled by the compiler.
+    // These are GLSL graphics built-ins or control-flow constructs handled by
+    // the compiler.
     const TARGET_SPECIFIC: Record<string, Set<string>> = {
       'javascript': new Set(['If', 'List', 'Range', 'Integrate']),
       'glsl': new Set([
@@ -629,25 +623,6 @@ describe('COMPILE', () => {
         'Conjugate',
       ]),
       'interval-javascript': new Set(['If']),
-      'python': new Set([
-        'Arctan2',
-        'Real',
-        'Imaginary',
-        'Argument',
-        'Conjugate',
-        'Sum',
-        'Product',
-        'Dot',
-        'Cross',
-        'Norm',
-        'Determinant',
-        'Inverse',
-        'Transpose',
-        'MatrixMultiply',
-        'Erf',
-        'Erfc',
-        'List',
-      ]),
     };
 
     const targets: Array<
@@ -656,7 +631,6 @@ describe('COMPILE', () => {
       ['javascript', new JavaScriptTarget()],
       ['glsl', new GLSLTarget()],
       ['interval-javascript', new IntervalJavaScriptTarget()],
-      ['python', new PythonTarget()],
     ];
 
     for (const [name, target] of targets) {
@@ -775,7 +749,6 @@ describe('COMPILE', () => {
       ['javascript', new JavaScriptTarget()],
       ['glsl', new GLSLTarget()],
       ['interval-javascript', new IntervalJavaScriptTarget()],
-      ['python', new PythonTarget()],
     ];
 
     for (const [name, target] of targets) {
@@ -796,7 +769,6 @@ describe('COMPILE', () => {
           'javascript': [],
           'glsl': [],
           'interval-javascript': [],
-          'python': [],
         };
 
         expect(missing.sort()).toEqual((expectedMissing[name] ?? []).sort());
@@ -3213,8 +3185,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     ).toBe(42);
   });
 
-  // Linear algebra (parity with the Python target). Values verified against
-  // the interpreter.
+  // Linear algebra. Values verified against the interpreter.
   it('Dot / MatrixMultiply dispatch on dimensionality', () => {
     const e = mkEngine();
     const M = ['List', ['List', 1, 2], ['List', 3, 4]];
@@ -5004,16 +4975,6 @@ describe('block-locals of a function body declared with no type', () => {
     expect(untyped).toBe(declared);
   });
 
-  it('Python: user-defined functions decline outright (unchanged)', () => {
-    const py = new PythonTarget();
-    for (const body of [WITNESS, TWO_ASSIGNS, DECLARE_THEN_ASSIGN]) {
-      const e = engineWithA(body);
-      expect(() => py.compile(e.box(['Add', ['a', 'u'], 1]))).toThrow(
-        /Unknown operator `a`/
-      );
-    }
-  });
-
   // Single-statement bodies (including the `Block(Typed(…))` ascription shape)
   // have no assignment to hoist, so they must stay BYTE-IDENTICAL: the block
   // is still unwrapped, with no synthesized declaration.
@@ -5898,296 +5859,6 @@ describe('the expression-only GPU routes decline statement bodies', () => {
   });
 });
 
-// The expression-only PYTHON route, the same defect one target over.
-// `PythonTarget.compileToSource()` answers with a bare expression string, but
-// this is a `bareStatementBlocks: true` target: a `Block` lowers to a
-// newline-joined statement sequence with the last statement `return`-prefixed.
-// Ungated, that went out behind the expression contract — `Block(s ≔ x; s)`
-// returned `"s = x\nreturn s"`, and `Block(Declare s; s ≔ x; Return s)`
-// returned `"s = x\nreturn return s"` (a doubled `return`). Neither parses.
-// Python's expression-level binding forms (the applied `lambda`, the flat CSE
-// comprehension) could in principle carry a lowering, but that is a feature —
-// this declines and points at `compileFunction()`, which emits a `def`.
-describe('the expression-only Python route declines statement bodies', () => {
-  const engineWithX = (): ComputeEngine => {
-    const e = new ComputeEngine();
-    e.declare('x', 'number');
-    // `s` is not declared in the engine: the bodies below declare it, and a
-    // write to a symbol declared in the engine declines.
-    return e;
-  };
-
-  /** `s = x\nreturn s` before the gate. */
-  const ASSIGN_THEN_VALUE: MathJsonExpression = [
-    'Block',
-    ['Declare', 's', "'unknown'", 'x'],
-    's',
-  ];
-  /** `s = x\nreturn return s` before the gate — the doubled `return`. */
-  const DECLARE_ASSIGN_RETURN: MathJsonExpression = [
-    'Block',
-    ['Declare', 's', 'number', 'x'],
-    ['Return', 's'],
-  ];
-  /** `return x` before the gate — a bare statement. */
-  const BARE_RETURN: MathJsonExpression = ['Block', ['Return', 'x']];
-  /**
-   * The two single-line holes the emitted-source scan cannot see. An
-   * assignment body emits `s = x` — one line, no `return` token — and Python
-   * assignment is a STATEMENT (this target emits no walrus operator). A root
-   * `Declare` emits the EMPTY string: Python has no declaration statement, so
-   * the name and its initializer both vanish.
-   */
-  const ASSIGN_ONLY: MathJsonExpression = [
-    'Block',
-    ['Declare', 's', "'unknown'", 0],
-    ['Assign', 's', 'x'],
-  ];
-  const DECLARE_ONLY: MathJsonExpression = ['Declare', 's', 'number', 'x'];
-
-  /** The decline of a block whose last statement is an assignment or a
-   * declaration, where the value of the block is used. */
-  const VALUE_USED =
-    /an assignment or a declaration is a statement, and its value is used here/;
-
-  it('declines a multi-statement block', () => {
-    for (const body of [ASSIGN_THEN_VALUE, DECLARE_ASSIGN_RETURN]) {
-      const python = new PythonTarget();
-      expect(() => python.compileToSource(engineWithX().box(body))).toThrow(
-        /Could not compile with `compileToSource\(\)`: this route emits a single Python EXPRESSION, but the body lowers to a statement sequence \(`s = x…`\)/
-      );
-      expect(() => python.compileToSource(engineWithX().box(body))).toThrow(
-        /Compile a statement body with compileFunction\(\) instead/
-      );
-    }
-  });
-
-  it('declines a body that lowers to a bare `return`', () => {
-    expect(() =>
-      new PythonTarget().compileToSource(engineWithX().box(BARE_RETURN))
-    ).toThrow(
-      /Could not compile with `compileToSource\(\)`: this route emits a single Python EXPRESSION, but the body lowers to a bare `return` statement \(`return x`\)/
-    );
-  });
-
-  it('expression bodies are untouched, byte for byte', () => {
-    // The controls that MUST keep working. A single-statement `Block` unwraps
-    // to its expression in the base compiler, so it never reaches the gate.
-    const python = new PythonTarget();
-    const e = engineWithX();
-    expect(python.compileToSource(e.box(['Add', 'x', 1]))).toBe('x + 1');
-    expect(python.compileToSource(e.box(['Block', ['Add', 'x', 1]]))).toBe(
-      'x + 1'
-    );
-    // A CSE emission is a flat comprehension — one line, and it stays one.
-    expect(
-      python.compileToSource(
-        e.parse('\\sin(6u)^2+\\frac{\\sin(6u)}{\\sin(6u)+2}')
-      )
-    ).toBe(
-      "[_cse1 ** 2 + _cse1 / (_cse1 + 2) for _cse1 in [np.sin(6 * u)]][0]"
-    );
-  });
-
-  it('a string literal containing `return` is an expression, not a statement', () => {
-    // The `return` token scan runs with Python string literals blanked out —
-    // this target emits them, and their CONTENT is not source.
-    expect(
-      new PythonTarget().compileToSource(
-        engineWithX().box({ str: 'a return b' })
-      )
-    ).toBe('"a return b"');
-  });
-
-  it('compileFunction() — the statement-capable route — is unchanged', () => {
-    // The escape hatch the message names still emits the statement block,
-    // indented under the `def` with the `return` the block hook placed.
-    expect(
-      new PythonTarget().compileFunction(
-        engineWithX().box(ASSIGN_THEN_VALUE),
-        'f',
-        ['x']
-      )
-    ).toBe('def f(x):\n    s = x\n    return s\n');
-  });
-
-  it('declines an assignment body — a statement, not an expression', () => {
-    // Before the gate: `compileToSource` returned `"s = x"` and `compileLambda`
-    // returned `"lambda x: s = x"`. Neither parses — unlike GLSL (see the GPU
-    // block above), Python assignment is not an operator, and this target does
-    // not emit `:=`. A `Block` nests: the check follows its value statement.
-    const python = new PythonTarget();
-    for (const body of [
-      ASSIGN_ONLY,
-      ['Assign', 's', 'x'] as MathJsonExpression,
-      ['Block', ASSIGN_ONLY] as MathJsonExpression,
-    ]) {
-      expect(() => python.compileToSource(engineWithX().box(body))).toThrow(
-        /Could not compile with `compileToSource\(\)`: this route emits a single Python EXPRESSION, but the body is an assignment/
-      );
-      expect(() =>
-        python.compileLambda(engineWithX().box(body), ['x'])
-      ).toThrow(
-        /Could not compile with `compileLambda\(\)`: this route emits a single Python EXPRESSION, but the body is an assignment/
-      );
-    }
-    expect(() =>
-      python.compileToSource(engineWithX().box(ASSIGN_ONLY))
-    ).toThrow(
-      /Python assignment is a STATEMENT \(this target does not emit the walrus operator\)/
-    );
-  });
-
-  it('declines a bare-`Declare` body, which emitted nothing at all', () => {
-    // Before the gate `compileToSource` returned `""` and `compileLambda`
-    // returned `"lambda x: "` — the declared name AND its initializer dropped.
-    const python = new PythonTarget();
-    for (const body of [
-      DECLARE_ONLY,
-      ['Block', DECLARE_ONLY] as MathJsonExpression,
-    ]) {
-      expect(() => python.compileToSource(engineWithX().box(body))).toThrow(
-        /Could not compile with `compileToSource\(\)`: this route emits a single Python EXPRESSION, but the body is a declaration/
-      );
-      expect(() =>
-        python.compileLambda(engineWithX().box(body), ['x'])
-      ).toThrow(
-        /Could not compile with `compileLambda\(\)`: this route emits a single Python EXPRESSION, but the body is a declaration/
-      );
-    }
-    expect(() =>
-      python.compileToSource(engineWithX().box(DECLARE_ONLY))
-    ).toThrow(
-      /the declared name and its initializer would be silently DROPPED/
-    );
-    // A declaration with no value is a static error.
-    expect(() =>
-      python.compileToSource(engineWithX().box(['Declare', 's', 'number']))
-    ).toThrow(/invalid expression/);
-  });
-
-  // `compileFunction()` — the route every message above points at — had the
-  // same defect one level down, in BOTH its branches. DECLINE, not a reroute:
-  // the multi-line branch adds no `return` of its own (it relies on the block
-  // hook having placed one on a VALUE statement), so routing `s = x` through it
-  // emits `def f(x):\n    s = x\n` — a `def` returning `None`, where the
-  // interpreter gives `Block(s ≔ x)` the assigned value. That is a different
-  // answer, not the pinned `…\n    return s\n` shape, so there is no honest
-  // reuse. The caller's fix — give the block a value statement — already works
-  // and is pinned by the test above.
-  it('compileFunction() declines a statement body in either branch', () => {
-    const python = new PythonTarget();
-    // Single-line branch: emitted `def f(x):\n    return s = x\n` before.
-    expect(() =>
-      python.compileFunction(engineWithX().box(['Assign', 's', 'x']), 'f', [
-        'x',
-      ])
-    ).toThrow(
-      /Could not compile with `compileFunction\(\)`: the body's value statement is an assignment, and a Python statement cannot be returned/
-    );
-    // A block whose last statement is an assignment has the value
-    // `Nothing`: the function body declines, with one statement or more.
-    for (const body of [
-      ASSIGN_ONLY,
-      [
-        'Block',
-        ['Declare', 's', "'unknown'", 'x'],
-        ['Declare', 't', "'unknown'", 0],
-        ['Assign', 't', 's'],
-      ],
-    ] as MathJsonExpression[])
-      expect(() =>
-        python.compileFunction(engineWithX().box(body), 'f', ['x'])
-      ).toThrow(VALUE_USED);
-    // The message names the caller-side fix.
-    expect(() =>
-      python.compileFunction(engineWithX().box(ASSIGN_ONLY), 'f', ['x'])
-    ).toThrow(/End the block with the value/);
-    // A last statement the hook cannot return stays declined: a nested
-    // block.
-    expect(() =>
-      python.compileFunction(
-        engineWithX().box([
-          'Block',
-          ['Declare', 's', "'unknown'", 'x'],
-          ['Declare', 't', "'unknown'", 0],
-          ['Block', ['Assign', 't', 's']],
-        ]),
-        'f',
-        ['x']
-      )
-    ).toThrow(
-      /Could not compile with `compileFunction\(\)`: the body's value statement is/
-    );
-    // A declaration with no value is a static error.
-    expect(() =>
-      python.compileFunction(
-        engineWithX().box([
-          'Block',
-          ['Declare', 's', "'unknown'", 'x'],
-          ['Declare', 't', 'number'],
-        ]),
-        'f',
-        ['x']
-      )
-    ).toThrow(/invalid expression/);
-    // A ROOT declaration: emitted `def f(x):\n    return \n` (initializer
-    // dropped). Still declined.
-    expect(() =>
-      python.compileFunction(engineWithX().box(DECLARE_ONLY), 'f', ['x'])
-    ).toThrow(
-      /Could not compile with `compileFunction\(\)`: the body's value statement is a declaration \(which this target emits as nothing at all\)/
-    );
-    // A declaration with an initializer as the last statement of a block:
-    // the value of the block is `Nothing`, so the function body declines.
-    expect(() =>
-      python.compileFunction(
-        engineWithX().box(['Block', DECLARE_ONLY] as MathJsonExpression),
-        'f',
-        ['x']
-      )
-    ).toThrow(VALUE_USED);
-    // A last assignment whose value is a block: Python has no expression
-    // form for a block, so the value of the assignment lowers to statements
-    // (it was spliced as `t = u = s`, `return 2 * u`, `return t`). The
-    // assignment itself declines.
-    expect(() =>
-      python.compileFunction(
-        engineWithX().box([
-          'Block',
-          ['Declare', 's', "'unknown'", 'x'],
-          ['Declare', 't', "'unknown'", 0],
-          [
-            'Assign',
-            't',
-            [
-              'Block',
-              ['Declare', 'u', "'unknown'", 's'],
-              ['Multiply', 'u', 2],
-            ],
-          ],
-        ]),
-        'f',
-        ['x']
-      )
-    ).toThrow(
-      /Could not compile `Assign`: the value assigned to "t" lowers to a statement sequence on target 'python'/
-    );
-  });
-
-  it('compile() declines a body whose value is an assignment or a declaration', () => {
-    // The value of such a body is `Nothing`, which has no compiled
-    // representation.
-    const python = new PythonTarget();
-    expect(() => python.compile(engineWithX().box(ASSIGN_ONLY))).toThrow(
-      VALUE_USED
-    );
-    expect(() => python.compile(engineWithX().box(DECLARE_ONLY))).toThrow(
-      VALUE_USED
-    );
-  });
-});
-
 // A parameter declared as a scalar (a number or a boolean) maps over a TUPLE
 // argument, as `Sin` does (user decision 2026-10-03): `Apply((u: real) ↦ 2u, (a, b))` is `(2a, 2b)`
 // under `evaluate()`, and each target computes the same tuple (an array in
@@ -6747,9 +6418,7 @@ describe('COMPILE a `Return` in a tail position gives its value, on every statem
   // A `Return` was written in place as a statement. In an expression it was
   // a syntax error on the JavaScript and interval targets: a bare root
   // `Return(x)` became the expression `return x`, and an `If` whose branches
-  // return became `c ? return 1 : return 5`. On Python, a block whose last
-  // statement is a `Return` became `return return x`, and `compileFunction()`
-  // wrote `return return x` for a body that is a `Return`. In a tail position
+  // return became `c ? return 1 : return 5`. In a tail position
   // (the compilation root, or the last statement of a block whose value is
   // used), a `Return` now gives its value, and an `If` whose branches return
   // is the conditional of the branch values.
@@ -6864,62 +6533,7 @@ describe('COMPILE a `Return` in a tail position gives its value, on every statem
     });
     expect(interval.success).toBe(false);
     expect(interval.error).toMatch(reason);
-    expect(() =>
-      new PythonTarget().compileFunction(engine().box(operand), 'f', ['y'])
-    ).toThrow(/Could not compile `If`: a multi-statement construct/);
   });
-
-  test('Python: the code has one `return` per path', () => {
-    const python = new PythonTarget();
-    const code = (body: MathJsonExpression) =>
-      python.compileFunction(engine().box(body), 'f', ['y'], undefined, {
-        constantFold: false,
-      });
-    expect(code(BODIES[0][1])).toBe('def f(y):\n    z = 1\n    return y + 1\n');
-    expect(code(BODIES[2][1])).toBe('def f(y):\n    return y + 1\n');
-    for (const [, body] of [...BODIES, ['', EARLY]] as [
-      string,
-      MathJsonExpression,
-    ][])
-      expect(code(body)).not.toMatch(/return\s+return/);
-  });
-
-  const pythonRuns = (() => {
-    try {
-      if (TEST_PYTHON === undefined) return false;
-      execFileSync(TEST_PYTHON, ['-c', 'import numpy'], { stdio: 'ignore' });
-      return true;
-    } catch {
-      return false;
-    }
-  })();
-
-  (pythonRuns ? test : test.skip)(
-    'Python: the compiled functions give the value of evaluate()',
-    () => {
-      const python = new PythonTarget();
-      const cases = [...BODIES, ['an early return', EARLY]] as [
-        string,
-        MathJsonExpression,
-      ][];
-      let src = 'import numpy as np\nimport json\n\n';
-      cases.forEach(([, body], i) => {
-        src += `${python.compileFunction(engine().box(body), `f${i}`, ['y'], undefined, { constantFold: false })}\n`;
-      });
-      src += `print(json.dumps([[float(f(y)) for y in ${JSON.stringify(SAMPLES)}] for f in [${cases.map((_, i) => `f${i}`).join(', ')}]]))\n`;
-      const file = path.join(os.tmpdir(), `ce-py-return-${process.pid}.py`);
-      fs.writeFileSync(file, src);
-      let out = '';
-      try {
-        out = execFileSync(TEST_PYTHON!, [file], { encoding: 'utf8' });
-      } finally {
-        fs.unlinkSync(file);
-      }
-      expect(JSON.parse(out)).toEqual(
-        cases.map(([, body]) => SAMPLES.map((y) => interpreted(body, y)))
-      );
-    }
-  );
 });
 
 describe('COMPILE a call of a block local or a parameter with a library name', () => {
@@ -6983,15 +6597,7 @@ describe('COMPILE a call of a block local or a parameter with a library name', (
         expect(interval.success).toBe(true);
         expect(midpoint(interval.run!({ x: 3 } as never))).toBe(4);
       }
-      // Python binds the local as a value and calls it (CE-237): the library
-      // function of the same name is spelled `np.…`, so the local name does
-      // not hide it. The GPU targets have no function values.
-      const py = compile(engine().box(local), {
-        to: 'python',
-        fallback: false,
-      }).code as string;
-      expect(py).toContain(`${name} = (lambda t: t + 1)`);
-      expect(py).toContain(`return ${name}(x)`);
+      // The GPU targets have no function values.
       expect(() =>
         compile(engine().box(local), { to: 'glsl', fallback: false })
       ).toThrow();
@@ -7004,7 +6610,7 @@ describe('COMPILE a call of a block local or a parameter with a library name', (
       // "Function values").
       const reason =
         /the argument `\(t\) => t \+ 1` is a function, and compiled code does not pass a function value through a parameter/;
-      for (const to of ['javascript', 'glsl', 'python'] as const)
+      for (const to of ['javascript', 'glsl'] as const)
         expect(() =>
           compile(engine().box(param), { to, fallback: false })
         ).toThrow(

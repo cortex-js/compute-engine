@@ -1,5 +1,42 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **The Python compilation target is removed.** `compile(expr, { to:
+  'python' })` now answers as for any target that is not registered
+  ("Compilation target "python" is not registered"), and `PythonTarget` is
+  no longer exported. There were no known users; the target may come back
+  later on the new compiler. A host can still register a target of its own
+  through `LanguageTarget`, under any name. A host target whose `language`
+  is `'python'` no longer gets the behaviours that the engine keyed on that
+  name (for example the lowered type names `float` and `int`, and the
+  refusal of an element-wise operation on a list). The MCP `compile` tool no
+  longer offers `python`. Removed with it, from `BaseCompiler`: the statics
+  `assertAssignmentIsStatement`, `compileExprBroadcastPython`,
+  `tryCompilePythonElementwise`, `withFreshBlockLocals` and
+  `freshBlockLocalName`; `tailValue()` takes one argument; the result of
+  `spellTuplePattern()` has no `pyPattern`.
+- **The experimental profile `'numeric-kernel'` of `compile()` is removed**,
+  with the structured compiler behind it. `profile` now accepts `'ir'`
+  only: `compile(expr, { profile: 'numeric-kernel' })` throws `Invalid
+  compilation option "profile": expected "ir"`, whatever `fallback` says.
+  The fields `pure` and `defaultedSymbols` of a compilation result and of a
+  `canCompile()` answer, which only that profile set, are gone, and so is
+  the value `'numeric-kernel'` of the `profile` field of stored code. From
+  the exported `JavaScriptTarget`, the protected hook `bodyEmitter()` is
+  removed (an override in a subclass is no longer called), and from
+  `BaseCompiler` the statics `assertCapturedCallableBindings`,
+  `resetCompilationMemos` and `resetSharedCompilationBudgets`. The
+  environment values `CE_JS_PROFILE=numeric-kernel` and
+  `CE_JS_PROFILE_SHADOW=1` no longer turn anything on.
+
+### Behavior Changes
+
+- **Compiled JavaScript: a `_` position of a loop pattern no longer takes a
+  temporary name**, so the temporaries after it in such a loop
+  (`Comprehension(…, Element(Tuple(_, j), Q))`) have other names. The values
+  are the same.
+
 ### Bug Fixes
 
 - **A function returned by another function no longer gets a `scope` effect
@@ -39557,8 +39594,6 @@ ce.simplificationRules.push({
   - Function mapping for common math + linear algebra
   - Helpers for full functions, lambdas, and vectorized code
 
-  See the [Python/NumPy Target Guide](/compute-engine/guides/python-target/) for
-  complete documentation and examples.
 
 - **GLSL Compilation Target**: New built-in GLSL (OpenGL Shading Language)
   target for compiling mathematical expressions to WebGL shaders.

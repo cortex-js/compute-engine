@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 /**
  * Compiled counterpart of `filter-predicate-errors.test.ts`.
@@ -9,7 +8,7 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
  * `Typed`-parameter annotation rejects the element it is applied to (the
  * annotation-as-contract ruling,
  * `docs/TYPE-SYSTEM.md` ruling 2). A
- * compiled callback is a plain arrow / Python lambda — the annotation is not
+ * compiled callback is a plain arrow — the annotation is not
  * emitted at all — so before this gate landed
  *
  *     Filter(ds, (n: integer) ↦ n > 0)   over   [1.5, 2.5]
@@ -17,7 +16,7 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
  * compiled to `((_f) => (_.ds).filter((_x) => _f(_x)))(((n) => 0 < n))` and RAN
  * to `[1.5, 2.5]` where the interpreter answers two `Error`s. Same for `Map`,
  * `TakeWhile`, `DropWhile` and every sibling callback consumer, on the
- * JavaScript and Python targets alike.
+ * JavaScript target.
  *
  * A compiled target has no Error VALUE to produce, so exact parity is out of
  * reach. The invariant is the weaker one — NO SILENTLY WRONG VALUES — and the
@@ -27,8 +26,6 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
  * still compiles, byte-identically — the same admission rule `lowerLevel` uses
  * for the fused per-element bypass (`annotationSatisfiedBySource`).
  */
-
-const python = new PythonTarget();
 
 /** `["Function", <body>, ["Typed", <param>, <type>]]` — an annotated callback. */
 const annotated = (param: string, type: string, body: unknown) => [
@@ -83,12 +80,6 @@ describe('Compiled callbacks with an unenforceable parameter annotation', () => 
         expect(() => js(violating())).toThrow(/Could not compile/);
       });
 
-      it('fails closed on the Python target', () => {
-        expect(() => python.compile(violating())).toThrow(
-          /callback parameter 'n' is annotated 'integer'/
-        );
-      });
-
       it('reports success: false (not a silent value) with fallback on', () => {
         const r = compile(violating(), { fallback: true });
         expect(r.success).toBe(false);
@@ -103,7 +94,6 @@ describe('Compiled callbacks with an unenforceable parameter annotation', () => 
         );
         const r = js(expr);
         expect(r.success).toBe(true);
-        expect(python.compile(expr).success).toBe(true);
       });
     });
   }
@@ -207,10 +197,6 @@ describe('the retraction repro', () => {
     expect(js(retracted()).run!({})).toEqual([1.5, 2.5]);
   });
 
-  it('the Python target compiles the reassigned source', () => {
-    expect(() => python.compile(retracted())).not.toThrow();
-  });
-
   it('the interpreter follows the reassigned source', () => {
     expect(retracted().evaluate().toString()).toBe('[1.5,2.5]');
   });
@@ -239,10 +225,6 @@ describe('a written annotation and a reassigned source', () => {
     expect(() => js(retracted())).toThrow(/Could not compile/);
   });
 
-  it('declines on the Python target', () => {
-    expect(() => python.compile(retracted())).toThrow(/integer/);
-  });
-
   it('the interpreter answers with per-element errors', () => {
     expect(retracted().evaluate().toString()).toContain('incompatible-type');
   });
@@ -265,7 +247,6 @@ describe('a symbol-valued annotated callback', () => {
 
   it('fails closed when the element type does not satisfy the annotation', () => {
     expect(() => js(withNamed('number'))).toThrow(/Could not compile/);
-    expect(() => python.compile(withNamed('number'))).toThrow(/integer/);
   });
 
   it('compiles when it does', () => {
@@ -368,10 +349,10 @@ describe('combiner and index callbacks', () => {
 
 /**
  * The gate is invisible to everything it does not apply to: an UNANNOTATED
- * callback compiles byte-identically, on both targets.
+ * callback compiles byte-identically.
  */
 describe('unannotated callbacks are untouched', () => {
-  it('emits the same JavaScript and Python as before the gate', () => {
+  it('emits the same JavaScript as before the gate', () => {
     const ce = new ComputeEngine();
     ce.declare('ds', 'list<number>');
     const expr = ce.box([
@@ -383,9 +364,6 @@ describe('unannotated callbacks are untouched', () => {
     // scalars, so the literal is passed as it is, with no wrapper.
     expect(js(expr).code).toBe(
       '((_f) => (_.ds).filter((_x) => _f(_x)))(((n = NaN) => 0 < n))'
-    );
-    expect(python.compile(expr).code).toBe(
-      '(lambda _f: [_x for _x in ds if _f(_x)])((lambda n: 0 < n))'
     );
   });
 });
@@ -404,7 +382,7 @@ describe('unannotated callbacks are untouched', () => {
  * The obligation at that point is the standing one: fail closed OR be sound.
  * Measured: the admission passes and the BODY declines — a `string` arm reaches
  * an operator whose lowering is numeric — so `compile()` reports
- * `success: false` on both targets and the interpreter evaluates. No silent
+ * `success: false` and the interpreter evaluates. No silent
  * wrong values. (Were a body ever to compile under a union annotation, this
  * test would have to assert `run()` parity with the interpreter instead.)
  */
@@ -428,15 +406,12 @@ describe('a HAND-annotated union callback over a satisfying source', () => {
       '(x: integer | string) -> boolean'
     );
 
-    // Fail-closed on both targets: the decline comes from the body's `Equal`
+    // Fail-closed: the decline comes from the body's `Equal`
     // over a possibly-string operand, not from the annotation gate. Constant
     // folding is opted out of throughout: the source is a literal list, so the
     // whole `Filter` would otherwise be evaluated at compile time and emitted
     // as the literal `[1]`, never reaching the body lowering under test.
     expect(() => js(expr, { constantFold: false })).toThrow(
-      /string-valued operands are not supported/
-    );
-    expect(() => python.compile(expr, { constantFold: false })).toThrow(
       /string-valued operands are not supported/
     );
     // With the default fallback, that is a reported failure, not a wrong value.

@@ -259,8 +259,8 @@ export function equal(
  * Not equal comparison for intervals: the negation of `equal`.
  *
  * An `empty` operand gives `'true'`, since `equal` gives `'false'` for it:
- * the interpreter and the `javascript` and `python` targets answer `True`
- * for `NaN ≠ 0` (user decision 2026-10-25). A `partial` operand gives
+ * the interpreter and the `javascript` target answer `True` for `NaN ≠ 0`
+ * (user decision 2026-10-25). A `partial` operand gives
  * `'true'` only when the enclosures do not overlap: where the operand is
  * undefined `≠` holds too, so the verdict is the one of the defined part.
  */

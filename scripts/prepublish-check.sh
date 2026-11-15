@@ -129,7 +129,7 @@ minutes_seconds() {
 # failed_test_files: sets FAILED_FILES to the test files that the latest
 # full run failed on, when it failed on test files only, and they exist, and
 # there are at most 10 of them. Otherwise FAILED_FILES is empty: a job that
-# is not a test file failed (the typecheck, the Python tests), or so many
+# is not a test file failed (the typecheck), or so many
 # files failed that the cause is not the load of the machine. It reads the
 # message of `release-check`: "… failed (<job>, <job>; log <path>) …".
 failed_test_files() {

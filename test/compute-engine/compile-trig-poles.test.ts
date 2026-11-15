@@ -1,13 +1,6 @@
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { TEST_PYTHON } from './test-python';
-import { execFileSync } from 'child_process';
-
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 //
 // THE POLES OF `Tan`, `Cot`, `Sec` AND `Csc` IN COMPILED CODE
@@ -15,8 +8,8 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
 // The interpreter answers the unsigned pole `~oo` when the argument `x` of
 // one of these functions is within its rounding error of a pole: when the
 // machine value `y` is infinite or `|y|·min(|x|, 2⁴⁰)·100·2⁻⁵³ ≥ 1`
-// (`isMachineTrigPole`, `numerics/numeric.ts`). Compiled JavaScript and
-// Python answer `Infinity` (`np.inf`) at the same arguments, the double that
+// (`isMachineTrigPole`, `numerics/numeric.ts`). Compiled JavaScript
+// answers `Infinity` at the same arguments, the double that
 // stands for `~oo`. Without the rule, `Math.tan(π/2)` gives
 // `16331239353195370`.
 //
@@ -235,105 +228,5 @@ describe('an operand used twice in the emitted code is computed once', () => {
     expect(compile(ce.box(['Coth', 'n'])).code).toBe(
       '(() => { const _tv1 = _.n; return (Math.cosh(_tv1) / Math.sinh(_tv1)); })()'
     );
-  });
-});
-
-describe('compiled Python answers the pole', () => {
-  const py = new PythonTarget();
-  const ce = machineEngine();
-  // The tests check the pole rule, not how an input is read. Python reads an
-  // input with an INFERRED `number` type through a `None` test (ROADMAP
-  // CE-460), and a DECLARED `number` as is. So `x` is declared.
-  ce.declare('x', 'number');
-
-  test('a complex argument does not get the pole rule', () => {
-    const z = ce.box(['Complex', 0, 1e-7]);
-    for (const head of ['Cot', 'Csc', 'Sec'])
-      expect(
-        py.compile(ce.box([head, ['Multiply', z, 'x']])).code
-      ).not.toContain('np.where');
-  });
-
-  test('the emitted code', () => {
-    // An infinite value at a nonzero angle below `π/2` keeps its sign (an
-    // overflow of `csc` or `cot` of a tiny angle, not a pole); the inner
-    // `np.where` is the pole rule itself.
-    const rule =
-      '(lambda _y: np.where(np.isinf(_y) & (_x != 0) & ' +
-      '(np.abs(_x) < 1.5707963267948966), _y, ' +
-      'np.where(np.isinf(_y) | (np.abs(_y) * ' +
-      'np.minimum(np.abs(_x), 1099511627776.0) * 1.1102230246251565e-14 ' +
-      '>= 1), np.inf, _y))[()])';
-    expect(py.compileFunction(ce.box(['Tan', 'x']), 'f', ['x'])).toContain(
-      `(lambda _x: ${rule}(np.tan(_x)))(x)`
-    );
-    // No module-level helper, so a bare lambda can hold it.
-    expect(py.compileLambda(ce.box(['Cot', 'x']), ['x'])).toBe(
-      `lambda x: (lambda _x: ${rule}(1 / np.tan(_x)))(x)`
-    );
-  });
-
-  const venvPython = TEST_PYTHON;
-  const hasNumpy = (() => {
-    if (!venvPython) return false;
-    try {
-      execFileSync(venvPython, ['-c', 'import numpy'], { stdio: 'ignore' });
-      return true;
-    } catch {
-      return false;
-    }
-  })();
-  const testMaybe = hasNumpy ? test : test.skip;
-
-  testMaybe('the values, run by numpy', () => {
-    let src = 'import numpy as np\nimport json\n\n';
-    for (const head of HEADS)
-      src += py.compileFunction(ce.box([head, 'x']), `f_${head}`, ['x']) + '\n';
-    // A signed infinity (`csc` of `±5·10⁻³²⁴`) is `'inf'`/`'-inf'`, the
-    // unsigned pole `'inf'`.
-    const spell = (v: Expression): number | 'inf' | '-inf' =>
-      isPole(v) || v.re === Infinity
-        ? 'inf'
-        : v.re === -Infinity
-          ? '-inf'
-          : v.re;
-    const expected: Array<number | 'inf' | '-inf'> = [];
-    src += 'r = []\n';
-    for (const head of HEADS) {
-      for (const x of ANGLES) {
-        expected.push(spell(ce.box([head, x]).N()));
-        src += `r.append(f_${head}(${x}))\n`;
-      }
-      // An array argument: the rule applies to each element.
-      src += `r.extend(f_${head}(np.array([${ANGLES.join(', ')}])).tolist())\n`;
-      for (const x of ANGLES) expected.push(spell(ce.box([head, x]).N()));
-    }
-    src +=
-      'print(json.dumps([("inf" if v > 0 else "-inf") if np.isinf(v) ' +
-      'else float(v) for v in r]))\n';
-    const file = path.join(os.tmpdir(), `ce-py-poles-${process.pid}.py`);
-    fs.writeFileSync(file, src);
-    let out = '';
-    try {
-      out = execFileSync(venvPython!, ['-W', 'ignore', file], {
-        encoding: 'utf8',
-      });
-    } finally {
-      fs.unlinkSync(file);
-    }
-    const actual = JSON.parse(out) as Array<number | 'inf' | '-inf'>;
-    expect(actual.length).toBe(expected.length);
-    for (let i = 0; i < expected.length; i++) {
-      const e = expected[i];
-      const a = actual[i];
-      if (e === 'inf' || e === '-inf') expect([i, a]).toEqual([i, e]);
-      // Relative: a value near a pole that is not a pole is large (`cot` of
-      // `π/12·k + 10⁻⁷` is about `10⁷`), and numpy and V8 can differ in the
-      // last bit of it.
-      else if (
-        !(Math.abs((a as number) - e) <= 1e-9 * Math.max(1, Math.abs(e)))
-      )
-        expect([i, a]).toEqual([i, e]);
-    }
   });
 });

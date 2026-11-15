@@ -125,17 +125,6 @@ describe('DEGREE LITERALS — compiled output agrees with evaluate()', () => {
     expect(r.value.lo).toBeLessThan(Math.PI / 180);
     expect(r.value.hi).toBeGreaterThan(Math.PI / 180);
   });
-
-  test('rad: python lowers Degrees to radians', () => {
-    const ce = engine('rad');
-    // A declared `number` input is read as is; an inferred one is read
-    // through a `None` test (ROADMAP CE-460).
-    ce.declare('x', 'number');
-    const py = ce._getCompilationTarget('python')!;
-    expect(py.compile(ce.parse('\\sin(x^\\circ)')).code).toBe(
-      'np.sin((x * np.pi / 180))'
-    );
-  });
 });
 
 /**
@@ -302,10 +291,8 @@ describe('ARGUMENT — compiled output agrees with .N()', () => {
     }
   });
 
-  test.each(UNITS)('%s: glsl and python scale the result', (unit) => {
+  test.each(UNITS)('%s: glsl scales the result', (unit) => {
     const ce = engine(unit);
-    // A declared `number` input is read as is in Python; an inferred one is
-    // read through a `None` test (ROADMAP CE-460).
     ce.declare('x', 'number');
     ce.declare('y', 'number');
     const z = ce.box([
@@ -313,23 +300,17 @@ describe('ARGUMENT — compiled output agrees with .N()', () => {
       ['Add', 'x', ['Multiply', 'ImaginaryUnit', 'y']],
     ]);
     const glsl = ce._getCompilationTarget('glsl')!.compile(z).code;
-    const py = ce._getCompilationTarget('python')!.compile(z).code;
     if (unit === 'rad') {
       expect(glsl).toBe('atan(y, x)');
-      // `np.add(…, 0)` makes a `-0` part `+0` (CE-262).
-      expect(py).toBe('np.angle(np.add(x + complex(0, 1) * y, 0))');
       return;
     }
     // A shader literal is the shortest decimal that reads back as the same
-    // single-precision value; a Python literal is the double.
+    // single-precision value.
     const shader = { deg: '57.29578', grad: '63.661976', turn: '0.15915494' }[
       unit
     ];
     expect(Math.fround(Number(shader))).toBe(Math.fround(FACTOR[unit]));
     expect(glsl).toBe(`${shader} * atan(y, x)`);
-    expect(py).toBe(
-      `${FACTOR[unit]} * np.angle(np.add(x + complex(0, 1) * y, 0))`
-    );
   });
 });
 

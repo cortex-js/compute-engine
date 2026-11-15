@@ -636,40 +636,6 @@ describe('COMPILE Loop - iterationBudget on interval-js', () => {
 });
 
 describe('COMPILE Loop - iterationBudget on the other targets', () => {
-  test('python declines a program with a `Loop`', () => {
-    expect(() =>
-      compile(counted(), {
-        to: 'python',
-        fallback: false,
-        iterationBudget: 5,
-      } as any)
-    ).toThrow(/iterationBudget/);
-  });
-
-  test('python with a fallback runs in the interpreter', () => {
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const result = compile(counted(), {
-        to: 'python',
-        iterationBudget: 5,
-      } as any);
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('iterationBudget');
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  test('python compiles a `Loop` with no budget, and a `Sum` with one', () => {
-    const plain = compile(counted(), { to: 'python', fallback: false } as any);
-    expect(plain.success).toBe(true);
-    const sum = ce.box(['Sum', 'i', ['Limits', 'i', 1, 'm']] as any);
-    expect(
-      compile(sum, { to: 'python', fallback: false, iterationBudget: 5 } as any)
-        .code
-    ).toBe(compile(sum, { to: 'python', fallback: false } as any).code);
-  });
-
   // On GLSL the budget is the pass cap of the evaluation (default 10,000):
   // only the cap in the counted code changes.
   test.each(['glsl'])('%s: only the pass cap changes', (to) => {

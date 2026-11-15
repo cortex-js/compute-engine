@@ -639,7 +639,7 @@ describe('GPU: real-only lowerings reject a complex argument', () => {
   // The shader targets declare them real-only (`gpuIsRealOnlyLowering`), and
   // the base compiler rejects a complex argument of a real-only lowering
   // before the lowering runs. The `shaderOnly` heads have a complex form on
-  // another target (JavaScript `_SYS.cacot`, Python `scipy.special.gamma`),
+  // another target (JavaScript `_SYS.cacot`),
   // which does not change the answer here.
   const shared: any[] = [
     ['Arctan2', Z, 'u'],

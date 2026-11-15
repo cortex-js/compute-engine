@@ -1,9 +1,5 @@
 // compileBlock and the local function scopes of a block.
 
-import {
-  bindScalarFragmentBlock,
-  scalarFragmentUnwrappedBlock,
-} from './javascript-fragment-facts.js';
 import type { Expression } from '../global-types.js';
 import {
   recordBlockScalarLocals,
@@ -32,7 +28,6 @@ import {
   refuseEffectContractViolations,
   spellReservedLocals,
   withDefineFunctionDeclares,
-  withFreshBlockLocals,
   nestedAssignmentsTo,
 } from './compile-locals.js';
 import { tuplePatternNames } from '../boxed-expression/tuple-pattern.js';
@@ -101,8 +96,8 @@ import {
  * bare destructuring declare compiles as a block of that one statement.
  *
  * Used by targets whose loop bodies route through `compileExpr` (the shader
- * targets). The JavaScript and Python targets have their own statement
- * dispatchers (`compileLoopBody`, `compilePythonStatements`).
+ * targets). The JavaScript target has its own statement
+ * dispatcher (`compileLoopBody`).
  */
 export function compileStatementList(
   expr: Expression,
@@ -226,8 +221,7 @@ export function compileBlock(
   // initial value is `Nothing` (the interpreter's value of
   // `Block(s ≔ x; Declare(t))`), the erasure marker, which has no compiled
   // representation. Without this check the declaration was dropped from the
-  // value position (Python returned the value of the statement before it)
-  // or spliced into it (`return float t;`, `return let t`).
+  // value position or spliced into it (`return float t;`, `return let t`).
   const lastArg = args[args.length - 1];
   if (
     valueUsed &&
@@ -295,10 +289,6 @@ export function compileBlock(
     // x + 1)` returned `t`).
     const lone = args[0];
     if (!valueUsed && target.bareStatementBlocks && isFunction(lone, 'Block')) {
-      if (target.language === 'python')
-        return withFreshBlockLocals(() =>
-          compileBlock(lone.ops, target, lone, false)
-        );
       const inner = compileBlock(lone.ops, target, lone, false);
       if (inner === '') return '';
       return `{\n${inner
@@ -306,10 +296,8 @@ export function compileBlock(
         .map((line) => `  ${line}`)
         .join('\n')}\n}`;
     }
-    // A Python statement has no terminator (`statementLines`).
     if (!valueUsed && target.bareStatementBlocks)
       return statementLines(
-        target,
         compileListStatement(target, args[0], (t) => [
           withCseScope(
             node,
@@ -324,9 +312,8 @@ export function compileBlock(
     // The value of a lone statement is the value of the block, so a
     // `Return` there gives its value (`tailValueFor`).
     const value = valueUsed ? tailValueFor(args[0], target) : args[0];
-    const innerTarget = scalarFragmentUnwrappedBlock(target, node, args);
-    return withCseScope(node, -1, innerTarget, () =>
-      compileOp(args[0], -1, innerTarget, prec, value)
+    return withCseScope(node, -1, target, () =>
+      compileOp(args[0], -1, target, prec, value)
     );
   }
 
@@ -541,15 +528,8 @@ export function compileBlock(
     // which is what makes mutually recursive definitions compile.
     const lexicalFunctions = lexicalFunctionScope(args, target, reboundLocals);
 
-    // The spelling of each local: its name, or a fresh name while
-    // `withFreshBlockLocals` runs.
+    // The spelling of each local: its name, or a fresh name.
     const spelled = new Map<string, string>();
-    if (CompilerState._freshBlockLocals > 0)
-      for (const local of locals) {
-        const fresh = tempVar(target);
-        spelled.set(local, fresh);
-        _freshLocalNames.add(fresh);
-      }
     // On a shader target, a local that has the name of a binding outside
     // the block (a parameter of the function, a loop index, a local of an
     // enclosing block) gets a fresh name too. The statements of the block
@@ -560,7 +540,7 @@ export function compileBlock(
     // start of each emitted line, so a local of a nested block that hides
     // a parameter must not have its name either, even when a local of an
     // enclosing block has the same name.
-    else if (isGPUTarget)
+    if (isGPUTarget)
       for (const local of locals) {
         if (target.boundVars?.has(local) !== true) continue;
         const fresh = tempVar(target);
@@ -612,7 +592,6 @@ export function compileBlock(
         )
       );
     }
-    bindScalarFragmentBlock(target, localTarget, node, args);
     if (target.language === 'javascript')
       recordBlockScalarLocals(args, localTarget);
 
@@ -716,14 +695,6 @@ export function compileBlock(
             // the narrowest one, since admitting is the direction that
             // miscompiles:
             //
-            //  - PYTHON. `compilePythonStatements` does statement-form an
-            //    else-less `If` correctly, but it is reached ONLY from a loop
-            //    body: a plain function-body `Block` reaches THIS routine,
-            //    whose emission is C-like and a syntax error in Python. Routing
-            //    to the Python emission from here needs a target hook (the
-            //    `block` hook receives already-COMPILED statements), which is a
-            //    separate change. Until then the shape declines with `If: wrong
-            //    number of arguments` and falls back to the interpreter.
             //  - INTERVAL JavaScript. `compileLoopBody` emits the condition as
             //    `_IA.decided(<verdict>)`, which throws for an undecided
             //    verdict, so a call whose input interval makes the condition
@@ -866,22 +837,6 @@ export function compileBlock(
             // with a `return` of that list (`return U; return x + 1.0;`),
             // and a block with a scalar value was stored in a temporary
             // that was then written as a statement (`_tv1;`).
-            //
-            // Python has no compound statement and no block scope. Its
-            // statements are put in the enclosing list, with no `return`,
-            // and each local of the nested block gets a fresh name
-            // (`withFreshBlockLocals`), so that a write of it does not
-            // change a variable of the enclosing code with the same name.
-            if (
-              isStatement &&
-              target.language === 'python' &&
-              isFunction(arg, 'Block')
-            ) {
-              const inner = withFreshBlockLocals(() =>
-                compileBlock(arg.ops, stmtTarget, arg, false)
-              );
-              return inner === '' ? [] : [inner];
-            }
             if (
               isStatement &&
               isGPUTarget &&
@@ -1018,7 +973,7 @@ export function compileBlock(
     // destructuring or not.)
     if (!valueUsed)
       return target.bareStatementBlocks
-        ? statementLines(target, result)
+        ? statementLines(result)
         : result.join(`;${target.ws('\n')}`);
 
     // The last statement is an assignment or a declaration, so the value of
@@ -1031,19 +986,9 @@ export function compileBlock(
     // does not count as used (the branch of a conditional that is a
     // statement) compiles on only when the compilation has no other value
     // with no settled shape: on JavaScript and GLSL, where an assignment is
-    // an expression, the code below returns the assignment. In Python an
-    // assignment is a statement, with no form that the code below
-    // can return, so the block declines.
-    if (isFunction(lastArg, 'Assign') || isFunction(lastArg, 'Declare')) {
+    // an expression, the code below returns the assignment.
+    if (isFunction(lastArg, 'Assign') || isFunction(lastArg, 'Declare'))
       core.throwPendingUnsettledShape();
-      if (target.language === 'python')
-        throw new Error(
-          `Could not compile \`Block\`: the last statement of the block is ` +
-            `an assignment or a declaration, so the value of the block is ` +
-            `\`Nothing\`, which has no compiled representation. End the ` +
-            `block with the value it should have.`
-        );
-    }
 
     // A multi-statement block that is a VALUE OPERAND on a shader target —
     // a `with` clause as a `Sum` term, or on one side of an addition — has

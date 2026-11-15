@@ -1,5 +1,5 @@
 // Broadcasting of element-wise operations over collections: the fused
-// broadcast, plain broadcasts, and the Python element-wise path.
+// broadcast and plain broadcasts.
 
 import type {
   Expression,
@@ -19,17 +19,12 @@ import {
   isNonRealNumber,
   isPointElementType,
   resolveTypeAlias,
-  resolveTypeForCompiledLanes as resolveTypeForCompilation,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import type { Type } from '../../common/type/types.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
-import {
-  isSymbol,
-  isNumber,
-  isFunction,
-} from '../boxed-expression/type-guards.js';
+import { isSymbol, isFunction } from '../boxed-expression/type-guards.js';
 import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import type { CompileTarget, CompiledFunction, TargetSource } from './types.js';
 import { isCallerMapped } from './cse.js';
@@ -1671,140 +1666,6 @@ export function compileBroadcastUnary(
     h,
     operand,
     { collection: () => core.compile(operand, target), element },
-    target
-  );
-  return out === undefined || out === '' ? undefined : out;
-}
-
-/**
- * The Python target's element-wise lowering for an arithmetic head that has
- * exactly ONE collection operand — `Negate(L)`, `1 + L`, `2 * L`, `L ** 2`,
- * `2 / L` for an `L` typed `list<number>`, and the same shapes over a `List`
- * literal whose elements are not all constants (`[x, y] + 1`). Returns
- * `undefined` to decline, and the caller then fails closed.
- *
- * The map is spelled by the target through its `broadcastUnary` hook (Python
- * emits a list comprehension, `[1 + _tv1 for _tv1 in L]`), which iterates a
- * plain Python list, a tuple and a NumPy array alike — so the emission does
- * not depend on what container the caller binds, which is the reason the
- * infix lowering (`1 + L`, a TypeError for a list) cannot be used. The
- * element body is produced by re-entering `compileExpr` on the same head with
- * the collection position replaced by the loop variable, so every scalar
- * convention of this target — operator precedence, complex dispatch, the
- * `**`/`np.power` split — is the scalar lane's, not a second implementation
- * of it.
- *
- * The admission is deliberately narrow, because each restriction removes a
- * shape whose Python result would NOT match the interpreter's:
- *
- * - **Exactly one collection operand.** With two (`L + M`) the interpreter
- *   answers `Error("incompatible-dimensions")` on any length disagreement,
- *   while a fan-out would have to pick a length; NumPy would silently recycle
- *   a length-1 axis (`np.add([1], [3,4,5])` is `[4,5,6]`) and `zip` would
- *   truncate. Neither reproduces the error, so that shape keeps declining.
- * - **The collection is an ordered list of numbers.** A comprehension over a
- *   `set` has no defined order; a `list<string>` would concatenate per
- *   element; a list of TUPLES (a point list) combines component-wise in the
- *   interpreter (`[1,2] * (3,4)` is `[(3,4),(6,8)]`), not element-wise; and a
- *   list of LISTS is not necessarily rectangular, so a one-level fan-out
- *   would hand a row to a scalar operator.
- * - **Every other operand is provably a number.** An `unknown`-typed operand
- *   may bind to a list at run time, which is the very repeat/concatenate
- *   divergence this guard exists for.
- * - **A `Power` over a collection BASE has a safe scalar exponent.** This is
- *   the one head whose element lowering is container-dependent: Python's `**`
- *   answers a float for a negative integer exponent of an `int` (`2 ** -2` is
- *   `0.25`), while NumPy REFUSES the same operation on an integer array
- *   element — `np.int64(2) ** -2` raises `ValueError: Integers to negative
- *   integer powers are not allowed` (measured, NumPy 2.4.2). The comprehension
- *   would therefore answer for a plain Python list and throw for an integer
- *   ndarray, and the artifact cannot constrain which the caller binds.
- *   Admitted are the two exponents both containers agree on: one provably a
- *   NON-NEGATIVE INTEGER (`v ** 2`), and one provably NOT an integer
- *   (`v ** 0.5`, a float on either container). A collection in the EXPONENT
- *   position (`2 ** v`) is deliberately NOT gated by this rule — its
- *   elements carry no static proof, so gating would refuse the whole
- *   shape. The user accepted the residual divergence because it is LOUD:
- *   an integer ndarray holding a negative element raises the ValueError
- *   at run time rather than answering a wrong value, while lists, tuples
- *   and float ndarrays all answer correctly. (ROADMAP.md, the
- *   Python arithmetic-guard entry, records the decision.)
- *
- * The scalar operands are spliced into the comprehension BODY, so their code
- * runs once per element rather than once. That is a cost, not a semantic
- * difference, while this target has no impure lowering (`Random` and its
- * family decline); the `Equal` collection chain already relies on the same
- * property when it compiles a shared middle operand twice.
- */
-export function tryCompilePythonElementwise(
-  engine: ComputeEngine,
-  h: string,
-  args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
-): TargetSource | undefined {
-  if (target.broadcastUnary === undefined) return undefined;
-
-  // The operand shape gate: an ordered collection whose elements are numbers.
-  // `list<any>` (not the bare `list`) is the absence-admitting shape top, and
-  // the element test then excludes `list<string>`, a point list and a nested
-  // list, none of which a one-level fan-out lowers faithfully.
-  const isElementwiseSource = (a: Expression): boolean => {
-    if (!a.type.matches('list<any>')) return false;
-    const elt = collectionElementType(resolveTypeForCompilation(a.type.type));
-    return elt !== undefined && isSubtype(elt, 'number');
-  };
-  // A scalar companion: provably a number, so it cannot be the list the
-  // fan-out would otherwise splice into a scalar operator position.
-  const isScalarCompanion = (a: Expression): boolean => {
-    const t = resolveTypeForCompilation(a.type.type);
-    return t !== 'never' && isSubtype(t, 'number');
-  };
-
-  let index = -1;
-  for (let i = 0; i < args.length; i++) {
-    if (isScalarCompanion(args[i])) continue;
-    if (index >= 0 || !isElementwiseSource(args[i])) return undefined;
-    index = i;
-  }
-  if (index < 0) return undefined;
-
-  // The `Power` exponent gate described above: a negative integer exponent
-  // over a collection BASE computes on a plain Python list and raises on an
-  // integer ndarray, so it fails closed rather than emit a comprehension
-  // whose result depends on the container the caller binds.
-  if (h === 'Power' && args.length === 2 && index === 0) {
-    const exponent = args[1];
-    const uniform =
-      isNumber(exponent) &&
-      !exponent.isComplex &&
-      (!Number.isInteger(exponent.re) || exponent.re >= 0);
-    if (!uniform) return undefined;
-  }
-
-  const source = args[index];
-  const element = (code: TargetSource): TargetSource => {
-    const v = tempVar(target);
-    const innerTarget: CompileTarget<Expression> = {
-      ...target,
-      var: (id: string) => (id === v ? code : target.var(id)),
-      ...withBoundScope(target, [v]),
-    };
-    // The loop variable stands for ONE element, so it is not
-    // collection-typed and the Python guard above does not fire again.
-    return withElementSymbols(engine, [v], ([element]) =>
-      core.compileExpr(
-        engine,
-        h,
-        args.map((a, i) => (i === index ? element : a)),
-        0,
-        innerTarget
-      )
-    );
-  };
-  const out = target.broadcastUnary(
-    h,
-    source,
-    { collection: () => core.compile(source, target), element },
     target
   );
   return out === undefined || out === '' ? undefined : out;

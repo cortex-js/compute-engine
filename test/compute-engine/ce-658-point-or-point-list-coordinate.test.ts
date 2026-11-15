@@ -5,7 +5,7 @@
  *
  * With `P := (3, 4)`, the interpreter gives `At(P, 1) + x` = `3 + x`. The
  * declared type of `At(P, 1)` is `missing | number | tuple<number, number>`,
- * and the checks of the `javascript`, `interval-js` and `python` targets
+ * and the checks of the `javascript` and `interval-js` targets
  * that read it declined the sum ("an operand may be a point"). Every
  * target now writes the assigned point in place of `P` at its compile
  * entry, and replaces a call whose body then is a point or a number by its
@@ -23,12 +23,9 @@
  * `P` as a point.
  */
 
-import { execFileSync } from 'node:child_process';
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { TEST_PYTHON } from './test-python';
 
 const UNION = 'tuple<number, number> | list<tuple<number, number>>';
 
@@ -42,12 +39,12 @@ function engine(value?: unknown): ComputeEngine {
   return ce;
 }
 
-const EXAMPLES: [string, unknown, string, string][] = [
-  // name, expression, javascript code, python code
-  ['At(P, 1) + x', ['Add', ['At', 'P', 1], 'x'], '_.x + 3', 'x + 3'],
-  ['At(P, 2) - x', ['Subtract', ['At', 'P', 2], 'x'], '-_.x + 4', '-x + 4'],
-  ['f(x) + x', ['Add', ['f', 'x'], 'x'], '_.x + 3', 'x + 3'],
-  ['PointX(P) + x', ['Add', ['PointX', 'P'], 'x'], '_.x + 3', 'x + 3'],
+const EXAMPLES: [string, unknown, string][] = [
+  // name, expression, javascript code
+  ['At(P, 1) + x', ['Add', ['At', 'P', 1], 'x'], '_.x + 3'],
+  ['At(P, 2) - x', ['Subtract', ['At', 'P', 2], 'x'], '-_.x + 4'],
+  ['f(x) + x', ['Add', ['f', 'x'], 'x'], '_.x + 3'],
+  ['PointX(P) + x', ['Add', ['PointX', 'P'], 'x'], '_.x + 3'],
 ];
 
 const SAMPLES = [-2, 0.5, 5];
@@ -92,51 +89,13 @@ describe('CE-658: javascript and interval-js give the interpreter values', () =>
   });
 });
 
-describe('CE-658: python', () => {
-  const python = new PythonTarget();
-
-  // `f(x) + x` is not here: the `python` target compiles no call of a user
-  // function (`g(x)` with `g(t) := t^2 + 1` declines too, "has no lowering
-  // for it").
-  test.each(EXAMPLES.filter(([name]) => name !== 'f(x) + x'))(
-    '%s',
-    (_name, json, _jsCode, pyCode) => {
-      const ce = engine(['Tuple', 3, 4]);
-      const r = compile(ce.box(json as any), { to: 'python', fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.code).toBe(pyCode);
-      expect(
-        python.compileFunction(ce.box(json as any), 'g', ['x'])
-      ).toContain(`return ${pyCode}`);
-    }
-  );
-
-  const run = TEST_PYTHON === undefined ? test.skip : test;
-  run('the run gives the interpreter values', () => {
-    const ce = engine(['Tuple', 3, 4]);
-    const json = ['Subtract', ['At', 'P', 2], 'x'];
-    const code = python.compileFunction(ce.box(json as any), 'g', ['x']);
-    const script =
-      `import math\n${code}\n` +
-      SAMPLES.map((x) => `print(repr(float(g(${x}))))`).join('\n');
-    const lines = execFileSync(TEST_PYTHON!, ['-c', script], {
-      encoding: 'utf-8',
-    })
-      .trim()
-      .split('\n')
-      .map(Number);
-    const expr = ce.box(json as any);
-    expect(lines).toEqual(SAMPLES.map((x) => interpreted(expr, x)));
-  });
-});
-
 /**
  * The message of the decline of `expr` on `to`: a target throws it or
  * returns it in `error`. `undefined` when the compilation succeeds.
  */
 function declineOf(
   expr: Expression,
-  to: 'javascript' | 'interval-js' | 'python',
+  to: 'javascript' | 'interval-js',
   vars?: Record<string, string>
 ): string | undefined {
   try {
@@ -150,7 +109,7 @@ function declineOf(
 describe('CE-658: the declines that stay', () => {
   const sum = ['Add', ['At', 'P', 1], 'x'];
 
-  test.each(['javascript', 'interval-js', 'python'] as const)(
+  test.each(['javascript', 'interval-js'] as const)(
     '%s: no assigned value compiles the point member',
     (to) => {
       const ce = engine();
@@ -174,7 +133,7 @@ describe('CE-658: the declines that stay', () => {
     }
   });
 
-  test.each(['javascript', 'interval-js', 'python'] as const)(
+  test.each(['javascript', 'interval-js'] as const)(
     '%s: an assigned list of points',
     (to) => {
       // The first element of a list of points is a point, and the

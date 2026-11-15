@@ -728,7 +728,7 @@ export function analyzeReferences(
     // current target language, returning `undefined`/`null`/`''` (see the
     // handler consult in `compileExpr`); assuming support unconditionally
     // would under-report `unsupported` for e.g. a JavaScript-only handler on
-    // a glsl/python target. So probe the handler with the real recursive
+    // a glsl target. So probe the handler with the real recursive
     // compile machinery in a throwaway context: a non-empty string return
     // means it lowers this head, while `undefined`/`null`/`''`/throw means it
     // declined. Executing the handler here is safe — the compile path would
@@ -1462,8 +1462,8 @@ export function declaredTypeText(t: Type): string {
  * The type the code compiled for a target without a `loweredSymbolType`
  * hook reads the free symbol `symbol` as, from its engine type and its
  * lane: the runner's value convention on JavaScript (`number`, `complex`,
- * `boolean`, `string`, `color`, `point`, `array`, `function`), `interval`
- * for a real number on interval-js, and the Python value types on Python.
+ * `boolean`, `string`, `color`, `point`, `array`, `function`), and
+ * `interval` for a real number on interval-js.
  * `undefined` when the type says none of these.
  */
 export function defaultLoweredSymbolType(
@@ -1471,30 +1471,24 @@ export function defaultLoweredSymbolType(
   language: string | undefined
 ): string | undefined {
   const t = symbol.type.type;
-  const python = language === 'python';
   if (core.isComplexValued(symbol) || isNonRealNumber(t)) return 'complex';
-  if (isSubtype(t, 'boolean')) return python ? 'bool' : 'boolean';
+  if (isSubtype(t, 'boolean')) return 'boolean';
   // A symbol with no type information (`unknown`) is read as a real
   // number, as the shader targets read it as a `float`.
   if (t === 'unknown' || isSubtype(t, 'number'))
-    return python
-      ? 'float'
-      : language === 'interval-javascript'
-        ? 'interval'
-        : 'number';
-  if (isSubtype(t, 'string')) return python ? 'str' : 'string';
+    return language === 'interval-javascript' ? 'interval' : 'number';
+  if (isSubtype(t, 'string')) return 'string';
   // A colour, or a colour operand whose type admits the other colour
   // spellings (`color | string | tuple`, the type of `a` after
   // `ColorMix(a, b, 0.5)`).
   if (
-    !python &&
-    (isSubtype(t, 'color') ||
-      (isSubtype('color', t) && isSubtype(t, 'color | string | tuple')))
+    isSubtype(t, 'color') ||
+    (isSubtype('color', t) && isSubtype(t, 'color | string | tuple'))
   )
     return 'color';
-  if (isTupleShapedType(t)) return python ? 'tuple' : 'point';
-  if (isSubtype(t, COLLECTION_SHAPE_TYPE)) return python ? 'list' : 'array';
-  if (!python && isSubtype(t, 'function')) return 'function';
+  if (isTupleShapedType(t)) return 'point';
+  if (isSubtype(t, COLLECTION_SHAPE_TYPE)) return 'array';
+  if (isSubtype(t, 'function')) return 'function';
   return undefined;
 }
 
@@ -1630,9 +1624,8 @@ export function buildInterpreterFallback<T extends string>(
   // fallback gives `NaN` there.
   //
   // A target that spells a written absence symbol with its NUMERIC marker
-  // (the Python target, where a written `Missing` is `math.nan`) uses the
-  // object null only for an absent value in an object-domain position (an
-  // absent point is `None` there): a position whose type admits `missing`
+  // uses the
+  // object null only for an absent value in an object-domain position: a position whose type admits `missing`
   // gives `NaN` unless every other arm of the type is disjoint from
   // `number`.
   const hasObjectNull =

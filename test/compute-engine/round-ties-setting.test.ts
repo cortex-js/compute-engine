@@ -1,7 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import {
   _mapAutoCompileStats as stats,
   _resetMapAutoCompileStats,
@@ -348,52 +347,6 @@ describe('the shader code of each rule', () => {
   });
 });
 
-describe('the Python code of each rule', () => {
-  const python = new PythonTarget();
-  const lastLine = (code: string) => code.split('\n').at(-1);
-
-  test.each(RULES)('%s', (rule) => {
-    const ce = engine(rule);
-    // A declared `number` input is read as is; an inferred one is read
-    // through a `None` test (ROADMAP CE-460).
-    ce.declare('x', 'number');
-    const code = python.compile(ce.box(['Round', 'x'])).code;
-    if (rule === 'to-even') expect(code).toBe('np.round(x)');
-    else {
-      expect(code).toContain('def _ce_round(');
-      expect(lastLine(code)).toBe(`_ce_round(x, '${rule}')`);
-    }
-  });
-});
-
-describe('a Python lambda writes the rounding inline', () => {
-  // A bare lambda has no place for the `_ce_round` helper.
-  const python = new PythonTarget();
-
-  test.each(RULES)('%s', (rule) => {
-    const ce = engine(rule);
-    const code = python.compileLambda(ce.box(['Round', 'x']), ['x']);
-    expect(code).not.toContain('_ce_round(');
-    expect(code.startsWith('lambda x: ')).toBe(true);
-  });
-
-  test('Remainder', () => {
-    const ce = engine('away-from-zero');
-    const code = python.compileLambda(ce.box(['Remainder', 'x', 2]), ['x']);
-    // The lambda has no helper definitions, so the rounding and the
-    // safe-integer-range check of each `Remainder` operand are both inline.
-    expect(code.startsWith('lambda x: ')).toBe(true);
-    expect(code).not.toContain('_ce_round(');
-    expect(code).toContain(
-      '(lambda _x: (lambda _a: (lambda _m: ' +
-        'np.sign(_x) * (_m + np.logical_or(_a - _m > 0.5, ' +
-        'np.logical_and(_a - _m == 0.5, np.greater(_x, 0)))))' +
-        '(np.floor(_a)))(np.abs(_x)))('
-    );
-    expect(code).toContain('is beyond the safe integer range of compiled code');
-  });
-});
-
 describe('Remainder does not use the tie rule of Round', () => {
   // `Remainder(a, b)` is `a − b·round(a/b)`, with the quotient rounded as
   // JavaScript `Math.round` does: a tie goes toward +∞. So
@@ -417,19 +370,13 @@ describe('Remainder does not use the tie rule of Round', () => {
       ]);
   });
 
-  test('the shader and Python code round the quotient toward +∞', () => {
-    // `round()` (shader) and `np.round` (Python) round a tie to even, and
+  test('the shader code rounds the quotient toward +∞', () => {
+    // `round()` (shader) rounds a tie to even, and
     // `Remainder(5, 2)` was `1`.
     const ce = engine('to-even');
     const remainder = ce.box(['Remainder', 'x', 2]);
     expect(new GLSLTarget().compile(remainder, {}).code).toBe(
       '((x) - (2.0) * _gpu_round_up((x) / (2.0)))'
     );
-    // The Python `_ce_remainder` helper checks the safe integer range of
-    // each operand and rounds the quotient with a tie toward +∞, whatever
-    // the tie rule of the engine.
-    const python = new PythonTarget().compile(remainder).code;
-    expect(python.split('\n').at(-1)).toBe('_ce_remainder(x, 2)');
-    expect(python).toContain('np.logical_and(_d == 0.5, np.greater(_q, 0))');
   });
 });

@@ -183,13 +183,8 @@ describe('AssertPresent — compiled (JavaScript)', () => {
     expect(String(r.code)).toContain('expected-present');
   });
 
-  test('Python raises; a shader target declines the head (P5)', () => {
+  test('a shader target declines the head (P5)', () => {
     ce.declare('x', 'number');
-    const py = compile(ce.box(['Add', ['AssertPresent', 'x'], 1]), {
-      to: 'python',
-    });
-    expect(py.success).toBe(true);
-    expect(String(py.code)).toContain('ValueError("expected-present: x is absent")');
     for (const to of ['glsl'] as const) {
       const sh = compile(ce.box(['Add', ['AssertPresent', 'x'], 1]), { to });
       // The GLSL fragment does not take the `AssertPresent` head.
@@ -203,22 +198,6 @@ describe('AssertPresent — compiled (JavaScript)', () => {
     });
     expect(later.success).toBe(true);
     expect(String(later.code)).toContain('Number.isNaN');
-  });
-
-  test('Python binds the operand once: an effectful operand runs once', () => {
-    ce.declare('ss', 'list<string>');
-    ce.declare('k', 'integer');
-    const py = compile(ce.box(['AssertPresent', ['At', 'ss', 'k']]), {
-      to: 'python',
-    });
-    expect(py.success).toBe(true);
-    const code = String(py.code);
-    expect(code).toContain('expected-present');
-    // Outside the error message text, the operand `ss[k]` appears once, as
-    // the argument of the binding lambda; the test and the result branch
-    // read the bound parameter `_c`.
-    const outsideMessage = code.replace(/"expected-present.*? is absent"/, '""');
-    expect(outsideMessage.match(/\bss\b/g)?.length).toBe(1);
   });
 
   test('the interval target raises too: the assertion is not removed', () => {

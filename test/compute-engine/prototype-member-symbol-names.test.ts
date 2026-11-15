@@ -140,7 +140,6 @@ describe('a symbol named after an Object.prototype member', () => {
       it('compiles as a function head on every target', () => {
         for (const to of [
           'javascript',
-          'python',
           'glsl',
           'interval-js',
         ] as const) {

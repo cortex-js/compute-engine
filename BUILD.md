@@ -54,16 +54,14 @@ agents. Repository-wide validation remains the orchestrator's responsibility.
 | ----------------------------- | ---------------------------------------------------------------------------- |
 | Developing a change           | Typecheck and tests for the changed area; see delegated-task guidance below. |
 | Opening a PR                  | `npm run ci`. GitHub also builds and checks the package.                     |
-| Changing the Python compiler  | `npm run test:python` in addition to the normal checks.                      |
 | Changing the GLSL compiler    | `npm run test:glsl` in addition to the normal checks.                        |
 | Changing documentation inputs | `npm run doc`; review the generated changes.                                 |
 | Preparing a release           | `npm run release`; see the release sequence below.                           |
 
-Normal checks do not require Python. Release CI runs extended validation, and slower
-suites also run nightly. A local release runs the same checks: the publish check
-runs the full test suite (`scripts/ci-nightly.sh`), and
-`scripts/release-checks.sh` runs the checks of `npm run ci` that the full suite
-does not run.
+Release CI runs extended validation, and slower suites also run nightly. A local
+release runs the same checks: the publish check runs the full test suite
+(`scripts/ci-nightly.sh`), and `scripts/release-checks.sh` runs the checks of
+`npm run ci` that the full suite does not run.
 
 On the shared development machine, follow the
 [shared-box specifics](docs/COMPUTE-ENGINE-BOX-SPECIFICS.md) for worker limits,
@@ -93,14 +91,13 @@ read-only audits.
 Before returning a delegated implementation:
 
 1. Run the checks assigned in the task. Otherwise run only: the test files
-   of the change (with `CE_TEST_PYTHON=1` too when the change edits the
-   Python compiler), the probes that a finding or a design question needs,
+   of the change, the probes that a finding or a design question needs,
    and `npx oxlint` on the changed source files. After a review fix, run only
    the test files that the fix can affect. Do not run, unless the task
    assigns it: a batch of many test files, the full suite, `npm run lint`,
-   `npm run test:python`, or a Prettier check or write (the release checks
-   formatting). The after-edit hook type-checks each edit, so run
-   the compiler by hand only when the hook is off or the task asks for it.
+   or a Prettier check or write (the release checks formatting). The
+   after-edit hook type-checks each edit, so run the compiler by hand only
+   when the hook is off or the task asks for it.
    When the change alters the emitted code of a compilation target, the test
    files of the change include those that contain a fragment of the emitted
    code it changes (`grep -rlF '<fragment>' test/`): they compare the exact
@@ -178,13 +175,12 @@ release requirements. Worker limits and box-lock rules still apply.
 | `npm test -- --watchman=false`               | Forward Jest options to the normal full run and canary.                                                           |
 | `npm run snapshot`                           | Update snapshots; never update a snapshot marked `@fixme`.                                                        |
 | `npm run coverage`                           | Runtime coverage.                                                                                                 |
-| `npm run test:python`                        | Check Python dependencies and run suites with Python execution assertions.                                        |
 | `npm run test:glsl`                          | Compile the GLSL that the engine writes with the WebGL 2 compiler of a headless Chromium.                         |
 | `npm run test:nightly`                       | Run only the additional `CE_NIGHTLY`-gated suites; not the full nightly pipeline.                                 |
 | `npm run test:perf`                          | Run timing assertions serially with `CE_PERF=1`.                                                                  |
 | `npm run ci:corpus-pipeline`                 | Check corpus regressions and generated rule artifacts.                                                            |
 | `npm run ci`                                 | Lint/format, typecheck, dependencies, corpus checks, consumer declarations, and normal runtime tests.             |
-| `npm run ci:extended`                        | Normal CI plus the Prettier check and Python execution validation.                                                |
+| `npm run ci:extended`                        | Normal CI plus the Prettier check.                                                                                |
 | `npm run build`                              | Incremental declarations, both JavaScript bundle variants, version stamping, and production consumer smoke tests. |
 | `npm run build -- development`               | Generate declarations and bundles without production consumer smoke tests.                                        |
 | `npm run clean`                              | Remove `build` and `dist`, including declaration cache metadata.                                                  |
@@ -195,13 +191,6 @@ release requirements. Worker limits and box-lock rules still apply.
 
 <details>
 <summary>Specialized checks and troubleshooting</summary>
-
-`npm run test:python` finds the local interpreter, checks NumPy/SciPy, selects
-the relevant suites, and enables execution checks. No test flags or environment
-variables are required for a configured checkout. If setup is missing, use an
-interpreter with NumPy/SciPy at `venv/bin/python3`, or set `CE_PYTHON` to its
-path. Normal tests still check Python code generation without starting an
-interpreter.
 
 `npm run test:glsl` (`scripts/glsl-check/`) is not part of `npm test`: it
 starts a headless Chromium of `playwright-core`, which renders with SwiftShader
@@ -308,7 +297,7 @@ they pass alone, the failure came from the load of the machine (a time limit, a
 stack depth): the release continues, and the occurrence is written to
 `~/.local/state/compute-engine-ci-nightly/release-second-look.log`, so that each
 test gets an issue. When a file still fails, or another job failed (the
-typecheck, the Python tests), the publish stops.
+typecheck), the publish stops.
 
 `CE_RELEASE_FORCE=1 npm publish` publishes without the full suite, the Prettier
 step and lint. It is what `npm run release force` sets, and it resumes a publish
@@ -333,10 +322,10 @@ prints the end of its log. `CE_VERBOSE=1 npm publish` shows all the output.
 </details>
 
 Alternatively, push the version commit and create a GitHub release tagged
-`v<version>`. The publish workflow installs Python dependencies, runs
-`ci:extended`, and publishes; `prepack` creates the production artifacts. The
-workflow does not generate documentation, so include it in the release commit.
-`npm pack` also triggers the clean production build.
+`v<version>`. The publish workflow runs `ci:extended`, and publishes; `prepack`
+creates the production artifacts. The workflow does not generate documentation,
+so include it in the release commit. `npm pack` also triggers the clean
+production build.
 
 ### Names that published versions point to
 

@@ -1,12 +1,9 @@
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { execFileSync } from 'child_process';
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { main, type CliIo } from '../../src/cli/main';
-import { TEST_PYTHON } from './test-python';
 
 // Compiled arithmetic is machine arithmetic: a float where the interpreter
 // gives an exact number is expected. An operation that reads every digit of
@@ -349,77 +346,6 @@ describe('constant fold of an operand beyond the safe integer range', () => {
   });
 });
 
-describe('Python target', () => {
-  const py = new PythonTarget();
-  // An engine whose inputs are declared: a declared `number` input is read
-  // as is, an inferred one through a `None` test (ROADMAP CE-460). The tests
-  // that use it check the integer test of the operands.
-  const pe = new ComputeEngine();
-  pe.declare('x', 'number');
-
-  it('Mod and Remainder check a non-literal operand', () => {
-    const mod = py.compile(pe.box(['Mod', 'x', 10])).code;
-    expect(mod).toContain("np.mod(*_ce_int_operands('Mod', False, x, 10))");
-    expect(mod).toContain('def _ce_int_operands(_op, _all, _a, _b):');
-    const rem = py.compile(pe.box(['Remainder', 'x', 7])).code;
-    expect(rem).toContain('_ce_remainder(x, 7)');
-    expect(rem).toContain("_ce_int_operands('Remainder', True, _a, _b)");
-    // A bare lambda has no module helper: the check is inline.
-    const lambda = py.compileLambda(pe.box(['Mod', 'x', 10]), ['x']);
-    expect(lambda).not.toContain('_ce_int_operand');
-    expect(lambda).toContain('ValueError(');
-  });
-
-  it('Mod by the literal 1 is not checked', () => {
-    expect(py.compile(pe.box(['Mod', 'x', 1])).code).toBe('np.mod(x, 1)');
-  });
-
-  const hasNumpy = (() => {
-    if (TEST_PYTHON === undefined) return false;
-    try {
-      execFileSync(TEST_PYTHON, ['-c', 'import numpy'], { stdio: 'ignore' });
-      return true;
-    } catch {
-      return false;
-    }
-  })();
-  const itPy = hasNumpy ? it : it.skip;
-
-  itPy('the emitted code raises for a float beyond the range', () => {
-    const helperCode = py.compile(ce.box(['Mod', 'x', 10])).code;
-    const lambda = py.compileLambda(ce.box(['Remainder', 'x', 7]), ['x']);
-    const program = [
-      'import numpy as np',
-      `def f(x):\n    return ${helperCode.split('\n').pop()}`,
-      helperCode.split('\n').slice(0, -1).join('\n'),
-      `g = ${lambda}`,
-      'for fn in (f, g):',
-      "    for x in (17.0, 2.0**60, float('inf'), 2**60 + 1):",
-      '        try:',
-      '            print(repr(float(fn(x))))',
-      '        except ValueError as e:',
-      "            print('ValueError ' + str(e).split(':')[0])",
-    ].join('\n');
-    const out = execFileSync(TEST_PYTHON!, ['-c', program])
-      .toString()
-      .trim()
-      .split('\n');
-    expect(out).toEqual([
-      '7.0',
-      'ValueError Mod',
-      'ValueError Mod',
-      // A Python integer is exact: `np.mod` computes on it exactly.
-      '7.0',
-      '3.0',
-      'ValueError Remainder',
-      'ValueError Remainder',
-      // The `Remainder` formula divides, so an integer beyond the range
-      // raises too.
-      'ValueError Remainder',
-    ]);
-  });
-});
-
 describe('Epsil CLI compile mode', () => {
   function makeIo(): { io: CliIo; stdout: () => string } {
     let out = '';
@@ -470,134 +396,5 @@ describe('Epsil CLI compile mode', () => {
       'Error',
       'Mod: Infinity is beyond the safe integer range of compiled code (±9007199254740991); evaluate with the interpreter for the exact result',
     ]);
-  });
-});
-
-describe('Python target: the effective dtype of the Mod and Remainder operands', () => {
-  const py = new PythonTarget();
-
-  const hasNumpy = (() => {
-    if (TEST_PYTHON === undefined) return false;
-    try {
-      execFileSync(TEST_PYTHON, ['-c', 'import numpy'], { stdio: 'ignore' });
-      return true;
-    } catch {
-      return false;
-    }
-  })();
-  const itPy = hasNumpy ? it : it.skip;
-
-  /** Run `calls` (Python expressions of `f`, the compiled function, and
-   * `g`, the compiled lambda) and print the value or the `ValueError`. */
-  function runPython(json: unknown, calls: string[]): string[] {
-    const helperCode = py.compile(ce.box(json as never)).code;
-    const lambda = py.compileLambda(ce.box(json as never), ['x', 'm']);
-    const program = [
-      'import numpy as np',
-      `def f(x, m):\n    return ${helperCode.split('\n').pop()}`,
-      helperCode.split('\n').slice(0, -1).join('\n'),
-      `g = ${lambda}`,
-      'for call in (' + calls.map((c) => JSON.stringify(c)).join(', ') + ',):',
-      '    try:',
-      '        print(repr(float(eval(call))))',
-      '    except ValueError as e:',
-      "        print('ValueError ' + str(e).split(':')[0])",
-    ].join('\n');
-    return execFileSync(TEST_PYTHON!, ['-c', program])
-      .toString()
-      .trim()
-      .split('\n');
-  }
-
-  // `np.mod` converts an integer to a float when the other operand is a
-  // float: `np.mod(2**60 + 1, 10.0)` is `6.0`, the exact answer is `7`.
-  itPy('Mod of an integer beyond the range by a float raises', () => {
-    expect(
-      runPython(
-        ['Mod', 'x', 'm'],
-        [
-          'f(2**60 + 1, 10.0)',
-          'g(2**60 + 1, 10.0)',
-          'f(10.0, 2**60 + 1)',
-          'g(10.0, 2**60 + 1)',
-          // Two integers: `np.mod` is exact.
-          'f(2**60 + 1, 10)',
-          'g(2**60 + 1, 10)',
-        ]
-      )
-    ).toEqual([
-      'ValueError Mod',
-      'ValueError Mod',
-      'ValueError Mod',
-      'ValueError Mod',
-      '7.0',
-      '7.0',
-    ]);
-  });
-
-  // `np.abs(np.int64(-2**63))` overflows and stays negative, so a test of
-  // the absolute value accepted the minimum int64.
-  itPy('the minimum int64 is beyond the range', () => {
-    expect(
-      runPython(
-        ['Mod', 'x', 'm'],
-        [
-          'f(np.int64(-2**63), 10.0)',
-          'g(np.int64(-2**63), 10.0)',
-          // Two integers: `np.mod` is exact.
-          'f(np.int64(-2**63), np.int64(10))',
-        ]
-      )
-    ).toEqual(['ValueError Mod', 'ValueError Mod', '2.0']);
-    expect(
-      runPython(
-        ['Remainder', 'x', 'm'],
-        [
-          'f(np.int64(-2**63), 10)',
-          'g(np.int64(-2**63), 10)',
-          'f(-2**63, 10)',
-          'g(-2**63, 10)',
-        ]
-      )
-    ).toEqual([
-      'ValueError Remainder',
-      'ValueError Remainder',
-      'ValueError Remainder',
-      'ValueError Remainder',
-    ]);
-  });
-
-  itPy('Remainder computes each operand once', () => {
-    const helperCode = py.compile(ce.box(['Remainder', 'x', 'y']), {
-      vars: { x: 'ca()', y: 'cb()' },
-    }).code;
-    const program = [
-      'import numpy as np',
-      'calls = []',
-      'def ca():\n    calls.append("a")\n    return 5',
-      'def cb():\n    calls.append("b")\n    return 2',
-      helperCode.split('\n').slice(0, -1).join('\n'),
-      `print(repr(float(${helperCode.split('\n').pop()})))`,
-      'print("".join(calls))',
-    ].join('\n');
-    // The quotient 5/2 is a tie, rounded toward +∞: 5 - 2·3 = -1.
-    expect(
-      execFileSync(TEST_PYTHON!, ['-c', program]).toString().trim().split('\n')
-    ).toEqual(['-1.0', 'ab']);
-  });
-
-  it('the Remainder lambda writes each operand once', () => {
-    // A declared `number` input is read as is; an inferred one is read
-    // through a `None` test, which names it twice (ROADMAP CE-460).
-    const pe = new ComputeEngine();
-    pe.declare('x', 'number');
-    pe.declare('m', 'number');
-    const lambda = py.compileLambda(
-      pe.box(['Remainder', ['Add', 'x', 29], ['Add', 'm', 3]]),
-      ['x', 'm']
-    );
-    // Once as a parameter of the lambda, once as an operand.
-    expect(lambda.match(/\bx\b/g)?.length).toBe(2);
-    expect(lambda.match(/\bm\b/g)?.length).toBe(2);
   });
 });

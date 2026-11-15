@@ -1264,40 +1264,6 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
     expect(result[1]).toEqual(['1', '1']);
   });
 
-  test('Python checks the rank of a statistic over a tensor, and declines a fold', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'tensor');
-    // A number or a list of numbers is a sample; a matrix is an error, and
-    // the emitted code checks the rank when it runs.
-    for (const json of [
-      ['Mean', 'p'],
-      ['Median', 'p'],
-    ])
-      expect(
-        compile(ce.box(json as any), { to: 'python', fallback: false } as never)
-          .code
-      ).toMatch(/np\.ndim\(_d\) <= 1/);
-    expect(() =>
-      compile(ce.box(['Reduce', 'p', 'Add', 0]), {
-        to: 'python',
-        fallback: false,
-      } as never)
-    ).toThrow(/Could not compile/);
-  });
-
-  test('Python reduces a possibly nested operand for Max', () => {
-    for (const type of ['broadcastable<number>']) {
-      const ce = new ComputeEngine();
-      ce.declare('p', type);
-      expect(
-        compile(ce.box(['Max', 'p']), {
-          to: 'python',
-          fallback: false,
-        } as never).code
-      ).toMatch(/np\.max\(_v\)/);
-    }
-  });
-
   test('Scan and Reduce over rows keep their typing', () => {
     const ce = new ComputeEngine();
     ce.declare('m', 'matrix<number>');
@@ -1383,15 +1349,6 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
       k: [1, 5],
     } as never) as unknown[];
     expect(result).toEqual([[1, 2], undefined]);
-  });
-
-  test('Python Max of a possibly empty list is NaN alone', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'broadcastable<number>');
-    expect(
-      compile(ce.box(['Max', 'p']), { to: 'python', fallback: false } as never)
-        .code
-    ).toMatch(/np\.size\(_v\) == 0/);
   });
 
   test('PointX and PointY of a string-armed operand read the element', () => {
@@ -1525,23 +1482,6 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
     expect(result.flat().map(re)).toEqual([0, 0, 0, 0]);
     expect(result.flat().map(im)).toEqual([1, 0, 0, 1]);
   });
-
-  test.each(['Max', 'Min'])(
-    'Python %s of several possibly empty lists is NaN when every one is empty',
-    (op) => {
-      const ce = new ComputeEngine();
-      ce.declare('p', 'broadcastable<number>');
-      ce.declare('q', 'broadcastable<number>');
-      const code = compile(ce.box([op, 'p', 'q']), {
-        to: 'python',
-        fallback: false,
-      } as never).code;
-      // An empty operand is skipped (`None`), and no operand left is NaN.
-      expect(code).toContain('None if np.size(_v) == 0');
-      expect(code).toContain("float('nan') if len(_ys) == 0");
-      expect(code).not.toMatch(/np\.inf/);
-    }
-  );
 
   test('a sum over a recursive alias of lists compiles', () => {
     const ce = new ComputeEngine();

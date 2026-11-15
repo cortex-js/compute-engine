@@ -104,39 +104,3 @@ describe('compile modes — standalone vs target-level route', () => {
 
   });
 });
-
-describe('the Python target route behaves like the JavaScript one', () => {
-  it("the decline's interpreter fallback follows the runner's value convention", () => {
-    // The Python target builds its own fallback in its catch, so the runner
-    // contract has to be honored there and not only on the standalone route.
-    // `scipy.special.loggamma` takes another branch than the interpreter off
-    // the real axis, so `GammaLn` is real-only on the Python target and
-    // `GammaLn(z)` with `z: complex` declines under strict. (The
-    // JavaScript-route test in compile-mode-plumbing uses `Erf`, which is
-    // real-only there; on Python `scipy.special.erf` takes a complex
-    // argument.)
-    const ce = new ComputeEngine();
-    ce.declare('z', 'complex');
-    const r = ce
-      ._getCompilationTarget('python')!
-      .compile(ce.box(['Add', ['GammaLn', 'z'], 'z']), {
-        fallback: true,
-        mode: 'strict',
-      });
-    expect(r.success).toBe(false);
-    // An exactly-real value comes back as a plain number: lnΓ(0.5) + 0.5.
-    expect(r.run!({ z: { re: 0.5, im: 0 } as never })).toBeCloseTo(
-      1.0723649429247001,
-      12
-    );
-    // …and a genuinely complex one as a `{re, im}`: lnΓ(3 + 4i) + 3 + 4i,
-    // with lnΓ the principal log (Im in (−π, π]).
-    const c = r.run!({ z: { re: 3, im: 4 } as never }) as {
-      re: number;
-      im: number;
-    };
-    expect(typeof c).toBe('object');
-    expect(c.re).toBeCloseTo(1.2433732153962191, 12);
-    expect(c.im).toBeCloseTo(2.4594791308550716, 12);
-  });
-});

@@ -14,9 +14,7 @@ import { lookupApplicable } from './function-utils.js';
  * (`Sin`) return `undefined` — their derivatives have closed forms, so the
  * fallback is never the right tool for them.
  *
- * The numeric derivative of `library/calculus.ts` and the structured route
- * of the JavaScript compiler (`numericDerivative()` in
- * `compilation/javascript-fragment-target.ts`) both read the operand with
+ * The numeric derivative of `library/calculus.ts` reads the operand with
  * this function.
  */
 export function resolveDerivativeFunctionLiteral(

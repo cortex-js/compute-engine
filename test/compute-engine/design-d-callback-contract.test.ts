@@ -6,7 +6,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
 import {
@@ -260,9 +259,6 @@ describe('phase 0: `CountIf` converts to the contextual signature', () => {
     );
     expect(r.preamble).toContain('const _val_cs = [1, 2, 3];');
     expect((r.run as () => unknown)()).toBe(2);
-    expect(new PythonTarget().compile(e, { constantFold: false })?.code).toBe(
-      '(lambda _f: sum(1 for _x in [1, 2, 3] if _f(_x)))((lambda n: 1 < n))'
-    );
   });
 });
 

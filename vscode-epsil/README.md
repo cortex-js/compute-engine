@@ -6,10 +6,10 @@ scientific computing.
 Epsil is a statically typed, functional language with a small core and a
 powerful standard library. It is designed for scientific computing, with
 built-in support for units, symbolic computation, LaTeX islands and code
-generation to JavaScript, Python (NumPy), and GLSL. Type inference makes most
-type annotations optional. Effects are tracked in the type system, so pure
-functions can be reasoned about and optimized, while functions with side effects
-are clearly marked.
+generation to JavaScript and GLSL. Type inference makes most type annotations
+optional. Effects are tracked in the type system, so pure functions can be
+reasoned about and optimized, while functions with side effects are clearly
+marked.
 
 ## Multi-clause function definitions, numeric ranges, and chained operations
 
@@ -74,8 +74,8 @@ solve(x^2 - 2, x) |> N()  // -> [1.4142135623730951, -1.4142135623730951]
 - **Epsil: Show Representation** (the `{}` button in the editor title bar) —
   opens a read-only pane beside your file showing what the engine makes of it:
   the **MathJSON** it parses to, its **canonical form**, or the program as
-  compiled by one of the engine's code-generation targets — **JavaScript**,
-  **Python** (NumPy), or **GLSL**.
+  compiled by one of the engine's code-generation targets — **JavaScript** or
+  **GLSL**.
 - **Epsil: Run File** (`epsil.runFile`) — saves the active file and runs it in
   an integrated terminal named _Epsil_. By default it runs the Epsil CLI bundled
   with the extension — the same engine build used for diagnostics, inline

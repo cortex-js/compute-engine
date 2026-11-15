@@ -5,8 +5,8 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 //
 // A local of a block is made by a `Declare` at the top level of the block; an
 // `Assign` writes a variable that is in scope and, inside a block, is an
-// error for a name that is not declared. As a variable of a JavaScript or
-// Python function, a local starts from its declaration in each top-level
+// error for a name that is not declared. As a variable of a JavaScript
+// function, a local starts from its declaration in each top-level
 // evaluation and in each function call, and keeps its value inside one
 // evaluation: across the iterations of a loop in the block.
 //

@@ -1,14 +1,10 @@
-import { execFileSync } from 'child_process';
-import { TEST_PYTHON } from './test-python';
-
 import { ComputeEngine, compile } from '../../src/compute-engine';
 
 // The lane of a linear-algebra head (`BaseCompiler.linearAlgebraLane`) selects
 // the helper a target emits for it (a real one, or one that computes with
 // complex entries) and is also the answer a parent expression reads for the
 // value of the node. These tests check that every route agrees with that
-// lane, and that the Python target agrees with the interpreter on complex
-// values.
+// lane.
 
 const MODES = ['strict', 'complex'] as const;
 
@@ -339,21 +335,6 @@ describe('A `Power` WHOSE BASE IS A MATRIX ONLY AFTER THE PARSE', () => {
     ]);
   });
 
-  it('python: the structural `Power` of a square matrix literal', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.function(
-      'Power',
-      [ce.parse('[[1, 2], [3, 4]]'), ce.number(2)],
-      { form: 'structural' }
-    );
-    const result = compile(expr, {
-      to: 'python',
-      constantFold: false,
-      fallback: false,
-    } as any);
-    expect(result.code).toBe('np.linalg.matrix_power([[1, 2], [3, 4]], 2)');
-  });
-
   it('javascript: a non-integer exponent keeps the element-wise power', () => {
     const expr = assignedAfterParse('B^{0.5}', '[[1, 2], [3, 4]]');
     const result = js(expr, 'strict');
@@ -488,245 +469,12 @@ describe('THE GPU COMPLEX POWER AT ZERO', () => {
     });
 });
 
-// The Python of `CE_PYTHON` or of the repo's virtual environment, when
-// present (`test-python.ts`). The value checks are skipped without it.
-const PYTHON = TEST_PYTHON;
-
-/** The Python program that binds the variables of `setup`, runs the
- * compilation `r`, and prints its value as two floats on one line. */
-function pythonProgram(r: any, setup: string): string {
-  const lines = (r.code as string).split('\n');
-  return [
-    'import numpy as np',
-    'import scipy.special',
-    'import cmath',
-    'import math',
-    'import warnings',
-    'warnings.simplefilter("ignore")',
-    setup,
-    r.preamble ?? '',
-    ...lines.slice(0, -1),
-    `v = complex(${lines[lines.length - 1]})`,
-    'print(repr(float(v.real)), repr(float(v.imag)))',
-  ].join('\n');
-}
-
-/** Run each program of `programs` (see `pythonProgram()`) and return the
- * value of each as `[re, im]`, in the same order.
- *
- * One Python process runs all the programs: starting Python and importing
- * NumPy and SciPy takes about 0.14 s, and a test that started one process
- * per sample point took about 8 s. Each program runs with `exec` in a new,
- * empty global namespace, so no variable or helper of one program is visible
- * to the next one. An exception in a program stops the process with a
- * non-zero exit code, and `execFileSync` then throws, as it did when each
- * program had its own process. */
-function runPythonPrograms(programs: string[]): Array<[number, number]> {
-  const driver = [
-    'import json, sys',
-    'for p in json.load(sys.stdin):',
-    '    exec(p, {})',
-  ].join('\n');
-  const out = execFileSync(PYTHON!, ['-c', driver], {
-    encoding: 'utf8',
-    input: JSON.stringify(programs),
-  }).trim();
-  const results = out.split('\n').map(
-    (line) =>
-      line
-        .trim()
-        .split(/\s+/)
-        .map((t) =>
-          t === 'inf' ? Infinity : t === '-inf' ? -Infinity : Number(t)
-        ) as [number, number]
-  );
-  expect(results.length).toBe(programs.length);
-  return results;
-}
-
-/** Run the Python compilation `r` with the variable bindings `setup`, and
- * return its value as `[re, im]`. */
-function runPython(r: any, setup: string): [number, number] {
-  return runPythonPrograms([pythonProgram(r, setup)])[0];
-}
-
-describe('PYTHON: THE OPERANDS OF A COMPLEX PRODUCT AND POWER', () => {
-  // A complex operand sends `Multiply` and `Power` to their function
-  // lowerings, which joined the operands without parentheses: `2(x + z)`
-  // emitted `2 * x + z`, and `(x + iy)^2` emitted `(x + complex(0, 1) * y ** 2)`.
-  function engine(): ComputeEngine {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('y', 'real');
-    ce.declare('z', 'complex');
-    return ce;
-  }
-  const CASES: Array<[any, string]> = [
-    [['Multiply', 2, ['Add', 'x', 'z']], '2 * (x + z)'],
-    [['Multiply', ['Add', 'y', 1], ['Add', 'z', 1]], '(y + 1) * (z + 1)'],
-    [
-      ['Power', ['Add', 'x', ['Multiply', 'y', 'ImaginaryUnit']], 2],
-      '((x + complex(0, 1) * y) ** 2)',
-    ],
-    [
-      ['Power', 2, ['Add', 'x', ['Multiply', 'y', 'ImaginaryUnit']]],
-      '(2 ** (x + complex(0, 1) * y))',
-    ],
-  ];
-  for (const [json, code] of CASES)
-    it(`${JSON.stringify(json)} compiles to ${code}`, () => {
-      const r = compile(engine().box(json), { to: 'python' } as any) as any;
-      expect(r.code).toBe(code);
-    });
-
-  (PYTHON === undefined ? it.skip : it)(
-    'the values agree with the interpreter',
-    () => {
-      const ce = engine();
-      const exprs = CASES.map(([json]) => ce.box(json));
-      const values = runPythonPrograms(
-        exprs.map((expr) =>
-          pythonProgram(
-            compile(expr, { to: 'python', fallback: false } as any),
-            'x = 0.5\ny = -1.5\nz = complex(0.25, 2)'
-          )
-        )
-      );
-      for (const [i, [json]] of CASES.entries()) {
-        const expr = exprs[i];
-        const actual = values[i];
-        const expected = expr
-          .subs({ x: 0.5, y: -1.5, z: ce.parse('0.25 + 2\\imaginaryI') })
-          .N();
-        expect([JSON.stringify(json), ...actual]).toEqual([
-          JSON.stringify(json),
-          expect.closeTo(expected.re, 9),
-          expect.closeTo(expected.im, 9),
-        ]);
-      }
-    }
-  );
-});
-
-describe('PYTHON: SPECIAL FUNCTIONS OF A COMPLEX ARGUMENT', () => {
-  // `scipy.special.loggamma` takes a different branch than the interpreter,
-  // so in `mode: 'complex'` a complex operand of `GammaLn` takes the run-time
-  // realness rule: the real lowering on the real part when the imaginary part
-  // is exactly zero, and an error otherwise. The strict default declines. `Artanh` and `Arsinh` take `cmath`, with the
-  // interpreter's side of each branch cut (`pyInverseTrig`).
-  function engine(): ComputeEngine {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('y', 'real');
-    return ce;
-  }
-  const Z = ['Add', 'x', ['Multiply', 'y', 'ImaginaryUnit']];
-  for (const head of ['GammaLn'])
-    it(`${head}(x + iy) takes the run-time realness rule`, () => {
-      const r = compile(engine().box([head, Z]), {
-        to: 'python',
-        fallback: false,
-        mode: 'complex',
-      } as any) as any;
-      expect(r.code).toContain('_ce_cisreal');
-    });
-
-  // The helpers that keep their complex argument agree with the interpreter
-  // on the real axis, on both sides of their branch cuts, and at 0.
-  const POINTS: Array<[number, number]> = [];
-  for (const x of [-3, -2.5, -1, -0.5, 0, 0.5, 1, 2, 3])
-    for (const y of [0, 1e-9, -1e-9, 1, -1]) POINTS.push([x, y]);
-  for (const y of [2, -2, 0.5, -0.5])
-    for (const x of [0, 1e-9, -1e-9]) POINTS.push([x, y]);
-  for (const head of [
-    'Erf',
-    'Erfc',
-    'Arcosh',
-    'Artanh',
-    'Arsinh',
-    'Lb',
-    'Log2',
-    'Log10',
-  ])
-    (PYTHON === undefined ? it.skip : it)(
-      `${head}(x + iy) agrees with the interpreter`,
-      () => {
-        const ce = engine();
-        const expr = ce.box([head, Z]);
-        const r = compile(expr, {
-          to: 'python',
-          fallback: false,
-        } as any) as any;
-        expect(r.code).not.toContain('_ce_cisreal');
-        const values = runPythonPrograms(
-          POINTS.map(([x, y]) => pythonProgram(r, `x = ${x}\ny = ${y}`))
-        );
-        for (const [i, [x, y]] of POINTS.entries()) {
-          const [re, im] = values[i];
-          const expected = expr.subs({ x, y }).N();
-          const same = (a: number, b: number) =>
-            a === b || Math.abs(a - b) <= 1e-9 * (1 + Math.abs(b));
-          expect([
-            head,
-            x,
-            y,
-            same(re, expected.re),
-            same(im, expected.im),
-          ]).toEqual([head, x, y, true, true]);
-        }
-      }
-    );
-});
-
-describe('PYTHON: STATISTICS AND TRACE OF COMPLEX VALUES', () => {
-  // `np.mean`, `np.var(…, ddof=1)` and `np.std(…, ddof=1)` compute the
-  // interpreter's values over complex elements (the variance is the sum of
-  // `|x − μ|²` over `n − 1`), so a `list<complex>` operand reaches them as it
-  // is. They were declared real-only on every target, and `Mean(L)` compiled
-  // to `np.mean(_ce_creal_elems(L))`, which is NaN.
+describe('STATISTICS OF COMPLEX VALUES', () => {
   function engine(): ComputeEngine {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<complex>');
-    ce.declare('M', 'matrix<complex>');
     return ce;
   }
-  const CASES: Array<[string, any, string]> = [
-    ['Mean', ['Mean', 'L'], 'np.mean(L)'],
-    ['Variance', ['Variance', 'L'], 'np.var(L, ddof=1)'],
-    ['StandardDeviation', ['StandardDeviation', 'L'], 'np.std(L, ddof=1)'],
-    // `float()` of a complex trace dropped its imaginary part.
-    ['Trace', ['Trace', 'M'], 'complex(np.trace(np.asarray(M)))'],
-  ];
-  for (const [name, json, code] of CASES) {
-    it(`${name}: the complex operand reaches NumPy as it is`, () => {
-      const r = compile(engine().box(json), { to: 'python' } as any) as any;
-      expect(r.code).toBe(code);
-    });
-    (PYTHON === undefined ? it.skip : it)(
-      `${name}: the value agrees with the interpreter`,
-      () => {
-        const ce = engine();
-        const expr = ce.box(json);
-        const r = compile(expr, { to: 'python', fallback: false } as any);
-        const actual = runPython(
-          r,
-          'L = [complex(1, 1), 2, complex(0, 3)]\n' +
-            'M = [[complex(1, 1), 2], [complex(0, -1), complex(3, 2)]]'
-        );
-        const expected = expr
-          .subs({
-            L: ce.parse('[1+\\imaginaryI, 2, 3\\imaginaryI]'),
-            M: ce.parse(
-              '[[1+\\imaginaryI, 2], [-\\imaginaryI, 3+2\\imaginaryI]]'
-            ),
-          })
-          .N();
-        expect(actual[0]).toBeCloseTo(expected.re, 9);
-        expect(actual[1]).toBeCloseTo(expected.im, 9);
-      }
-    );
-  }
-
   // JavaScript has a complex lowering of `Mean` (`_SYS.cmean`), which sums
   // `{re, im}` entries; before it, `Mean` took the run-time realness rule and
   // answered NaN for complex data.

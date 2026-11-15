@@ -112,9 +112,9 @@ export const FOLD_CHARS_PER_NODE = 3;
 
 /**
  * Operator heads that are word-spelled infix/prefix **keywords** in some
- * targets (Python `and` / `or` / `not`), never function calls. The alphabetic
+ * targets (`and` / `or` / `not`), never function calls. The alphabetic
  * op-string of these heads must NOT be treated as a function-call name — that
- * would emit `and(a, b)` (a Python SyntaxError). This is distinct from a user
+ * would emit `and(a, b)`. This is distinct from a user
  * override that intentionally maps an operator to a function name (e.g.
  * `Add: ['add', 11]` → `add(x, y)`): those heads are not in this set.
  */
@@ -257,19 +257,15 @@ export const BINARY_INFIX_VALUE_OPERATORS: ReadonlySet<string> = new Set([
  * The heads whose scalar code gives a wrong value for a list operand. In
  * JavaScript, `[1, 2] + [3, 4]` is the string `"1,23,4"`, `[1, 2] * [3, 4]` is
  * `NaN`, `[1, 2] < 3` is `false` where the interpreter gives `[True, True]`,
- * and `[1, 2] = [1, 2]` is `false`. In Python, `[1, 2] + [3, 4]` is
- * `[1, 2, 3, 4]`, and `2 * [1, 2]` is `[1, 2, 1, 2]`. `Max` and `Min` with one
+ * and `[1, 2] = [1, 2]` is `false`. `Max` and `Min` with one
  * scalar operand are that operand, where the interpreter reduces a list:
  * `Max(p)` with `p = [1, 5]` is 5.
  *
- * The JavaScript, Python and `interval-js` targets decline these heads, and
+ * The JavaScript and `interval-js` targets decline these heads, and
  * every other head whose definition is `broadcastable` (`Sin`, `Sqrt`, `Abs`,
  * …), over an operand declared `any` or `value`, whose value can be a list
  * (`assertNoDeclaredTopOperands()`, `compile-admission.ts`). On JavaScript, the
  * scalar kernel of such a head gives `NaN` for an array (`Math.sin([1, 2])`).
- * On Python, `np.sin` accepts a list and gives the correct values as an array;
- * it declines too, because compiled code settles the shape of each value at
- * compile time.
  */
 export const DECLARED_TOP_DECLINE_HEADS: ReadonlySet<string> = new Set([
   'Add',
@@ -292,7 +288,7 @@ export const DECLARED_TOP_DECLINE_HEADS: ReadonlySet<string> = new Set([
 /**
  * Function heads that consume a complex value and return a real (or complex)
  * result. These are string-mapped to a complex-aware library routine in some
- * targets (e.g. Python `Real: 'np.real'`), so — unlike a real-only helper —
+ * targets, so — unlike a real-only helper —
  * a complex argument is expected and must NOT trip the fail-closed guard.
  */
 export const COMPLEX_TRANSPARENT_HEADS: ReadonlySet<string> = new Set([
@@ -305,7 +301,7 @@ export const COMPLEX_TRANSPARENT_HEADS: ReadonlySet<string> = new Set([
 /**
  * Heads that produce a real-SHAPED value BY DEFINITION — whatever their
  * operand's type or complexness. Every target lowers them to a real scalar
- * (`Imaginary` → `(z).y` on GLSL, `.im` on JS, `np.imag` on Python;
+ * (`Imaginary` → `(z).y` on GLSL, `.im` on JS;
  * `Argument` → `atan(z.y, z.x)` / `_SYS.carg`), so an enclosing form may
  * treat them as real without parent and child disagreeing on the value
  * shape.
@@ -349,8 +345,7 @@ export const SCALAR_ARITHMETIC_HEADS: ReadonlySet<string> = new Set([
  * read through `BaseCompiler.isRealOnlyLowering`), and adds the heads that
  * are real-only in its OWN lowerings: the special functions (`Erf`,
  * `BesselJ`, …) have a complex extension in the interpreter, and a target
- * may or may not lower it (Python's `scipy.special.erf` takes a complex
- * argument, JavaScript's `_SYS.erf` does not).
+ * may or may not lower it (JavaScript's `_SYS.erf` does not).
  *
  * Five families:
  *
@@ -368,9 +363,8 @@ export const SCALAR_ARITHMETIC_HEADS: ReadonlySet<string> = new Set([
  *    answers an `incompatible-type` error). `Mean`, `Variance` and
  *    `StandardDeviation` are not listed: the interpreter computes them
  *    over complex values (the variance is the sum of `|x − μ|²` over
- *    `n − 1`), and the Python lowerings `np.mean`, `np.var(…, ddof=1)` and
- *    `np.std(…, ddof=1)` compute the same values. They are real-only on
- *    the JavaScript and shader targets only, whose reducers sum plain
+ *    `n − 1`). They are real-only on
+ *    the JavaScript and shader targets, whose reducers sum plain
  *    numbers (`JS_REAL_ONLY_LOWERINGS`, `GPU_REAL_ONLY_LOWERINGS`).
  *    Measured before the gate: `Mean([i, 2i])` compiled to `NaN` on
  *    JavaScript where the interpreter answers the complex mean.

@@ -7,9 +7,8 @@
  * radians: 0.894 at x = 90 instead of 1. The value is now rewritten alone
  * (`BaseCompiler.foldedValueInRadians()`), so nothing is converted twice.
  *
- * The routes `compileToSource()` and `compileFunction()` of the GLSL and
- * Python targets did not rewrite their expression at all; they now do,
- * as `compile()` does.
+ * The routes `compileToSource()` and `compileFunction()` of the GLSL target
+ * did not rewrite their expression at all; they now do, as `compile()` does.
  *
  * Found during the work on ROADMAP CE-593.
  */
@@ -17,9 +16,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { TEST_PYTHON } from './test-python';
-import { execFileSync } from 'child_process';
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -57,13 +53,6 @@ describe('a folded value in degree mode', () => {
       scalar
     );
     expect(compile(ce.parse('P.x'), { to, fallback: false }).code).toBe(point);
-  });
-
-  test('python', () => {
-    const ce = engine();
-    expect(
-      compile(ce.parse('c + 1'), { to: 'python', fallback: false }).code
-    ).toBe('np.sin(0.017453292519943295 * x) + 1');
   });
 
   test('interval-js', () => {
@@ -117,17 +106,6 @@ describe('compileToSource() and compileFunction() in degree mode', () => {
     );
     expect(source).toContain(
       'float f(float x) {\n  return _gpu_sin(0.017453292 * y) + _gpu_sin(0.017453292 * x);\n}'
-    );
-  });
-
-  test('python: compileToSource() and compileFunction()', () => {
-    const ce = engineWithY();
-    const target = new PythonTarget();
-    expect(target.compileToSource(ce.parse('\\sin(x)'))).toBe(
-      'np.sin(0.017453292519943295 * x)'
-    );
-    expect(target.compileFunction(ce.parse('\\sin(x)'), 'f', ['x'])).toBe(
-      'def f(x):\n    return np.sin(0.017453292519943295 * x)\n'
     );
   });
 });
@@ -197,71 +175,6 @@ describe('the constant folder in degree mode reads a stored definition', () => {
     // of magnitude at most 0.5, and `sin` is the built-in.
     expect(r.preamble).toContain('return sin(0.017453292 * t);');
   });
-
-  const PYTHON: Array<[string, string]> = [
-    ['2k', '2 * 0.5'],
-    ['k+1', '0.5 + 1'],
-    ['\\sin(k)', 'np.sin(0.017453292519943295 * 0.5)'],
-    ['\\arcsin(k)', '57.29577951308232 * np.arcsin(0.5)'],
-    ['\\cos(30)+k', '0.5 + 0.8660254037844387'],
-  ];
-
-  test.each(PYTHON)('python: %s', (src, code) => {
-    const ce = engineWithK();
-    expect(compile(ce.parse(src), { to: 'python', fallback: false }).code).toBe(
-      code
-    );
-  });
-
-  // The Python target has no lowering for a call of a user function, so a
-  // call that is not folded is refused, as `f(x)` is. Before, the fold
-  // compiled `f(k)` to the sine of 0.5 radians.
-  test('python: a user function', () => {
-    const ce = engineWithK();
-    expect(() =>
-      compile(ce.parse('f(k)'), { to: 'python', fallback: false })
-    ).toThrow(/Could not compile `f`/);
-  });
-
-  const hasNumpy = (() => {
-    if (!TEST_PYTHON) return false;
-    try {
-      execFileSync(TEST_PYTHON, ['-c', 'import numpy'], { stdio: 'ignore' });
-      return true;
-    } catch {
-      return false;
-    }
-  })();
-  (hasNumpy ? test : test.skip)('python: the values, run by numpy', () => {
-    const ce = engineWithK();
-    const src =
-      'import numpy as np\nimport json\n' +
-      `print(json.dumps([float(v) for v in [${PYTHON.map(([, c]) => c).join(', ')}]]))\n`;
-    const out = execFileSync(TEST_PYTHON!, ['-c', src], { encoding: 'utf8' });
-    const values = JSON.parse(out) as number[];
-    PYTHON.forEach(([s], i) =>
-      expect(values[i]).toBeCloseTo(expected(ce, s), 12)
-    );
-  });
-});
-
-describe('python: compileLambda() in degree mode', () => {
-  // `compileLambda()` did not rewrite its expression for the angular unit,
-  // while the stored value of `c` was rewritten: the code mixed the two
-  // units, `lambda x: np.sin(0.0174… * y) + np.sin(x)`.
-  test('the expression and the value are both converted', () => {
-    const ce = new ComputeEngine();
-    ce.angularUnit = 'deg';
-    ce.declare('x', 'real');
-    ce.declare('y', 'real');
-    ce.declare('c', 'real');
-    ce.assign('c', ce.parse('\\sin(y)'));
-    expect(
-      new PythonTarget().compileLambda(ce.parse('\\sin(x) + c'), ['x'])
-    ).toBe(
-      'lambda x: np.sin(0.017453292519943295 * y) + np.sin(0.017453292519943295 * x)'
-    );
-  });
 });
 
 describe('a compiled integral in degree mode reads a stored definition', () => {
@@ -269,8 +182,8 @@ describe('a compiled integral in degree mode reads a stored definition', () => {
   // the stored value of `k` and the body of `f` in radians: `∫₀ˣ k dt`
   // compiled to `x·sin(30 rad)`, -1.976 at x = 2 instead of 1. Such an
   // integral now compiles by its numeric route, where the integrand compiles
-  // structurally with each stored value rewritten for the unit. The GLSL and
-  // Python targets have no lowering for these integrals.
+  // structurally with each stored value rewritten for the unit. The GLSL
+  // target has no lowering for these integrals.
   function engineWithK(): ComputeEngine {
     const ce = new ComputeEngine();
     ce.angularUnit = 'deg';
@@ -334,7 +247,7 @@ describe('AbsArg in degree mode', () => {
   // and through a function body.
   const REFUSAL =
     /Could not compile `AbsArg` when the angular unit is not radians/;
-  const TARGETS = ['javascript', 'interval-js', 'glsl', 'python'] as const;
+  const TARGETS = ['javascript', 'interval-js', 'glsl'] as const;
 
   function engineWithK(unit: 'deg' | 'rad' = 'deg'): ComputeEngine {
     const ce = new ComputeEngine();
@@ -415,9 +328,6 @@ describe('AbsArg in degree mode', () => {
     const e = ce.box(CASES[1][1] as any);
     expect(compile(e, { fallback: false }).code).toBe('1.5707963267948966');
     expect(compile(e, { to: 'glsl', fallback: false }).code).toBe('1.5707964');
-    expect(compile(e, { to: 'python', fallback: false }).code).toBe(
-      '1.5707963267948966'
-    );
   });
 });
 

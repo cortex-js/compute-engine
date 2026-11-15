@@ -20,14 +20,9 @@
 // are static errors: a declaration throws, and a function literal has an
 // `Error` in place of the parameter, so that it does not compile.
 
-import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
-import { TEST_PYTHON } from './test-python';
 
 type Json = any;
 
@@ -284,88 +279,6 @@ describe('COMPILED PARAMETER DEFAULTS: USER FUNCTIONS', () => {
   });
 });
 
-describe('COMPILED PARAMETER DEFAULTS: PYTHON', () => {
-  const ce = new ComputeEngine();
-
-  test('a value default fills `None`, the omission of an argument', () => {
-    expect(run(ce, defaulted(2), 'python').code).toBe(
-      '(lambda x, k=None: (lambda k: k * x)(2 if k is None else k))'
-    );
-  });
-
-  test('a collection default is evaluated at each call', () => {
-    const lit = [
-      'Function',
-      'xs',
-      ['Optional', ['Typed', 'xs', "'list<number>'"], ['List']],
-    ];
-    expect(run(ce, lit, 'python').code).toContain('[] if xs is None');
-  });
-
-  const python = TEST_PYTHON ?? '';
-  const pythonTest = fs.existsSync(python) ? test : test.skip;
-
-  pythonTest('the emitted Python agrees with the interpreter', () => {
-    const value = run(ce, defaulted(2), 'python').code;
-    const list = run(
-      ce,
-      [
-        'Function',
-        'xs',
-        ['Optional', ['Typed', 'xs', "'list<number>'"], ['List']],
-      ],
-      'python'
-    ).code;
-    const program = [
-      'import json',
-      'import cmath',
-      'import numpy as np',
-      `f = ${value}`,
-      `h = ${list}`,
-      'a = h()',
-      'b = h()',
-      'print(json.dumps([f(3), f(3, 5), a, b, a is not b]))',
-    ].join('\n');
-    const file = path.join(os.tmpdir(), `ce-py-defaults-${process.pid}.py`);
-    fs.writeFileSync(file, program);
-    let out = '';
-    try {
-      out = execFileSync(python, [file], { encoding: 'utf8' });
-    } finally {
-      fs.unlinkSync(file);
-    }
-    expect(JSON.parse(out)).toEqual([6, 15, [], [], true]);
-    expect(interpreted(ce, ['Apply', defaulted(2), 3])).toBe(6);
-  });
-
-  pythonTest('a dictionary default is a new empty `dict` at each call', () => {
-    const lit = [
-      'Function',
-      'm',
-      ['Optional', ['Typed', 'm', "'dictionary<integer>'"], ['Dictionary']],
-    ];
-    const program = [
-      'import json',
-      'import cmath',
-      'import numpy as np',
-      `h = ${run(ce, lit, 'python').code}`,
-      'a = h()',
-      'b = h()',
-      'print(json.dumps([a, b, a is not b]))',
-    ].join('\n');
-    const file = path.join(os.tmpdir(), `ce-py-dict-default-${process.pid}.py`);
-    fs.writeFileSync(file, program);
-    let out = '';
-    try {
-      out = execFileSync(python, [file], { encoding: 'utf8' });
-    } finally {
-      fs.unlinkSync(file);
-    }
-    expect(JSON.parse(out)).toEqual([{}, {}, true]);
-    expect(interpreted(ce, ['Apply', lit])).toEqual({ dict: {} });
-  });
-});
-
 describe('COMPILED PARAMETER DEFAULTS: INTERVAL AND GLSL', () => {
   const ce = new ComputeEngine();
   ce.declare('y', 'real');
@@ -499,46 +412,6 @@ describe('COMPILED PARAMETER DEFAULTS: CALLBACKS AND FOLDS', () => {
     expect(interpretedValues(ce, scan, { y: 1 })).toEqual([2, 6, 12]);
     expect(run(ce, scan, 'javascript', { y: 1 }).value).toEqual([2, 6, 12]);
   });
-
-  const python = TEST_PYTHON ?? '';
-  const pythonTest = fs.existsSync(python) ? test : test.skip;
-
-  pythonTest(
-    'Python: `Reduce` and `Scan` with a combiner with a default',
-    () => {
-      const ce = new ComputeEngine();
-      const reduce = run(
-        ce,
-        ['Reduce', ['List', 1, 2, 3], combiner, 0],
-        'python'
-      );
-      const scan = run(ce, ['Scan', ['List', 1, 2, 3], combiner, 0], 'python');
-      const out = runPython(python, [
-        `print(json.dumps([float(${reduce.code}), [float(v) for v in ${scan.code}]]))`,
-      ]);
-      expect(out).toEqual([12, [2, 6, 12]]);
-      expect(interpreted(ce, ['Reduce', ['List', 1, 2, 3], combiner, 0])).toBe(
-        12
-      );
-    }
-  );
-
-  test('Python: the omission marker does not take the name of a parameter', () => {
-    const ce = new ComputeEngine();
-    const lit = [
-      'Function',
-      'xs',
-      ['Typed', '_ce_omitted', "'number'"],
-      ['Optional', ['Typed', 'xs', "'list<number>'"], ['List']],
-    ];
-    expect(interpreted(ce, ['Apply', lit, 1])).toEqual(['List']);
-    const { code } = run(ce, lit, 'python');
-    expect(code).not.toContain('xs is _ce_omitted');
-    if (fs.existsSync(python))
-      expect(runPython(python, [`print(json.dumps((${code})(1)))`])).toEqual(
-        []
-      );
-  });
 });
 
 describe('COMPILED PARAMETER DEFAULTS: ARGUMENT COUNT AND DEFINITIONS', () => {
@@ -638,7 +511,7 @@ describe('COMPILED PARAMETER DEFAULTS: ARGUMENT COUNT AND DEFINITIONS', () => {
         .subs({ L: ['List', 1, 2, 3] })
         .evaluate().json
     ).toBe(3);
-    for (const to of ['javascript', 'python'])
+    for (const to of ['javascript'])
       for (const expr of [reduce, ['Scan', 'L', combiner, 0]])
         expect(() =>
           compile(ce.box(expr) as any, { to, fallback: false } as any)
@@ -670,21 +543,6 @@ describe('COMPILED PARAMETER DEFAULTS: SORT, ITERATE AND PIPE', () => {
     expect(run(ce, pipe, 'javascript', { y: 5 }).value).toEqual([2, 10]);
   });
 });
-
-/** The JSON value that the Python program `lines` prints (`json` is
- * imported). */
-function runPython(python: string, lines: string[]): unknown {
-  const file = path.join(
-    os.tmpdir(),
-    `ce-py-defaults-${process.pid}-${Math.random().toString(36).slice(2)}.py`
-  );
-  fs.writeFileSync(file, ['import json', ...lines].join('\n'));
-  try {
-    return JSON.parse(execFileSync(python, [file], { encoding: 'utf8' }));
-  } finally {
-    fs.unlinkSync(file);
-  }
-}
 
 describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS ONLY A LEFT-OUT ARGUMENT', () => {
   const ce = new ComputeEngine();
@@ -791,45 +649,6 @@ describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS ONLY A LEFT-OUT ARGUMENT'
     const fn: any = jsFunction(ce, K);
     expect([fn.run(), fn.run(undefined)]).toEqual([2, 2]);
     expect(fn.run(5)).toBe(5);
-  });
-
-  const python = TEST_PYTHON ?? '';
-  const pythonTest = fs.existsSync(python) ? test : test.skip;
-
-  pythonTest('Python', () => {
-    const lines = [
-      'import json',
-      'import cmath',
-      'import numpy as np',
-      'L = [1.0, 2.0]',
-      'out = []',
-    ];
-    for (const [, expr] of programs) {
-      const { code } = run(ce, expr, 'python');
-      // A block compiles to statements that end with a `return`.
-      if (code.includes('\n')) {
-        lines.push(
-          `def _block():\n${code
-            .split('\n')
-            .map((l) => `    ${l}`)
-            .join('\n')}`
-        );
-        lines.push('out.append(_block())');
-      } else lines.push(`out.append(${code})`);
-    }
-    lines.push('print(json.dumps(out))');
-    const file = path.join(
-      os.tmpdir(),
-      `ce-py-absent-default-${process.pid}.py`
-    );
-    fs.writeFileSync(file, lines.join('\n'));
-    let out = '';
-    try {
-      out = execFileSync(python, [file], { encoding: 'utf8' });
-    } finally {
-      fs.unlinkSync(file);
-    }
-    expect(JSON.parse(out)).toEqual(programs.map(([, , expected]) => expected));
   });
 });
 

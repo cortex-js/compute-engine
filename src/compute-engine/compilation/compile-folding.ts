@@ -225,7 +225,7 @@ const EXACT_FOLD_DIGITS_PER_WORD = 19;
  * whose structural handler inlines when `len < 50`.
  *
  * This is the default only. It is a source-size trade-off for
- * the JavaScript and Python targets, where both emissions exist and both
+ * the JavaScript target, where both emissions exist and both
  * compile. On the shader targets a dynamic collection has no lowering at
  * all, so for a constant one the inline literal is the only emission that can
  * compile and the number is a capability limit instead — they raise it via
@@ -390,8 +390,8 @@ export function tryConstantFold(
   const engine = expr.engine;
 
   // A constant COLLECTION folds to a literal of its elements, emitted
-  // through the target's own lowering — `[1, 4, 9]` on JavaScript and
-  // Python, `vec3(1.0, 4.0, 9.0)` / `float[5](…)` on the shader targets. So
+  // through the target's own lowering — `[1, 4, 9]` on JavaScript,
+  // `vec3(1.0, 4.0, 9.0)` / `float[5](…)` on the shader targets. So
   // `At(Map(_ ↦ _², 1..20), k)` with a run-time `k` indexes a baked array
   // instead of building the range and mapping over it on every call. (On the
   // shader targets that shape had no lowering at all and failed closed; a
@@ -399,9 +399,8 @@ export function tryConstantFold(
   //
   // The literal is rebuilt with the value's OWN aggregate head: a `Tuple`
   // must not come back as a `List`, because the two are different types
-  // wherever the target spells them differently — a Python list is mutable
-  // and unhashable, and `(1, 2) == [1, 2]` is `False` there, so folding a
-  // tuple through the list lowering silently changed the value's type.
+  // wherever the target spells them differently, so folding a
+  // tuple through the list lowering would silently change the value's type.
   if (elements !== undefined) {
     // A complex-ish collection does not fold AT ALL. The structural
     // lowering picks its element convention from a conservative static
@@ -456,12 +455,11 @@ export function tryConstantFold(
 
   // A boolean folds only when the target spells the boolean constants (the
   // JS target's `True`/`False` mappings). A target without a spelling
-  // (Python, the shader targets) keeps its structural lowering.
+  // (the shader targets) keeps its structural lowering.
   //
   // A comparison of closed exact numbers also folds through the target's
-  // inlined constants (`True`/`False` on Python). Its structural code
-  // compares doubles, which can give the wrong answer: on Python,
-  // `(25! − 1)/24! < 25` compiled to `25 < 25`, which is `False`.
+  // inlined constants. Its structural code
+  // compares doubles, which can give the wrong answer.
   if (isSymbol(value, 'True') || isSymbol(value, 'False'))
     return (
       target.var?.(value.symbol) ??
@@ -701,7 +699,7 @@ export function reachesCallerCode(
 /**
  * Does the emitted code of `expr` run code that the caller supplied, on
  * `target` (`reachesCallerCode`)? Every target uses this one test: the
- * JavaScript, interval-JavaScript and Python targets, and the GLSL
+ * JavaScript and interval-JavaScript targets, and the GLSL
  * shader target.
  *
  * The `vars`, `functions` and `operators` entries of the caller are those of
@@ -2361,7 +2359,7 @@ export function emitFoldedValue(
  * (`(integer) any -> integer`), and not the unknown effects of a call whose
  * head has no such definition. The same holds for a call of a parameter typed as a
  * function; such a call passes this check, but the compilation of the call
- * itself declines on the JavaScript and Python targets for another reason.
+ * itself declines on the JavaScript target for another reason.
  */
 export function assertSafeBigOpBounds(
   kind: string,

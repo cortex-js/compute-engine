@@ -190,8 +190,8 @@ describe('CSE over shared subtrees: the same output as an unshared tree', () => 
     'power and log': (e) =>
       F('Add', F('Power', e, ce.number(3)), F('Ln', F('Add', e, ce.One))),
   };
-  // The GLSL and Python targets are checked on the shapes without lazy
-  // operands only. With a lazy operand, the emission of those targets (not
+  // The GLSL target is checked on the shapes without lazy
+  // operands only. With a lazy operand, the emission of that target (not
   // the analysis) already chose differently for a DAG and for a tree before
   // the analysis was made linear: it writes a `Which` arm that reads a
   // temporary as an if-statement for the DAG and as a conditional
@@ -200,7 +200,6 @@ describe('CSE over shared subtrees: the same output as an unshared tree', () => 
   const targets = [
     ['javascript', {}],
     ['glsl', { to: 'glsl' }],
-    ['python', { to: 'python' }],
   ] as const;
 
   for (const [name, step] of Object.entries(shapes))

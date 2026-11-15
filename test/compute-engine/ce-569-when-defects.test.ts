@@ -1,7 +1,5 @@
-import { execFileSync } from 'child_process';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { TEST_PYTHON } from './test-python';
 
 /**
  * ROADMAP CE-569: defects of the compiled `If(c, e)`, which selected the
@@ -153,86 +151,6 @@ describe('CE-569 — javascript: When over a condition', () => {
         if (expected.isNaN === true) expect(actual).toBeNaN();
         else expect(actual).toBeCloseTo(expected.re, 12);
       }
-    }
-  });
-});
-
-describe('CE-569 — python: a boolean condition', () => {
-  it('When(x, c) reads a boolean input by its truthiness', () => {
-    const ce = engine();
-    const r = compile(ce.box(['If', 'c', 'x']), {
-      to: 'python',
-      fallback: false,
-    } as never);
-    expect(r.code).toBe(
-      "((x) if (c) else (float('nan')))"
-    );
-  });
-
-  it('When(x, ¬c) reads a boolean input by its truthiness', () => {
-    const ce = engine();
-    const r = compile(ce.box(['If', ['Not', 'c'], 'x']), {
-      to: 'python',
-      fallback: false,
-    } as never);
-    expect(r.code).toBe(
-      "((x) if (not c) else (float('nan')))"
-    );
-  });
-
-  it('a relation keeps the plain conditional expression', () => {
-    const ce = engine();
-    const r = compile(
-      ce.box(['If', ['Greater', 'x', 0], ['Power', 'x', 2]]),
-      {
-        to: 'python',
-        fallback: false,
-      } as never
-    );
-    expect(r.code).toBe("((x ** 2) if (0 < x) else (float('nan')))");
-  });
-
-  const run = TEST_PYTHON === undefined ? it.skip : it;
-  run('the compiled code runs', () => {
-    const ce = engine();
-    // An input must have a type (`untyped-input` otherwise): the input
-    // named like the generated parameter is declared.
-    ce.declare('_CND', 'real');
-    const cases: Array<[unknown, Record<string, string>, string]> = [
-      [['If', 'c', 'x'], { x: '2.0', c: 'True' }, '2.0'],
-      [['If', 'c', 'x'], { x: '2.0', c: 'False' }, 'nan'],
-      [['If', ['Not', 'c'], 'x'], { x: '2.0', c: 'False' }, '2.0'],
-      [
-        ['If', ['And', 'c', ['Greater', 'x', 0]], 'x'],
-        { x: '2.0', c: 'True' },
-        '2.0',
-      ],
-      // A value that is a variable named like the generated parameter.
-      [
-        ['If', ['And', 'c', ['Greater', 'x', 0]], '_CND'],
-        { _CND: '7', x: '2.0', c: 'True' },
-        '7',
-      ],
-    ];
-    for (const [json, inputs, expected] of cases) {
-      const code = compile(ce.box(json as never), {
-        to: 'python',
-        fallback: false,
-      } as never).code;
-      const assigns = Object.entries(inputs)
-        .map(([k, v]) => `${k} = ${v}`)
-        .join('\n');
-      const out = execFileSync(TEST_PYTHON!, [
-        '-c',
-        `import math\nimport numpy as np\n${assigns}\nprint(${code})`,
-      ])
-        .toString()
-        .trim();
-      expect([JSON.stringify(json), inputs, out]).toEqual([
-        JSON.stringify(json),
-        inputs,
-        expected,
-      ]);
     }
   });
 });

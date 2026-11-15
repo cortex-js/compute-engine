@@ -1837,6 +1837,130 @@ main tree at `c8b8ff6033810afb30c299c66e81534eaf79e720` plus the patch;
 No test fails in the shadow run and no internal error is counted; with the
 switch on, the one test of CE-1267.
 
+Tycho's run of the build of `52a408a81e65f6a358b71219721642211e73514b` (G13
+and G14; session `tycho-desk`, 2026-11-15):
+
+- JavaScript over every Desmos state: 9,870 of 11,617 admitted (9,824
+  before); GLSL 3,927 of 4,376 (unchanged). No internal error; 43,829
+  JavaScript runs and 402 colour runs with no difference; every admitted
+  shader valid in WebGL 2.
+- The integer sampler: its self-test passes on `Floor(x/49)` (caught on the
+  build before); over 852 corpus calls with `Floor`, `Ceil`, `Round` or
+  `Mod` and 649,857 integer runs, no row differs.
+- 127 admitted shaders change text, all by the helper `_gpu_ir_quot`. The
+  render audit of CORE shows no picture change; the showcase entries that
+  hold the helper are not in that audit. Picture check of six of them in a
+  page (WebGL on the machine's GPU, each entry twice per arm): `julia-set`,
+  `butterfly-curve`, `kernel-functions` and `black-hole` are identical with
+  the profile on; `pendulum-wave` differs by 4 pixels on curve edges, only
+  with both seams on; `rainbow-sky` differs by 42 single pixels on the edges
+  of its arcs, from the GLSL seam: the existing GLSL target declines its 8
+  arc rows, so they are drawn on the CPU without the profile and by the GPU
+  with it. No shader failed to compile.
+- The causes of a list-of-tuples input are gone (63 calls); some of those
+  calls decline one step later (a list times a point, a list local of
+  tuples).
+- What the switch still loses, without the handlers and the colour values
+  that read other names: JavaScript 291 calls (337 before), of which the
+  existing compiler compiles 272; GLSL 46, of which 33. The largest
+  JavaScript causes: a `Comprehension` of several clauses 29, `RandomChoice`
+  29, `ListJoin` 25, a name whose value is not a number about 30, a list
+  times a point and sums of them about 28, a function 14, `RandomShuffle`
+  13, `Zip` 10, a list or tuple argument of `Apply` 17.
+
+Review with the user, 2026-11-15, at
+`52a408a81e65f6a358b71219721642211e73514b`, and the decisions taken.
+
+What was measured. `compilation/` is 207,973 lines in 152 files. The
+pipeline is 7,482 lines (and 14,815 lines of tests). The old compilers by
+file are 81,625 lines in 39 files: `javascript-target.ts` 19,043; the two
+earlier replacement attempts 36,999 (`javascript-fragment-target.ts` and
+the structured route); the GLSL target 25,583. A shared layer of 102,913
+lines in 96 files (`compiler-core.ts`, the `compile-*.ts` files, CSE,
+folding) stays as long as a target is built on it: by the import graph,
+deleting the old files orphans 656 more lines, because the Python target
+(8,212 lines) and the interval target (7,741) use that layer. Timing of
+twelve programs, old against new, at a load of about 15: scalar kernels run
+1.3 to 1.9 times faster on the profile and compile faster; a `Sum` from 1 to
+n runs 2.8 times slower (the deadline check is a call on every pass); a list
+of 1,000 elements 8 to 45 times slower (a list is built with
+`Array.from({length}, fn)`: 30.8 µs per 1,000 elements against 0.68 µs for a
+preallocated array and a loop). Both are spellings of the JavaScript
+printer, to fix before the default.
+
+User decisions of 2026-11-15:
+
+- The work continues; the old compilers are not kept.
+- The two abandoned attempts (the `numeric-kernel` profile, the structured
+  route, `javascript-fragment-target.ts`) are removed now, with their tests:
+  a breaking change of an experimental option.
+- The Python target is dropped now, code and tests ("Approved: drop Python
+  target, code and tests"); it may come back later as a printer on the
+  pipeline. There are no known users.
+- Interval arithmetic becomes a mode of the pipeline's JavaScript target,
+  as `bigint` is, in a session of its own; the brief is
+  `docs/scratch/2026-11-15-ir-interval-mode-handoff.md`.
+
+With JavaScript, GLSL, interval and Python off the shared layer, that layer
+can be deleted too.
+
+The two removals, 2026-11-15, landed together on
+`926016f4ce9fcd4dc07e74541046e7d46a461020` (which holds the first batch of
+the interval mode, by session `ce-interval`).
+
+- The `numeric-kernel` profile and the structured route:
+  `javascript-fragment-target.ts`, `javascript-fragment-facts.ts`, the
+  `javascript-structured-*.ts` and `structured-*.ts` files, 58 test files,
+  two fuzz scripts and the pilot benchmark. `profile` accepts `'ir'` only.
+  Removed with it, since only that route used them: hooks inside the kept
+  JavaScript compiler (the calls into the facts module, `bodyEmitter()`),
+  nine members of `FragmentDefinition`, the result fields `pure` and
+  `defaultedSymbols`. Review (Codex: nothing; Claude: 7,735 programs and
+  131,479 compilations for JavaScript, GLSL, interval and the profile,
+  identical on the base and the patched tree; two test cases that pinned
+  the existing compiler alone were moved to kept files). Closed: CE-1242.
+- The Python target: `python-target.ts` (8,212 lines), about 1,300 lines of
+  Python branches in the shared layer, 11 test files and the Python rows of
+  190 others, the guide page, the view of the VS Code extension, the CI
+  workflow that only ran the Python tests. Review (Codex: nothing; Claude:
+  18,180 compilations of a 1,010-program corpus and 104,722 compilations of
+  452 kept test files identical for JavaScript, GLSL and interval; a host
+  target whose `language` is `'python'` loses the behaviours keyed on that
+  name; three tests that had lost coverage of kept code were restored on
+  GLSL or interval). One emitted-text change on JavaScript: a `_` position
+  of a loop pattern takes no temporary.
+- Size: 386 files, 127,393 lines deleted, 1,149 added. `compilation/` is
+  161,288 lines (207,973 before, and that count now includes the interval
+  adapter and printer).
+- Checks on the merged tree at `7c74ab286db468549e092c1b0ac3f12cd2722508`:
+  the full suite with `CE_JS_PROFILE=ir` and with `CE_JS_PROFILE_SHADOW=ir`,
+  both green (2,037 suites, 84,614 tests; the one failure of CE-1267 was in
+  a deleted file of the structured route). After the reconciliation with
+  the interval batch (two files): type check, `check:deps`, lint,
+  `check:docs`, and 38 test files (2,214 tests) of the profile, the interval
+  mode, the switches and the target registration.
+- Measures after the removals (the denominators changed: the tests of the
+  removed route compiled about 10,000 programs): engine compilations 10,453
+  of 10,767 admitted (97.1%); every JavaScript compile 17,369 of 28,594
+  (60.7%); public JavaScript 6,904 of 17,815 (38.8%); GLSL 1,157 of 2,395
+  (48.3%; 1,078 of the 1,596 that the existing target compiles, 67.5%).
+
+Found after the review, to settle before the default:
+
+- A hang, with the switch `CE_JS_PROFILE_PUBLIC=ir`:
+  `test/compute-engine/compile-big-op-unsafe-bounds.test.ts` never ends. A
+  loop of the JavaScript printer advances its index with `v++`, which does
+  not change a number at 2^53, so `Sum(Sin(x + k), k = 2^53..2^53 + 2)`
+  spins; G12 exposed it by admitting bounds that are not safe integers.
+  Batch G15 makes a loop count its passes, declines a constant bound beyond
+  the safe integers, and fixes the two speed causes above. Every batch brief
+  now also requires a test with a loop bound at 2^53.
+- A contract item (`ce-interval`, from a Codex review): with
+  `vars: { c: '_.c' }` and `varsObjectRefs`, the existing JavaScript target
+  records `['c', 'x']` for `c + x + 1` and the profile records `['x']`: a
+  mapped name is not an entry input of the profile. The option's
+  documentation says "every free symbol it emitted as a vars-object lookup".
+
 Tycho's run of the build of `d4e8d87819f53fa014559a0891d8b96c27b109ec` (G10;
 session `tycho-desk`, 2026-11-15):
 

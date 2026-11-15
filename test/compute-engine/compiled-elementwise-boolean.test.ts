@@ -480,36 +480,3 @@ describe('the scalar paths are unchanged', () => {
     expect(r!.code).toMatch(/_\.x < 3/);
   });
 });
-
-describe('other targets keep their existing lowering', () => {
-  // The element-wise lowering is JavaScript-only: it emits `_SYS.bcast`, which
-  // only the JavaScript runtime provides. Python is untouched.
-  const engine = new ComputeEngine();
-
-  test('Python still lowers a collection comparison as before', () => {
-    const r = compile(engine.box(['Less', ['List', 1, 2], 2] as any), {
-      to: 'python',
-    });
-    expect(r?.success).toBe(true);
-    expect(r!.code).toMatch(/np\.less/);
-  });
-
-  test('Python equality with one list of numbers compiles to a comprehension', () => {
-    // The interpreter broadcasts `Equal([1, 2], 2)` to `[False, True]`. The
-    // Python target compiles the same element-wise test as a list
-    // comprehension with the exact `==` of the scalar form (CE-281.1).
-    const r = compile(engine.box(['Equal', ['List', 1, 2], 2] as any), {
-      to: 'python',
-    });
-    expect(r?.success).toBe(true);
-    expect(r!.code).toMatch(/^\[\(\((_tv\d+)\) == \(2\)\) for \1 in \[1, 2\]\]$/);
-  });
-
-  test('Python equality keeps its tolerance-aware lowering on scalars', () => {
-    const r = compile(engine.box(['Equal', ['Add', 0.1, 0.2], 0.3] as any), {
-      to: 'python',
-    });
-    expect(r?.success).toBe(true);
-    expect(r!.code).not.toMatch(/np\./);
-  });
-});

@@ -68,39 +68,6 @@ import {
 } from './diagnostics.js';
 
 /**
- * The refusal for the name of an operator or a function (`List`, `Sqrt`,
- * `Add`, a user function `f`) that the Python target reaches as a value: a
- * bare symbol, or the result of `Head` that canonicalization folds to that
- * symbol. A name that the compilation binds or that the caller supplies (a
- * parameter, a `vars` key) is an input, and this refusal does not apply to
- * it.
- *
- * The interpreter gives the symbol itself as the value. Python code has no
- * form for a symbol value. The callback operand of a higher-order operator
- * does not reach this refusal: the operator's own lowering compiles it. On
- * this target that lowering accepts a function literal (or a `Composition`,
- * which it rewrites as one) and only four operator names, `Add`,
- * `Subtract`, `Multiply` and `Divide`, which it writes as a two-argument
- * Python lambda (`pyCallbackArg()`, `python-target.ts`). That lambda runs
- * only where the operator calls its callback with two arguments, as the
- * combiner of `Reduce`; the `Reduce` lowering also writes `Add`,
- * `Multiply`, `Min` and `Max` as a native reduction. Another operator or
- * function name as a callback, such as `Map(Sqrt, v)` or `Map(f, v)`,
- * declines in that lowering. Without this
- * refusal, the target emitted the bare name, which raises a `NameError` at
- * run time, or the JavaScript lambda `(a,b) => a + b`, which is a Python
- * syntax error.
- */
-function pythonOperatorValueRefusal(s: string): string {
-  return (
-    `Could not compile \`${s}\` on target 'python': the name of an operator ` +
-    `or a function is used as a value, and Python code has no form for a ` +
-    `symbol value. A caller using the default \`fallback: true\` falls back ` +
-    `to interpreted evaluation.`
-  );
-}
-
-/**
  * The code of a symbol. A case of `_compileInner`, in a function of its
  * own so that the stack frame of `_compileInner` stays small: each level of
  * a nested expression keeps one such frame on the stack, and a deep
@@ -112,25 +79,7 @@ export function compileInnerSymbol(
 ): TargetSource {
   const s = expr.symbol;
   const op = target.operators?.(s);
-  // On the Python target, a name that the compilation binds or that the
-  // caller supplies (a `compileFunction` parameter, a `vars` key, a lambda
-  // parameter or another bound name) is an input, also when it is spelled
-  // like an operator (`Add`). It goes through the ordinary symbol
-  // resolution below, which emits the input, and not through the operator
-  // branch, which refuses an operator name used as a value on this target.
-  // On the Python target every `var` resolver is a table lookup (constants,
-  // `vars` entries, parameters and bound names). Unlike the JavaScript
-  // resolver, it records nothing about which inputs the code reads, so
-  // calling it here has no side effect. No Python constant has the name of
-  // an operator, so `var` returns a value for an operator name only when
-  // that name is an input.
-  const isPythonInput =
-    op !== undefined &&
-    target.language === 'python' &&
-    (target.boundVars?.has(s) === true ||
-      target.varsKeys?.has(s) === true ||
-      target.var?.(s) !== undefined);
-  if (op !== undefined && !isPythonInput) {
+  if (op !== undefined) {
     // A bare operator symbol used in value position (a first-class function
     // — e.g. a `Reduce` combiner or `Map` mapper). Only genuinely binary
     // arithmetic operators lower to a valid binary infix lambda; unary
@@ -158,10 +107,6 @@ export function compileInnerSymbol(
       }
       throw new Error(builtinCallbackRefusal(s));
     }
-    // The infix lambda below is JavaScript source. The Python target has no
-    // other form for it here: see `pythonOperatorValueRefusal`.
-    if (target.language === 'python')
-      throw new Error(pythonOperatorValueRefusal(s));
     // We're compiling something like "Add"
     return `(a,b) => a ${op[0]} b`;
   }
@@ -175,7 +120,7 @@ export function compileInnerSymbol(
   // `NaN`.
   //
   // The lowering is the target's OBJECT-domain null (`undefined` on
-  // JavaScript, `None` on Python). On a target with no object axis (the
+  // JavaScript). On a target with no object axis (the
   // shader targets, the interval target) the numeric marker is the only
   // spelling there is, and it is used. A target with no absence capability
   // at all fails closed.
@@ -286,8 +231,7 @@ export function compileInnerSymbol(
   // this decline every target's free-symbol plumbing produced something
   // that looks like success: the shader
   // targets emitted the undefined identifier `Nothing` (a driver-side
-  // compile error behind `success: true`), the Python target the
-  // undefined name `Nothing`, and the interval target a `_.Nothing`
+  // compile error behind `success: true`), and the interval target a `_.Nothing`
   // vars-object read that is `undefined` at run time. Fail closed
   // for every target here, on the one route they share. The JavaScript
   // target's own `var` hook refuses it first with the same message, so
@@ -381,21 +325,6 @@ export function compileInnerSymbol(
       );
     }
   }
-  // The Python target has no registry of emitted functions, so the routes
-  // above do not run for it, and the name of an operator or a function
-  // fell through to the free-symbol emission below: `Head(List(1))`, which
-  // canonicalizes to the symbol `List`, compiled to the Python code `List`,
-  // which raises a `NameError` at run time.
-  if (
-    target.language === 'python' &&
-    !registry &&
-    !isBoundOrMapped &&
-    resolved === undefined &&
-    (isRefusableBuiltinCallback(expr.engine, s) ||
-      isHostOperatorCallback(expr.engine, s) ||
-      isUserDefinedFunction(expr.engine, s))
-  )
-    throw new Error(pythonOperatorValueRefusal(s));
   if (resolved !== undefined) return liftWideReference(expr, resolved, target);
   // The target did not resolve the symbol (no `vars` mapping, constant, or
   // free-symbol plumbing). Before falling back to a bare reference — which

@@ -386,7 +386,7 @@ export function reachesExcludedName(
 /**
  * Whether `expr` is a `Tabulate` with a dimension that is a finite real
  * number literal that rounds to 0 or less (the test of the `Tabulate`
- * compile handlers of the JavaScript and Python targets, which read the
+ * compile handlers of the JavaScript target, which read the
  * dimension with `tryGetConstant()`). Its value is the empty list `[]`, and
  * those handlers decline it, so it must not constant-fold: the fold would
  * emit the `[]` before the handler can decline.

@@ -2,11 +2,8 @@
  * Tests for Sum and Product compilation
  */
 
-import { execFileSync } from 'node:child_process';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { TEST_PYTHON } from './test-python';
 
 const ce = new ComputeEngine();
 ce.declare('m', 'real');
@@ -612,7 +609,7 @@ describe('COMPILE SUM/PRODUCT: A BODY THAT WRITES THE INDEX', () => {
   };
 
   test.each(
-    ['javascript', 'interval-js', 'python', 'glsl'].flatMap((to) =>
+    ['javascript', 'interval-js', 'glsl'].flatMap((to) =>
       CASES.map(([name, json, index]) => [to, name, json, index] as const)
     )
   )('%s declines %s', (to, _name, json, index) => {
@@ -792,41 +789,6 @@ describe('COMPILE SUM/PRODUCT: A BOUND THAT READS A VARIABLE WITH THE NAME OF TH
     expect(code).toMatch(/j <= _tv\d+;/);
     expect(runShader(code)).toBe(v);
   });
-
-  // In a generator expression, Python evaluates the `range` of a later
-  // `for` clause in the scope of the generator, where the variable of every
-  // clause is a local: a later clause takes a fresh index name.
-  (TEST_PYTHON === undefined ? it.skip : it)(
-    'Python: the generator and the loop form give the interpreter value',
-    () => {
-      const cases: unknown[] = [
-        block('Sum', 'j', ['Limits', 'j', 'j', 5]),
-        block('Sum', 'j', ['Limits', 'j', 1, ['Add', 'j', 2]]),
-        block('Sum', ['Add', 'k', 'j'], ['Limits', 'k', 1, 3], ['Limits', 'j', 1, 'j']),
-        block(
-          'Product',
-          ['Add', 'k', 'j'],
-          ['Limits', 'k', 1, 2],
-          ['Limits', 'j', 'k', 'j']
-        ),
-      ];
-      const py = new PythonTarget();
-      let program = 'import math\nout = []\n';
-      cases.forEach((json, i) => {
-        const code = py.compile(ce.box(json as any)).code as string;
-        const body = code
-          .split('\n')
-          .map((l) => `    ${l}`)
-          .join('\n');
-        program += `def f${i}():\n${body}\nout.append(f${i}())\n`;
-      });
-      program += 'print(out)\n';
-      const out = JSON.parse(
-        execFileSync(TEST_PYTHON!, ['-c', program], { encoding: 'utf8' })
-      ) as number[];
-      expect(out).toEqual(cases.map((json) => ce.box(json as any).evaluate().re));
-    }
-  );
 });
 
 describe('COMPILE SUM/PRODUCT: A BOUND THAT IS NOT PURE', () => {
@@ -845,7 +807,7 @@ describe('COMPILE SUM/PRODUCT: A BOUND THAT IS NOT PURE', () => {
     }
   );
   test.each(
-    ['javascript', 'interval-js', 'python', 'glsl'].flatMap((to) =>
+    ['javascript', 'interval-js', 'glsl'].flatMap((to) =>
       exprs.map((e) => [to, JSON.stringify(e), e] as const)
     )
   )('%s declines %s', (to, _name, e) => {

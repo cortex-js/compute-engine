@@ -14,7 +14,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // most-specific-first, throwing `protocol-implementation-missing` on
 // fall-through (the multi-clause `no-matching-clause` convention — the
 // interpreter's error VALUE has no compiled analog). Anything unprovable
-// declines (fail closed, D6). Python/GPU/interval targets keep failing
+// declines (fail closed, D6). GPU/interval targets keep failing
 // closed.
 //
 // Protocols are engine-global, so every block uses a fresh engine.
@@ -640,19 +640,5 @@ function tally() -> integer {
     // Whatever the ordinary route decides, the protocol tier must not have
     // emitted a getter helper.
     expect(result.code ?? '').not.toContain('__get__');
-  });
-});
-
-describe('cross-target fail-closed pins', () => {
-  test('python declines and reports the member unsupported', () => {
-    const ce = engineFor(`${DESCRIBABLE}
-type string is Describable {
-  function describe(self: Self) -> string { "a string" }
-}`);
-    const result = compile(ce.box(['describe', 'x'] as any), {
-      to: 'python',
-    });
-    expect(result.success).toBe(false);
-    expect(result.unsupported).toContain('describe');
   });
 });

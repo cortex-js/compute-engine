@@ -119,7 +119,7 @@ describe('compiled targets append it as one element', () => {
     ]);
   });
 
-  test('a tuple through an alias or an all-tuple union is one element on both targets', () => {
+  test('a tuple through an alias or an all-tuple union is one element on JavaScript', () => {
     const ce2 = new ComputeEngine();
     ce2.declare('P', { type: 'list<tuple<number, number>>' });
     ce2.declare('q', 'tuple<number, number> | tuple<number, number, number>');
@@ -131,19 +131,5 @@ describe('compiled targets append it as one element', () => {
       [0, 0],
       [1, 2],
     ]);
-    const py = compile(ce2.box(['Join', 'P', 'q']), {
-      to: 'python',
-      fallback: false,
-    });
-    expect(py.code).toBe('[*P, q]');
-  });
-
-  test('python: the wrapped scalar is unpacked as one element', () => {
-    ce.declare('M', 'list<number>');
-    const r = compile(ce.box(['Join', 'M', 10]), {
-      to: 'python',
-      fallback: false,
-    });
-    expect(r.code).toBe('[*M, *[10]]');
   });
 });

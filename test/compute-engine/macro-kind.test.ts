@@ -1188,7 +1188,7 @@ describe('the count of macros is per engine', () => {
 });
 
 describe('compiled code (section 4)', () => {
-  const TARGETS = ['javascript', 'glsl', 'interval-js', 'python'] as const;
+  const TARGETS = ['javascript', 'glsl', 'interval-js'] as const;
 
   test.each(TARGETS)('row 1 compiles on %s', (to) => {
     const ce = new ComputeEngine();
@@ -1216,7 +1216,6 @@ describe('compiled code (section 4)', () => {
       'interval-js',
       'const _cse1 = _IA.sin(_IA.add(_IA.square(_.x), _IA.square(_.y)))',
     ],
-    ['python', 'for _cse1 in [np.sin(x ** 2 + y ** 2)]'],
   ])('a body written three times is one shared local on %s', (to, fragment) => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');

@@ -1,7 +1,4 @@
-import { execFileSync } from 'node:child_process';
 import { ComputeEngine, compile } from '../../src/compute-engine';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { TEST_PYTHON } from './test-python';
 
 // A restriction or a `Which` over a list of conditions that selects no clause
 // at a position gives `NaN` in a number cell and a point whose coordinates
@@ -209,86 +206,12 @@ describe('A DISCHARGE READS EVERY SPELLING OF AN ABSENT CELL', () => {
   });
 });
 
-// The Python target spells an absent value `None` or `NaN` (a written
-// `Missing` is `math.nan` there). Its discharge reads both, for a value of
-// any type, and reads every other value as present without raising.
-const describePython = TEST_PYTHON === undefined ? describe.skip : describe;
-describePython('Python: a discharge reads None and NaN', () => {
-  function runPython(
-    engine: ComputeEngine,
-    json: unknown,
-    param: string,
-    arg: string
-  ): string {
-    const fn = new PythonTarget().compileFunction(
-      engine.box(json as any),
-      'f',
-      [param]
-    );
-    return execFileSync(
-      TEST_PYTHON!,
-      [
-        '-c',
-        `import math\nimport cmath\nimport numpy as np\n${fn}\nprint(repr(f(${arg})))`,
-      ],
-      { stdio: ['ignore', 'pipe', 'pipe'] }
-    )
-      .toString()
-      .trim();
-  }
-
+describe('a discharge reads a written Missing and a present value in the interpreter', () => {
   const engine = new ComputeEngine();
-  engine.declare('P', 'list<tuple<real, real>>');
   // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
   // "`Missing` is a result only"), so `u` and `z` hold present values only.
   engine.declare('u', 'real | string');
   engine.declare('z', 'complex');
-
-  test.each([
-    // A read past the end of a list of points is a point whose coordinates
-    // are `NaN`, which `Coalesce` reads as absent.
-    [
-      'Coalesce of a read past the end of a list of points',
-      ['Coalesce', ['At', 'P', 5], ['Tuple', 0, 0]],
-      'P',
-      '[(1, 2), (3, 4)]',
-      '(0, 0)',
-    ],
-    [
-      'IsMissing of a written Missing in a list of strings',
-      ['IsMissing', ['At', ['List', { str: 'a' }, 'Missing'], 2]],
-      'P',
-      'None',
-      'True',
-    ],
-    [
-      'Coalesce of a written Missing in a list of strings',
-      ['Coalesce', ['At', ['List', { str: 'a' }, 'Missing'], 2], { str: 'z' }],
-      'P',
-      'None',
-      "'z'",
-    ],
-    [
-      'IsMissing of a present string in a list of strings',
-      ['IsMissing', ['At', ['List', { str: 'a' }, 'Missing'], 1]],
-      'P',
-      'None',
-      'False',
-    ],
-    // `math.isnan("ab")` raised a `TypeError` here.
-    ['IsMissing of a string', ['IsMissing', 'u'], 'u', '"ab"', 'False'],
-    // `math.isnan(1+2j)` raised a `TypeError` here.
-    ['IsMissing of a complex number', ['IsMissing', 'z'], 'z', '1+2j', 'False'],
-    [
-      'IsMissing of a complex NaN',
-      ['IsMissing', 'z'],
-      'z',
-      'complex(math.nan, 0)',
-      'True',
-    ],
-  ])('%s', (_name, json, param, arg, pythonValue) => {
-    expect(runPython(engine, json, param, arg)).toBe(pythonValue);
-  });
 
   test('the interpreter agrees', () => {
     const at = (j: unknown) => engine.box(j as any).evaluate().toString();

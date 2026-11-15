@@ -7,8 +7,7 @@
  * (`optionDecline()`); a `Decline` of the slice is the public decline
  * `'outside-profile'`, any other error a `'compile-error'`, and a
  * cancellation is thrown as it is. `compile()` applies `fallback` to both
- * declines, as for the `numeric-kernel` profile. See "Selecting the
- * pipeline" in `README.md`.
+ * declines. See "Selecting the pipeline" in `README.md`.
  */
 
 import type { Expression } from '../../global-types.js';

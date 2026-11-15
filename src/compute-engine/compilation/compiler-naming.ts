@@ -112,8 +112,8 @@ export function namingContext(
  * never captures a name a splice introduces.
  *
  * `extra` are identifiers the caller supplies OUT of band that the emitter
- * writes bare — the Python target's `compileFunction`/`compileLambda`
- * parameter lists. (Names that come from the expression, e.g. a `Function`
+ * writes bare, such as the parameter lists of a custom target's
+ * `compileFunction`/`compileLambda`. (Names that come from the expression, e.g. a `Function`
  * literal's parameters, are already covered by the walk.)
  */
 export function newNamingContext(

@@ -146,31 +146,6 @@ describe('a restricted NUMBER keeps its IEEE comparison', () => {
   });
 });
 
-describe('the Python target', () => {
-  // The compiled value of a comparison with an absent operand, and of a
-  // branch or a connective over it, is not specified
-  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
-  // "Everything computed from an absent value, except at a discharge"; R4
-  // of `docs/plans/2026-11-01-absent-value-contract.md`). The
-  // written absence lowers to the `NaN` of its numeric slot, and the
-  // comparison is the target's own.
-  test('a comparison with a written absence operand compares NaN', () => {
-    const r = compile(ce.box(['Less', 'Missing', 't'] as never), {
-      to: 'python',
-    } as never);
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('math.nan < t');
-  });
-
-  test('a branch over it compiles the comparison', () => {
-    const r = compile(ce.box(['If', ['Less', 'Missing', 't'], 1, 2] as never), {
-      to: 'python',
-    } as never);
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('(math.nan < t)');
-  });
-});
-
 /**
  * A CHAIN with an absent operand is the Kleene conjunction of its pairwise
  * links: one link that is decidedly false makes the chain false, and a chain
@@ -227,21 +202,6 @@ describe('a chained comparison with an absent operand', () => {
     ['Less(x, 0, Missing)', decidedFalse, NaN, 0],
   ])('Which over %s at x = %p', (_l, json, x, expected) => {
     expect(interpretedAt(['Which', json, 1, 'True', 0], x)).toBe(expected);
-  });
-
-  test.each([
-    ['Less(x, 0, Missing)', decidedFalse],
-    ['Less(x, 5, Missing)', undecided],
-    ['LessEqual(Missing, x, 5)', leading],
-  ])('Python: %s is the conjunction of its links', (_l, json) => {
-    for (const j of [json, ['If', json, 1, 2]]) {
-      const r = compile(ce.box(j as never), { to: 'python' } as never);
-      expect(r.success).toBe(true);
-      // The present link is compared, and the written absence is the `NaN`
-      // of its numeric slot.
-      expect(r.code).toMatch(/x <=? (0|5)|x >=? /);
-      expect(r.code).toContain('math.nan');
-    }
   });
 
   test.each([

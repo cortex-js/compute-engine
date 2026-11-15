@@ -10,7 +10,6 @@ import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import { lookupApplicable } from '../function-utils.js';
 import {
   couldBeNumericTuple,
-  isFiniteIndexedCollection,
   isNumericTuple,
   isTupleShapedType,
 } from '../collection-utils.js';
@@ -59,10 +58,7 @@ import {
   operandCompiler,
   withCseIsolatedInstance,
 } from './compile-cse.js';
-import {
-  tryCompileBroadcast,
-  tryCompilePythonElementwise,
-} from './compile-broadcast.js';
+import { tryCompileBroadcast } from './compile-broadcast.js';
 import { isArrayOperand } from './compile-real-analysis.js';
 import {
   LANE_RECORD_LANGUAGES,
@@ -85,7 +81,6 @@ import {
   promotionActive,
 } from './compile-declarations.js';
 import {
-  assertAssignmentIsStatement,
   assertExpressionValue,
   compileValueOperand,
 } from './compile-statements.js';
@@ -163,9 +158,8 @@ export function compileExprCapturedBody(
  * (`assertNoDeclaredTopOperands()`, `compile-admission.ts`). Its value can be a number or a list, and the
  * interpreter maps an element-wise head over a list, where it gives `[4, 6]`
  * for `p + q` with `[1, 2]` and `[3, 4]`. The scalar code of `p + q` gives a
- * wrong result for a list: the string `"1,23,4"` on JavaScript, the
- * concatenated list `[1, 2, 3, 4]` on Python, and an `empty` interval on
- * `interval-js`. Compiled code does not test the shape of a value at run
+ * wrong result for a list: the string `"1,23,4"` on JavaScript, and an
+ * `empty` interval on `interval-js`. Compiled code does not test the shape of a value at run
  * time. So the compilation declines, and the message tells the host to
  * declare the shape of the symbol (`real`, `list<real>`).
  *
@@ -192,7 +186,7 @@ function declineElementwiseOverDeclaredTop(
 /**
  * The element-wise JavaScript broadcast of a `broadcastable` head over list
  * operands. A case of `compileExpr`: it returns the code, or `undefined` when
- * `compileExpr` continues with its next case. On the JavaScript, Python and
+ * `compileExpr` continues with its next case. On the JavaScript and
  * `interval-js` targets, it first declines an operand declared `any` or
  * `value` (`declineElementwiseOverDeclaredTop()`).
  */
@@ -206,7 +200,6 @@ export function compileExprElementwiseBroadcast(
 ): TargetSource | undefined {
   if (
     target.language === 'javascript' ||
-    target.language === 'python' ||
     target.language === 'interval-javascript'
   )
     declineElementwiseOverDeclaredTop(engine, h, args, target);
@@ -715,88 +708,6 @@ export function compileExprBroadcastJavaScript(
 }
 
 /**
- * The Python broadcast of a call whose operands may be collections. A case of
- * `compileExpr`: it returns the code, or `undefined` when `compileExpr`
- * continues with its next case.
- */
-export function compileExprBroadcastPython(
-  engine: ComputeEngine,
-  h: string,
-  args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
-): TargetSource | undefined {
-  if (target.language === 'python') {
-    const def = engine.lookupDefinition(h);
-    const isArithmeticInfixHead =
-      SCALAR_ARITHMETIC_HEADS.has(h) ||
-      (isOperatorDef(def) &&
-        def.operator.broadcastable === true &&
-        !isRelationalOperator(h) &&
-        !LOGICAL_BROADCAST_HEADS.has(h));
-    const opMap = target.operators?.(h);
-    const lowersToInfix =
-      opMap !== undefined && !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(opMap[0]);
-    // One shape reaches its lowering WITHOUT going through the fan-out below:
-    // a UNARY broadcastable head over a FINITE INDEXED collection
-    // (`Negate([1,2,3])`), which the function-codegen path further down
-    // already fans out through the target's `broadcastUnary` hook. The
-    // predicate mirrors that dispatch site one for one, so the guard only
-    // stands aside when the dispatch will actually fire; if the hook then
-    // declines, that path fails closed on its own.
-    const isUnaryBroadcastOverCollection =
-      target.broadcastUnary !== undefined &&
-      args.length === 1 &&
-      isOperatorDef(def) &&
-      def.operator.broadcastable === true &&
-      isFiniteIndexedCollection(args[0]) &&
-      !isBroadcastExemptTupleOperand(engine, h, args[0]) &&
-      typeof target.functions?.(h) === 'function';
-    if (
-      isArithmeticInfixHead &&
-      lowersToInfix &&
-      !isUnaryBroadcastOverCollection &&
-      args.some(
-        (a) =>
-          a.isCollection ||
-          // The COLLECTION shape top, for the same reason as the JavaScript
-          // guard above: a SET-typed operand matches neither `list<any>`
-          // nor `indexed_collection<any>` and escaped the guard, emitting
-          // `T + 1` where the interpreter answers `incompatible-type`.
-          // The fan-out below keeps its own narrower participation test,
-          // so a set never fans out (unordered — a comprehension has no
-          // defined order); it declines here instead.
-          a.type.matches('collection<any>') ||
-          // A GATED collection (a restricted point or list, typed
-          // `missing | C`): `t * ((t, 1) if c else None)` repeats a
-          // tuple or raises in Python, for the same reason.
-          isGatedIndexedCollection(a) ||
-          isBoundPossiblyCollectionTyped(a, target)
-      )
-    ) {
-      const elementwise = tryCompilePythonElementwise(engine, h, args, target);
-      if (elementwise !== undefined) return elementwise;
-      // A call of a block-local function has no static result type, so it
-      // is possibly a collection here. Name it, since the general message
-      // does not say why such an operand may be a collection. CE-237.2.
-      const localCall = args.find(
-        (a) =>
-          isFunction(a) &&
-          typeof a.operator === 'string' &&
-          blockLocalFunction(a.operator, target) !== undefined
-      );
-      if (localCall !== undefined)
-        throw new Error(
-          `Could not compile \`${h}\`: an operand is a call of the block-local function \`${localCall.operator}\`, and the Python target does not prove that the value of such a call is not a collection. Python's arithmetic operators repeat/concatenate a list instead of broadcasting element-wise, diverging from the interpreter. The interpreter evaluates it instead.`
-        );
-      throw new Error(
-        `Could not compile \`${h}\`: arithmetic over a possibly-collection-typed operand on the Python target — Python's arithmetic operators repeat/concatenate a list instead of broadcasting element-wise, diverging from the interpreter. Materialize the operand with evaluate() and compile a scalar element function instead.`
-      );
-    }
-  }
-  return undefined;
-}
-
-/**
  * An `Assign`. A case of `compileExpr`: it returns the code, or `undefined`
  * when `compileExpr` continues with its next case.
  */
@@ -878,28 +789,23 @@ export function compileExprAssign(
       compileOp(node, 1, target, 0, args[1]),
       target
     );
-    // On a target that writes a block as a bare statement sequence (Python,
-    // the shader targets), a value that compiles to several statements, or
+    // On a target that writes a block as a bare statement sequence (the
+    // shader targets), a value that compiles to several statements, or
     // to a `return`, cannot be the right side of an assignment: splicing
     // `u = s\nreturn 2 * u` after `t = ` gave `t = u = s` and a `return`
     // that left the enclosing function with the value of the inner block.
     // The shader targets move such a block into the enclosing statement
     // list when they can (`valueBlock`), and its value then compiles to a
-    // single temporary; where no statement list is available, and on
-    // Python, which has no such lowering, the assignment declines.
+    // single temporary; where no statement list is available, the
+    // assignment declines.
     assertExpressionValue(code, target, 'Assign', args[0].symbol);
     const stored = target.assignmentValue?.(args[1], code, target) ?? code;
     // An assignment that is an operand of an operator (`(t ≔ 1) + 2`, whose
     // value is the assigned value) was emitted without parentheses:
     // `t = 1 + 2` assigns 3 to `t`, where the interpreter assigns 1. An
     // assignment is an expression in JavaScript and in GLSL, so it is
-    // parenthesized there. In Python an assignment is a
-    // statement, and it has no expression form: the compilation declines
-    // (`assertAssignmentIsStatement`).
-    if (prec > 0) {
-      assertAssignmentIsStatement(args[0].symbol, target);
-      return `(${name} = ${stored})`;
-    }
+    // parenthesized there.
+    if (prec > 0) return `(${name} = ${stored})`;
     return `${name} = ${stored}`;
   }
   return undefined;

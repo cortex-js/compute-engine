@@ -1,12 +1,5 @@
-import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { TEST_PYTHON } from './test-python';
-
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 
@@ -16,22 +9,18 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 // The compilation tails of `docs/epsil/ROADMAP.md` ("Compilation tails"):
 //
 // - a DESTRUCTURING loop binder, `for (p, q) in pairs { … }`, on the
-//   JavaScript and Python targets. The interpreter binds the pattern only to
+//   JavaScript target. The interpreter binds the pattern only to
 //   a TUPLE of the pattern's arity and answers a shape-mismatch error value
 //   for anything else (a list of the right length included); compiled code
 //   cannot tell a tuple from a list, so the pattern compiles only when the
 //   source's static element type proves tuples of the matching arity at
 //   every nesting (`BaseCompiler.elementClauseBinders`).
-// - the Python target's `Loop` over several `Element` clauses, over a
-//   stepped or descending literal `Range`, and its `Comprehension` — which
-//   previously emitted the JAVASCRIPT comprehension behind `success: true`.
 // - a `Range` whose bound is provably not a number (the chained `1..10..2`
 //   spelling, `Range(Range(1, 10), 2)`) declines on the JavaScript target
 //   instead of emitting an empty range.
 //
 
 const ce = new ComputeEngine();
-const python = new PythonTarget();
 
 /** The MathJSON of an Epsil program, source offsets stripped. */
 function epsil(source: string): MathJsonExpression {
@@ -171,97 +160,7 @@ describe('COMPILE Range — a bound that is provably not a number fails closed',
   });
 });
 
-describe('COMPILE Loop / Comprehension — Python target', () => {
-  // A statement-shaped program (a `Block` with a loop) has no Python
-  // EXPRESSION form; the `def` route is the one that emits it. A bare
-  // `Comprehension` is an expression and takes the source route.
-  const py = (expr: MathJsonExpression): string => {
-    const boxed = ce.box(expr);
-    return boxed.operator === 'Block'
-      ? python.compileFunction(boxed, 'fn', [], undefined, {
-          constantFold: false,
-        })
-      : python.compileToSource(boxed, { constantFold: false });
-  };
-
-  it('several Element clauses nest one `for` under another', () => {
-    const src = py([
-      'Block',
-      ['Declare', 's', ['Dictionary', ['KeyValuePair', 'value', 0]]],
-      [
-        'Loop',
-        ['Block', ['Assign', 's', ['Add', 's', ['Multiply', 'i', 'j']]]],
-        ['Element', 'i', ['Range', 1, 3]],
-        ['Element', 'j', ['Range', 1, 2]],
-      ],
-      's',
-    ]);
-    expect(src).toMatch(
-      /for i in range\(1, 4\):\n\s+for j in range\(1, 3\):\n\s+s =/
-    );
-  });
-
-  it('a stepped or descending literal Range is a native `range`', () => {
-    expect(
-      py(epsil('let s = 0\nfor k in Range(1, 10, 3) { s = s + k }\ns'))
-    ).toContain('for k in range(1, 11, 3):');
-    expect(
-      py(epsil('let s = 0\nfor k in Range(10, 1, -3) { s = s + k }\ns'))
-    ).toContain('for k in range(10, 0, -3):');
-    expect(py(epsil('let s = 0\nfor k in 10..1 { s = s + k }\ns'))).toContain(
-      'for k in range(10, 0, -1):'
-    );
-  });
-
-  it('a destructuring binder spells as a tuple pattern', () => {
-    expect(
-      py(
-        epsil('let s = 0\nfor (i, j) in [(1, 4), (2, 5)] { s = s + i * j }\ns')
-      )
-    ).toContain('for (i, j) in [(1, 4), (2, 5)]:');
-    expect(() =>
-      py(
-        epsil('let s = 0\nfor (i, j) in [[1, 4], [2, 5]] { s = s + i * j }\ns')
-      )
-    ).toThrow(/not a tuple/);
-  });
-
-  it('a Comprehension is a list comprehension, not the JavaScript IIFE', () => {
-    expect(
-      py([
-        'Comprehension',
-        ['Multiply', 'i', 'j'],
-        ['Element', 'i', ['Range', 1, 3]],
-        ['Element', 'j', ['Range', 1, 2]],
-      ])
-    ).toBe('[i * j for i in range(1, 4) for j in range(1, 3)]');
-    expect(
-      py([
-        'Comprehension',
-        ['Multiply', 'x', 2],
-        ['Element', 'x', ['List', 1, 2, 3]],
-      ])
-    ).toBe('[2 * x for x in [1, 2, 3]]');
-    // A multi-statement body has no list-comprehension form.
-    expect(() =>
-      py([
-        'Comprehension',
-        [
-          'Block',
-          ['Declare', 'y', ['Dictionary', ['KeyValuePair', 'value', 'x']]],
-          ['Multiply', 'y', 2],
-        ],
-        ['Element', 'x', ['List', 1, 2, 3]],
-      ])
-    ).toThrow(/multi-statement body/);
-  });
-});
-
-describe('COMPILE Loop — shapes that fail closed on both targets (review pins)', () => {
-  const py = (expr: MathJsonExpression): string =>
-    python.compileFunction(ce.box(expr), 'fn', [], undefined, {
-      constantFold: false,
-    });
+describe('COMPILE Loop — shapes that fail closed on JavaScript (review pins)', () => {
   const loopOver = (
     binder: MathJsonExpression,
     source: MathJsonExpression,
@@ -286,7 +185,6 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
       's',
     ];
     expect(() => js(program)).toThrow(/stops the whole loop/);
-    expect(() => py(program)).toThrow(/stops the whole loop/);
     // The interpreter stops the whole traversal: one turn, not three.
     expect(interpreted(program)).toBe('1');
   });
@@ -308,7 +206,6 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
   ];
   const declinesOnEveryTarget = (program: MathJsonExpression): void => {
     expect(() => js(program)).toThrow(/stops the whole loop/);
-    expect(() => py(program)).toThrow(/stops the whole loop/);
     const interval = new IntervalJavaScriptTarget().compile(ce.box(program));
     expect(interval.success).toBe(false);
     expect(interval.error).toMatch(/stops the whole loop/);
@@ -352,7 +249,6 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
     const r = js(program);
     expect(r.success).toBe(true);
     expect(r.run!({})).toBe(9);
-    expect(() => py(program)).not.toThrow();
     expect(interpreted(program)).toBe('9');
   });
 
@@ -361,85 +257,15 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
     // pattern is an error there), so both targets see an invalid expression.
     const program = loopOver(['Tuple', 'a', 'a'], ['List', ['Tuple', 1, 2]]);
     expect(() => js(program)).toThrow(/Could not compile invalid expression/);
-    expect(() => py(program)).toThrow(/Could not compile invalid expression/);
   });
 
-  it('a one-position Python pattern keeps its trailing comma', () => {
+  it('a one-position pattern', () => {
     const program = loopOver(
       ['Tuple', 'x'],
       ['List', ['Tuple', 1], ['Tuple', 2]],
       ['Assign', 's', ['Add', 's', 'x']]
     );
-    expect(py(program)).toContain('for (x,) in');
     expect(js(program).run!({})).toBe(3);
-  });
-
-  it('a `_` position is a generated temporary in Python, never the name `_`', () => {
-    const src = py(
-      epsil('let s = 0\nfor (i, _) in [(1, 4), (2, 5)] { s = s + i }\ns')
-    );
-    expect(src).toMatch(/for \(i, _tv\d+\) in/);
-    expect(src).not.toContain('(i, _)');
-  });
-
-  it('a string source declines on Python (grapheme clusters)', () => {
-    expect(() =>
-      py(epsil('let s = 0\nfor c in "abc" { s = s + 1 }\ns'))
-    ).toThrow(/grapheme/);
-  });
-
-  it('a symbolic two-bound Range picks its direction at run time on Python', () => {
-    const src = python.compileFunction(
-      ce.box(epsil('let s = 0\nfor k in Range(a, b) { s = s + k }\ns')),
-      'fn',
-      ['a', 'b'],
-      undefined,
-      { constantFold: false }
-    );
-    // Integral run-time values take a native `range` in the direction of
-    // `b - a`; a fractional value walks the range in unit steps from the
-    // start bound, as the interpreter does (`range(2.5, …)` would raise).
-    expect(src).toContain(
-      'range(int(_a), int(_b) + 1) if _b >= _a else range(int(_a), int(_b) - 1, -1)'
-    );
-    expect(src).toContain(
-      'if float(_a).is_integer() and float(_b).is_integer() else'
-    );
-    expect(src).toContain(
-      '(lambda _s: [_a + _s * _i for _i in range((lambda _q: max(0, int((_q + (0 if float(_a).is_integer() and float(_b).is_integer() and float(_s).is_integer() else min(1e-12 * (1 + abs(_q)), 0.001))) // 1) + 1))((_b - _a) / _s))])(1 if _b >= _a else -1)'
-    );
-  });
-
-  it('a fractional literal Range bound takes the value lowering on Python', () => {
-    // `Range(5.5, 1)` is 5.5, 4.5, 3.5, 2.5, 1.5 in the interpreter. The
-    // `Sum`/`Product` bound helper floors a literal, so the run-time
-    // direction header read it as `range(5, 0, -1)`.
-    const src = py(epsil('let s = 0\nfor k in Range(5.5, 1) { s = s + k }\ns'));
-    expect(src).not.toContain('range(5,');
-    expect(src).toContain('float(_a + _s * _i)');
-    expect(src).toContain('(1 if _b >= _a else -1)');
-    expect(src).toContain('(5.5, 1)');
-  });
-
-  it('a statement-shaped comprehension body declines on Python', () => {
-    // A bare `Assign` as the body is the static error
-    // `assignment-in-operand`, so that compile declines on the invalid
-    // expression.
-    for (const body of [
-      ['Assign', 's', 'x'],
-      ['Break'],
-      ['Block', ['Assign', 's', 'x']],
-    ])
-      expect(() =>
-        python.compileToSource(
-          ce.box([
-            'Comprehension',
-            body as MathJsonExpression,
-            ['Element', 'x', ['List', 1, 2]],
-          ]),
-          { constantFold: false }
-        )
-      ).toThrow(/statement|declaration|invalid expression/);
   });
 
   it('a non-numeric Range bound declines on every operand count', () => {
@@ -471,123 +297,3 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
     expect(r.success).toBe(false);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Execution parity: run the emitted Python and compare with the interpreter
-// (the harness of `compile-python-arity.test.ts`; skipped without the venv).
-// ---------------------------------------------------------------------------
-
-const VENV_PYTHON =
-  TEST_PYTHON ?? '';
-
-// None of the cases below lowers through numpy, so the block needs only the
-// venv's Python itself.
-const describeVenv = fs.existsSync(VENV_PYTHON) ? describe : describe.skip;
-
-describeVenv(
-  'COMPILE Loop / Comprehension — Python execution parity (venv)',
-  () => {
-    const CASES: Array<{
-      name: string;
-      expr: MathJsonExpression;
-      expected: unknown;
-      /** The compiled function's parameters, and the arguments of its one
-       * call (the interpreter runs with the same assignments). */
-      params?: string[];
-      args?: number[];
-    }> = [
-      {
-        name: 'nested loops',
-        expr: epsil(
-          'let s = 0\nfor i in 1..3 { for j in 1..2 { s = s + i * j } }\ns'
-        ),
-        expected: 18,
-      },
-      {
-        name: 'descending stepped range',
-        expr: epsil('let s = 0\nfor k in Range(10, 1, -3) { s = s + k }\ns'),
-        expected: 22,
-      },
-      {
-        name: 'destructuring',
-        expr: epsil(
-          'let s = 0\nfor (i, j) in [(1, 4), (2, 5), (3, 6)] { s = s + i * j }\ns'
-        ),
-        expected: 32,
-      },
-      {
-        name: 'comprehension',
-        expr: [
-          'Comprehension',
-          ['Multiply', 'i', 'j'],
-          ['Element', 'i', ['Range', 1, 3]],
-          ['Element', 'j', ['Range', 1, 2]],
-        ],
-        expected: [1, 2, 2, 4, 3, 6],
-      },
-      {
-        name: 'symbolic descending range',
-        expr: epsil('let s = 0\nfor k in Range(n, 1) { s = s + k }\ns'),
-        params: ['n'],
-        args: [5],
-        expected: 15,
-      },
-      {
-        name: 'symbolic descending range, fractional start bound',
-        expr: epsil('let s = 0\nfor k in Range(n, 1) { s = s + k }\ns'),
-        params: ['n'],
-        args: [2.5],
-        expected: 4,
-      },
-      {
-        name: 'symbolic ascending range, fractional stop bound',
-        expr: epsil('let s = 0\nfor k in Range(1, n) { s = s + k }\ns'),
-        params: ['n'],
-        args: [2.5],
-        expected: 3,
-      },
-      {
-        name: 'symbolic range, both bounds symbolic and descending',
-        expr: epsil('let s = 0\nfor k in Range(a, b) { s = s + k }\ns'),
-        params: ['a', 'b'],
-        args: [10, 7],
-        expected: 34,
-      },
-      {
-        name: 'fractional literal descending range',
-        expr: epsil('let s = 0\nfor k in Range(5.5, 1) { s = s + k }\ns'),
-        expected: 17.5,
-      },
-    ];
-
-    it('the emitted Python evaluates to the interpreter value', () => {
-      let program = 'import cmath, math, json\n\n';
-      CASES.forEach((c, i) => {
-        program += `${python.compileFunction(ce.box(c.expr), `fn_${i}`, c.params ?? [])}\n`;
-      });
-      program += 'results = []\n';
-      CASES.forEach((c, i) => {
-        program += `results.append(fn_${i}(${(c.args ?? []).join(', ')}))\n`;
-      });
-      program += 'print(json.dumps(results))\n';
-
-      const file = path.join(os.tmpdir(), `ce-py-loops-${process.pid}.py`);
-      fs.writeFileSync(file, program);
-      let out = '';
-      try {
-        out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
-      } finally {
-        fs.unlinkSync(file);
-      }
-      const actual = JSON.parse(out) as unknown[];
-      CASES.forEach((c, i) => {
-        expect([c.name, actual[i]]).toEqual([c.name, c.expected]);
-        expect(interpreted(c.expr, c.params, c.args)).toBe(
-          Array.isArray(c.expected)
-            ? `[${c.expected.join(',')}]`
-            : String(c.expected)
-        );
-      });
-    });
-  }
-);

@@ -238,17 +238,6 @@ test('a function parameter named _v is not captured by the text search', () => {
   }
 });
 
-test('the Python target still refuses list-of-lists elements', () => {
-  const ce = setup();
-  for (const expr of [
-    ['Contains', 'xss', 'ys'],
-    ['Unique', 'xss'],
-  ])
-    expect(() =>
-      compile(ce.box(expr as never), { to: 'python', fallback: false })
-    ).toThrow(/Could not compile/);
-});
-
 describe('a Range that the interpreter keeps apart from a list fails closed', () => {
   // The compiled code lowers every `Range` to an array, but the interpreter
   // makes a `Range` element the same as a list only when it is a finite range

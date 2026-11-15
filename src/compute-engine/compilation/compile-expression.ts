@@ -39,7 +39,6 @@ import {
 } from './vars-inputs.js';
 import { fragmentErrorDiagnostic } from './fragment.js';
 import type { CanCompileResult } from './fragment.js';
-import { ScalarFragmentJavaScriptTarget } from './javascript-fragment-target.js';
 import { compileWithIrProfile, type IR_OPTIONS } from './ir/adapter.js';
 import { compileWithIrProfileGlsl } from './ir/adapter-glsl.js';
 import { compileWithIrProfileInterval } from './ir/adapter-interval.js';
@@ -98,7 +97,7 @@ export type CompileExpressionOptions<T extends string = string> = {
   constantFold?: boolean;
   storage?: Readonly<Record<MathJsonSymbol, StorageHint>>;
   strictTypes?: boolean;
-  profile?: 'numeric-kernel' | 'ir';
+  profile?: 'ir';
 };
 
 /**
@@ -117,16 +116,13 @@ void IR_OPTIONS_CLASSIFIED;
 
 /**
  * Throw when the `profile` option is given with a target other than
- * `javascript` (or `glsl` for the profile `ir`), or with a direct target
+ * `javascript`, `glsl` or `interval-js`, or with a direct target
  * (`target`). It is an error of the options, thrown whatever `fallback`
  * says, as for the other invalid options.
  */
 function assertProfileTarget(options: CompileExpressionOptions | undefined) {
   if (options?.profile === undefined) return;
-  const ir = options.profile === 'ir';
-  const targets = ir
-    ? 'the targets "javascript", "glsl" and "interval-js"'
-    : 'the target "javascript"';
+  const targets = 'the targets "javascript", "glsl" and "interval-js"';
   if (options.target !== undefined)
     throw new Error(
       `Invalid compilation option "profile": the profile "${options.profile}" is ` +
@@ -134,7 +130,7 @@ function assertProfileTarget(options: CompileExpressionOptions | undefined) {
         '(the `target` option)'
     );
   const to = options.to ?? 'javascript';
-  if (to !== 'javascript' && !((to === 'glsl' || to === 'interval-js') && ir))
+  if (to !== 'javascript' && to !== 'glsl' && to !== 'interval-js')
     throw new Error(
       `Invalid compilation option "profile": the profile "${options.profile}" is ` +
         `defined for ${targets} only, not for "${to}"`
@@ -158,16 +154,11 @@ function assertProfileTarget(options: CompileExpressionOptions | undefined) {
  * (success: false, run: applicableN1) unless `options.fallback` is false,
  * in which case it throws.
  *
- * With `profile: 'numeric-kernel'` (experimental, `javascript` only), the
- * structured compiler of the JavaScript target compiles the expression,
- * and the result reports `profile`, `pure` and `shippable`
- * (`CompilationOptions.profile`).
- *
  * ## Real-only special functions (compile targets)
  *
  * The built-in targets implement most special functions (`Erf`, `Gamma`,
  * `Zeta`, the Bessel/Airy family, …) with **real-only** library helpers
- * (`_SYS.erf`, `scipy.special.erf`, GLSL `log2`, …). They accept a real scalar
+ * (`_SYS.erf`, GLSL `log2`, …). They accept a real scalar
  * only. Elementary functions that *do* have a complex extension (`Sin`, `Exp`,
  * `Sqrt`, `Power`, …) dispatch to a complex helper when an argument is
  * complex-valued; the real-only special functions do not. A complex value
@@ -196,7 +187,7 @@ export function compile<
     publicDepth === 0 &&
     !ce._opensOperation(false)
   ) {
-    const consumer = shadowConsumerOf(options, true);
+    const consumer = shadowConsumerOf(options);
     if (consumer === 'public' || consumer === 'glsl:public') {
       // A compilation that this one starts is not a public call.
       publicDepth += 1;
@@ -211,7 +202,7 @@ export function compile<
     }
   }
   if (ce._jsProfileShadow && shadowDepth === 0 && !ce._opensOperation(false)) {
-    const consumer = shadowConsumerOf(options, ce._jsProfileShadow === 'ir');
+    const consumer = shadowConsumerOf(options);
     if (consumer !== undefined)
       return compileWithShadow(expr, options, consumer);
   }
@@ -231,19 +222,17 @@ let publicDepth = 0;
 /**
  * The consumer under which the shadow measure counts a compilation with
  * `options` (`jsProfileShadowConsumer()`), or `undefined` when it is not
- * measured: a target other than `javascript` (and `glsl`, measured with
- * the profile `ir` only, as `glsl:public`), a direct target, a profile
- * asked for, or a compilation of `implicitCompile()` that follows an
- * attempt of its switch.
+ * measured: a target other than `javascript` (and `glsl`, counted as
+ * `glsl:public`), a direct target, a profile asked for, or a compilation
+ * of `implicitCompile()` that follows an attempt of its switch.
  */
 function shadowConsumerOf(
-  options: CompileExpressionOptions | undefined,
-  ir: boolean
+  options: CompileExpressionOptions | undefined
 ): string | undefined {
   if (options?.profile !== undefined || options?.target !== undefined)
     return undefined;
   const to = options?.to ?? 'javascript';
-  if (to === 'glsl' && ir) return 'glsl:public';
+  if (to === 'glsl') return 'glsl:public';
   if (to !== 'javascript') return undefined;
   return jsProfileShadowConsumer(options);
 }
@@ -251,7 +240,7 @@ function shadowConsumerOf(
 /**
  * The compilation of `expr` with `options`, and then, for the shadow
  * measure, a compilation of `expr` with the same options and the profile
- * `numeric-kernel` (or `ir` when `ce._jsProfileShadow` is `'ir'`), whose outcome is counted under `consumer`
+ * `ir`, whose outcome is counted under `consumer`
  * (`recordJsProfileShadow()`) and whose result is discarded. The result,
  * or the error, is that of the first compilation. A cancellation of the
  * first compilation is thrown with no second one.
@@ -299,8 +288,8 @@ function measureProfile(
 ): void {
   const ce = expr.engine;
   // The profile lowers a node reached on several paths once where it can,
-  // and declines a program over its limit of operations
-  // (`STRUCTURED_OPERATION_LIMIT`), so the measure cannot hang.
+  // and declines a program over its limit of nodes (`NODE_LIMIT` in
+  // `ir/lower.ts`), so the measure cannot hang.
   shadowDepth += 1;
   try {
     const result = compileExpression(expr, {
@@ -309,7 +298,7 @@ function measureProfile(
       ...(options?.varsObjectRefs === undefined
         ? {}
         : { varsObjectRefs: new Set() }),
-      profile: ce._jsProfileShadow === 'ir' ? 'ir' : 'numeric-kernel',
+      profile: 'ir',
       fallback: false,
     });
     if (result.success === true)
@@ -829,9 +818,6 @@ function compileInScope<
       constantFold: options?.constantFold,
       storage: options?.storage,
     };
-    // The `numeric-kernel` profile compiles on the structured route of the
-    // JavaScript target (`ScalarFragmentJavaScriptTarget`), with the
-    // assembly of the JavaScript target.
     // The profile `ir` (experimental) compiles with the IR compiler
     // (`ir/adapter.ts`); a decline falls back in the catch below. On
     // `glsl` (`ir/adapter-glsl.ts`) and `interval-js`
@@ -867,16 +853,6 @@ function compileInScope<
         expr,
         options
       ) as unknown as CompilationResult<T, R>;
-    if (options?.profile === 'numeric-kernel')
-      return strictTypesChecked(
-        expr,
-        new ScalarFragmentJavaScriptTarget('structured').compile(expr, {
-          ...targetOptions,
-          profile: 'numeric-kernel',
-        }) as unknown as CompilationResult<T, R>,
-        options,
-        languageTarget
-      );
     return strictTypesChecked(
       expr,
       languageTarget.compile(expr, targetOptions) as CompilationResult<T, R>,
@@ -953,17 +929,14 @@ function compileInScope<
  * has no list of what that target compiles, and a "yes" that `compile()`
  * then contradicts would be wrong.
  *
- * **Experimental.** With the option `profile: 'numeric-kernel'` (and the
- * target `javascript`), it answers for the profile: `{ ok: true, pure,
- * shippable }` exactly when `compile()` with the same options gives code,
- * with the `pure` and `shippable` fields of that result; otherwise `{ ok:
- * false, diagnostic }`, with the diagnostic of the decline that `compile()`
- * gives (`'outside-profile'` with the first node outside the profile, or
- * the code of another decline), or a `'compile-error'` with the message of
- * an invalid option. It runs the whole compilation, emission included, so
- * it costs as much as `compile()`. With `profile: 'ir'` (experimental too),
- * it answers in the same way for that profile; its positive answer has no
- * `pure`.
+ * **Experimental.** With the option `profile: 'ir'`, it answers for the
+ * profile: `{ ok: true, shippable }` exactly when `compile()` with the
+ * same options gives code, with the `shippable` field of that result;
+ * otherwise `{ ok: false, diagnostic }`, with the diagnostic of the decline
+ * that `compile()` gives (`'outside-profile'` with the first node outside
+ * the profile, or the code of another decline), or a `'compile-error'`
+ * with the message of an invalid option. It runs the whole compilation,
+ * emission included, so it costs as much as `compile()`.
  *
  * It never throws: an invalid expression, an invalid option or an error of
  * the preparation of the tree gives `ok: false` with the message of the
@@ -995,14 +968,7 @@ export function canCompile(
         varsObjectRefs: undefined,
         fallback: false,
       });
-      return {
-        ok: true,
-        pure: result.pure,
-        shippable: result.shippable,
-        ...(result.defaultedSymbols === undefined
-          ? {}
-          : { defaultedSymbols: result.defaultedSymbols }),
-      };
+      return { ok: true, shippable: result.shippable };
     } catch (e) {
       return { ok: false, diagnostic: compileDiagnosticOf(e) };
     }

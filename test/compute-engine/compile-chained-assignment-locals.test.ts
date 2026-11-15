@@ -39,7 +39,7 @@ describe('A CHAINED ASSIGNMENT IS A STATIC ERROR', () => {
     expect(expr.toString()).toContain('assignment-in-operand');
   });
 
-  for (const to of ['javascript', 'glsl', 'python'] as const)
+  for (const to of ['javascript', 'glsl'] as const)
     test(`${to} declines a chained assignment in a loop body`, () => {
       const ce = new ComputeEngine();
       const expr = ce.box(program(['Block', chained], 't') as any);

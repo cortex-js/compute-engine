@@ -89,8 +89,8 @@ the same absence predicate as `??`: it fails with `expected-present` for
 `Missing`, `NaN` and a `NaN` point, and passes `Nothing`
 through. Its type is `presentType()` of the operand (`coalesce.ts`), which
 removes those absence forms and keeps `nothing`. A compiler omits the check
-only when the operand's type proves presence; the JavaScript and Python
-targets raise, and a target that cannot raise compiles the identity without
+only when the operand's type proves presence; the JavaScript target
+raises, and a target that cannot raise compiles the identity without
 reading the assertion as a proof. See the
 [design note](plans/2026-10-20-bare-tuple-record-any.md) for the collection
 rules and [type-system reference](TYPE-SYSTEM.md) for current subtyping.
@@ -136,7 +136,7 @@ second marker, `Indeterminate`, of this decision is removed.
    `Missing`. A restriction `If(c, e)` with `c` false follows the same
    rule (user decision of 2026-11-03): `If(c, 5)` is `NaN`,
    `If(c, (1, 2))` is `(NaN, NaN)` on every route and in compiled
-   JavaScript and Python, and `If(c, "a")` and `If(c, [1, 2])` are
+   JavaScript, and `If(c, "a")` and `If(c, [1, 2])` are
    `Missing`. So `Sin(If(c, (0, 1)))` is `(NaN, NaN)`, and an accessor
    of a point over an absent list of points gives the point of `NaN`
    coordinates: `First(If(c, [(1, 2), (3, 4)]))` is `(NaN, NaN)`, while
@@ -533,8 +533,8 @@ equality (`=`) whose operand is an undefined numeric value (`NaN`,
 `Indeterminate`) is `False`. This was already its value when it is
 evaluated alone; it is now also its value in the condition of an `If` or a
 `Which`, so the branch takes its next arm (the else arm). The rule holds on
-every route: the interpreter, the `javascript` and `python` compile
-targets, and `interval-js` for an operand that is undefined over the WHOLE
+every route: the interpreter, the `javascript` compile target, and
+`interval-js` for an operand that is undefined over the WHOLE
 cell (`empty`). The GPU target (`glsl`) already selected by the
 IEEE `false` and did not change.
 
@@ -544,7 +544,6 @@ IEEE `false` and did not change.
 | `\left\{\frac{0}{0}>0:1,0\right\}` (also `<`, `≤`, `≥`, `=`), interpreter | `Missing` | `0` |
 | `If(0/0 > 0, 1, 0)`, interpreter | `Missing` | `0` |
 | `\left\{x > 0: 1, 0\right\}`, `javascript`, run at `{x: NaN}` | `NaN` | `0` |
-| the same, `python`, `x = nan` | `nan` | `0` |
 | `0 < \sqrt{x}`, `interval-js`, `x` = [-1, -1] (`\sqrt{x}` is `empty`) | `'maybe'` | `'false'` |
 | the same, `x` = [-1, 1] (`\sqrt{x}` is `partial`) | `'maybe'` | `'maybe'` (unchanged) |
 | `\sqrt{x} \ge 0`, `interval-js`, `x` = [-1, 1] | `'true'` | `'maybe'` |
@@ -555,11 +554,11 @@ What the decision does NOT change:
 
 - **`≠` (`NotEqual`)** kept its earlier behavior until the user decision of
   2026-10-23: a branch on a `NotEqual` with a NaN operand took no arm
-  (`Missing` in the interpreter, `NaN` on the `javascript` and `python`
-  targets). Since that decision `NaN ≠ 0` is `True` in a branch condition
+  (`Missing` in the interpreter, `NaN` on the `javascript` target).
+  Since that decision `NaN ≠ 0` is `True` in a branch condition
   too, as IEEE reads it and as the cell of an element-wise condition always
   was, so `If(NaN ≠ 0, a, b)` takes `a` on the interpreter and on the
-  `javascript` and `python` targets, the same arm as `If(¬(NaN = 0), a, b)`.
+  `javascript` target, the same arm as `If(¬(NaN = 0), a, b)`.
   The GPU targets took the then arm before and still do. `interval-js`
   still answers `'maybe'` for `\sqrt{x} \ne 0` over an `empty` operand.
 - **`Missing`** kept its Kleene reading in the interpreter until the
@@ -567,7 +566,7 @@ What the decision does NOT change:
   1)` was `Missing`, and an `If` on it was the absent-condition error
   (§3.D). Since that decision both are `False`/the else arm. In compiled code a comparison, a connective or a branch
   condition over an absent operand is unspecified (decision of 2026-11-01,
-  §6): the `javascript` and `python` targets give the IEEE answer for the
+  §6): the `javascript` target gives the IEEE answer for the
   absent object (`false`), so `If(w > 0, 1, 0)` with `w: real | missing`
   absent takes the else arm and gives 0; `interval-js` gives `'false'` for
   a comparison with an `empty` operand, whatever produced the `empty`.
@@ -609,8 +608,7 @@ What the decision does NOT change:
   `(_.L).reduce((_a, _b) => _a + _b, 0)`, which throws a `TypeError` on
   `javascript`; the `interval-js` code gives `undefined`. The interpreter has
   no value. `run()`, `broadcast()` and the `interval-js` runner do not test
-  such an input before the run, and the Python functions of
-  `compileFunction()` and `compileLambda()` do not test it either. An input
+  such an input before the run. An input
   declared with a `missing` arm (`L: list<real> | missing`) is not left out
   when the caller passes `undefined` for it: it holds the absent value,
   which `IsMissing` and `Coalesce` discharge. The interpreter rule for a
@@ -741,7 +739,7 @@ see a complex constant are written for it:
   true of a complex value.
 
 Compiled routes. The compiled arithmetic does not change. On the
-`javascript` and `python` targets a pole computed at run time, and the
+`javascript` target a pole computed at run time, and the
 constant pole next to a variable, is the IEEE `Infinity`, which is ordered
 (on `interval-js` the constant pole is a hoisted constant that compares as
 `+∞`): this is a lane difference, recorded with the other divergences of
@@ -751,36 +749,35 @@ the `Infinity` projection in `docs/COMPILATION-MODEL.md`. Measured
 | Expression | Input | Compiled | Interpreter |
 | --- | --- | --- | --- |
 | `\left\{\frac{1}{x} > 0: 1, 0\right\}` | `x = 0`, `javascript` | `1` (`(0 < 1 / _.x) ? 1 : 0`) | `0` |
-| the same | `x = 0`, `python`, `x` a NumPy float | `1.0` (a plain Python float raises `ZeroDivisionError`) | `0` |
-| `\frac{1}{x} = \frac{1}{x}` | `x = 0`, `javascript` and `python` | `true` | `False` |
+| `\frac{1}{x} = \frac{1}{x}` | `x = 0`, `javascript` | `true` | `False` |
 | `\left\{\frac{1}{x} > 0: 1, 0\right\}` | `x` = [0, 0], `interval-js` | [0, 0] (`\frac{1}{x}` is `empty`, so the comparison is `'false'`) | `0` |
 | `\left\{\sqrt{x} > 0: 1, 0\right\}` | `x = -1`, `javascript` | `0` (the runtime rule of the complex modes) | `0` |
-| `x < \frac{1}{0}` | `x = 1`, `javascript`, `python`, `interval-js` | `true` (`_.x < Infinity`, `x < np.inf`, `'true'`) | `False` |
+| `x < \frac{1}{0}` | `x = 1`, `javascript`, `interval-js` | `true` (`_.x < Infinity`, `'true'`) | `False` |
 | `\frac{1}{0} = x` | `x = 1`, the same targets | `false` (`true` at `x = Infinity` on `javascript`) | `False` |
 | `0 < \frac{1}{0}`, closed | `interval-js` | `'true'` (`_IA.less(_k1, _k2)`; no fold) | `False` |
 | `\frac{1}{0} = \frac{1}{0}`, closed | `interval-js` | `'true'` (`_IA.equal(_k1, _k1)`; no fold) | `False` |
 
 A closed comparison (no variable) folds to the value of the interpreter on
-`javascript`, `glsl` and `python`, with or without `constantFold`
+`javascript` and `glsl`, with or without `constantFold`
 (a comparison folds under the opt-out because its result jumps at a point;
 `closedExactJump`, `compilation/base-compiler.ts`, which reads the pole
 `ComplexInfinity` as a value with no order, not as a float). Measured
 2026-10-21, the same code with `constantFold: true` and `constantFold:
 false`:
 
-| Expression | `javascript` | `glsl` | `python` | `interval-js` |
-| --- | --- | --- | --- | --- |
-| `0 < \frac{1}{0}` | `false` | `false` | `False` | `'true'` (no fold) |
-| `\frac{1}{0} = \frac{1}{0}` | `false` | `false` | `False` | `'true'` (no fold) |
-| `\frac{1}{0} = 0` | `false` | `false` | `False` | `'false'` (no fold) |
-| `\frac{1}{0} \ne 0` | `true` | `true` | `True` | `'true'` (no fold) |
-| `0 < i`, `0 < \ln(-1)` | `false` | `false` | `False` | compile-time decline |
-| `i = i` | `true` | `true` | `True` | compile-time decline |
-| `0 \le \infty` | `true` | `true` | `True` | `'true'` |
+| Expression | `javascript` | `glsl` | `interval-js` |
+| --- | --- | --- | --- |
+| `0 < \frac{1}{0}` | `false` | `false` | `'true'` (no fold) |
+| `\frac{1}{0} = \frac{1}{0}` | `false` | `false` | `'true'` (no fold) |
+| `\frac{1}{0} = 0` | `false` | `false` | `'false'` (no fold) |
+| `\frac{1}{0} \ne 0` | `true` | `true` | `'true'` (no fold) |
+| `0 < i`, `0 < \ln(-1)` | `false` | `false` | compile-time decline |
+| `i = i` | `true` | `true` | compile-time decline |
+| `0 \le \infty` | `true` | `true` | `'true'` |
 
 Before, the interpreter left the comparisons with a value with no order
 unevaluated, the fold failed and the code was structural (`0 < Infinity`,
-`true`), and on `python` and under `constantFold: false` the code of a
+`true`), and under `constantFold: false` the code of a
 comparison with the pole stayed structural also after the interpreter
 decided it, since the pole is not an exact number. `interval-js` never
 folds a comparison: its code computes an enclosure. `i < x` is still the
@@ -1395,8 +1392,8 @@ decision, a comparison with an absent operand was `Missing`, in a numeric
 slot too: `w > 0` was `Missing` (typed `boolean | missing`) and
 `If(w > 0, 1, 0)` had no value. A `NaN` is a value, and a comparison with
 it keeps the IEEE answer. In compiled code a comparison with an absent operand is
-unspecified (decision of 2026-11-01, §6): the `javascript` and `python`
-targets give the IEEE answer for the absent object the host passes
+unspecified (decision of 2026-11-01, §6): the `javascript`
+target gives the IEEE answer for the absent object the host passes
 (`undefined > 0` is `false`), the GPU targets have only `NaN` and give the
 IEEE answer too. A program that must know whether `w` is absent asks
 `IsMissing(w)`, not `IsMissing(w > 0)`.
@@ -1534,9 +1531,7 @@ still answers `NaN` for an absent cell, a value that is not specified.
 
 **A WRITTEN absence symbol lowers to the target's object-domain null** —
 `undefined` on JavaScript, and the target's numeric marker where there is no
-object axis (the shader targets, the interval target) or where the object null
-would break the numeric library (the Python target spells `math.nan`, since
-numpy raises on `None`). It is
+object axis (the shader targets, the interval target). It is
 a value the compiler spells out, not a free variable the caller supplies, so
 `compile(Missing).freeSymbols` is empty; the object null rather than the
 numeric marker, because the whole-collection rule above must keep an absent
@@ -1546,8 +1541,7 @@ therefore reads the object null as absent too (2026-09-22).
 **Compiled arithmetic over an absent INPUT or an absent OBJECT is
 unspecified** (decision of 2026-11-01, §6; it replaces the decisions of
 2026-09-27 and 2026-10-25, ROADMAP CE-395). With `p: number | missing`
-passed as `None`, Python's `p + 1` is a `TypeError`; passed as `undefined`,
-JavaScript's `p + 1` is `NaN`. Arithmetic whose operand is an absent point,
+passed as `undefined`, JavaScript's `p + 1` is `NaN`. Arithmetic whose operand is an absent point,
 tuple or list (`2·P\{c\}`, `P\{c\} + Q`, `L\{c\} + 1`) gives the target's own
 value (`undefined`, `NaN`, a `TypeError`). A host that needs a value there
 writes `Coalesce(p, 0) + 1`, or declares `p: number` and passes a number.
@@ -1632,14 +1626,12 @@ which `NaN` equals nothing and `Missing` compared with anything is `Missing`.
   lifts the scalar to `[1, NaN]`.
 
 On the compiled routes, rule C holds through SameValueZero element tests
-(`includes`, and `_SYS.eqt` on JavaScript; `_ce_same` on Python, whose float
-leaf reads `nan` as the same as `nan`). Two refusals keep them faithful: a
+(`includes`, and `_SYS.eqt` on JavaScript). Two refusals keep them faithful: a
 needle that may be a COMPUTED absence (its type has a `missing` arm, and it is
 not the written symbol) is not compiled on JavaScript, because an unselected
-numeric `Which` lowers to `NaN` there and would be found where `NaN` sits; on
-Python the written symbol is refused as well, because it lowers to `nan`. For
+numeric `Which` lowers to `NaN` there and would be found where `NaN` sits. For
 rule D, `Any` and `All` over a collection whose element type has a `missing`
-arm are not compiled on either target, because `some`/`every` cannot answer
+arm are not compiled on JavaScript, because `some`/`every` cannot answer
 `Missing`; the selecting operators need no refusal, since "not decidedly true"
 is "not selected" on both routes.
 
@@ -2398,8 +2390,8 @@ maps its channels onto it:
   gives for an operator over an absent operand, it describes the interpreter
   and the compiled code as they are, not a promise of the compiled value.
 - The compiled targets have only the IEEE `NaN`, so every form with no
-  value compiles to the target's `NaN` (`NaN` in JavaScript, `np.nan` in
-  Python, `_gpu_nan()` in the shaders). This agrees with the interpreter,
+  value compiles to the target's `NaN` (`NaN` in JavaScript, `_gpu_nan()` in
+  the shaders). This agrees with the interpreter,
   which also answers `NaN` (§1), so it is not a divergence. `Indeterminate`
   is an input spelling of `NaN` and reaches no target as a symbol.
 - The non-values of compiled code are one per domain: `NaN` for a
@@ -2987,7 +2979,7 @@ document's history):
   `test/compute-engine/compile-elseless-if-statement.test.ts`). Ruled the
   same day, after the alignment: the compiled absent value of `Which`, `If`
   and `When` follows ONE rule per target (`BaseCompiler.absenceKind`) —
-  the object null (`undefined`, Python `None`) only when every arm is
+  the object null (`undefined`) only when every arm is
   provably not a number, `NaN` for a number and for an unknown type, since a
   bare symbol arm is a number until proven otherwise and an object null there
   would turn its arithmetic consumers into a host `TypeError`. Pinned in
@@ -3020,13 +3012,13 @@ document's history):
   `NaN`), a piecewise value with no selected clause, an `If` with an absent
   branch, an element read of a restricted list (`First([5, 6]{c})`) and an
   arithmetic result (`5{c} + 1`) all give the same answer, on every route:
-  held, fresh, `.N()`, compiled JavaScript and compiled Python. Amended the
+  held, fresh, `.N()` and compiled JavaScript. Amended the
   same day: the first version of this rule found a `NaN` that was written as
   `NaN` (`IndexOf([1, NaN], NaN)` was `2`) and decided the absence of a
   `NaN` from the operand as written, which gave different answers for a
   nested selection (interpreter against compiled code), for a value derived
-  from a restriction (fresh against held), evaluated a random condition a
-  second time, and missed the `nan` of an absent `If` branch in Python. A
+  from a restriction (fresh against held), and evaluated a random condition
+  a second time. A
   searched value that holds a restriction, a piecewise value or an `If`
   whose condition is not decided is not moved out of the application: the
   application stays unevaluated and gives the correct answer once the
@@ -3048,9 +3040,8 @@ document's history):
   either, and does not widen its type: `IndexOf([1, Missing], 2)` is typed
   `integer` (`ABSENT_CELLS_PASS_THROUGH`, `broadcast-lift-type.ts`). The
   compiled code tests the run-time value of the searched operand before the
-  element test (`compileSearchedValue`, `pySearchedValue`): in JavaScript
-  `v == null || v !== v`, in Python `v is None` or a float `v != v`, gives
-  the "not found" answer.
+  element test (`compileSearchedValue`): in JavaScript
+  `v == null || v !== v` gives the "not found" answer.
 - **RULED 2026-09-26: Insert, ReplaceAt and Append on an absent collection
   answer Missing.** `Insert(Missing, 1, 2)`, `ReplaceAt(Missing, 1, 2)` and
   `Append(Missing, 1)` answer `Missing` on every route, typed with a
@@ -3162,10 +3153,9 @@ document's history):
   condition compiles to a short-circuiting three-valued value (a
   decided-false guard never evaluates what follows it; an undecided one
   still does) and is selected through the value-shaped test, on the
-  JavaScript and Python targets; `If(x > 0 ∧ y > 0, 1, -1)` at `x = 1,
+  JavaScript target; `If(x > 0 ∧ y > 0, 1, -1)` at `x = 1,
   y = NaN` is `NaN`, at `x = -1, y = NaN` it is `-1`. A third follow-up
   ruling the same day settles the other compile targets:
-  the Python target, which has a real NaN, takes the same operand guard;
   the GPU target (GLSL) keeps JavaScript-style selection for now,
   because NaN propagation is not guaranteed on every driver, and stay on
   the ROADMAP item that records that reason. CORRECTION (measured

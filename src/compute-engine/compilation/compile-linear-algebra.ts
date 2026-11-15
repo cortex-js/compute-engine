@@ -336,10 +336,6 @@ export function mayHoldPoint(
  *   for `Power` (`compileRuntimeMatrixPower`): `_SYS.matrixProductShape`
  *   answers the product when an operand holds a matrix, or `undefined`, in
  *   which case the element-wise code runs. Each operand is evaluated once.
- * - On the Python target, the first case is `np.matmul` (and `np.multiply`
- *   for a step between two vectors). The second case answers `undefined`,
- *   and `compileExpr` refuses the product, as for any arithmetic over a
- *   list on that target.
  *
  * A product with an array operand whose type may hold a tuple (a point)
  * and also a matrix (a bare `list`, `list<unknown>`, `list<any>`) declines
@@ -394,9 +390,7 @@ export function compileMatrixProduct(
   // An array operand whose type may hold a point and also a matrix (a bare
   // `list`, `list<any>`) declines: a list of two points and a 2×2 matrix
   // are the same value at run time, but the interpreter multiplies the
-  // matrix as a matrix and the points coordinate by coordinate. On the
-  // Python target such an operand is refused later by `compileExpr`, as any
-  // arithmetic over a list of unknown shape is there.
+  // matrix as a matrix and the points coordinate by coordinate.
   const pointOrMatrix = arrays.find(
     (a) => mayHoldPoint(engine, a) && mayBeMatrix(a)
   );
@@ -436,31 +430,6 @@ export function compileMatrixProduct(
               ? [shape[0]]
               : [d[1]];
     }
-    if (target.language === 'python') {
-      // NumPy computes with complex entries as with real ones. A step with
-      // a matrix is `np.matmul`, a step between two vectors is
-      // `np.multiply`, and the numbers scale the result (a NumPy array).
-      let product = core.compile(arrays[0], target);
-      let rank = dims[0]!.length;
-      for (const [i, a] of arrays.entries()) {
-        if (i === 0) continue;
-        const code = core.compile(a, target);
-        const r = dims[i]!.length;
-        product =
-          rank === 1 && r === 1
-            ? `np.multiply(${product}, ${code})`
-            : `np.matmul(${product}, ${code})`;
-        rank = rank === 2 && r === 2 ? 2 : 1;
-      }
-      // At the precedence of a product, so that a sum is in parentheses:
-      // `(x + 1)·p·q` is `(x + 1) * np.matmul(p, q)`.
-      const scalars = args
-        .filter((a) => !arrays.includes(a))
-        .map((a) => core.compile(a, target, 12));
-      return scalars.length === 0
-        ? product
-        : `(${[...scalars, product].join(' * ')})`;
-    }
     const complex =
       linearAlgebraLane(args) === 'complex' ||
       args.some((a) => core.isComplexValued(a));
@@ -468,8 +437,6 @@ export function compileMatrixProduct(
     return `${helper}(${args.map((a) => core.compile(a, target)).join(', ')})`;
   }
 
-  // Python: a product whose ranks are known only at run time keeps the
-  // refusal below (`compileExpr`), as a `Power` of such a base does.
   if (target.language !== 'javascript') return undefined;
 
   // The rank of an operand is known only at run time: dispatch on the
@@ -650,8 +617,7 @@ export function arrayLiteralElements(
  * zero is refused, and a bracket inside a quoted text at a deeper level
  * can only leave the depth unbalanced, which is refused too.
  * {@link arrayLiteralElements} refuses any text that holds a quote before
- * it asks. The Python function lowerings of `Multiply` and `Power` read it
- * to parenthesize an operand (`python-target.ts`).
+ * it asks.
  */
 export function isAtomicSource(code: string): boolean {
   let depth = 0;

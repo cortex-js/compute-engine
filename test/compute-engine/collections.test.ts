@@ -6601,7 +6601,7 @@ describe('Wolfram call forms of the list heads', () => {
     ],
   ];
   for (const [name, expr] of declined)
-    for (const to of ['javascript', 'python'])
+    for (const to of ['javascript'])
       test(`${name} is not compiled to ${to}`, () => {
         const ce2 = new ComputeEngine();
         ce2.declare('xs', 'list<integer>');

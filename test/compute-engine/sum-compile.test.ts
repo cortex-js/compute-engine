@@ -360,7 +360,7 @@ describe('§B2 — field access on a variant value', () => {
       ['lit', 7],
       { str: 'num' },
     ] as MathJsonExpression);
-    for (const to of ['python', 'glsl'] as const)
+    for (const to of ['glsl'] as const)
       expect(() =>
         compile(e, { to, fallback: false, constantFold: false })
       ).toThrow(to === 'glsl' ? /outside the GLSL fragment/ : /Could not compile/);
@@ -468,22 +468,6 @@ describe('fail closed — out-of-scope targets and non-sugar nominals', () => {
         { fallback: false }
       )
     ).toThrow(/not compilable/);
-  });
-
-  test('Python fails closed on a constructor-pattern match', () => {
-    const ce = engine(AST);
-    ce.declare('n', 'node');
-    expect(() =>
-      compile(
-        ce.box([
-          'Match',
-          'n',
-          ['MatchCase', ['lit', '_v'], 'v'],
-          ['MatchCase', '_', 0],
-        ] as MathJsonExpression),
-        { to: 'python', fallback: false }
-      )
-    ).toThrow(/not supported by the Python/);
   });
 
   test('the GPU targets decline a constructor-pattern match', () => {

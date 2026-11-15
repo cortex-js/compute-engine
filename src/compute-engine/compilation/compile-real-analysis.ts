@@ -178,7 +178,7 @@ export function assumedRealNonNegative(expr: Expression): boolean {
  * The base of a `Log` call when it is one the targets spell with a
  * DEDICATED kernel: `10` for the one-argument form and for a literal base
  * `10`, `2` for a literal base `2`, `undefined` for every other base. The
- * dedicated kernels (`Math.log10`/`Math.log2`, `np.log10`/`np.log2`, the
+ * dedicated kernels (`Math.log10`/`Math.log2`, the
  * shader `log2`, `_IA.log10`/`_IA.log2`) are what the interpreter's
  * constant fold uses, so a runtime `Log` spelled through them agrees with
  * a folded one to the last bit; spelled as `ln(x) / ln(b)` it was one ulp

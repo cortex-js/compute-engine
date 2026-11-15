@@ -87,3 +87,17 @@ describe('COMPILE a call of a user function mapped by `vars`', () => {
     expect(r.run!({ x: 1 } as never)).toBe(2);
   });
 });
+
+describe('a vars entry that names a library operator', () => {
+  it('calls the source of the entry at each element of a Map', () => {
+    const engine = new ComputeEngine();
+    engine.declare('L', 'list<real>');
+    const r = compile(engine.box(['Map', 'Sin', 'L']), {
+      cse: false,
+      constantFold: false,
+      fallback: false,
+      vars: { Sin: '((t) => t + 1)' },
+    } as never)!;
+    expect(r.run!({ L: [0] } as never)).toEqual([1]);
+  });
+});

@@ -57,19 +57,16 @@ export type FragmentValueType =
   | { kind: 'point'; size: number }
   | { kind: 'color' };
 
-/** The type of an element of a list. A boolean element (a list of
- *  booleans) is typed by the JavaScript structured route only
- *  (`javascript-fragment-target.ts`); no rule of the GLSL fragment target
- *  makes one. */
+/** The type of an element of a list. No rule of the GLSL fragment target
+ *  makes a boolean element (a list of booleans). */
 export type FragmentElementType =
   | { kind: 'real' }
   | { kind: 'integer' }
   | { kind: 'boolean' }
   | { kind: 'point'; size: number };
 
-/** A list. `count` is absent when it is known only at run time. The element
- *  is a list (a list of lists, to the depth that the type states) only in a
- *  definition that sets `nestedLists`. */
+/** A list. `count` is absent when it is known only at run time. The pass
+ *  refuses a list whose element is a list (`isNestedList()`). */
 export type FragmentListType = {
   kind: 'list';
   element: FragmentElementType | FragmentListType;
@@ -475,8 +472,7 @@ export type FragmentFunction = {
    *  a list argument, because every parameter has a scalar type (the
    *  spec, decision 19). A call with a list of 2 to 4 reals at a scalar
    *  parameter is then the list of the values of the function at the
-   *  elements, which the emitter writes with an element-wise wrapper; with
-   *  `FragmentDefinition.mapsListArguments`, a list of any length. */
+   *  elements, which the emitter writes with an element-wise wrapper. */
   readonly broadcasts?: boolean;
   /** The symbol of each parameter in the function literal, when the
    *  literal has one. The pass binds the parameter with it, so that the
@@ -526,11 +522,6 @@ export type FragmentDefinition<R> = {
    *  the symbol as an input. The pass types the value in place of the
    *  symbol. */
   storedValue?(symbol: Expression): Expression | undefined;
-  /** Whether the compiler computes the stored value of the free symbol
-   *  `symbol` once, at the start of the program, outside every form, and
-   *  not where the symbol is read: the forms around the read do not bind
-   *  the names of the value. Absent: `false`. */
-  storedOutsideBinders?(symbol: Expression): boolean;
   /** How the target holds the value of a name, chosen once, where the name
    *  is bound, from its type, its role and its declaration. `undefined`
    *  when the target cannot hold it. */
@@ -590,74 +581,6 @@ export type FragmentDefinition<R> = {
    *  terms written out one by one): its bounds then need not fit the loop
    *  counter. */
   aggregateHasNoLoop?(node: Expression, lower: number, upper: number): boolean;
-  /** The type of the local that a `Declare` with a value declares, or
-   *  `undefined` for the rule of the pass, `localType()`, which widens an
-   *  integer to a real. `value`: the type of the value; `declared`: the
-   *  spelling of the declared type (`integer`), or `undefined` for a
-   *  declaration with no type (the form of a `let`, `Declare(t, {value:
-   *  …})`); `inferred`: the type that the engine infers for the local in
-   *  its block, from its value and from every value written to it;
-   *  `name`: the name of the local; `declaration`: the `Declare`
-   *  statement. Absent: the rule of the pass. */
-  localType?(local: {
-    name: string;
-    declaration?: Expression;
-    value: FragmentValueType | FragmentListType;
-    declared: string | undefined;
-    inferred: Type | undefined;
-  }): FragmentValueType | FragmentListType | undefined;
-  /** Whether the target reads the bound `bound` of a counted loop, which
-   *  it does not fold and whose static type is not `integer`, as an
-   *  integer. `isInteger` answers whether the fact of a node of the bound
-   *  is `integer`. The JavaScript structured route admits a bound computed
-   *  from the length of a list with integer arithmetic, which the engine
-   *  types `integer | signed_infinity` or `real`. Absent: such a bound is
-   *  refused, as the shader emitters read the static type of a bound. */
-  loopBoundFromFact?(
-    bound: Expression,
-    isInteger: (node: Expression) => boolean
-  ): boolean;
-  /** Whether a call passes a list argument of the type `argument` to a
-   *  declared list parameter of another type `parameter` as it is, with no
-   *  conversion (a list of integers to a list of reals, when the target
-   *  holds both as one array of numbers). Absent: such an argument is
-   *  refused. */
-  passesListArgument?(
-    argument: FragmentListType,
-    parameter: FragmentListType
-  ): boolean;
-  /** Present when a call applies the function to each element of a list
-   *  of reals or of integers, of any length, at a parameter whose type is
-   *  a real or an integer, when the interpreter applies the function to
-   *  each element (`FragmentFunction.broadcasts`; the JavaScript structured
-   *  route): the value of the call is the list of the values of the
-   *  function. The answer is
-   *  whether the lists `lists` of one call have one length, as the
-   *  definition proves it. Absent: such an argument is mapped only by the
-   *  rule of `FragmentFunction.broadcasts`. */
-  mapsListArguments?(
-    lists: readonly Expression[],
-    scope: FragmentScope<R>,
-    context: FragmentContext<R>,
-    walker: FragmentWalker<R>
-  ): boolean;
-  /** Whether a local can hold a list: a `Declare` whose value is a list,
-   *  and an `Assign` of a list to such a local. A list of the type
-   *  `argument` is then read as a list of the type `parameter` when
-   *  `passesListArgument()` accepts the pair, also for the two branches of
-   *  an `If`. Absent: a local is a scalar, a complex number or a point. */
-  readonly listLocals?: boolean;
-  /** Whether each name of a destructuring write of a literal tuple
-   *  (`(a, b) ≔ (b, a + b)`) receives the facts of its operand, as a
-   *  write of that operand to the name. Absent: each name receives a real
-   *  component of the point. */
-  readonly literalTupleComponents?: boolean;
-  /** Whether a list can hold lists (`FragmentListType` with a list element,
-   *  a list of lists to the depth that the type states): the definition
-   *  types such a value only in the rules that read one. Absent: the pass
-   *  refuses a value and a binding of such a type, whatever rule makes
-   *  it. */
-  readonly nestedLists?: boolean;
 };
 
 //
@@ -757,7 +680,7 @@ function sameType(a: FragmentType, b: FragmentType): boolean {
 }
 
 /** Whether `t` is a list whose elements are lists (a list of lists), which
- *  only a definition that sets `nestedLists` makes. */
+ *  the pass refuses. */
 function isNestedList(t: FragmentType): boolean {
   return t.kind === 'list' && t.element.kind === 'list';
 }
@@ -888,9 +811,6 @@ export type FragmentLoweringContract = {
   /** The operand count of the outermost made node: a number, or a range
    *  `[min, max]`. Absent: any count. */
   readonly nops?: number | readonly [number, number];
-  /** True when a leaf of the made tree can be a symbol that the lowering
-   *  copied from another expression (a name of a function body). */
-  readonly symbolLeaves?: boolean;
   /** Names of symbols that no leaf of the made tree can be, also when the
    *  leaf is accepted otherwise (a symbol of the original). A lowering that
    *  removes a constant (`Pi`) states it here. */
@@ -956,9 +876,8 @@ export function fragmentNodeIsTyped<R>(
  * (`FragmentTargetFields.fragmentScope`), or a number literal. Otherwise
  * it must be a function expression with a head of `contract.operators` (and,
  * for the outermost node, `contract.nops` operands), and each operand is
- * checked in the same way. With `contract.symbolLeaves`, a symbol is also
- * accepted. A node that fails the check is an internal error: the lowering
- * made a node that its contract does not state.
+ * checked in the same way. A node that fails the check is an internal
+ * error: the lowering made a node that its contract does not state.
  *
  * The check rejects a head outside `contract.operators`, a leaf that is
  * neither part of the original nor a typed node, a non-finite number
@@ -994,8 +913,7 @@ export function fragmentReplaceOperands(
     LOWERED_NODES.has(e) ||
     ofOriginal(e) ||
     typedUnder(scope, e) ||
-    (isNumber(e) && e.isFinite !== false) ||
-    (contract.symbolLeaves === true && isSymbol(e));
+    (isNumber(e) && e.isFinite !== false);
   const fail = (e: Expression, why: string): never => {
     throw new Error(
       `Internal error: the lowering "${contract.name}" made ` +
@@ -1135,7 +1053,7 @@ function makeWalker<R>(
     type: FragmentValueType | FragmentListType,
     conversions?: readonly FragmentConversion<R>[]
   ): FragmentValueFacts<R> => {
-    if (isNestedList(type) && definition.nestedLists !== true)
+    if (isNestedList(type))
       return refuse(
         node,
         'signature',
@@ -1175,16 +1093,6 @@ function makeWalker<R>(
         : { kind: 'to-float', type, representation: target };
     if (isScalarNumeric(from) && type.kind === 'complex')
       return { kind: 'real-to-complex', type, representation: target };
-    // A list that the target holds as a list of another type, with no
-    // conversion (`passesListArgument`), where a local can hold a list.
-    if (
-      definition.listLocals === true &&
-      from.kind === 'list' &&
-      type.kind === 'list' &&
-      facts.representation === target &&
-      definition.passesListArgument?.(from, type) === true
-    )
-      return { kind: 'none', type, representation: target };
     return undefined;
   };
 
@@ -1231,16 +1139,6 @@ function makeWalker<R>(
       (b.kind === 'complex' && isScalarNumeric(a))
     )
       return { kind: 'complex' };
-    // Two lists, one of which the target reads as the other
-    // (`FragmentDefinition.listLocals`).
-    if (
-      definition.listLocals === true &&
-      a.kind === 'list' &&
-      b.kind === 'list'
-    ) {
-      if (definition.passesListArgument?.(a, b) === true) return b;
-      if (definition.passesListArgument?.(b, a) === true) return a;
-    }
     return undefined;
   };
 
@@ -1286,7 +1184,7 @@ function makeWalker<R>(
     role: FragmentBindingRole,
     declared?: string
   ): FragmentValueFacts<R> => {
-    if (isNestedList(type) && definition.nestedLists !== true)
+    if (isNestedList(type))
       return refuse(
         node,
         'signature',
@@ -1632,10 +1530,7 @@ function makeWalker<R>(
       // A name of the value, or of a value that it reads, that a form binds
       // where the symbol is read (an index, a local or a parameter) would
       // read the binder. The compiler refuses it (`foldCapturedName()`).
-      const captured =
-        definition.storedOutsideBinders?.(node) === true
-          ? undefined
-          : capturedName(stored, scope);
+      const captured = capturedName(stored, scope);
       if (captured !== undefined)
         return refuse(
           node,
@@ -1954,31 +1849,21 @@ function makeWalker<R>(
     // call with a wrapper that calls the function on each component. A
     // point argument is not mapped: the interpreter maps a tuple only when
     // the signature of the function is declared.
-    // A definition with `mapsListArguments` maps a list of numbers of any
-    // length at a parameter of a real or an integer type, of a function
-    // that the interpreter applies to each element. A list of lists is
-    // mapped at its numbers (the rank of the list).
-    const mapsAll = definition.mapsListArguments !== undefined;
-    const mapped = args.map((a, i) =>
-      mapsAll
-        ? fn.broadcasts === true &&
-          numberListRank(a.type) > 0 &&
-          fn.parameterTypes[i] !== undefined &&
-          isScalarNumeric(fn.parameterTypes[i]!)
-        : fn.broadcasts === true &&
-          a.type.kind === 'list' &&
-          isScalarNumeric(a.type.element) &&
-          a.type.count !== undefined &&
-          a.type.count >= 2 &&
-          a.representation ===
-            definition.representationOfValue({
-              kind: 'point',
-              size: a.type.count,
-            })
+    const mapped = args.map(
+      (a) =>
+        fn.broadcasts === true &&
+        a.type.kind === 'list' &&
+        isScalarNumeric(a.type.element) &&
+        a.type.count !== undefined &&
+        a.type.count >= 2 &&
+        a.representation ===
+          definition.representationOfValue({
+            kind: 'point',
+            size: a.type.count,
+          })
     );
     const unmapped = args.findIndex(
       (a, i) =>
-        !mapsAll &&
         fn.broadcasts === true &&
         !mapped[i] &&
         a.type.kind === 'list' &&
@@ -1998,22 +1883,7 @@ function makeWalker<R>(
         mapped[i] && a.type.kind === 'list' ? [a.type.count] : []
       )
     );
-    const mappedLists = fn.arguments.filter((_, i) => mapped[i]);
-    if (
-      mapsAll &&
-      !definition.mapsListArguments!(mappedLists, scope, context, walker)
-    )
-      return refuse(
-        node,
-        'signature',
-        `The call \`${nodeText(node)}\` applies \`${fn.name}\` to each ` +
-          `element of the lists ` +
-          `${mappedLists.map((a) => `\`${nodeText(a)}\``).join(' and ')}, ` +
-          `whose lengths are not equal by construction (declare one width ` +
-          `for them: \`list<real^3>\` or \`vector<3>\`): the existing ` +
-          `compiler gives NaN for two lists of different lengths`
-      );
-    if (widths.size > 1 && !mapsAll)
+    if (widths.size > 1)
       return refuse(
         node,
         'signature',
@@ -2022,8 +1892,7 @@ function makeWalker<R>(
       );
     const elementArgs = args.map((a, i) => {
       if (!mapped[i] || a.type.kind !== 'list') return a;
-      let element = a.type.element as FragmentValueType | FragmentListType;
-      while (mapsAll && element.kind === 'list') element = element.element;
+      const element = a.type.element as FragmentValueType | FragmentListType;
       const representation = definition.representationOfValue(element);
       return representation === undefined
         ? a
@@ -2102,15 +1971,7 @@ function makeWalker<R>(
               type: fromArgument,
               representation: a.representation,
             }
-          : a.type.kind === 'list' &&
-              parameterType.kind === 'list' &&
-              definition.passesListArgument?.(a.type, parameterType) === true
-            ? {
-                kind: 'none' as const,
-                type: parameterType,
-                representation: a.representation,
-              }
-            : convert(a, parameterType);
+          : convert(a, parameterType);
       if (c === undefined)
         return refuse(
           fn.arguments[i],
@@ -2146,33 +2007,6 @@ function makeWalker<R>(
         `The call \`${nodeText(node)}\` has the type ` +
           `\`${node.type.toString()}\`, which admits more than one shape`
       );
-    // A call applied to each element of lists of any length
-    // (`mapsListArguments`): a list of the values of the function, which
-    // must be reals, integers or lists of them (a list of lists of the
-    // values).
-    if (mapsAll && mapped.some((m) => m)) {
-      if (!isScalarNumeric(result) && numberListRank(result) === 0)
-        return refuse(
-          node,
-          'signature',
-          `The call \`${nodeText(node)}\` applies \`${fn.name}\` to each ` +
-            `element of a list, and the value of \`${fn.name}\` has the ` +
-            `type \`${fragmentTypeToString(result)}\`, not a real, an ` +
-            `integer or a list of them`
-        );
-      // The rank of the value is the rank of the list arguments (the
-      // definition proved that they have one), over the value of the
-      // function.
-      let value = {
-        kind: 'list',
-        element: isScalarNumeric(result)
-          ? { kind: result.kind as 'real' | 'integer' }
-          : (result as FragmentListType),
-      } as FragmentListType;
-      const rank = Math.max(...args.map((a) => numberListRank(a.type)));
-      for (let k = 1; k < rank; k++) value = { kind: 'list', element: value };
-      return valueFacts(node, value, conversions);
-    }
     // A call applied to each element of lists of the length `n` is a list
     // of `n` reals. The wrapper builds a `vecN` of the values of the
     // function, so the function must have a real value. The wrapper passes
@@ -2538,14 +2372,7 @@ function walkLoop(kind: 'loop' | 'parallel') {
         isNumber(bound) ||
         (isSymbol(bound) && Number.isFinite(bound.re)) ||
         (isFunction(bound) && isNumber(w.constant(bound, scope)));
-      if (
-        !folded &&
-        !bound.type.matches('integer') &&
-        w.definition.loopBoundFromFact?.(
-          bound,
-          (node) => w.value(node, scope, context).type.kind === 'integer'
-        ) !== true
-      )
+      if (!folded && !bound.type.matches('integer'))
         return w.refuse(
           node,
           'signature',
@@ -2672,15 +2499,12 @@ function componentTypes<R>(
   return undefined;
 }
 
-/** A `Declare` statement of a block, which `walkBlock` reads. `inferred`:
- * the type that the engine infers for a local of the block
- * (`FragmentDefinition.localType`). */
+/** A `Declare` statement of a block, which `walkBlock` reads. */
 function walkDeclare<R>(
   statement: Expression,
   scope: FragmentScope<R>,
   context: FragmentContext<R>,
-  w: FragmentWalker<R>,
-  inferred?: (name: string) => Type | undefined
+  w: FragmentWalker<R>
 ): void {
   const names = declaredNames(statement);
   if (names === undefined)
@@ -2745,16 +2569,7 @@ function walkDeclare<R>(
           name.symbol
         );
     }
-    type =
-      w.definition.localType?.({
-        name: name.symbol,
-        declaration: statement,
-        value: facts.type,
-        declared:
-          declared === undefined ? undefined : declaredTypeSource(declared),
-        inferred: inferred?.(name.symbol),
-      }) ?? type;
-    if (type.kind === 'list' && w.definition.listLocals !== true)
+    if (type.kind === 'list')
       return void w.refuse(
         statement,
         'signature',
@@ -2794,25 +2609,7 @@ function walkDeclare<R>(
       'signature',
       nonLiteralTupleValue('declaration', value)
     );
-  // The type of a local of each operand of a literal tuple, by the rule of
-  // a local of one name, when the definition reads them
-  // (`FragmentDefinition.literalTupleComponents`).
-  const components =
-    w.definition.literalTupleComponents === true &&
-    isFunction(value, 'Tuple') &&
-    value.nops === names.length
-      ? value.ops.map((op, i) => {
-          const name = (names[i] as Expression & { symbol: string }).symbol;
-          const t = w.value(op, scope, context).type;
-          return (w.definition.localType?.({
-            name,
-            declaration: statement,
-            value: t,
-            declared: undefined,
-            inferred: inferred?.(name),
-          }) ?? localType(t)) as FragmentValueType;
-        })
-      : componentTypes(facts, names.length);
+  const components = componentTypes(facts, names.length);
   if (components === undefined)
     return void w.refuse(
       statement,
@@ -2849,7 +2646,6 @@ export function walkBlock<R>(
     if (isFunction(s, 'Declare'))
       for (const n of declaredNames(s) ?? [])
         names.push((n as Expression & { symbol: string }).symbol);
-  const blockScope = node.localScope;
   w.collect(inner, names);
   if (names.length > 0)
     ENFORCED_LOCALS.set(
@@ -2867,12 +2663,7 @@ export function walkBlock<R>(
       return;
     }
     if (isFunction(s, 'Declare')) {
-      walkDeclare(s, inner, { ...context, place: 'value' }, w, (name) => {
-        const definition = blockScope?.bindings.get(name);
-        return definition !== undefined && 'value' in definition
-          ? definition.value.type.type
-          : undefined;
-      });
+      walkDeclare(s, inner, { ...context, place: 'value' }, w);
       inner.statements.add(s);
       last = { type: { kind: 'statement' } };
       if (place !== 'statement')
@@ -3121,8 +2912,6 @@ export function walkAt<R>(
   if (!('representation' in base))
     return w.refuse(node, 'signature', `The base of \`At\` has no value`);
   const t = base.type;
-  // A list of lists (a definition with `nestedLists`) has no element of a
-  // value type: its rule reads it (`At` of the structured route).
   const element: FragmentValueType | undefined =
     t.kind === 'point'
       ? { kind: 'real' }
@@ -3492,20 +3281,8 @@ export function walkAssign<R>(
       'signature',
       nonLiteralTupleValue('assignment', ops[1])
     );
-  // The facts of each operand of a literal tuple, when the definition reads
-  // them (`FragmentDefinition.literalTupleComponents`).
-  const operandFacts =
-    targets.length > 1 &&
-    w.definition.literalTupleComponents === true &&
-    isFunction(ops[1], 'Tuple') &&
-    ops[1].nops === targets.length
-      ? ops[1].ops.map((op) => w.value(op, scope, context))
-      : undefined;
   const types =
-    targets.length === 1
-      ? [value.type]
-      : (operandFacts?.map((f) => f.type) ??
-        componentTypes(value, targets.length));
+    targets.length === 1 ? [value.type] : componentTypes(value, targets.length);
   if (types === undefined)
     return w.refuse(
       node,
@@ -3577,14 +3354,12 @@ export function walkAssign<R>(
     const facts =
       targets.length === 1
         ? value
-        : operandFacts !== undefined
-          ? operandFacts[i]
-          : ({
-              type: from,
-              representation: value.representation,
-            } as FragmentValueFacts<R>);
+        : ({
+            type: from,
+            representation: value.representation,
+          } as FragmentValueFacts<R>);
     if (
-      (local.kind === 'list' && w.definition.listLocals !== true) ||
+      local.kind === 'list' ||
       local.kind === 'statement' ||
       local.kind === 'range' ||
       local.kind === 'function' ||
@@ -3646,16 +3421,13 @@ export const walkParallelLoop = walkLoop('parallel');
 // The diagnostic (the design note, section 7)
 //
 
-/** The answer of `canCompile()`. With the `numeric-kernel` profile, a
- *  positive answer also carries the `pure`, `shippable` and
- *  `defaultedSymbols` fields of the result that `compile()` gives
- *  (`CompilationResult`). */
+/** The answer of `canCompile()`. With the `profile` option, a positive
+ *  answer also carries the `shippable` field of the result that
+ *  `compile()` gives (`CompilationResult`). */
 export type CanCompileResult =
   | {
       ok: true;
-      pure?: boolean;
       shippable?: boolean;
-      defaultedSymbols?: string[];
     }
   | { ok: false; diagnostic: CompileDiagnostic };
 

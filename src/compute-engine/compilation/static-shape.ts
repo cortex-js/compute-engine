@@ -648,44 +648,6 @@ function shapeTestCode(
 }
 
 /**
- * The `CompileTarget.shapeDispatch` of the Python target. A point or a list
- * can be a Python list, a tuple or a NumPy array, and each has a length; a
- * scalar (an `int`, a `float`, a `bool`, a NumPy scalar) has none.
- *
- * The join is a conditional expression, so each body must be one Python
- * expression. A body that lowers to statements (a `Block` of several
- * statements at the root gives `k = (lambda u: 2 * u)\nreturn k(x)`) has
- * no place in it, and the dispatch throws: the caller then compiles the
- * root with one body, which declines on the union input. The signals of a
- * statement are those of `pythonAssertExpressionOnly()` in
- * `python-target.ts`: a line break, or the word `return` outside a string
- * literal.
- */
-export function pythonShapeDispatch(
-  value: string,
-  test: ShapeTest,
-  ifTrue: string,
-  ifFalse: string
-): string {
-  const isStatement = (code: string): boolean =>
-    code.includes('\n') ||
-    /\breturn\b/.test(code.replace(/"(?:[^"\\]|\\.)*"/g, '""'));
-  if (isStatement(ifTrue) || isStatement(ifFalse))
-    throw new Error(
-      `Could not compile: a body of the dispatch on the shape of ` +
-        `\`${value}\` lowers to Python statements, and the dispatch joins ` +
-        `the bodies in one conditional expression.`
-    );
-  const cond = shapeTestCode(value, test, {
-    isArray: (v) => `hasattr(${v}, '__len__')`,
-    isEmpty: (v) => `len(${v}) == 0`,
-    isAbsent: (v) => `${v} is None`,
-    or: (terms) => `(${terms.join(' or ')})`,
-  });
-  return `(${ifTrue} if ${cond} else ${ifFalse})`;
-}
-
-/**
  * True when `t` is a reference to an opaque nominal type, or to a
  * transparent alias that is a sum declared with the sum sugar (its
  * declaration record carries `_sumVariants`). The interpreter binds a

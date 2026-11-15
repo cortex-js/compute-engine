@@ -806,7 +806,7 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
     // `Σ h(i)·(1/1.4^i)·a(…)` where `a` returns a vector — the interpreter's
     // elementwise zip-broadcast Sum. Interval scalar accumulation over arrays
     // would silently produce a wrong value, so compilation must fail closed
-    // (mirrors the JS/base/python/gpu gate).
+    // (mirrors the JS/base/gpu gate).
     const e = new ComputeEngine();
     e.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
     e.parse(

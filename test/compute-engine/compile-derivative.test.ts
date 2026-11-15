@@ -266,7 +266,7 @@ describe('COMPILE DERIVATIVE — glsl, an applied derivative in the prepare stag
 });
 
 describe('COMPILE DERIVATIVE — other targets', () => {
-  test.each(['python', 'interval-js'] as const)(
+  test.each(['interval-js'] as const)(
     '\\frac{d}{dx}\\sin(x) compiles on %s',
     (to) => {
       const result = compile(ce.parse('\\frac{d}{dx}\\sin(x)'), { to });

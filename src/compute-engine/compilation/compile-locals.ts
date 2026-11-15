@@ -28,7 +28,6 @@ import { declareValueOperand } from './compile-declarations.js';
 import { localShapeFrameOf } from './compile-shapes.js';
 import type { LocalEntry, LocalValueFrame } from './compiler-types.js';
 import { tempVar } from './compiler-naming.js';
-import { CompilerState } from './compiler-state.js';
 
 /**
  * Base compiler class containing language-agnostic compilation logic
@@ -99,7 +98,7 @@ export function withDefineFunctionDeclares(
 ): ReadonlyArray<Expression> {
   // Same target restriction as `CompileTarget.localFunctions`: only a target
   // that binds a function-valued local as a value (`bindsLocalFunctions`:
-  // the JavaScript family and Python) can bind one at all. The GPU targets
+  // the JavaScript family) can bind one at all. The GPU targets
   // declare a local with a scalar type, separately from its assignment, so
   // the rewrite would emit `float g;` against an arrow-function assignment
   // — source no compiler accepts. They keep failing closed on
@@ -526,8 +525,7 @@ export function nestedAssignmentsTo(
  * the local: `Declare(x, "unknown", x + 1)`, which the parse of
  * `x \coloneq x+1; 2x` gives. The interpreter reads the enclosing binding of `x` in that value
  * (the symbol `x`, left symbolic), and the compiled code has no value for
- * it: JavaScript read `undefined` and answered `NaN`, GLSL read an uninitialized variable, and Python read
- * a parameter of the same name.
+ * it: JavaScript read `undefined` and answered `NaN`, GLSL read an uninitialized variable.
  *
  * The first value of a local is the value of the first statement of the
  * list that declares it with a value or assigns it. A read of the local in
@@ -702,9 +700,8 @@ export function unassignedLocalRead(name: string): never {
   );
 }
 
-/** The fresh names that `compileBlock` gave to block locals while
- * `withFreshBlockLocals` runs, which `assignLValue` accepts as the
- * spelling of a write. Cleared when the outermost call ends. */
+/** The fresh names that `compileBlock` gave to block locals, which
+ * `assignLValue` accepts as the spelling of a write. */
 export const _freshLocalNames = new Set<string>();
 /** The emitted name of a `Declare` statement whose local has the name of an
  * identifier that the emitted code uses (`_SYS`), or whose value reads the
@@ -831,15 +828,13 @@ export function reservedLoopLocals(
 }
 /** The fresh names of loop indices that a target spells itself while the
  * loop body compiles (`withWritableLoopIndices`), which `assignLValue`
- * accepts as the spelling of a write. Kept apart from `_freshLocalNames`,
- * which the end of an inner `withFreshBlockLocals` call clears. */
+ * accepts as the spelling of a write. Kept apart from `_freshLocalNames`. */
 export const _writableLoopIndices = new Set<string>();
 
 /**
  * Run `fn` with the fresh names `names` of loop indices accepted by
  * `assignLValue` as the spelling of a write. A target that gives a loop
- * index a fresh name (the Python `for` statement, whose variable is a
- * variable of the whole function) uses it while it compiles the body, so
+ * index a fresh name uses it while it compiles the body, so
  * that a body that assigns its index compiles as it does with the
  * original name. The names are removed when `fn` ends.
  */
@@ -854,43 +849,6 @@ export function withWritableLoopIndices<T>(
   } finally {
     for (const n of added) _writableLoopIndices.delete(n);
   }
-}
-
-/**
- * Run `fn` with each local of each block that `compileBlock` compiles
- * spelled with a fresh name (`tempVar`) instead of its own name. A target
- * whose code puts the statements of a block in the scope of the
- * enclosing function (the Python loop form of a `Sum` with a statement
- * body) uses it, so that a local of the block does not write a variable
- * of the enclosing code with the same name: a parameter `t` of the
- * function, or a local `t` of an enclosing block, is a different binding
- * from a local `t` of the body.
- */
-export function withFreshBlockLocals<T>(fn: () => T): T {
-  CompilerState._freshBlockLocals += 1;
-  try {
-    return fn();
-  } finally {
-    CompilerState._freshBlockLocals -= 1;
-    if (CompilerState._freshBlockLocals === 0) _freshLocalNames.clear();
-  }
-}
-
-/**
- * A fresh name for a block local that a target spells itself, while
- * `withFreshBlockLocals` runs. `assignLValue` accepts it as the spelling
- * of a write, as it accepts the fresh names that `compileBlock` gives.
- * The name stays accepted until the outermost `withFreshBlockLocals`
- * call ends.
- */
-export function freshBlockLocalName(target: CompileTarget<Expression>): string {
-  if (CompilerState._freshBlockLocals === 0)
-    throw new Error(
-      'Internal: a fresh block-local name outside `withFreshBlockLocals`'
-    );
-  const fresh = tempVar(target);
-  _freshLocalNames.add(fresh);
-  return fresh;
 }
 
 /**
@@ -941,7 +899,7 @@ export function assignLValue(
     return target.mangleId ? target.mangleId(name) : name;
   }
   // A `vars` key that no binding of the expression shadows names an input
-  // that the host gives (a uniform, a Python name, a JavaScript `vars`
+  // that the host gives (a uniform, a JavaScript `vars`
   // mapping that spells the name as itself): the write declines, on every
   // target.
   if (
@@ -951,7 +909,7 @@ export function assignLValue(
   )
     throw engineSymbolWriteDecline(name);
   if (resolved === name) return resolved;
-  // A block local spelled with a fresh name (`withFreshBlockLocals`).
+  // A block local spelled with a fresh name (`compileBlock`).
   if (_freshLocalNames.has(resolved)) return resolved;
   // A loop index spelled with a fresh name (`withWritableLoopIndices`).
   if (_writableLoopIndices.has(resolved)) return resolved;
@@ -986,15 +944,12 @@ export function assignLValue(
  * A target with no `declare` hook (the JavaScript family) lowers a
  * `Declare` as a value binding. The GPU targets declare a local with a
  * scalar type, separately from its assignment, so a function-valued local
- * has no binding a call could reach. Python has a `declare` hook too, but
- * it emits nothing: a Python local is created by its first assignment
- * (`k = lambda u: 2 * u`), so Python binds a function-valued local as a
- * value as well. CE-237.
+ * has no binding a call could reach. CE-237.
  */
 export function bindsLocalFunctions(
   target: CompileTarget<Expression>
 ): boolean {
-  return target.declare === undefined || target.language === 'python';
+  return target.declare === undefined;
 }
 
 /**

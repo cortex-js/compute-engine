@@ -437,11 +437,10 @@ describe('PARAMETER DEFAULTS: A CONSTANT SYMBOL DEFAULT (GITHUB ISSUE #490)', ()
     const r = compiled(ce, ['Map', 'gm', ['List', 'u', 2]]);
     expect(r.success).toBe(true);
     expect(r.run!({ u: 3 })).toEqual([6, 4]);
-    // The other targets compile the `Apply` of the literal; GLSL and Python
-    // decline the call of `gm`, for a reason that is not the default (GLSL
-    // has no type for the parameter `mode`; Python has no lowering for a
-    // call of a user function).
-    for (const to of ['interval-js', 'python'] as const)
+    // The other targets compile the `Apply` of the literal; GLSL declines the
+    // call of `gm`, for a reason that is not the default (GLSL has no type for
+    // the parameter `mode`).
+    for (const to of ['interval-js'] as const)
       expect(compiled(ce, ['Apply', modeLiteral, 'u'], { to }).success).toBe(
         true
       );
@@ -454,7 +453,7 @@ describe('PARAMETER DEFAULTS: A CONSTANT SYMBOL DEFAULT (GITHUB ISSUE #490)', ()
   test('a function literal with `over = Integers`: compiled code declines on `Element`', () => {
     // No target compiles `Element` with a set operand, so the call declines
     // on each target. The default itself is not the reason.
-    for (const to of ['javascript', 'interval-js', 'glsl', 'python'] as const)
+    for (const to of ['javascript', 'interval-js', 'glsl'] as const)
       expect(compiled(ce, ['Apply', overLiteral, 'u'], { to }).success).toBe(
         false
       );

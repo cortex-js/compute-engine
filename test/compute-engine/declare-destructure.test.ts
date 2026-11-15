@@ -791,26 +791,6 @@ describe('Assign with a Tuple pattern: compilation', () => {
     expect(expr.evaluate().isSame(34)).toBe(true);
   });
 
-  test('the Python target emits the temporaries too', () => {
-    // Python has its own statement path (`compilePythonStatements`) that
-    // mirrors `compileLoopBody`, and a `declare` hook that emits ONLY the
-    // declaration — so a value-carrying `Declare` dropped the initializer and
-    // left every temporary unbound (`a = _tv1` with no `_tv1 = …`). The
-    // lowering emits declaration and initializer as separate statements.
-    const r = compile(
-      boxed(
-        'do { let a = 0; let b = 1; ' +
-          'for k in 1..10 { (a, b) := (b, a + b) }; a }'
-      ),
-      { to: 'python' }
-    );
-    expect(r?.success).toBe(true);
-    const code = r!.code as string;
-    // Every temporary that is READ is also WRITTEN.
-    for (const name of new Set(code.match(/_tv\d+/g) ?? []))
-      expect(code).toMatch(new RegExp(`${name} = `));
-  });
-
   test.each(['glsl'] as const)(
     'the %s target compiles it, with no stray `return` in the loop',
     (to) => {

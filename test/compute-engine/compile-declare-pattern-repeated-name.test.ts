@@ -51,7 +51,7 @@ function compileTo(ce: ComputeEngine, json: MathJsonExpression, to: string) {
 }
 
 describe('A destructuring declaration with a repeated name declines', () => {
-  test.each(['javascript', 'interval-js', 'python', 'glsl'])('%s', (to) => {
+  test.each(['javascript', 'interval-js', 'glsl'])('%s', (to) => {
     const ce = new ComputeEngine();
     // The interpreter gives the name the value at its last position.
     expect(ce.box(FLAT).evaluate().re).toBe(2);

@@ -28,11 +28,11 @@
  * on a span that is not an ascending index range. `throwsAtRuntime` asserts
  * that pair (compiled throw, interpreted error value) cell by cell.
  *
- * JavaScript is the only target with lowerings. Python and GLSL decline every
- * Phase-2 operator, and they do so through the DEFAULT: an operator the
+ * JavaScript is the only target with lowerings. GLSL declines every
+ * Phase-2 operator, and does so through the DEFAULT: an operator the
  * engine knows but the target has no entry for is refused by the compiler
  * itself. The first describe block locks that default, because the whole
- * Python/GLSL column of the matrix rests on it.
+ * GLSL column of the matrix rests on it.
  *
  * Test inputs are the D10 set (Phase 1's D15): ASCII, the precomposed and
  * decomposed spellings of `"é"`, one ZWJ emoji family and one regional-indicator
@@ -197,14 +197,14 @@ function failsClosed(expr: Expression): void {
 }
 
 /** `expr` compiled for a non-JavaScript target. */
-function compileTo(expr: Expression, to: 'python' | 'glsl') {
+function compileTo(expr: Expression, to: 'glsl') {
   return compile(expr, { to, constantFold: false } as never);
 }
 
 // ── The default: an operator with no lowering entry declines ────────────────
 
 describe('D8 lock: an operator with NO lowering entry declines on every target', () => {
-  // The whole Python/GLSL column of the Phase-2 matrix — and the
+  // The whole GLSL column of the Phase-2 matrix — and the
   // JavaScript `NumberFrom` cell — rests on this default. `NumberFrom` is the
   // witness: D8 leaves it fail-closed on purpose (its parse contract and its
   // exactness rules — an integer numeral is an exact integer, a fractional one
@@ -213,7 +213,7 @@ describe('D8 lock: an operator with NO lowering entry declines on every target',
   //
   // If this test ever fails, some target has grown a `NumberFrom` entry and the
   // fail-closed cells below stop being guaranteed by the default.
-  test.each(['javascript', 'python', 'glsl'] as const)(
+  test.each(['javascript', 'glsl'] as const)(
     '`NumberFrom` declines on the %s target',
     (to) => {
       const r = compile(ce.box(['NumberFrom', { str: '12' }]), {
@@ -1191,7 +1191,7 @@ describe('a `string | character` free variable reads as a string', () => {
   });
 });
 
-// ── Python / GLSL ───────────────────────────────────────────────────────────
+// ── GLSL ────────────────────────────────────────────────────────────────────
 
 const PHASE_2_OPERATORS: ReadonlyArray<readonly [string, unknown]> = [
   ['RangeOf', ['RangeOf', { str: 'abc' }, { str: 'b' }]],
@@ -1216,33 +1216,6 @@ const PHASE_2_OPERATORS: ReadonlyArray<readonly [string, unknown]> = [
   ['StringJoin', ['StringJoin', { str: 'abc' }, { str: '-' }]],
   ['Join', ['Join', { str: 'ab' }, { str: 'cd' }]],
 ];
-
-describe('D8: every Phase-2 operator fails closed on the Python target', () => {
-  // Python's string support is SCALAR only (equality, orderings, `IndexOf`);
-  // none of the Phase-2 operators has a grapheme-aware Python lowering, so each
-  // is refused — through the target-capability default, which names the target
-  // in its diagnostic. Nothing about Python's existing scalar string support
-  // changes.
-  test.each(PHASE_2_OPERATORS)('%s declines', (_name, json) => {
-    const r = compileTo(ce.box(json as never), 'python');
-    expect(r.success).toBe(false);
-    // Either the target-capability default ("target 'python' has no lowering
-    // for it") or an operator-specific fail-closed gate the Python target
-    // already carries — `Join` has one, naming the grapheme-segmentation
-    // capability Python's stdlib lacks. Both are the D6 refusal.
-    expect(r.error).toMatch(/target 'python'|Could not compile/);
-  });
-
-  test('Python keeps its SCALAR string support', () => {
-    // The regression guard for the block above: gating the new operators must
-    // not have closed anything that was compiling.
-    const r = compileTo(
-      ce.box(['Equal', { str: 'a' }, { str: 'a' }]),
-      'python'
-    );
-    expect(r.success).toBe(true);
-  });
-});
 
 describe('D8: GLSL rejects the Phase-2 operators', () => {
   // A shader has no string type at all, so every one of these is refused. The

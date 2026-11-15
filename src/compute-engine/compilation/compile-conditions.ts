@@ -135,7 +135,7 @@ export function assertNoContradictedScalarOperand(
  * (`isElementwiseBigOpBody` → `isPossiblyCollectionTypedJS`, which routes the
  * same shape through the value-safe `_SYS.bcast` element-wise fold) diverts
  * every body this predicate accepts before `assertScalarBigOpBody` is reached,
- * so JS emission is unchanged. The GPU/Python/interval targets have no
+ * so JS emission is unchanged. The GPU/interval targets have no
  * element-wise arm, so for them the only sound answer is to decline.
  */
 export function isCollectionValuedBigOpBodyByLookThrough(
@@ -313,18 +313,13 @@ export function writesBlocksAsIife(target: CompileTarget<Expression>): boolean {
  * statement, so written in place it put `return` inside an expression
  * (`return return x`, `c ? return 1 : return 5`), a syntax error.
  *
- * With `keepReturn`, a `Return` that is `e` itself is kept (a target
- * whose block hook emits it as the `return` statement of the block, as
- * Python does); a `Return` in a branch is still replaced.
- *
  * `e` itself when it has no such `Return`.
  */
-export function tailValue(e: Expression, keepReturn = false): Expression {
-  if (isFunction(e, 'Return') && e.nops === 1)
-    return keepReturn ? e : tailValue(e.ops[0]);
+export function tailValue(e: Expression): Expression {
+  if (isFunction(e, 'Return') && e.nops === 1) return tailValue(e.ops[0]);
   // A block of one statement is that statement (`Block(Return(x))`).
   if (isFunction(e, 'Block') && e.nops === 1) {
-    const inner = tailValue(e.ops[0], keepReturn);
+    const inner = tailValue(e.ops[0]);
     return inner === e.ops[0] ? e : inner;
   }
   if (isFunction(e, 'If') && e.nops >= 2) {
@@ -337,9 +332,7 @@ export function tailValue(e: Expression, keepReturn = false): Expression {
 
 /**
  * `tailValue` for the targets that read a `Return` in a tail position as
- * its value: the IIFE targets (`writesBlocksAsIife`), and Python, whose
- * block hook writes the last statement as `return …` (a `Return` itself
- * is kept there, and only a `Return` in a branch of an `If` is replaced).
+ * its value: the IIFE targets (`writesBlocksAsIife`).
  * `e` itself on any other target.
  */
 export function tailValueFor(
@@ -347,7 +340,6 @@ export function tailValueFor(
   target: CompileTarget<Expression>
 ): Expression {
   if (writesBlocksAsIife(target)) return tailValue(e);
-  if (target.language === 'python') return tailValue(e, true);
   return e;
 }
 
@@ -363,14 +355,14 @@ export function tailValueFor(
  *   `true` and are admitted. Only a type with no numeric inhabitant at all
  *   reaches the rest.
  * - `boolean` is EXEMPT. It is not a number, but `+` over booleans is
- *   numerically faithful on the numeric targets (JS/Python coerce to 0/1),
+ *   numerically faithful on the numeric targets (JS coerces to 0/1),
  *   which is the counting idiom `Σ_i (x_i > 0)` — compiled it answers `2`
  *   where the interpreter only manages a symbolic `2·True + 2·False`.
  *   Declining it would remove a working lowering to fix nothing.
  * - `broadcastable<T>` is EXEMPT: it spans scalar and collection, so such a
  *   body is routinely a plain scalar at run time (a wide-declared helper
  *   application in a shader body). The JS target routes it through the
- *   `_SYS.bcast` fold before it ever gets here; the GPU/Python/interval
+ *   `_SYS.bcast` fold before it ever gets here; the GPU/interval
  *   targets rely on it staying admitted. The narrow case where the body can
  *   be PROVEN collection-valued despite the open declared type is carved out
  *   by the caller's third clause
@@ -492,9 +484,8 @@ export function assertScalarCondition(
   // `B: broadcastable<number>` is a `broadcastable<boolean>`) selects
   // element-wise in the interpreter when it is a flat list. A
   // conditional expression of the target would read the truthiness of an
-  // array instead: Python raises on an array of two or more elements, and
-  // the interval target answers an interval where the interpreter answers
-  // a list. So when the caller names its `target`, such a condition is
+  // array instead: the interval target answers an interval where the
+  // interpreter answers a list. So when the caller names its `target`, such a condition is
   // refused. A shader target (one with `loweredSymbolType`) is exempt: a
   // variable of a shader is a uniform of a fixed type, so its value is
   // not a list that the code did not declare. A target with an

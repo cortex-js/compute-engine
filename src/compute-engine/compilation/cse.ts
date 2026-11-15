@@ -522,15 +522,15 @@ export interface CseHarvestOptions {
    * Admit a repeated square of a bare symbol (`x^2`, `x·x`) below the size
    * and benefit thresholds (`Harvester.isSymbolSquare`). On by default; a
    * target whose temporary binding costs more than the square it saves
-   * (`CompileTarget.shareSymbolSquares`, the Python target) turns it off.
+   * (`CompileTarget.shareSymbolSquares`) turns it off.
    */
   readonly shareSymbolSquares?: boolean;
 
   /**
    * Harvest the value `If` that ends a block in value position as an
    * expression (`isValueSelection`). On by default; a target that may write
-   * that `If` as an if-statement (`CompileTarget.valueTailSelections`, the
-   * Python target) turns it off.
+   * that `If` as an if-statement (`CompileTarget.valueTailSelections`)
+   * turns it off.
    */
   readonly valueTailSelections?: boolean;
 
@@ -1478,7 +1478,7 @@ class Harvester {
    * A limit: the arm reads the temporary only when the emission binds it
    * (the state `'bound'` of `compileWithCse`, `base-compiler.ts`). A
    * candidate stays unbound when its right-hand side compiles to more than
-   * one line on a target with `bareStatementBlocks` (the Python and shader
+   * one line on a target with `bareStatementBlocks` (the shader
    * targets: a binder or a statement construct in the node), or folds to a
    * constant. Then the arm emits `node` in full, without the regions below
    * it, so without sharing inside it. The code is correct, but it can be
@@ -1996,12 +1996,8 @@ class Harvester {
     // tuple was emitted twice (measured by the Tycho code-generation audit of
     // 2026-10-17). A small integer exponent lowers to multiplications and stays
     // with the ordinary thresholds. On a target that declines the
-    // symbol-square exemption (Python, where a temporary is a one-element list
-    // comprehension), a power keeps the ordinary thresholds too: `e^x` is the
-    // single operation `np.e ** x` there, and a general power is the helper
-    // call `_ce_pow(x, y)`, which this exemption never covered on that target.
-    // A root is several library calls on every target
-    // (`np.sign(x) * np.power(np.abs(x), 1.0 / 3)` on Python).
+    // symbol-square exemption, a power keeps the ordinary thresholds too.
+    // A root is several library calls on every target.
     if (isFunction(node, 'Root')) return true;
     if (isFunction(node, 'Power') && node.nops === 2) {
       if (!this.shareSymbolSquares) return false;
@@ -2236,7 +2232,7 @@ class Harvester {
         // call shared by the condition and a branch (`T(c)` in
         // `If(cos(T(c)) > 0, T(c), NaN)`) would be emitted twice. A target
         // that may write this `If` as an if-statement turns the rule off
-        // (`valueTailSelections`, the Python target). A block in statement
+        // (`valueTailSelections`). A block in statement
         // position (a loop body, a branch of an if-statement) is evaluated for
         // effect, and a target may write an `If` there as an if-statement, so
         // it keeps the statement form.

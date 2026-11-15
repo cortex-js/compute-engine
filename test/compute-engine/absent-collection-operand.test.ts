@@ -541,11 +541,11 @@ describe('Join and the set operators over an absent collection', () => {
     }
   });
 
-  test.each(['javascript', 'python'])(
+  test.each(['javascript'])(
     'a join with an absent operand does not compile to %s',
     (to) => {
       // The interpreter answers `Missing` for the whole join. The compiled
-      // code was `[undefined, 3]` (JavaScript) and `[math.nan, 3]` (Python).
+      // code was `[undefined, 3]` (JavaScript).
       const r = compile(
         engine().box(['Join', 'Missing', ['List', 3]] as never),
         { to } as never

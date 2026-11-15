@@ -1,5 +1,4 @@
 import { engine as ce } from '../utils';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 /**
  * Two engine-semantics behaviors for statement-position constructs:
@@ -98,18 +97,6 @@ describe('block-local Declare shadows a constant-named symbol', () => {
     ]);
     // A fresh `Add(i, 1)` outside any block folds to the imaginary unit.
     expect(ce.box(['Add', 'i', 1]).operator).toBe('Complex');
-  });
-
-  test('Python compile of a Block declaring a local `i` emits bare `i`', () => {
-    const python = new PythonTarget();
-    const block = ce.box([
-      'Block',
-      ['Declare', 'i', { str: 'integer' }, 3],
-      ['Add', 'i', 1],
-    ]);
-    const code = python.compile(block).code;
-    expect(code).not.toContain('complex');
-    expect(code).toContain('i + 1');
   });
 
   test('`Assign(i, 3)` without a Declare still throws (constant)', () => {

@@ -12,9 +12,8 @@
  * with the codomain's absence marker — `NaN` for a number — where no clause
  * is selected. The last test of the first describe pins that form.)
  *
- * A LOOP BODY never hit that — `compileLoopBody` (JavaScript) and
- * `compilePythonStatements` (Python) statement-form `If` and already emit the
- * no-else shape. A plain function-body `Block` did, because its statements route
+ * A LOOP BODY never hit that — `compileLoopBody` (JavaScript) statement-forms
+ * `If` and already emits the no-else shape. A plain function-body `Block` did, because its statements route
  * through `compileExpr`. So every function containing a guard statement failed
  * to compile, including the `parseNumber` scanner of the Epsil examples
  * (`if cs[j] == "-" { sign = -1; j = j + 1 }`).
@@ -24,8 +23,8 @@
  * there is the value form, and compiles as the one-clause `Which` described
  * above.
  *
- * It is also confined to PLAIN JavaScript. Python and interval-JavaScript
- * function bodies keep declining, each for a verified reason — see the
+ * It is also confined to PLAIN JavaScript. Interval-JavaScript function
+ * bodies keep declining, for a verified reason — see the
  * `the admission is plain-JavaScript only` describe at the bottom.
  */
 
@@ -165,17 +164,13 @@ describe('an else-less If as a block statement', () => {
   test('the value-form else-less If compiles on every target as a one-clause Which', () => {
     ce.declare('x', 'number');
     const expr = ce.box(['If', ['Greater', 'x', 0], ['Add', 'x', 1]]);
-    for (const to of ['javascript', 'python', 'interval-js', 'glsl'] as const) {
+    for (const to of ['javascript', 'interval-js', 'glsl'] as const) {
       const r = compile(expr, { to, fallback: false });
       expect([to, r.success]).toEqual([to, true]);
     }
     const js = compile(expr, { fallback: false });
     expect((js.run as any)({ x: 2 })).toBe(3);
     expect((js.run as any)({ x: -2 })).toBeNaN();
-    // A STATEMENT arm keeps the guard-statement reading of the describe
-    // below: it is not a value-form selection.
-    const stmt = ce.box(['If', ['Greater', 'x', 0], ['Assign', 's', 1]]);
-    expect(compile(stmt, { to: 'python' }).success).toBe(false);
   });
 
   test('a Block arm is read through to its value statement', () => {
@@ -192,14 +187,6 @@ describe('an else-less If as a block statement', () => {
     expect(r.success).toBe(true);
     expect((r.run as any)({ x: 2 })).toBe(2);
     expect((r.run as any)({ x: -2 })).toBeNaN();
-    // `Block(Declare(y, "unknown", x))` ends in a statement: a guard
-    // statement, declined on Python like the bare assignment arm is.
-    const stmtBlock = ce.box([
-      'If',
-      ['Greater', 'x', 0],
-      ['Block', ['Declare', 'y', "'unknown'", 'x']],
-    ]);
-    expect(compile(stmtBlock, { to: 'python' }).success).toBe(false);
   });
 
   test('a masked object-domain value is the object null, not NaN', () => {
@@ -362,38 +349,6 @@ describe('the admission is plain-JavaScript only', () => {
       's',
     ]);
   }
-
-  test('PYTHON still declines (the statement dispatcher is loop-body only)', () => {
-    // `compilePythonStatements` DOES statement-form an else-less `If`, but a
-    // plain function-body `Block` never reaches it — only a loop body does. So
-    // the shape falls back to the interpreter here. Routing it needs a target
-    // hook (`block` receives already-compiled statements), a separate change.
-    const r = compile(elselessBlock(ce), { to: 'python' });
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/Could not compile `If`: wrong number of arguments/);
-  });
-
-  test('a Python LOOP body with an else-less If was already fine', () => {
-    // The positive control for the reason above: the same `If`, reached from
-    // `compilePythonStatements`, compiles to a Python `if` statement.
-    const expr = ce.box([
-      'Block',
-      ['Declare', 's', { str: 'unknown' }, 0],
-      [
-        'Loop',
-        ['If', ['Greater', 'i', 2], ['Assign', 's', ['Add', 's', 'i']]],
-        ['Element', 'i', ['Range', 1, 5]],
-      ],
-      's',
-    ]);
-    const r = compile(expr, { to: 'python', fallback: false });
-    expect(r.success).toBe(true);
-    // The loop-body `If` carried the NaN conjunct `i == i` until the user
-    // decision of 2026-10-20: a NaN operand now decides `i > 2` false, and
-    // Python has no unsupplied-variable test, so the emitted test is the
-    // comparison alone.
-    expect(r.code).toMatch(/if 2 < i:/);
-  });
 
   test('INTERVAL JavaScript still declines', () => {
     // `compileLoopBody` emits the condition as `_IA.decided(<verdict>)`,

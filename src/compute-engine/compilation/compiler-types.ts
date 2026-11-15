@@ -173,8 +173,6 @@ export interface ElementBinder {
   names: string[];
   /** `x`, or an array pattern such as `[a, , [b, c]]`. */
   jsPattern: string;
-  /** `x`, or a tuple pattern such as `(a, _, (b, c))`. */
-  pyPattern: string;
   leaves: Array<
     [leaf: Expression & { symbol: string }, type: Type | undefined]
   >;

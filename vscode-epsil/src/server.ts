@@ -1601,7 +1601,7 @@ function severityOf(severity: string): DiagnosticSeverity {
 //
 //   - `ast`        — the MathJSON the parser produced, before canonicalization
 //   - `canonical`  — each top-level statement in canonical form
-//   - `javascript` / `python` / `glsl` — the program compiled by that target
+//   - `javascript` / `glsl` — the program compiled by that target
 //
 // Everything here parses, canonicalizes, or compiles — nothing is ever
 // evaluated, so rendering a view cannot run user code.
@@ -1722,8 +1722,8 @@ function renderCanonical(
  *
  * `functionBody` marks a target whose `compile()` output is the BODY of a
  * function rather than a standalone program: the last statement is emitted as
- * a bare `return`, which is a syntax error at the top level of a Python module
- * or a GLSL translation unit. The JavaScript target is the exception — it
+ * a bare `return`, which is a syntax error at the top level of a GLSL
+ * translation unit. The JavaScript target is the exception — it
  * wraps its own output in an immediately-invoked arrow function, so what it
  * emits runs as written. The view says so in its header instead of silently
  * offering a fragment as a program; wrapping it here is not an option, because
@@ -1732,7 +1732,6 @@ function renderCanonical(
  * outright. */
 const COMPILE_TARGETS = {
   javascript: { title: 'JavaScript', comment: '//', functionBody: false },
-  python: { title: 'Python', comment: '#', functionBody: true },
   glsl: { title: 'GLSL', comment: '//', functionBody: true },
 } as const;
 

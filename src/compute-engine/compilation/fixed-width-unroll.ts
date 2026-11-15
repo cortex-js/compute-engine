@@ -257,7 +257,7 @@ const MAX_REWRITE_ROUNDS = 16;
  * (rule 2), and the arithmetic distribution (rule 4). For those, a collection
  * of four elements or fewer is a shape every target already has a lowering
  * for: `vec2`/`vec3`/`vec4` on the shader targets, the `_SYS.bcast` closure on
- * JavaScript, a list comprehension in Python. Unrolling one would replace a
+ * JavaScript. Unrolling one would replace a
  * native lowering with a longer one and buy nothing — and on the shader
  * targets it would replace one vector operation with four scalar ones. From
  * five elements up no target has a native fixed-width shape: the collection is

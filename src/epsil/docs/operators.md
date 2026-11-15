@@ -316,7 +316,7 @@ operator run is one token: write `x?! + 1`, not `x?!+1` (as `3! + 1`, not
 serialized: `(n!)?!`, `(x?!)!`.
 
 Compiled code raises on the absent branch (JavaScript, the interval
-JavaScript target, Python) with the
+JavaScript target) with the
 message `expected-present: <operand> is absent`; the check is left out when
 the operand's type already excludes absence (a declared length with a literal
 index, a type without `nan`). A shader target (GLSL) cannot raise:

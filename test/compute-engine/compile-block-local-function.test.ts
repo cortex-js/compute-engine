@@ -22,12 +22,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { TEST_PYTHON } from './test-python';
 
 let ce: ComputeEngine;
 beforeEach(() => {
@@ -413,31 +407,6 @@ describe('COMPILE a `function` definition', () => {
         .evaluate()
         .toString()
     ).toBe('Error(ErrorCode("variable-redeclaration", "f"))');
-  });
-});
-
-describe('COMPILE a block-local function — other targets are unchanged', () => {
-  // The GPU targets declare a local with a scalar type, separately from its
-  // assignment, so they can bind no function-valued local. Python binds one
-  // as a value (`h = (lambda k: k + 1)`) since CE-237: both shapes compile,
-  // and the call with a constant argument folds. The Python call itself is
-  // tested in the Python block at the end of this file.
-  it('Python compiles a `function` definition and its call', () => {
-    const code = compile(program('function h(k) { k + 1 }\nh(3)'), {
-      to: 'python',
-      fallback: false,
-    } as never)!.code as string;
-    expect(code).toContain('h = (lambda k: k + 1)');
-    expect(code).toContain('return 4');
-  });
-
-  it('Python compiles a call of a lambda-bound local', () => {
-    const code = compile(program('const h = (k) => k + 1\nh(3)'), {
-      to: 'python',
-      fallback: false,
-    } as never)!.code as string;
-    expect(code).toContain('h = (lambda k: k + 1)');
-    expect(code).toContain('return 4');
   });
 });
 
@@ -854,16 +823,13 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     ]);
   });
 
-  it('the GPU targets and Python fail closed, as for the `const` form', () => {
+  it('the GPU targets fail closed, as for the `const` form', () => {
     const json = [
       'Block',
       ['Declare', 'k', "'function'", twice],
       ['k', 'x'],
     ];
-    // On Python the root `Block` lowers to statements, which the dispatch on
-    // the shape of `x` (declared `real | list<real>`) cannot join in one
-    // conditional expression: the call of `k` over the union declines.
-    for (const to of ['glsl', 'python'])
+    for (const to of ['glsl'])
       expect(() =>
         compile(ce.box(json as never), { to, fallback: false } as never)
       ).toThrow();
@@ -1108,114 +1074,5 @@ describe('COMPILE a call of a block-local function with a tuple argument', () =>
     e.assign('p', e.box(['Tuple', 5, 6]));
     e.assign('n', 1);
     expect(e.box(json as never).evaluate().json).toBe(7);
-  });
-});
-
-/**
- * The Python target binds a block-local function as a Python value
- * (`h = (lambda k: k + 1)`). A call with scalar arguments is a direct call;
- * a call with a list argument at a scalar parameter is a comprehension that
- * maps the function over the list, as the interpreter does. A call whose
- * result type is settled is an operand of arithmetic like any other value.
- */
-describe('COMPILE a block-local function on the Python target', () => {
-  const python = new PythonTarget();
-
-  /** The Python function of an Epsil program, its parameters typed. */
-  function pyFunction(source: string, params: Record<string, string>): string {
-    for (const [k, t] of Object.entries(params)) ce.declare(k, t as never);
-    return python.compileFunction(program(source), 'fn', Object.keys(params));
-  }
-
-  const runPython = (code: string, args: unknown[]): unknown => {
-    const file = path.join(os.tmpdir(), `ce-py-local-fn-${process.pid}.py`);
-    fs.writeFileSync(
-      file,
-      `import numpy as np\nimport json\n\n${code}\nprint(json.dumps(fn(*json.loads(${JSON.stringify(JSON.stringify(args))}))))\n`
-    );
-    try {
-      return JSON.parse(
-        execFileSync(TEST_PYTHON!, [file], { encoding: 'utf8' })
-      );
-    } finally {
-      fs.unlinkSync(file);
-    }
-  };
-  const itPython = TEST_PYTHON === undefined ? it.skip : it;
-
-  it('binds the local and folds a call with a constant argument', () => {
-    const code = pyFunction('const h = (k) => k + 1\nh(3)', {});
-    expect(code).toContain('h = (lambda k: k + 1)');
-    expect(code).toContain('return 4');
-  });
-
-  itPython('compiles the call of a `const`, `let` or `function` local', () => {
-    for (const source of [
-      'const h = (k) => k + 1\nh(n)',
-      'let h = (k) => k + 1\nh(n)',
-      'function h(k) { k + 1 }\nh(n)',
-    ]) {
-      ce = new ComputeEngine();
-      const code = pyFunction(source, { n: 'integer' });
-      expect(code).toContain('return h(n)');
-      expect([source, runPython(code, [3])]).toEqual([source, 4]);
-    }
-    ce = new ComputeEngine();
-    ce.assign('n', 3);
-    expect(program('const h = (k) => k + 1\nh(n)').evaluate().toString()).toBe(
-      '4'
-    );
-  });
-
-  it('a list argument maps the local over the list, as the interpreter does', () => {
-    const code = pyFunction('const h = (k) => k + 1\nh(xs)', {
-      xs: 'list<integer>',
-    });
-    expect(code).toContain('[h(_tv2) for _tv2 in _tv1]');
-    ce = new ComputeEngine();
-    ce.assign('xs', ce.box(['List', 1, 2, 3]));
-    expect(program('const h = (k) => k + 1\nh(xs)').evaluate().toString()).toBe(
-      '[2,3,4]'
-    );
-  });
-
-  itPython('a list argument maps the local over the list: the Python value', () => {
-    const code = pyFunction('const h = (k) => k + 1\nh(xs)', {
-      xs: 'list<integer>',
-    });
-    expect(runPython(code, [[1, 2, 3]])).toEqual([2, 3, 4]);
-  });
-
-  it('a call inside arithmetic is a scalar operand', () => {
-    const code = pyFunction('const h = (k) => k + 1\n2 * h(n)', {
-      n: 'integer',
-    });
-    expect(code).toContain('return 2 * h(n)');
-    ce = new ComputeEngine();
-    ce.assign('n', 3);
-    expect(program('const h = (k) => k + 1\n2 * h(n)').evaluate().toString()).toBe(
-      '8'
-    );
-  });
-
-  itPython('a call inside arithmetic is a scalar operand: the Python value', () => {
-    const code = pyFunction('const h = (k) => k + 1\n2 * h(n)', {
-      n: 'integer',
-    });
-    expect(runPython(code, [3])).toBe(8);
-  });
-
-  it('a local assigned twice fails closed, with the reason', () => {
-    expect(() =>
-      pyFunction('let h = (k) => k + 1\nh := (k) => k + 2\nh(n)', {
-        n: 'integer',
-      })
-    ).toThrow(/is assigned more than once or inside a nested statement/);
-  });
-
-  it('an arity mismatch fails closed', () => {
-    expect(() =>
-      pyFunction('const h = (a, b) => a + b\nh(n)', { n: 'integer' })
-    ).toThrow(/declared with 2 parameters but called with 1/);
   });
 });

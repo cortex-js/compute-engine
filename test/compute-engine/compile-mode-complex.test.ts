@@ -786,30 +786,6 @@ describe('complex mode — D2/D6 runtime rules', () => {
     ).toThrow(/occurs at more than one position/);
   });
 
-  it('the Python target emits its own syntax for the runtime rule and passes non-numbers through the lift', () => {
-    // `Erf`, not `Floor`: post-Phase F, `Floor`'s extended-real carrier
-    // types its operand real and the runtime rule is statically elided —
-    // `Erf` keeps the wide carrier, so its operand stays possibly-complex
-    // and the emission this test pins still fires.
-    // `a` is declared: Python reads an input with an INFERRED `number` type
-    // through a `None` test, and a DECLARED `number` as is (ROADMAP CE-460).
-    const e = new ComputeEngine();
-    e.declare('a', 'number');
-    const r = compile(e.box(['Less', ['Erf', 'a'], 2]), {
-      mode: 'complex',
-      to: 'python',
-      fallback: false,
-      constantFold: false,
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).toContain("else float('nan')");
-    expect(r.code).toContain('_ce_cplx(a)');
-    expect(r.code).not.toContain('?');
-    expect(r.code).not.toContain('&&');
-    // The lift helper leaves a bool, a string or a list untouched.
-    expect(r.code).toContain('not isinstance(_v, bool) else _v');
-  });
-
   it('D8: √(Random() − 1) < 2 draws once per call; 2·√(Random() − 1) lifts one bound draw', () => {
     const e = new ComputeEngine();
     let draws = 0;

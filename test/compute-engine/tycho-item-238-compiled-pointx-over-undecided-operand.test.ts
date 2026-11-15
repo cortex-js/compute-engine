@@ -199,12 +199,12 @@ describe('PointList with a broadcastable component', () => {
     expect(r.run!({ u: 7 })).toEqual([7, 0]);
   });
 
-  test('the python and shader targets fail closed on it', () => {
+  test('the shader targets fail closed on it', () => {
     const ce = engine();
     define(ce, 'k(v):=\\operatorname{PointList}(2\\mathrm{PointX}(v),3\\mathrm{PointY}(v))');
     const lit = ce.symbol('k').value!;
     const body = lit.ops![0];
-    for (const to of ['python', 'glsl'] as const) {
+    for (const to of ['glsl'] as const) {
       const r = compile(body, { to });
       expect(r.success).toBe(false);
       expect(String(r.reason ?? r.error)).toContain(

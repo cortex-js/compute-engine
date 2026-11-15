@@ -26,7 +26,7 @@ function engine(): ComputeEngine {
 }
 
 describe('COMPILE MODES: auto is removed', () => {
-  for (const to of ['javascript', 'python'] as const) {
+  for (const to of ['javascript'] as const) {
     test(`${to}: mode 'auto' declines with unsupported-mode`, () => {
       const ce = engine();
       const r = compile(ce.parse('\\sqrt{x}'), {

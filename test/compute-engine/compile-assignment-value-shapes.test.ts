@@ -1,10 +1,6 @@
-import { execFileSync } from 'child_process';
-import * as fs from 'fs';
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import type { MathJsonExpression } from '../../src/math-json/types';
-import { TEST_PYTHON } from './test-python';
 
 // The compiled code of a statement whose value is not a plain expression:
 // an assignment whose value is a block or another assignment, a block whose
@@ -14,27 +10,6 @@ import { TEST_PYTHON } from './test-python';
 // assignment as an operand is the static error `assignment-in-operand`, and
 // a block that ends with an assignment or a declaration has the value
 // `Nothing`, which has no compiled form.
-
-const pythonHasNumpy = (() => {
-  if (TEST_PYTHON === undefined || !fs.existsSync(TEST_PYTHON)) return false;
-  try {
-    execFileSync(TEST_PYTHON, ['-I', '-c', 'import numpy'], {
-      stdio: 'ignore',
-    });
-    return true;
-  } catch {
-    return false;
-  }
-})();
-const itPython = pythonHasNumpy ? it : it.skip;
-
-/** Run the Python function `def f(x)` that `source` defines, at `x`. */
-function runPython(source: string, x: number): number {
-  const program = `import numpy as np\nimport math\n${source}\nprint(float(f(${x})))\n`;
-  return Number(
-    execFileSync(TEST_PYTHON!, ['-I', '-c', program], { encoding: 'utf8' })
-  );
-}
 
 /** The interpreter's value of `json` with `x` assigned `3`. */
 function interpreterAt3(json: MathJsonExpression): string {
@@ -82,20 +57,6 @@ describe('an assignment whose value is a block', () => {
     );
   });
 
-  test('Python declines on compile() and compileFunction()', () => {
-    // It emitted `t = u = s` and `return 2 * u`, which returned 6.
-    const ce = engine();
-    expect(compile(ce.box(json), { to: 'python' }).success).toBe(false);
-    expect(() =>
-      new PythonTarget().compile(ce.box(json), { fallback: false })
-    ).toThrow(
-      /Could not compile `Assign`: the value assigned to "t" lowers to a statement sequence on target 'python'/
-    );
-    expect(() =>
-      new PythonTarget().compileFunction(ce.box(json), 'f', ['x'])
-    ).toThrow(/the value assigned to "t" lowers to a statement sequence/);
-  });
-
   test.each(['glsl'] as const)('%s declines', (to) => {
     expect(() => compile(engine().box(json), { to, fallback: false })).toThrow(
       /a block with a statement other than a declaration with a value is an operand here/
@@ -122,16 +83,12 @@ describe('an assignment whose value is another assignment', () => {
     expect(expr.toString()).toContain('assignment-in-operand');
   });
 
-  test.each(['javascript', 'python', 'glsl'] as const)(
-    '%s declines',
-    (to) => {
-      // The GLSL fragment refuses the `Error` head before any code is written.
-      expect(() =>
-        compile(engine().box(json), { to, fallback: false })
-      ).toThrow(to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/);
-    }
-  );
-
+  test.each(['javascript', 'glsl'] as const)('%s declines', (to) => {
+    // The GLSL fragment refuses the `Error` head before any code is written.
+    expect(() => compile(engine().box(json), { to, fallback: false })).toThrow(
+      to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
+    );
+  });
 });
 
 describe('a block whose last statement is a declaration', () => {
@@ -162,13 +119,10 @@ describe('a block whose last statement is a declaration', () => {
   );
 
   test.each(shapes.map((s) => [s]))('every target declines: %j', (json) => {
-    for (const to of ['javascript', 'python', 'glsl', 'interval-js'] as const) {
+    for (const to of ['javascript', 'glsl', 'interval-js'] as const) {
       const r = compile(engine().box(json), { to });
       expect(r.success).toBe(false);
     }
-    expect(() =>
-      new PythonTarget().compile(engine().box(json), { fallback: false })
-    ).toThrow(/an assignment or a declaration is a statement, and its value/);
   });
 
   test('a declaration with no value is a static error', () => {
@@ -201,18 +155,13 @@ describe('a nested block whose last statement is an assignment', () => {
     expect(engine().box(json).evaluate().symbol).toBe('Nothing');
   });
 
-  test.each(['javascript', 'python', 'glsl'] as const)(
-    '%s compile() declines',
-    (to) => {
-      expect(() =>
-        compile(engine().box(json), { to, fallback: false })
-      ).toThrow(
-        to === 'glsl'
-          ? /`Assign\(t, s \+ 1\)` is a statement, and it stands where a value is expected/
-          : /an assignment or a declaration is a statement, and its value/
-      );
-    }
-  );
+  test.each(['javascript', 'glsl'] as const)('%s compile() declines', (to) => {
+    expect(() => compile(engine().box(json), { to, fallback: false })).toThrow(
+      to === 'glsl'
+        ? /`Assign\(t, s \+ 1\)` is a statement, and it stands where a value is expected/
+        : /an assignment or a declaration is a statement, and its value/
+    );
+  });
 
   test('GLSL compileFunction() declines', () => {
     expect(() =>
@@ -237,23 +186,6 @@ describe('a nested block whose last statement is an assignment', () => {
       expect(r.success).toBe(true);
       expectValidShaderShape(gpuSource(r));
     }
-  });
-
-  itPython('the Python code gives the value of the interpreter', () => {
-    const named: MathJsonExpression = [
-      'Block',
-      ['Declare', 's', "'unknown'", 'x'],
-      ['Block', ['Declare', 't', "'unknown'", ['Add', 's', 1]], 't'],
-    ];
-    const r = compile(engine().box(named), { to: 'python' });
-    expect(r.success).toBe(true);
-    const source =
-      'def f(x):\n' +
-      r
-        .code!.split('\n')
-        .map((l) => `    ${l}`)
-        .join('\n');
-    expect(runPython(source, 3)).toBe(4);
   });
 });
 
@@ -289,7 +221,7 @@ describe('a block local whose value reads the outer name', () => {
     );
   });
 
-  test.each(['javascript', 'python', 'glsl', 'interval-js'] as const)(
+  test.each(['javascript', 'glsl', 'interval-js'] as const)(
     '%s compiles the box route and the parse route',
     (to) => {
       const boxed = compile(new ComputeEngine().box(boxRoute), { to });
@@ -356,31 +288,6 @@ describe('a block local whose value reads the outer name', () => {
   );
 });
 
-describe('Python compile() of a selection whose arm is a block with a value', () => {
-  // The `if:`/`else:` block it emitted had no `return`, so the code ran to
-  // `None` where the interpreter gives 4 at x = 3.
-  test.each(
-    (
-      [
-        [
-          'If',
-          ['Greater', 'x', 0],
-          ['Block', ['Declare', 's', "'unknown'", 'x'], ['Add', 's', 1]],
-          0,
-        ],
-      ] as MathJsonExpression[]
-    ).map((s) => [s])
-  )('declines: %j', (json) => {
-    expect(interpreterAt3(json)).toBe('4');
-    expect(() =>
-      new PythonTarget().compile(engine().box(json), { fallback: false })
-    ).toThrow(
-      /the body's value statement is a selection whose branches are statements/
-    );
-    expect(compile(engine().box(json)).run!({ x: 3 })).toBe(4);
-  });
-});
-
 // `Undefined` is not an absent value since 2026-11-02 (`docs/ERROR-MODEL.md`,
 // "`Missing` is a result only"), so `[1, Missing]` is no longer compared
 // with `[1, Undefined]`.
@@ -395,29 +302,5 @@ describe('interval-js: a written absence in a list', () => {
       { kind: 'interval', value: { lo: 1, hi: 1 } },
       { kind: 'empty' },
     ]);
-  });
-});
-
-describe('Python: the name of a free symbol must be a Python identifier', () => {
-  test('a name that is not an identifier declines', () => {
-    const ce = new ComputeEngine();
-    ce.declare('😀', 'real');
-    const expr = ce.box(['Add', { sym: '😀' }, 1] as MathJsonExpression);
-    expect(() => new PythonTarget().compile(expr, { fallback: false })).toThrow(
-      /"😀" is not a Python identifier and cannot be used as a variable name/
-    );
-  });
-
-  test('a non-ASCII identifier compiles', () => {
-    const ce = new ComputeEngine();
-    ce.declare('café', 'real');
-    const r = compile(
-      ce.box(['Add', { sym: 'café' }, 1] as MathJsonExpression),
-      {
-        to: 'python',
-      }
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('café + 1');
   });
 });

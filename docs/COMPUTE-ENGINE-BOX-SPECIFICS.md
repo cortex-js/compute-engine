@@ -56,13 +56,13 @@ sub-agent never runs it unless its task prompt assigns it.
 the sub-agent runs; the orchestrator does not run them again on the same
 content. When the orchestrator copies a sub-agent's files into the main tree
 and `cmp` shows them byte for byte the same, the sub-agent's results for
-those files stand: do not repeat its tests, its lint, or its Python tests.
+those files stand: do not repeat its tests or its lint.
 On 2026-10-30 one change of 9 files ran the full suite three times, a
-383-file batch on each of four fix rounds, and lint and the Python tests in
-both trees; none of these runs found a defect.
+383-file batch on each of four fix rounds, and lint in both trees; none of
+these runs found a defect.
 
-Take the box lock for full suites, aggregate CI, builds, corpus checks,
-`npm run test:python`, and a targeted run of several test files. Timing tests
+Take the box lock for full suites, aggregate CI, builds, corpus checks, and a
+targeted run of several test files. Timing tests
 (`npm run test:perf`) also require the lock and run serially. Type checking and
 a run of one test file do not need the lock. A Jest worker can hold about 3 GB,
 so the lock limits memory as well as CPU. Worktrees and sub-agents share these

@@ -1,6 +1,6 @@
 /**
  * The type and the absence marker of an element read whose base is typed by
- * a tuple, shared by the JavaScript and Python targets.
+ * a tuple.
  *
  * The interpreter reads one slot of a tuple: `At(p, 1)` for
  * `p: tuple<unknown, number>` is typed `unknown`, not `number`, the join of
@@ -97,8 +97,7 @@ function absentTupleReadIsNumeric(t: TupleType, position: number): boolean {
  * Whether the element read at the 1-based `position` of `coll` gives `NaN`,
  * not `Missing`, when `coll` is absent at run time. The compiled JavaScript
  * passes the answer to `_SYS.atWithValueMarker`, which otherwise answers
- * `Missing` (`undefined`) for an absent base. The compiled Python uses the
- * answer as the marker of an absent base (`float('nan')` or `None`).
+ * `Missing` (`undefined`) for an absent base.
  *
  * The interpreter takes the marker of a read of an absent base from the
  * type of the read: `NaN` for a number, `Missing` otherwise. Only a base

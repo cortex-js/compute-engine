@@ -223,10 +223,8 @@ export function declaredTypeSource(t: Expression): string | undefined {
  *
  * Admitted only when all of:
  * - the target is JavaScript. Every other target keeps the existing D6 —
- *   the positional-read lowering has only been established there (the
- *   Python target cannot compile a user-function call at all, so the shape
- *   this exists for is unreachable on it) and a widened gate needs its own
- *   per-target verification, not an assumption.
+ *   the positional-read lowering has only been established there and a
+ *   widened gate needs its own per-target verification, not an assumption.
  * - the pattern is FLAT at this level (every position a symbol or `_`). A
  *   nested position would need a temporary of its own; it stays D6.
  * - the value's static type is a tuple whose arity is statically known and
@@ -242,7 +240,7 @@ export function declaredTypeSource(t: Expression): string | undefined {
  *
  * Note for whoever widens the target gate: the temporary's declaration and
  * its initializer are emitted as SEPARATE statements because a target with a
- * `declare` hook (Python, GPU) emits only the declaration from a combined
+ * `declare` hook (GPU) emits only the declaration from a combined
  * `Declare(sym, type, value)` and drops the initializer (see
  * `desugarPatternAssign`). The per-leaf DECLARES below are combined, which
  * is sound on JavaScript only — splitting those too is the first step of
@@ -1373,7 +1371,7 @@ export function desugarPatternAssign(
       //
       // The declaration and its initializer are emitted as SEPARATE
       // statements, not as one value-carrying `Declare`: a target with a
-      // `declare` hook (Python, GPU) emits only the declaration from a
+      // `declare` hook (GPU) emits only the declaration from a
       // `Declare` and relies on `compileBlock` to hoist the initializer out
       // as its own assignment — which the statement paths here do not do,
       // so a combined form silently dropped the initializer and left every

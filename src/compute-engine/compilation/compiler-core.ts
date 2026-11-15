@@ -2,10 +2,6 @@
 // mutual recursion. It imports every handler module and installs the hubs in
 // the record of compiler-core-hooks.ts.
 
-import {
-  enterScalarFragment,
-  assertScalarPreparedNode,
-} from './javascript-fragment-facts.js';
 import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
 import { inLiteralScope } from '../boxed-expression/call-result-type.js';
 import { nonScalarEnclosingBindings } from '../boxed-expression/enclosing-binding-result-type.js';
@@ -268,7 +264,6 @@ import {
   hasNonIntegerRealCell,
   isArrayOperand,
   knownExponentPower,
-  negativeBaseFloatPower,
   realPowerExponent,
 } from './compile-real-analysis.js';
 import {
@@ -357,7 +352,6 @@ import {
   compileExprApplyField,
   compileExprAssign,
   compileExprBroadcastJavaScript,
-  compileExprBroadcastPython,
   compileExprCapturedBody,
   compileExprCoalesce,
   compileExprDeclare,
@@ -950,7 +944,6 @@ function compileExpression(
    * settled shape that `unsettledShapeIn()` finds. */
   admission?: { unsettled?: UnsettledShape }
 ): TargetSource {
-  assertScalarPreparedNode(expr, target);
   // Check before folding/inlining can replace a captured call by its body.
   if (CompilerState._compileDepth === 0) {
     assertCapturedCallableBindings(expr, target);
@@ -1061,7 +1054,7 @@ function compileExpression(
   // (D6) with a diagnostic rather than emit source that cannot represent the
   // hole. Numeric-domain absence (`number | missing`) is `NaN` (I6) and needs
   // no object axis, so it is exempt. Only object-axis-less targets pay the
-  // check (JS/Python declare `object`, so the guard short-circuits).
+  // check (JS declares `object`, so the guard short-circuits).
   if (target.absence !== undefined && target.absence.object === undefined)
     assertObjectAbsenceRepresentable(expr, target, target.absence);
   // The engine⇄compiled boundary for TAGGED sums
@@ -1112,7 +1105,7 @@ function compileExpressionInFrame(
   const nextBoundCtx = target.boundVars ?? prevBoundCtx;
   // Compilation boundary for the complexness memo (Tycho item 148). This —
   // not `compileRoot` — is the entry EVERY target funnels through (the GPU,
-  // JS, Python and interval targets each call `BaseCompiler.compile`
+  // JS and interval targets each call `BaseCompiler.compile`
   // directly from their own `compileOrThrow`), so the reset has to key off
   // the nesting depth rather than a per-target hook. Engine symbol values
   // are stable within one compilation but not across compilations, and a
@@ -1242,13 +1235,11 @@ function compileExpressionInFrame(
   // `finally` below knows not to freeze a report for code that was never
   // emitted.
   let emitted = false;
-  let leaveScalarFragment: (() => void) | undefined;
   // A function node stays on the stack while its operands compile
   // (`_compileParents`).
   const isParent = isFunction(expr);
   if (isParent) _compileParents.push(expr);
   try {
-    leaveScalarFragment = enterScalarFragment(expr, target);
     // In `mode: 'bigint'` the lane analysis of the outermost expression
     // decides, before any emission, whether every numeric node is on the
     // integer lane (`compile-bigint-lane.ts`); a node that is not declines
@@ -1291,7 +1282,6 @@ function compileExpressionInFrame(
     emitted = true;
     return compiled;
   } finally {
-    leaveScalarFragment?.();
     if (isParent) _compileParents.pop();
     CompilerState._compileDepth -= 1;
     CompilerState._callSiteTarget = prevCallSiteTarget;
@@ -2072,8 +2062,7 @@ export function realOperandGuard(
     }
     const body = emit();
     // The conditional and its "else" literal are the TARGET's spelling
-    // (`realGuard`): JavaScript `((g) ? (body) : NaN)`, Python
-    // `((body) if (g) else float('nan'))`. The element-wise form has no
+    // (`realGuard`): JavaScript `((g) ? (body) : NaN)`. The element-wise form has no
     // guards, so the body is emitted unconditionally.
     return target.bindExpr(
       bindings,
@@ -3316,7 +3305,7 @@ function compileInnerLeaf(
     // A negative numeric literal (e.g. `-2`) has a leading unary minus, so it
     // must be parenthesized wherever a unary `Negate(...)` would be: when
     // spliced as an operand that binds tighter than unary negation. Otherwise
-    // Python `Power(-2, x)` emits `-2 ** x`, which parses as `-(2 ** x)`
+    // `Power(-2, x)` would emit `-2 ** x`, which parses as `-(2 ** x)`
     // (sign-flipped). Mirror the Negate operator's own `op[1] < prec` wrap.
     // An `inexactNumber` spelling is exempt: it is a target-chosen
     // aggregate (the interval target emits an object literal), not a
@@ -3339,8 +3328,7 @@ function compileInnerLeaf(
   // only. Gated on the target's own `character` capability rather than on
   // `string`, because holding the cluster is only half of it: ordering two
   // characters, segmenting a string into them and counting them all need
-  // grapheme-cluster awareness. Python has string literals but no stdlib
-  // grapheme segmentation, and GLSL has no text at all, so both decline
+  // grapheme-cluster awareness. GLSL has no text at all, so it declines
   // here instead of emitting a target string that would then be compared with
   // the wrong order or indexed by the wrong unit.
   // (`docs/STRING_ROADMAP.md`, decision D13.)
@@ -3355,7 +3343,7 @@ function compileInnerLeaf(
   }
 
   // Is it a dictionary? Each value compiles as a value operand, so a
-  // statement (an assignment on Python, a multi-statement block) declines or
+  // statement (a multi-statement block) declines or
   // lowers as in any other operand, and the target spells the literal,
   // which makes a new value at each evaluation. The shape of a value comes
   // from its static type, as for any other node: a value whose type is
@@ -3518,7 +3506,7 @@ export function compileExpr(
   // `tryCompileBroadcast`. Other targets have native vector types (GLSL
   // `vec3 + vec3`) or their own broadcasting, so this is JavaScript-only. The
   // decline of an operand declared `any` or `value` here also applies to the
-  // Python and `interval-js` targets.
+  // `interval-js` target.
   sub = compileExprElementwiseBroadcast(engine, h, args, prec, target, node);
   if (sub !== undefined) return sub;
 
@@ -3540,7 +3528,7 @@ export function compileExpr(
   // `assertNoAmbiguousComplexElementRead`.
   assertNoAmbiguousComplexElementRead(h, args);
 
-  // The broadcast guards of the JavaScript, Python and GPU targets
+  // The broadcast guards of the JavaScript and GPU targets
   // (`compileExprBroadcastGuards`).
   sub = compileExprBroadcastGuards(engine, h, args, target);
   if (sub !== undefined) return sub;
@@ -3989,8 +3977,7 @@ function compileExprNormOrMatrixPower(
   //
   // A GATED point (`isGatedPoint`: a restricted point such as
   // `If(c, (t, 1))`) is a point too when it is present. Without this,
-  // the Python target emitted `np.abs(…)` over it, the component-wise
-  // `abs`.
+  // the component-wise `abs` was emitted over it.
   if (h === 'Abs' && args.length === 1 && absCompilesToPointNorm(args[0])) {
     return core.compileExpr(engine, 'Norm', args, prec, target);
   }
@@ -4099,10 +4086,7 @@ function compileExprNormOrMatrixPower(
   // (`compileMatrixProduct`). A product of vectors, or of numbers and one
   // matrix, keeps the element-wise code that `compileExpr()` emits after
   // this function.
-  if (
-    h === 'Multiply' &&
-    (target.language === 'javascript' || target.language === 'python')
-  ) {
+  if (h === 'Multiply' && target.language === 'javascript') {
     const product = compileMatrixProduct(engine, args, prec, target, node);
     if (product !== undefined) return product;
   }
@@ -4111,8 +4095,8 @@ function compileExprNormOrMatrixPower(
 
 /**
  * The broadcast guards of `compileExpr()`: the code of a node that the
- * JavaScript or Python broadcast lowering writes, or a decline of a node
- * that the JavaScript, Python or GPU targets cannot lower element by
+ * JavaScript broadcast lowering writes, or a decline of a node
+ * that the JavaScript or GPU targets cannot lower element by
  * element; `undefined` for another node.
  */
 function compileExprBroadcastGuards(
@@ -4163,29 +4147,6 @@ function compileExprBroadcastGuards(
   // application). After the F1 widening, most such operands compile through
   // `_SYS.bcast` and never reach here.
   sub = compileExprBroadcastJavaScript(engine, h, args, target);
-  if (sub !== undefined) return sub;
-
-  // Python target: arithmetic over a collection-typed or possibly-collection
-  // operand (a concrete/declared `list`/`indexed_collection`, a
-  // `broadcastable<T>`, or a top-typed application such as `h(x)` — the same
-  // operand predicate as the JS D6 guard above) cannot be lowered to the
-  // target's INFIX arithmetic. Python's arithmetic operators do NOT broadcast
-  // a plain `list`: `2 * [1, 2]` REPEATS (`[1, 2, 1, 2]`), `[1, 2] - 1`
-  // raises — both diverge from the interpreter's element-wise result
-  // (`[2, 4]` / `[0, 1]`). A NumPy array WOULD broadcast, but the compiled
-  // artifact cannot constrain what the caller binds, so the outcome is
-  // binding-dependent.
-  //
-  // What IS soundly expressible is a fan-out over the ONE collection operand
-  // (`tryCompilePythonElementwise`): the target spells the element-wise map
-  // as a list comprehension, which is element-wise for a plain Python list,
-  // a tuple and an ndarray alike. When that route declines, fail closed
-  // and let the engine fall back to the interpreter, which broadcasts
-  // correctly. Only infix-lowering arithmetic heads are affected;
-  // element-wise math functions (`Sin` → `np.sin`) broadcast natively over a
-  // NumPy array and are left untouched. Bare unknown symbols are NOT
-  // possibly-collection-typed, so plain scalar plot bodies are unaffected.
-  sub = compileExprBroadcastPython(engine, h, args, target);
   if (sub !== undefined) return sub;
 
   // GPU shader targets: a comparison or logical connective over a non-scalar
@@ -4312,25 +4273,7 @@ function compileExprInfix(
 ): TargetSource | undefined {
   const op = target.operators?.(h);
 
-  // A Python power that may need the real root of a negative base (an
-  // exact rational or a float exponent, see `negativeBaseFloatPower`)
-  // goes to the `Power` function lowering instead of the `**` operator.
-  // So does a power that the analysis reads as promoted to the complex
-  // lane (an unknown-sign real base with a float exponent, `t^0.3`, in the
-  // `complex` mode, see `promotesRadicalToComplex`): the function lowering
-  // emits `np.emath.power` for it, which gives the complex value for a
-  // negative base, as the analysis reports to the parent. Before, the
-  // `**` operator was emitted for this form in every mode, so the emission
-  // did not match the analysis (CE-230.6).
-  const realPythonPower =
-    target.language === 'python' &&
-    h === 'Power' &&
-    op?.[0] === '**' &&
-    (realPowerExponent(args) !== undefined ||
-      negativeBaseFloatPower(args) !== undefined ||
-      (!args.some((a) => core.isComplexValued(a)) &&
-        core.promotesRadicalToComplex('Power', args)));
-  return compileExprOperator(h, args, prec, target, node, op, realPythonPower);
+  return compileExprOperator(h, args, prec, target, node, op);
 }
 
 /**
@@ -4464,8 +4407,7 @@ function compileExprSelection(
   // other targets decline it here, each for a verified reason
   // (`test/compute-engine/compile-elseless-if-statement.test.ts`). Wrapping
   // such an arm in a conditional expression would emit an assignment inside
-  // an expression, which Python refuses and the GPU statement model does
-  // not admit.
+  // an expression, which the GPU statement model does not admit.
   //
   // The interpreter evaluates a value-form `If(c, t)` as the restriction
   // `t\{c\}`. With a mask of rank 1 as condition, a restriction aligns a
@@ -4508,13 +4450,13 @@ function compileExprSelection(
   // the domain of a point (`docs/ERROR-MODEL.md`, "`Missing` is a result
   // only", rule 2). It compiles as `If(c, p, (NaN, …, NaN))`. The node is
   // not passed on: its operand indices do not name the synthesized point.
-  // Only the JavaScript and Python targets take this route. The interval
+  // Only the JavaScript target takes this route. The interval
   // target spells the point of `NaN` coordinates in its own restriction
   // (`_IA.restrict` with the arity of the point), and has no lowering of a
   // `Tuple`. The shader targets already give a `vec2` (or wider) of `NaN`
   // for an absent point on their own route.
   const restrictedArity =
-    target.language === 'javascript' || target.language === 'python'
+    target.language === 'javascript'
       ? pointScalarRestrictionArity(h, args)
       : undefined;
   if (restrictedArity !== undefined)
@@ -4549,7 +4491,7 @@ function compileExprMatchOrBlock(
 ): TargetSource | undefined {
   if (h === 'Match') {
     // A target may override the whole construct (GPU emits target-specific
-    // ternaries; interval/Python fail closed). Otherwise the default is the
+    // ternaries; interval fails closed). Otherwise the default is the
     // JavaScript emission (chained `if`/`switch` in an arrow-IIFE).
     //
     // `Match` compiles guards and bodies from plan-constructed closure trees,
@@ -4689,7 +4631,7 @@ function compileExprHelperCall(
   // scalar, and handing it a complex value silently returns garbage
   // (compiled `Erf(z)` for complex z → −1, not NaN). Fail closed with
   // the offending head. A helper the target declares complex-capable
-  // (Python `scipy.special.erf`) receives the complex value as it is.
+  // receives the complex value as it is.
   if (
     isRealOnlyLowering(target, h) &&
     args.some((a) => realGuardCandidate(a, engine, target))
@@ -7099,10 +7041,7 @@ export function emitFunctionLiteralDefinition(
           // position, nested dependency) funnels through here. Targets without
           // a static return type are structurally untouched — JavaScript (no
           // lowering at all) keeps the bare `a(u)` shape the ruling protects,
-          // interval-js uses that same untyped arrow form, and a future
-          // dynamically-typed definition lowering (a Python `def` — the only
-          // user-function lowering Python could gain; it declines with "Unknown
-          // operator" today) would have no return type to contradict.
+          // interval-js uses that same untyped arrow form.
           if (
             lowering.staticReturnType === true &&
             isContradictedScalarFunctionBody(bodyExpr)
@@ -7403,7 +7342,7 @@ export function compileWithCse(
   // candidate that is the temporary's name, never its code.
   const rhs = foldEmitted(expr, target, core._compileInner(expr, target, 0));
   // A target whose multi-statement constructs are bare statement sequences
-  // (Python, GPU) has no expression-position form for such a right-hand
+  // (GPU) has no expression-position form for such a right-hand
   // side. Leave the candidate `'defining'`: every occurrence then compiles
   // inline, exactly as before — a lost optimization, never invalid source.
   // The right-hand side above was compiled at precedence 0; the CALLER's

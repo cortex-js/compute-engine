@@ -1,12 +1,6 @@
-import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
-import { TEST_PYTHON } from './test-python';
-
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 /**
  * Three-valued (Kleene) lowering of `And`/`Or`/`Not` in compiled code.
@@ -14,7 +8,7 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
  * The interpreter is two-valued (user decision of 2026-11-02,
  * `docs/ERROR-MODEL.md`): a comparison with an absent operand is `False`, a
  * connective reads an absent operand as `False`, and a branch over it takes
- * its arm. The compiled JavaScript and Python targets still emit a
+ * its arm. The compiled JavaScript target still emits a
  * three-valued lowering when an operand of a connective may be absent: a
  * compiled `If`/`Which` then takes no arm and answers NaN, and a connective in
  * value position answers `undefined`. The compiled value computed from an
@@ -290,115 +284,6 @@ describe('COMPILE three-valued connectives — no new code on the common path', 
   });
 });
 
-describe('COMPILE connectives — Python target', () => {
-  const ce = realEngine();
-  const python = new PythonTarget();
-  const code = (mathJson: unknown): string =>
-    python.compile(ce.expr(mathJson as any)).code;
-
-  it('keeps the plain conditional when every leaf is an ordered comparison', () => {
-    // A NaN operand decides `x > 0` false (user decision 2026-10-20), and
-    // Python has no unsupplied variable, so the condition is decided by
-    // construction.
-    expect(code(['If', ['And', gt('x'), gt('y')], 1, -1])).toBe(
-      '((1) if (0 < x and 0 < y) else (-1))'
-    );
-  });
-
-  it('keeps the plain and over a real symbol', () => {
-    // Over a `real` symbol `NaN ≠ 0` is decided (`True`, user decision
-    // 2026-10-23), so the condition keeps the plain `and`, which
-    // short-circuits.
-    expect(
-      code([
-        'If',
-        ['And', ['NotEqual', 'x', 0], ['Greater', ['Divide', 1, 'x'], 1]],
-        1,
-        -1,
-      ])
-    ).toBe('((1) if (((x) != (0)) and 1 < 1 / x) else (-1))');
-  });
-});
-
-/**
- * Execution parity for the Python emissions above, run through the repo's
- * `./venv/bin/python3` the way `compile-python-parity.test.ts` does. Skipped
- * when that venv (with numpy) is not present, so a checkout without the
- * benchmark environment is never blocked.
- */
-const VENV_PYTHON =
-  TEST_PYTHON ?? '';
-function venvHasNumpy(): boolean {
-  try {
-    if (!fs.existsSync(VENV_PYTHON)) return false;
-    execFileSync(VENV_PYTHON, ['-c', 'import numpy'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-const describePython = venvHasNumpy() ? describe : describe.skip;
-
-describePython('COMPILE three-valued connectives — Python execution', () => {
-  const ce = realEngine();
-  const python = new PythonTarget();
-
-  /** Run one emitted Python expression with `x`, `y` bound, and report it. */
-  function runPython(source: string, vars: Record<string, number>): string {
-    const bindings = Object.entries(vars)
-      .map(
-        ([name, value]) =>
-          `${name} = ${Number.isNaN(value) ? "float('nan')" : value}`
-      )
-      .join('\n');
-    const script = `import numpy as np\n${bindings}\nprint(repr(${source}))\n`;
-    return execFileSync(VENV_PYTHON, ['-c', script], {
-      encoding: 'utf-8',
-    }).trim();
-  }
-
-  // `NotEqual(name, 0)`.
-  const ne = (name: string): unknown[] => ['NotEqual', name, 0];
-
-  it('decides a NotEqual with a NaN operand true', () => {
-    const source = python.compile(
-      ce.expr(['If', ['And', ne('x'), ne('y')], 1, -1] as any)
-    ).code;
-    expect(runPython(source, { x: 1, y: NaN })).toBe('1');
-    expect(runPython(source, { x: 0, y: NaN })).toBe('-1');
-  });
-
-  it('decides an ordered comparison with a NaN operand false', () => {
-    const source = python.compile(
-      ce.expr(['If', ['And', gt('x'), gt('y')], 1, -1] as any)
-    ).code;
-    expect(runPython(source, { x: 1, y: NaN })).toBe('-1');
-    expect(runPython(source, { x: 1, y: 2 })).toBe('1');
-  });
-
-  it('runs the guard idiom at zero without raising', () => {
-    // `1 / 0` and `1 / 0.0` both raise in Python (ZeroDivisionError), so the
-    // guard has to keep short-circuiting: at `x = 0` the first conjunct is
-    // decided `False` and the division must never be evaluated. An eagerly
-    // bound operand would abort the call instead of answering the else arm.
-    const source = python.compile(
-      ce.expr([
-        'If',
-        ['And', ['NotEqual', 'x', 0], ['Greater', ['Divide', 1, 'x'], 1]],
-        1,
-        -1,
-      ] as any)
-    ).code;
-    expect(runPython(source, { x: 0 })).toBe('-1');
-    expect(runPython(source, { x: 0.5 })).toBe('1');
-    expect(runPython(source, { x: 4 })).toBe('-1');
-    // `NaN ≠ 0` is `True` (user decision 2026-10-23), so the second conjunct
-    // is reached, and `1 < 1/NaN` is decided false (user decision 2026-10-20):
-    // `And` is false.
-    expect(runPython(source, { x: NaN })).toBe('-1');
-  });
-});
-
 describe('COMPILE three-valued connectives — GPU and interval targets untouched', () => {
   const ce = realEngine();
   const glsl = new GLSLTarget();
@@ -534,12 +419,5 @@ describe('COMPILE three-valued connectives — value position', () => {
     const not = js(ce, ['Not', 'p']);
     expect(not.run({ p: false })).toBe(true);
     expect(not.run({ p: true })).toBe(false);
-  });
-
-  it('keeps the plain Python and when every operand is a decided boolean', () => {
-    const python = new PythonTarget();
-    expect(python.compile(ce.expr(['And', 'p', 'q'] as any)).code).toBe(
-      'p and q'
-    );
   });
 });

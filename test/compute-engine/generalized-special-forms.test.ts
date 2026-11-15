@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import type { Expression } from '../../src/compute-engine/global-types';
@@ -518,9 +517,6 @@ describe('the widened shapes do not compile to the narrower lowerings', () => {
       expect(() => compile(e, { to: 'javascript', fallback: false })).toThrow(
         /Could not compile/
       );
-      expect(() =>
-        new PythonTarget().compile(e, { constantFold: false })
-      ).toThrow(/Could not compile/);
       expect(() => new GLSLTarget().compile(e)).toThrow();
     });
   }

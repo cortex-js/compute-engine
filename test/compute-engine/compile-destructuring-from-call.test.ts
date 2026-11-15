@@ -269,11 +269,9 @@ describe('destructuring from a non-literal value: what still fails closed', () =
 
 //
 // The path is JavaScript-only: the shader targets have no tuple-indexing
-// lowering for an untyped local, and the Python target cannot compile a
-// user-function call at all. Both must keep the existing D6 refusal — NOT
-// miscompile. Probed through a tuple-TYPED symbol (rather than a call, which
-// Python refuses for an unrelated reason) so the refusal that fires is this
-// gate's.
+// lowering for an untyped local. They must keep the existing D6 refusal — NOT
+// miscompile. Probed through a tuple-TYPED symbol (rather than a call) so the
+// refusal that fires is this gate's.
 //
 describe('non-JavaScript targets keep the fail-closed refusal', () => {
   const tupleSymbolEngine = () => {
@@ -313,7 +311,7 @@ describe('non-JavaScript targets keep the fail-closed refusal', () => {
     agrees(assign, 34);
   });
 
-  for (const to of ['glsl', 'python', 'interval-js'] as const) {
+  for (const to of ['glsl', 'interval-js'] as const) {
     test(`${to} fails closed on the declare form`, () => {
       const r = compile(declareBlock(tupleSymbolEngine()), { to });
       expect(r?.success).toBe(false);

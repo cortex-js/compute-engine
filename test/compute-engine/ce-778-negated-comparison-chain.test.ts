@@ -37,10 +37,6 @@ describe('CE-778: a negated comparison chain keeps its parentheses', () => {
     );
   });
 
-  test('Python', () => {
-    expect(code(NEGATED_CHAIN, 'python')).toBe('not ((3 < y) and (y < x))');
-  });
-
   test('the compiled value is the value of the interpreter', () => {
     const expr = ce.box(NEGATED_CHAIN as any);
     const fn = compile(expr, { to: 'javascript' });
@@ -70,8 +66,5 @@ describe('CE-778: a negated comparison chain keeps its parentheses', () => {
     expect(code(['And', ['Less', 3, 'y', 'x'], ['Less', 'x', 5]], 'glsl')).toBe(
       '(3.0 < y) && (y < x) && x < 5.0'
     );
-    expect(
-      code(['Or', ['Less', 3, 'y', 'x'], ['Less', 'x', 5]], 'python')
-    ).toBe('(3 < y) and (y < x) or x < 5');
   });
 });

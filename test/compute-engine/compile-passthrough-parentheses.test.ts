@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
@@ -15,8 +14,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * operand: `3·⌊n + 1⌋` over an integer `n` emitted `3.0 * n + 1.0`, which is
  * `3n + 1` — a wrong value behind a reported success.
  *
- * Each case puts the passthrough inside a TIGHTER parent (`3 · …`, or a
- * Python `… ** 2`), so a missing pair of parentheses changes the value. The
+ * Each case puts the passthrough inside a TIGHTER parent (`3 · …`), so a missing pair of parentheses changes the value. The
  * negative controls pin that an ATOMIC operand — a symbol — still emits bare,
  * which is what keeps the existing emissions unchanged.
  */
@@ -25,7 +23,6 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 const NO_FOLD = { constantFold: false } as const;
 
 const glsl = new GLSLTarget();
-const python = new PythonTarget();
 
 function makeEngine(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -128,94 +125,6 @@ describe('IDENTITY PASSTHROUGH PARENTHESES — GPU (GLSL)', () => {
         expect(glsl.compile(expr, NO_FOLD).code).toBe(`3.0 * ${sym}`);
       });
     }
-  });
-});
-
-describe('IDENTITY PASSTHROUGH PARENTHESES — Python', () => {
-  test('Identity: the infix operand is parenthesized', () => {
-    const expr = ce.box(['Multiply', 3, ['Identity', ['Add', 'x', 1]]]);
-    expect(python.compile(expr, NO_FOLD).code).toBe('3 * (x + 1)');
-  });
-
-  // Python's `**` binds TIGHTER than the unary minus, so a bare `-x ** 2` is
-  // `-(x²)` — the wrong value, not just a redundant grouping.
-  test('Identity of a negation under a power', () => {
-    const expr = ce.box(['Power', ['Identity', ['Negate', 'x']], 2]);
-    expect(python.compile(expr, NO_FOLD).code).toBe('(-x) ** 2');
-  });
-
-  // A NEGATIVE number literal is not a Python primary either: the same
-  // precedence puts `-2 ** 2` at −4. A one-operand `Max` over a negative
-  // literal is reachable when a `Sum` unroll substitutes a negative index.
-  test('a negative literal under a power is parenthesized', () => {
-    for (const head of ['Identity', 'Max']) {
-      const expr = ce.box(['Power', [head, -2] as never, 2]);
-      expect(python.compile(expr, NO_FOLD).code).toBe('(-2) ** 2');
-    }
-  });
-
-  test('Max of one operand: the infix operand is parenthesized', () => {
-    const expr = ce.box(['Multiply', 3, ['Max', ['Add', 'x', 1]]]);
-    expect(python.compile(expr, NO_FOLD).code).toBe('3 * (x + 1)');
-  });
-
-  test('Min of one operand: the infix operand is parenthesized', () => {
-    const expr = ce.box(['Multiply', 3, ['Min', ['Add', 'x', 1]]]);
-    expect(python.compile(expr, NO_FOLD).code).toBe('3 * (x + 1)');
-  });
-
-  // Only non-canonical input has a one-operand sum, product, connective,
-  // `Subtract` or power of 1 (CE-251.1). `Subtract(x)` is `x` in the
-  // interpreter: read as a prefix `-` it emitted `3 * (-x + 1)`, which is
-  // both negated and regrouped.
-  test('a one-operand n-ary operator from raw input keeps its grouping', () => {
-    const raw = (json: unknown) => ce.box(json as never, { form: 'raw' });
-    const X1 = ['Add', 'x', 1];
-    for (const json of [
-      ['Multiply', 3, ['Multiply', X1]],
-      ['Multiply', 3, ['Add', X1]],
-      ['Multiply', 3, ['Subtract', X1]],
-    ])
-      expect(python.compile(raw(json), NO_FOLD).code).toBe('3 * (x + 1)');
-    expect(
-      python.compile(raw(['Multiply', 3, ['Power', X1, 1]]), NO_FOLD).code
-    ).toBe('3 * (x + 1) ** 1');
-    expect(
-      python.compile(raw(['And', 'P', ['Or', ['Or', 'Q', 'R']]]), NO_FOLD).code
-    ).toBe('P and (Q or R)');
-    for (const head of ['ElementMax', 'ElementMin'])
-      expect(
-        python.compile(raw(['Multiply', 3, [head, X1]]), NO_FOLD).code
-      ).toBe('3 * (x + 1)');
-  });
-
-  // `Divide(x)` and `Power(x)` evaluate to `Error("missing")`. They emitted
-  // `/(x + 1)` and `**(x + 1)`, which are not valid Python.
-  test('a binary operator with one operand fails closed', () => {
-    const raw = (json: unknown) => ce.box(json as never, { form: 'raw' });
-    for (const head of ['Divide', 'Power'])
-      expect(() =>
-        python.compile(raw(['Multiply', 3, [head, ['Add', 'x', 1]]]), NO_FOLD)
-      ).toThrow(/expected two operands, got one/);
-  });
-
-  describe('negative control — an atomic operand stays bare', () => {
-    test('Identity of a symbol', () => {
-      const expr = ce.box(['Multiply', 3, ['Identity', 'x']]);
-      expect(python.compile(expr, NO_FOLD).code).toBe('3 * x');
-    });
-
-    test('Max of a symbol', () => {
-      const expr = ce.box(['Multiply', 3, ['Max', 'x']]);
-      expect(python.compile(expr, NO_FOLD).code).toBe('3 * x');
-    });
-
-    // A COLLECTION operand of a one-operand `Max` is a REDUCTION, not a
-    // passthrough: it already carries its own `np.max(…)` call.
-    test('Max of a list reduces and needs no parentheses', () => {
-      const expr = ce.box(['Multiply', 3, ['Max', ['List', 1, 2, 3]]]);
-      expect(python.compile(expr, NO_FOLD).code).toBe('3 * np.max([1, 2, 3])');
-    });
   });
 });
 

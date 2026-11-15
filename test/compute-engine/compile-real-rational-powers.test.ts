@@ -162,18 +162,6 @@ describe('real branches of exact rational powers', () => {
       expect(result.code).not.toContain('sign(x)');
     }
   );
-
-  test('Python binds the base once and selects the real sign', () => {
-    const ce = realEngine();
-    const result = compile(
-      ce.box(['Power', ['Sin', 'x'], ['Rational', -5, 3]]),
-      { to: 'python', constantFold: false }
-    );
-    expect(result.success).toBe(true);
-    expect(result.code).toContain('np.where');
-    expect((result.code!.match(/np.power/g) ?? []).length).toBe(1);
-    expect((result.code!.match(/np.sin\(x\)/g) ?? []).length).toBe(1);
-  });
 });
 
 // The interpreter reads a DECIMAL exponent as the nearest small rational
@@ -286,8 +274,6 @@ describe('a decimal exponent or root index read as an odd-denominator rational',
     const glsl = compile(expr, { to: 'glsl' });
     expect(glsl.code).toContain('pow(abs(x), ');
     expect(glsl.code).not.toContain('sign');
-    const py = compile(expr, { to: 'python' });
-    expect(py.code).toBe('np.power(np.abs(x), 1.0 / 2.5)');
     // A constant radicand folds to the positive value.
     expect(Number(compile(ce.parse('\\sqrt[2.5]{-8}')).code)).toBeCloseTo(
       want,
@@ -392,13 +378,6 @@ describe('a decimal exponent or root index read as an odd-denominator rational',
     const want = -(32 ** 0.4545454545454545);
     expect(out.value.lo).toBeLessThanOrEqual(want);
     expect(out.value.hi).toBeGreaterThanOrEqual(want);
-  });
-
-  test('python: Root(x, 2.2) takes the signed real root', () => {
-    const ce = realEngine();
-    const result = compile(ce.parse('\\sqrt[2.2]{x}'), { to: 'python' });
-    expect(result.success).toBe(true);
-    expect(result.code).toContain('np.sign(x)');
   });
 
   test('a decimal that does not read as an odd-denominator rational keeps its lowering', () => {

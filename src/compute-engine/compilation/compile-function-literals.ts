@@ -323,8 +323,8 @@ export function compileExprFunctionLiteral(
       );
       // The map over list values, as for the arrow below. The map takes as
       // many values as the consumer passes, not one per parameter: the
-      // target's lambda fills a parameter with a default value that the
-      // consumer does not pass (`lambda x, k=2: k` on Python), and a map
+      // target's lambda may fill a parameter with a default value that the
+      // consumer does not pass, and a map
       // with one parameter per parameter of the literal would require it.
       const lowered =
         passed !== undefined &&
@@ -339,7 +339,7 @@ export function compileExprFunctionLiteral(
             )
           : undefined;
       if (lowered === undefined || !lowered.some((r) => r > 0)) return code;
-      const mapped = staticMapCallback(code, lowered, target, passed?.types);
+      const mapped = staticMapCallback(code, lowered, target);
       if (mapped === undefined)
         throw new Error(
           'Could not compile a `Function` literal: its consumer passes it ' +
@@ -753,7 +753,7 @@ export function compileExprFunctionLiteral(
     // consumer passes (`callbackArgumentsOf()`) select the variant: the
     // arrow itself over scalar values, and a static map of it over list
     // values (`((_tv1) => (_tv2) => _SYS.mapFn(_tv1, [1], _tv2))(arrow)`,
-    // `_IA.mapFn` on interval-js, a comprehension on Python). A value whose
+    // `_IA.mapFn` on interval-js). A value whose
     // shape is not settled declines (`callbackArgumentRanks()`). A literal
     // with no consumer (the root `compile(f)`, a local that a block stores
     // or returns, an argument of a call) is the scalar variant, the arrow.
@@ -796,7 +796,7 @@ export function compileExprFunctionLiteral(
     if (maps) {
       // A parameter that the consumer leaves out is filled outside the map,
       // so that the map receives a value for it.
-      const mapped = staticMapCallback(callee, ranks!, target, passed?.types);
+      const mapped = staticMapCallback(callee, ranks!, target);
       if (mapped === undefined)
         throw new Error(
           'Could not compile a `Function` literal: its consumer passes it ' +

@@ -1,7 +1,6 @@
 // Operator expressions: compileExprOperator, shadowed library lowerings, and
 // the head tables that decide real-only and complex-propagating operators.
 
-import { scalarResultIsComplex } from './javascript-fragment-facts.js';
 import type {
   Expression,
   FunctionInterface,
@@ -49,14 +48,12 @@ import {
 } from './compile-user-functions.js';
 import {
   compilationType,
-  couldBeCollectionParticipant,
   exactRationalDivisor,
   isBoundPossiblyCollectionTyped,
   isGatedIndexedCollection,
   isMixedStringOrderingParticipants,
   isProvablyCharacterOperand,
   isProvablyStringOperand,
-  unfaithfulComparisonAggregate,
 } from './compiler-type-facts.js';
 import { core } from './compiler-core-hooks.js';
 import { _codeOverrides } from './compiler-mode.js';
@@ -76,7 +73,7 @@ import { cseRegionOf } from './compile-conditions.js';
  * type is a tuple of known arity n rewrites to n positional `At` accesses
  * (`f(At(p,1), …, At(p,n))`). An argument whose arity is not statically
  * known fails closed: the compiled code could not re-validate the
- * arity the interpreter enforces at splice time (a JS/Python dynamic
+ * arity the interpreter enforces at splice time (a JS dynamic
  * spread would silently mis-bind on a mismatch instead of erroring).
  */
 export function spliceSpreadOperands(expr: Expression): Expression {
@@ -217,7 +214,7 @@ export function findShadowedLibraryLowering(
  * (`tryCompileLocalFunctionCall`). It declines, with the reason, when the
  * target has no such route: a parameter, a block local that is not bound
  * to a function literal, or a target that does not bind a block-local
- * function as a value (the shader and Python targets).
+ * function as a value (the shader targets).
  *
  * `undefined` when the head is not such a name.
  */
@@ -295,20 +292,19 @@ export function compileExprOperator(
   prec: number,
   target: CompileTarget<Expression>,
   node: Expression | undefined,
-  op: [string, number] | undefined,
-  realPythonPower: boolean
+  op: [string, number] | undefined
 ): TargetSource | undefined {
-  if (op !== undefined && !realPythonPower) {
+  if (op !== undefined) {
     // Skip infix operators for complex operands — fall through to function
     // dispatch. An operand the D2 runtime rule has bound to a real
     // projection (`_codeOverrides`) is real here.
-    const hasComplex =
-      scalarResultIsComplex(target) ??
-      args.some((a) => core.isComplexValued(a) && !_codeOverrides.has(a));
+    const hasComplex = args.some(
+      (a) => core.isComplexValued(a) && !_codeOverrides.has(a)
+    );
     if (!hasComplex) {
       // Check if this looks like a function name rather than an operator.
       // Function names are alphanumeric identifiers, operators are symbols.
-      // A word-spelled *keyword* operator (Python `and`/`or`/`not`) is
+      // A word-spelled *keyword* operator (`and`/`or`/`not`) is
       // alphabetic but still infix/prefix — never a function call — so it is
       // excluded here (otherwise `And(a, b)` would emit `and(a, b)`).
       const isFunction =
@@ -406,65 +402,6 @@ export function compileExprOperator(
             (isInequalityOperator(h) &&
               args.length === 2 &&
               args.every(isProvablyStringOperand)));
-        // PYTHON, the same two divert rules as the ordering gates on that
-        // target (`assertPyNoMixedStringOrdering` /
-        // `assertPyComparableAggregate`, python-target.ts): an ordering whose
-        // participants mix string evidence with something not provably a
-        // string, or whose participant is an unfaithful AGGREGATE, must not
-        // take the infix `<`. A mixed pair emits `"a" < 1` — a
-        // plausible-looking boolean where the interpreter stays symbolic —
-        // and an aggregate emits `p < q` / `d1 < d2`, which Python answers
-        // lexicographically (or raises) where the interpreter leaves the
-        // comparison inert. Declining here lets the head fall through to
-        // `compilePythonRelation`, which fails closed with the
-        // diagnostic. An ALL-string ordering keeps the fast path: `"a" < "b"`
-        // is the interpreter's own string comparison (probe-verified,
-        // chains included).
-        //
-        // A participant that is merely collection-TYPED diverts too, with the
-        // same STATIC evidence the JS collection divert above uses: the
-        // `!x.isCollection` admission below is blind to an unassigned
-        // collection-typed symbol, so `Less(sl1, sl2)` over two
-        // `list<string>` parameters emitted the infix `sl1 < sl2` — ONE
-        // lexicographic Python bool where the interpreter answers a list of
-        // booleans (and the flat-all-string exemption let it straight
-        // through). `compilePythonRelation` emits the element-wise
-        // `np.less(sl1, sl2)` for the admitted shapes and D6-declines the
-        // gated ones.
-        const pyOrderingUnfaithful =
-          target.language === 'python' &&
-          isRelationalOperator(h) &&
-          (args.some((x) => unfaithfulComparisonAggregate(x) !== null) ||
-            args.some(
-              (x) =>
-                // A string operand is exempt — see the JavaScript divert
-                // above. Python's `<` on `str` is the interpreter's own
-                // string comparison.
-                !isProvablyStringOperand(x) &&
-                (x.type.matches('collection<any>') ||
-                  isBoundPossiblyCollectionTyped(x))
-            ) ||
-            isMixedStringOrderingParticipants(args));
-        // PYTHON, a logical connective (`And`, `Or`, `Not`) with an operand
-        // that is, or may be, a collection. The infix `and`/`or`/`not` reads
-        // the truthiness of a Python list, so `And(L, True)` for
-        // `L: list<boolean>` emitted `L and True` and answered `True` where
-        // the interpreter answers the element-wise `[True, False]`.
-        // Declining here lets the head fall through to its function form
-        // (`compilePythonLogical`, python-target.ts), which broadcasts a
-        // provable list of booleans and fails closed for every other shape.
-        // CE-278.
-        const pyConnectiveOverCollection =
-          target.language === 'python' &&
-          LOGICAL_BROADCAST_HEADS.has(h) &&
-          args.some(
-            (x) =>
-              !isProvablyStringOperand(x) &&
-              (x.type.matches('collection<any>') ||
-                isGatedIndexedCollection(x) ||
-                isBoundPossiblyCollectionTyped(x) ||
-                couldBeCollectionParticipant(x))
-          );
         // An ORDERING with a CHARACTER participant, on EVERY target. The
         // interpreter orders two characters by their NFC CODE-POINT sequence
         // (`compare.ts`), whereas `String.prototype.<` compares UTF-16 code
@@ -486,13 +423,11 @@ export function compileExprOperator(
           args.every((x) => !x.isCollection || isProvablyStringOperand(x)) &&
           !relationalOverCollection &&
           !orderingOverString &&
-          !orderingOverCharacter &&
-          !pyOrderingUnfaithful &&
-          !pyConnectiveOverCollection
+          !orderingOverCharacter
         ) {
           if (isRelationalOperator(h) && args.length > 2) {
             // Chain relational operators, conjoined with the target's chain
-            // operator (`&&` by default; Python `and`).
+            // operator (`&&` by default).
             //
             // A middle operand appears in TWO comparisons (`a < m < b` →
             // `(a < m) && (m < b)`). Emitting it twice would evaluate it
@@ -515,13 +450,13 @@ export function compileExprOperator(
             // interpreter's argument order (`Less(Random(), Random(), 0.9)`
             // drew the middle first). So as soon as an impure operand is
             // bound at all, bind EVERY impure operand, in argument order:
-            // `bindExpr`'s application form (JS `((a, b) => …)(x, y)`,
-            // Python `(lambda a, b: …)(x, y)`) and the hoisted-statement sink
+            // `bindExpr`'s application form (JS `((a, b) => …)(x, y)`)
+            // and the hoisted-statement sink
             // both evaluate left to right, so the draws then follow argument
             // order. A chain with no impure operand is untouched.
             //
-            // On a target with `bindExpr` (JavaScript, interval-JavaScript,
-            // Python), an operand that runs code the caller supplied (a
+            // On a target with `bindExpr` (JavaScript, interval-JavaScript),
+            // an operand that runs code the caller supplied (a
             // `vars` entry `W: 'nextValue()'`, a head mapped through
             // `functions`) counts as impure here, also when it is a bare
             // symbol: that code can count its calls or draw a number
@@ -710,8 +645,7 @@ export function compileExprOperator(
             // `Power` is right-associative: `a ** b ** c` parses as
             // `a ** (b ** c)`. So a *left* operand of equal precedence must
             // be parenthesized — otherwise `(a^b)^c` would emit the
-            // right-associative `a ** b ** c` (wrong grouping in Python,
-            // where `**` is the only right-associative arithmetic operator).
+            // right-associative `a ** b ** c` (wrong grouping).
             const rightAssoc = h === 'Power';
             // `Subtract`/`Divide` are left-associative and *non*-associative:
             // `a - (b - c) ≠ (a - b) - c`. So a *right* operand of equal

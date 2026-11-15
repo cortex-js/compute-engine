@@ -43,7 +43,7 @@ import {
  * `expr` with the point values and the point calls written in place
  * (`inlinePointValues` and `inlinePointCalls`), for the root of a
  * compilation on a target that is not a shader target (`javascript`,
- * `interval-js`, `python`). `expr` itself when `expr` has no symbol whose
+ * `interval-js`). `expr` itself when `expr` has no symbol whose
  * type admits a point and a list of points and no call whose type admits
  * an inlined point: the rewrites then change nothing, and the walks they
  * need (the reachable names, the binding checks) are not done.

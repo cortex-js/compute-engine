@@ -189,16 +189,6 @@ describe('cross-target compilation', () => {
       expect(compileOn(t, ['ElementMin', 'x', 0]).code).toContain('min(');
     }
   });
-
-  test('python: map to np.clip / np.maximum / np.minimum', () => {
-    expect(compileOn('python', ['Clamp', 'x', 0, 1]).code).toContain('np.clip');
-    expect(compileOn('python', ['ElementMax', 'x', 0]).code).toContain(
-      'np.maximum'
-    );
-    expect(compileOn('python', ['ElementMin', 'x', 0]).code).toContain(
-      'np.minimum'
-    );
-  });
 });
 
 describe('LaTeX round-trip', () => {

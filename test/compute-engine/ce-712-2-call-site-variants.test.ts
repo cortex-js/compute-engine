@@ -7,7 +7,7 @@
  * - a scalar argument: the direct call, `_fn_f(_.x)`;
  * - a list argument at a scalar parameter: a static map whose depth is the
  *   list rank of the argument, `_SYS.mapFn(_fn_f, [1], _.L)` on
- *   JavaScript, `_IA.mapFn(…)` on interval-js, a comprehension on Python;
+ *   JavaScript, `_IA.mapFn(…)` on interval-js;
  * - an argument with no settled shape (a parameter declared `any`): the
  *   call declines, and the interpreter fallback names the argument in
  *   `unsupported` (rule R3).
@@ -20,11 +20,9 @@
  * and R3 of `docs/plans/2026-10-31-static-shape-compilation.md`.
  */
 
-import { execFileSync } from 'node:child_process';
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { TEST_PYTHON } from './test-python';
 
 type Value = number | Value[];
 
@@ -87,19 +85,6 @@ function expectClose(actual: Value, expected: Value): void {
   } else expect(actual).toBeCloseTo(expected, 12);
 }
 
-/** The value of the Python code of `expr` with the inputs of `VARS`. */
-function pythonValue(code: string, names: string[]): Value {
-  const assign = names.map((k) => `${k} = ${JSON.stringify(VARS[k])}`);
-  const script = [
-    'import json, math',
-    ...assign,
-    `print(json.dumps(${code}))`,
-  ].join('\n');
-  return JSON.parse(
-    execFileSync(TEST_PYTHON!, ['-c', script], { encoding: 'utf8' })
-  );
-}
-
 const Q = [
   'Declare',
   'q',
@@ -140,25 +125,25 @@ const ROWS: [string, unknown, string | undefined, string[]][] = [
     'row 12: Apply(t ↦ 2t, L)',
     ['Apply', ['Function', ['Multiply', 2, 't'], 't'], 'L'],
     '_SYS.mapFn((((t) => 2 * t)), [1], _.L)',
-    ['javascript', 'python'],
+    ['javascript'],
   ],
   [
     'Apply((t, s) ↦ t + s, M, x)',
     ['Apply', ['Function', ['Add', 't', 's'], 't', 's'], 'M', 'x'],
     '_SYS.mapFn((((t, s) => s + t)), [2, 0], _.M, _.x)',
-    ['javascript', 'python'],
+    ['javascript'],
   ],
   [
     'row 14: Block(q ≔ s ↦ 3s, q(L))',
     ['Block', Q, ['q', 'L']],
     undefined,
-    ['javascript', 'interval-js', 'python'],
+    ['javascript', 'interval-js'],
   ],
   [
     'row 15: Block(q ≔ s ↦ 3s, q(x) + q(y))',
     ['Block', Q, ['Add', ['q', 'x'], ['q', 'y']]],
     undefined,
-    ['javascript', 'interval-js', 'python'],
+    ['javascript', 'interval-js'],
   ],
 ];
 
@@ -177,12 +162,6 @@ describe('CE-712.2: the static type of an argument selects the call', () => {
         expectClose(r.run!(VARS as any) as Value, expected);
       } else if (to === 'interval-js')
         expectClose(fromIntervals(r.run!(VARS as any)), expected);
-      else if (TEST_PYTHON !== undefined) {
-        // The root of a Python compilation can be a block of statements;
-        // only an expression is evaluated here.
-        if (!r.code.includes('\n'))
-          expectClose(pythonValue(r.code, Object.keys(VARS)), expected);
-      }
     }
   });
 
@@ -192,17 +171,6 @@ describe('CE-712.2: the static type of an argument selects the call', () => {
       fallback: false,
     });
     expect(r.code).toContain('return q(_.x) + q(_.y)');
-  });
-
-  test('python: the block-local call over a list is a comprehension', () => {
-    const ce = engine();
-    const r = compile(ce.box(['Block', Q, ['q', 'L']]), {
-      to: 'python',
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('[q(');
-    expect(r.code).toContain(' for ');
   });
 });
 

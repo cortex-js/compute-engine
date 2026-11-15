@@ -4,7 +4,6 @@ import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { validEpsil } from '../utils';
 
 //
@@ -535,14 +534,5 @@ describe('EPSIL WHILE LET — compilation', () => {
     const r = compile(expr);
     expect(r.success).toBe(true);
     expect(r.run()).toBe(3);
-  });
-
-  test('the Python target fails closed on the Match', () => {
-    const ce = new ComputeEngine();
-    const [ast, diags] = parseEpsil(source);
-    expect(diags).toEqual([]);
-    expect(() =>
-      new PythonTarget().compileFunction(ce.box(ast!), 'g', [])
-    ).toThrow(/Could not compile `Match`: pattern matching is not supported/);
   });
 });

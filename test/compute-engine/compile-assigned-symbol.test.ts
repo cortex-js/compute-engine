@@ -152,17 +152,12 @@ describe('COMPILE: assigned-symbol folding', () => {
     // it to `1.5707963267948966` and the parenthesization this test pins
     // would no longer be observable. The splicing under test is unaffected.
     // The JavaScript target binds the compound value once and reads it by
-    // name; Python folds it inline, which is where the parenthesization
-    // shows.
+    // name.
     const js = ce
       ._getCompilationTarget('javascript')!
       .compile(expr, { constantFold: false });
     expect(js.code).toBe('Math.sin(_val_a * _.x)');
     expect(js.preamble).toContain('const _val_a = 0.5 * Math.PI;');
-    expect(
-      ce._getCompilationTarget('python')!.compile(expr, { constantFold: false })
-        .code
-    ).toBe('np.sin((0.5 * np.pi) * x)');
   });
 
   // A symbol assigned a *symbolic* value whose value itself references a free
@@ -184,13 +179,10 @@ describe('COMPILE: assigned-symbol folding', () => {
       const r = ce
         ._getCompilationTarget('javascript')!
         .compile(ce.parse('b x'));
-      // Bound once on JavaScript; spliced inline (parenthesized) on Python.
+      // Bound once on JavaScript.
       expect(r.code).toBe('_val_b * _.x');
       expect(r.preamble).toContain('const _val_b = _.c + 1;');
       expect(r.run!({ c: 2, x: 3 })).toBe(9); // (2+1)*3
-      expect(
-        ce._getCompilationTarget('python')!.compile(ce.parse('b x')).code
-      ).toBe('(c + 1) * x');
     });
 
     it('parenthesizes the compound value under a coefficient and a power', () => {
@@ -542,7 +534,7 @@ describe('COMPILE: a declared vars-mapped input compiles as if it had no value (
     '\\int_0^x a t\\,dt',
     'a^{1/2} + n x',
   ];
-  for (const to of ['javascript', 'python', 'glsl', 'interval-js']) {
+  for (const to of ['javascript', 'glsl', 'interval-js']) {
     it(`${to}: the output is the same with and without the held value`, () => {
       for (const src of sources) {
         const emit = (withValue: boolean) => {

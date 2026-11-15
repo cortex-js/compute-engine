@@ -246,7 +246,7 @@ export function isRealOnlyLoweringHead(h: string): boolean {
  * there. Each target declares its own real-only lowerings
  * (`CompileTarget.isRealOnlyLowering`): the same head can be real-only on
  * one target and have a complex lowering on another (`Erf` is real-only on
- * JavaScript and takes a complex argument on Python). A target that
+ * JavaScript and has a complex lowering on another). A target that
  * declares nothing gets the default: the heads in
  * `REAL_ONLY_BY_DEFINITION`, and every head it maps to a plain helper name
  * (`stringHelperIsRealOnly`). An interval target, and a target with no
@@ -276,7 +276,7 @@ export function isRealOnlyLowering(
  * complex value returns a wrong value, not NaN (`_SYS.erf` of a complex
  * `z` answered −1). The heads that consume a complex value by definition
  * (`Real`, `Imaginary`, `Argument`, `Conjugate`) are excluded: some
- * targets map them to a complex-aware routine (Python `np.real`).
+ * targets map them to a complex-aware routine.
  */
 export function stringHelperIsRealOnly(
   h: string,

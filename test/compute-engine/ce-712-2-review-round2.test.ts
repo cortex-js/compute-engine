@@ -21,10 +21,8 @@
  * listed as compiled on a target must compile there.
  */
 
-import { execFileSync } from 'node:child_process';
-import { ComputeEngine, PythonTarget } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { TEST_PYTHON } from './test-python';
 import { variantResultType } from '../../src/compute-engine/compilation/compiler-core';
 import { typeToString } from '../../src/common/type/serialize';
 
@@ -68,15 +66,8 @@ const INPUTS: Record<string, Json> = {
   PC: ['List', ['Tuple', 1, 2], ['Tuple', 3]],
 };
 
-/** `ce` with the Python target, which an engine does not register by
- * default: without it, a compilation to `python` gives no code. */
-function withPython(ce: ComputeEngine): ComputeEngine {
-  ce.registerCompilationTarget('python', new PythonTarget());
-  return ce;
-}
-
 function makeEngine(): ComputeEngine {
-  const ce = withPython(new ComputeEngine());
+  const ce = new ComputeEngine();
   ce.declare('P', 'list<tuple<real, real>>');
   ce.declare('rows', 'list<list<tuple<real, real>>>');
   ce.declare('R', 'list<list<real>>');
@@ -203,37 +194,6 @@ function compiled(ce: ComputeEngine, expr: Json, to: string) {
   }
 }
 
-function runPython(code: string, preamble: string | undefined): unknown {
-  const src = [
-    'import json, math',
-    'import numpy as np',
-    `P = [tuple(p) for p in ${JSON.stringify(VALUES.P)}]`,
-    `rows = [[tuple(p) for p in r] for r in ${JSON.stringify(VALUES.rows)}]`,
-    `R = ${JSON.stringify(VALUES.R)}`,
-    ...['G', 'W'].map(
-      (n) =>
-        `${n} = [None if p is None else tuple(p) for p in json.loads('${JSON.stringify(VALUES[n])}')]`
-    ),
-    'C = [1, (3, 4)]',
-    'CS = [1, (3, 4)]',
-    'PC = [(1, 2), (3,)]',
-    preamble ?? '',
-    `v = ${code}`,
-    'def plain(v):',
-    '    if v is None: return None',
-    '    if isinstance(v, (list, tuple)): return [plain(e) for e in v]',
-    '    return float(v)',
-    'print(json.dumps(plain(v)))',
-  ].join('\n');
-  const out = execFileSync(TEST_PYTHON!, ['-c', src], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  }).toString();
-  // `None`, the compiled `Missing`, is `null` in JSON.
-  const absent = (v: unknown): unknown =>
-    v === null ? undefined : Array.isArray(v) ? v.map(absent) : v;
-  return absent(JSON.parse(out));
-}
-
 const SEVEN = ['Function', 7, 't'];
 const TWO_T = ['Function', ['Multiply', 2, 't'], 't'];
 /** The call `call` in a block that binds the local `g` to `fn`. */
@@ -332,17 +292,17 @@ const CASES: [string, Json, string[]][] = [
     ['javascript'],
   ],
   // A literal: the interpreter binds each element of the source whole.
-  ['Map(t ↦ 7, P)', ['Map', SEVEN, 'P'], ['javascript', 'python']],
-  ['Map(t ↦ 7, rows)', ['Map', SEVEN, 'rows'], ['javascript', 'python']],
+  ['Map(t ↦ 7, P)', ['Map', SEVEN, 'P'], ['javascript']],
+  ['Map(t ↦ 7, rows)', ['Map', SEVEN, 'rows'], ['javascript']],
   [
     'Map((t: unknown) ↦ 7, rows)',
     ['Map', UNKNOWN_SEVEN, 'rows'],
-    ['javascript', 'python'],
+    ['javascript'],
   ],
   // A literal, and a named function whose body reads its parameter, bind
   // each point whole: `Apply(t ↦ 7, P)` is `[7, 7]` and `Map(fl, P)` is
   // `[2, 2]`.
-  ['Apply(t ↦ 7, P)', ['Apply', SEVEN, 'P'], ['javascript', 'python']],
+  ['Apply(t ↦ 7, P)', ['Apply', SEVEN, 'P'], ['javascript']],
   ['Map(fl, P)', ['Map', 'fl', 'P'], ['javascript']],
   // Points of two widths: the list levels do not settle one shape, so the
   // call declines with `unsettled-shape` (rule R3).
@@ -355,7 +315,7 @@ const CASES: [string, Json, string[]][] = [
   [
     'Map((x: unknown, k: real = 2) ↦ k, R)',
     ['Map', UNKNOWN_DEFAULT, 'R'],
-    ['javascript', 'python'],
+    ['javascript'],
   ],
 ];
 
@@ -375,7 +335,7 @@ const NOMINAL_CASES: [string, Json][] = [
 
 describe('a list of values of a nominal type', () => {
   test.each(NOMINAL_CASES)('%s declines or compiles', (_label, expr) => {
-    for (const to of ['javascript', 'interval-js', 'python']) {
+    for (const to of ['javascript', 'interval-js']) {
       const r = compiled(makeEngine(), expr, to);
       expect(r === undefined || typeof r.code === 'string').toBe(true);
     }
@@ -407,15 +367,6 @@ describe('a compiled value equals the interpreter value', () => {
       return;
     }
     expectClose(intervalValue(actual), expected);
-  });
-
-  const py = TEST_PYTHON === undefined ? test.skip : test;
-  py.each(CASES)('%s on python', (_label, expr, required) => {
-    const ce = makeEngine();
-    const r = compiled(ce, expr, 'python');
-    if (required.includes('python')) expect(r).toBeDefined();
-    if (r === undefined) return;
-    expectClose(runPython(r.code, r.preamble), interpreted(ce, expr));
   });
 });
 
@@ -480,8 +431,7 @@ describe('the result type of the variant of a call over a list of points', () =>
 // is a number, or a list of any depth whose leaves are numbers. The host
 // that declares this type asks for an open rank, so a call of a function
 // with scalar parameters maps the function over every list level at run
-// time, with the broadcast helper of the operators, as `b + 1` does. The
-// Python target has no such map, and the call declines there.
+// time, with the broadcast helper of the operators, as `b + 1` does.
 describe('a call over an argument declared broadcastable<real>', () => {
   const BVALUES: [string, unknown, Json][] = [
     ['a number', 2, 2],
@@ -489,7 +439,7 @@ describe('a call over an argument declared broadcastable<real>', () => {
     ['a list of lists', [[1, 2], [3]], ['List', ['List', 1, 2], ['List', 3]]],
   ];
   const engine = (): ComputeEngine => {
-    const ce = withPython(new ComputeEngine());
+    const ce = new ComputeEngine();
     ce.declare('b', 'broadcastable<real>');
     ce.declare('L', 'list<real>');
     ce.box(['DefineFunction', 'g', ['Function', ['Add', 't', 1], 't']] as never).evaluate();
@@ -548,11 +498,6 @@ describe('a call over an argument declared broadcastable<real>', () => {
     // admits only scalars beside the value of open rank.
     expect(compiled(engine(), ['h', 'b', 'L'], 'javascript')).toBeUndefined();
   });
-
-  test('an Apply over the value declines on python', () => {
-    const expr = ['Apply', ['Function', ['Add', 't', 1], 't'], 'b'];
-    expect(compiled(engine(), expr, 'python')).toBeUndefined();
-  });
 });
 
 // One point named through a nominal type (`Row`, declared `tuple<real,
@@ -563,7 +508,7 @@ describe('a call over an argument declared broadcastable<real>', () => {
 // coordinate.
 describe('one point named through an alias or a nominal type', () => {
   const engine = (): ComputeEngine => {
-    const ce = withPython(new ComputeEngine());
+    const ce = new ComputeEngine();
     ce.declareType('Row', 'tuple<real, real>');
     ce.declareType('mpt', 'tuple<real, real>', { alias: true });
     ce.declare('r', 'Row');
@@ -618,7 +563,7 @@ describe('one point named through an alias or a nominal type', () => {
       // must decline or compile.
       if (s === 'r') {
         test(`${label} for ${what} declines or compiles`, () => {
-          for (const to of ['javascript', 'interval-js', 'python']) {
+          for (const to of ['javascript', 'interval-js']) {
             const r = compiled(engine(), expr, to);
             expect(r === undefined || typeof r.code === 'string').toBe(true);
           }
@@ -642,44 +587,6 @@ describe('one point named through an alias or a nominal type', () => {
           interpretedP(ce, expr, s, mj)
         );
       });
-      const py = TEST_PYTHON === undefined ? test.skip : test;
-      py(`${label} for ${what} on python`, () => {
-        const ce = engine();
-        const r = compiled(ce, expr, 'python');
-        if (r === undefined) return;
-        const src = [
-          'import json, math',
-          'import numpy as np',
-          `${s} = ${js === undefined ? 'None' : `(${(js as number[]).join(', ')})`}`,
-          'x = 3',
-          r.preamble ?? '',
-          // The code of a block is a list of statements that ends with a
-          // `return`.
-          ...(r.code.includes('\n')
-            ? ['def _f():', ...r.code.split('\n').map((l) => `    ${l}`), 'v = _f()']
-            : [`v = ${r.code}`]),
-          'def plain(v):',
-          '    if v is None: return None',
-          '    if isinstance(v, (list, tuple)): return [plain(e) for e in v]',
-          '    f = float(v)',
-          '    return "NaN" if f != f else f',
-          'print(json.dumps(plain(v)))',
-        ].join('\n');
-        const out = JSON.parse(
-          execFileSync(TEST_PYTHON!, ['-c', src], {
-            stdio: ['ignore', 'pipe', 'pipe'],
-          }).toString()
-        );
-        const back = (v: unknown): unknown =>
-          v === null
-            ? undefined
-            : v === 'NaN'
-              ? NaN
-              : Array.isArray(v)
-                ? v.map(back)
-                : v;
-        expectSame(back(out), interpretedP(ce, expr, s, mj));
-      });
     }
 
   test('the values of the interpreter', () => {
@@ -693,15 +600,14 @@ describe('one point named through an alias or a nominal type', () => {
 
   // A function local to a block is bound as the literal compiled for a
   // scalar parameter. On JavaScript the call applies the literal compiled
-  // for one point; another target declines, also for a plain tuple: the
-  // Python product `2 * y` repeats the tuple `y`.
+  // for one point; another target declines, also for a plain tuple.
   test('the call of a block-local function', () => {
     const ce = engine();
     ce.declare('y', 'tuple<real, real>');
     expect(compiled(ce, LOCAL(TWO_T, ['g', 'r']), 'javascript')!.code).toBe(
       '(() => {\nlet g = ((t) => 2 * t);\nreturn (((t) => [(2 * t[0]), (2 * t[1])]))(_.r)\n})()'
     );
-    for (const to of ['interval-js', 'python']) {
+    for (const to of ['interval-js']) {
       for (const s of ['r', 'm', 'y'])
         expect(compiled(ce, LOCAL(TWO_T, ['g', s]), to)).toBeUndefined();
     }
@@ -730,7 +636,7 @@ describe('one point named through an alias or a nominal type', () => {
 // `broadcastable<real>` or a list of points.
 describe('a value of a nominal type whose definition is a list', () => {
   const engine = (): ComputeEngine => {
-    const ce = withPython(new ComputeEngine());
+    const ce = new ComputeEngine();
     ce.declareType('bn', 'broadcastable<real>');
     ce.declareType('Rows', 'list<tuple<real, real>>');
     ce.declare('b', 'broadcastable<real>');
@@ -750,7 +656,7 @@ describe('a value of a nominal type whose definition is a list', () => {
   // there is no value for a list `b` to match.
   test('a call beside an argument of open rank declines', () => {
     const ce = engine();
-    for (const to of ['javascript', 'interval-js', 'python'])
+    for (const to of ['javascript', 'interval-js'])
       expect(compiled(ce, ['f', 'b', 'n'], to)).toBeUndefined();
     expect(
       ce

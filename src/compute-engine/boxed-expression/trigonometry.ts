@@ -753,7 +753,7 @@ function bigZeroAndPoleDust(
  * The machine counterpart of `bigPoleDust`: the value `~oo` when the angle
  * `x` (in radians) is within its rounding error of a pole, that is when
  * `|value|·min(|x|, 2⁴⁰)·100·2⁻⁵³ ≥ 1` (`isMachineTrigPole`). Compiled
- * JavaScript and Python use the same rule, and the routes must agree at
+ * JavaScript uses the same rule, and the routes must agree at
  * every argument (`test/compute-engine/compile-trig-poles.test.ts`).
  */
 function poleDust(

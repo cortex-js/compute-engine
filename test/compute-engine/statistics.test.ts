@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 // Phase 2 statistics: Covariance/PopulationCovariance/Correlation,
 // LinearRegression/PolynomialFit, and the empirical `Quantile` overload.
@@ -609,22 +608,6 @@ describe('compilation', () => {
       ce.box(['Correlation', L(NX), L(NY)]).N().re,
       10
     );
-  });
-
-  test('Python codegen for cov/corr', () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', 'list<real>');
-    ce.declare('b', 'list<real>');
-    const py = new PythonTarget();
-    expect(
-      py.compile(ce.box(['Covariance', ce.symbol('a'), ce.symbol('b')])).code
-    ).toBe('np.cov(a, b)[0][1]');
-    expect(
-      py.compile(ce.box(['PopulationCovariance', ce.symbol('a'), ce.symbol('b')])).code
-    ).toBe('np.cov(a, b, ddof=0)[0][1]');
-    expect(
-      py.compile(ce.box(['Correlation', ce.symbol('a'), ce.symbol('b')])).code
-    ).toBe('np.corrcoef(a, b)[0][1]');
   });
 });
 

@@ -76,9 +76,7 @@ import {
   expressionParameterReadAt,
   isNominalAtomicArg,
   paramElementTypeIsOpen,
-  admitsAbsentAtMappedLevel,
   provablyScalarOrFramedScalar,
-  pythonMapCall,
   signatureParamsLowerToScalars,
   userFunctionParamType,
 } from './compile-user-calls.js';
@@ -1752,7 +1750,7 @@ function userFunctionValueRefWithoutDefaults(
       passed,
       literal === undefined ? 0 : literal.ops.length - 1
     );
-    const mapped = staticMapCallback(name, ranks, target, passed.types);
+    const mapped = staticMapCallback(name, ranks, target);
     if (mapped === undefined)
       throw new Error(
         `Could not compile the function value \`${h}\`: its consumer ` +
@@ -1838,7 +1836,7 @@ function userFunctionValueRefWithoutDefaults(
   );
   if (pointRef !== undefined) return pointRef;
   const ranks = callbackArgumentRanks(h, passed, nParams);
-  return mappedValueRef(name, callee, ranks, registry, target, passed.types);
+  return mappedValueRef(name, callee, ranks, registry, target);
 }
 
 /**
@@ -2021,7 +2019,7 @@ function pointListValueRef(
   // A point that is absent (`list<tuple<real, real> | missing>`) is passed
   // to the definition for one point as it is: a function applied to an
   // absent value has no specified value in compiled code.
-  return mappedValueRef(point, point, ranks, registry, target, passed.types);
+  return mappedValueRef(point, point, ranks, registry, target);
 }
 
 /**
@@ -2095,7 +2093,7 @@ export function namedPointArgumentAtUntypedParameter(
  *
  * On JavaScript:
  * `((_tv1) => _tv1 === undefined ? _fn_f2(_tv1) : _fn_f2_point(_tv1))(_.e)`.
- * Throws on a target other than JavaScript and Python.
+ * Throws on a target other than JavaScript.
  */
 export function absentPointFork(
   point: string,
@@ -2108,8 +2106,6 @@ export function absentPointFork(
   const list = params.join(', ');
   if (target.language === 'javascript')
     return `((${list}) => ${params[at]} === undefined ? ${scalar}(${list}) : ${point}(${list}))(${args.join(', ')})`;
-  if (target.language === 'python')
-    return `(lambda ${list}: ${scalar}(${list}) if ${params[at]} is None else ${point}(${list}))(${args.join(', ')})`;
   throw new Error(
     `Could not compile the call: an argument is one point that may be ` +
       `absent, at a parameter with no declared type, and the ` +
@@ -2138,8 +2134,8 @@ export function absentPointFork(
  * point of a tuple type at position `i` is typed as the point too: the
  * caller knows that the literal reads the parameter there as a scalar
  * (`bindsOnePointAsUndeclared()`). Throws (the `Apply` declines) when
- * the typed literal is not valid, when the target is not JavaScript or
- * Python, or when a point that may be absent is beside another point or
+ * the typed literal is not valid, when the target is not JavaScript,
+ * or when a point that may be absent is beside another point or
  * an argument that is not a scalar: the definition for a scalar would
  * receive that argument.
  */
@@ -2170,7 +2166,7 @@ export function appliedLiteralNamedPointCall(
         `parameter with no declared type, which the interpreter binds ` +
         `whole, and ${why}`
     );
-  if (target.language !== 'javascript' && target.language !== 'python')
+  if (target.language !== 'javascript')
     throw decline(
       `the '${target.language ?? 'unknown'}' target does not compile the ` +
         `literal for one point.`
@@ -2223,7 +2219,7 @@ export function appliedLiteralNamedPointCall(
  * `codes` are the compiled arguments. Throws (the `Apply` declines) when
  * the list levels do not lead to one point type, when another argument is
  * not a scalar, when the typed literal is not valid, or when the target is
- * not JavaScript or Python.
+ * not JavaScript.
  */
 export function appliedLiteralPointListCall(
   literal: Expression,
@@ -2252,7 +2248,7 @@ export function appliedLiteralPointListCall(
     );
   const below = pointsBelowLists(args[at].type.type);
   if (!below) throw decline(`the list levels do not lead to one point type.`);
-  if (target.language !== 'javascript' && target.language !== 'python')
+  if (target.language !== 'javascript')
     throw decline(
       `the '${target.language ?? 'unknown'}' target does not compile the ` +
         `literal for one point.`
@@ -2269,36 +2265,19 @@ export function appliedLiteralPointListCall(
       `the literal with the parameter typed as the point is not valid.`
     );
   const t = args[at].type.type;
-  // On Python, the literal compiled for any argument raises a `TypeError`
-  // for `None` when its body reads the parameter (`max(None, 0)`,
-  // `abs(None)`, `np.sin(None)`), where the interpreter runs the body with
-  // `Missing`: `Apply(t ↦ Max(t, 0), L)` with `L` absent is `NaN`. So a
-  // list that may be absent declines there, unless the body does not read
-  // the parameter (`t ↦ 7`).
-  if (target.language === 'python' && isSubtype('missing', t)) {
-    const name = functionLiteralParameterName(params[at]);
-    if (name === '' || literal.ops[0].symbols.includes(name))
-      throw decline(
-        `the list may be absent, and on Python the body, which reads the ` +
-          `parameter, fails on \`None\`.`
-      );
-  }
   const point = `(${compile(typed)})`;
   const scalar = `(${scalarCallee()})`;
   const mapped = staticMapCallback(
     point,
     args.map((_a, i) => (i === at ? below.rank : 0)),
-    target,
-    args.map((a) => a.type.type)
+    target
   );
   if (mapped === undefined)
     throw decline(`the target has no map of a function over a list.`);
   if (!isSubtype('missing', t)) return `(${mapped})(${codes.join(', ')})`;
   const temps = args.map(() => tempVar(target));
   const list = temps.join(', ');
-  if (target.language === 'javascript')
-    return `((${list}) => ${temps[at]} === undefined ? ${scalar}(${list}) : (${mapped})(${list}))(${codes.join(', ')})`;
-  return `(lambda ${list}: ${scalar}(${list}) if ${temps[at]} is None else (${mapped})(${list}))(${codes.join(', ')})`;
+  return `((${list}) => ${temps[at]} === undefined ? ${scalar}(${list}) : (${mapped})(${list}))(${codes.join(', ')})`;
 }
 
 /**
@@ -2312,15 +2291,14 @@ function mappedValueRef(
   callee: string,
   ranks: ReadonlyArray<number>,
   registry: UserFunctionRegistry,
-  target: CompileTarget<Expression>,
-  types?: ReadonlyArray<Type | undefined>
+  target: CompileTarget<Expression>
 ): string {
   if (!ranks.some((r) => r > 0)) return callee;
-  const wrapperName = `${name}$m${mapWrapperSuffix(ranks, types, target)}`;
+  const wrapperName = `${name}$m${mapWrapperSuffix(ranks)}`;
   if (!registry.defs.has(wrapperName))
     registry.defs.set(
       wrapperName,
-      `const ${wrapperName} = ${staticMapCallback(callee, ranks, target, types)};`
+      `const ${wrapperName} = ${staticMapCallback(callee, ranks, target)};`
     );
   return wrapperName;
 }
@@ -2558,7 +2536,7 @@ export function multiClauseValueRef(
   // at a callback position (user decision of 2026-09-22), whether its
   // parameters are declared scalars or left open.
   const ranks = callbackArgumentRanks(h, passed, passed.types.length);
-  return mappedValueRef(name, name, ranks, registry, target, passed.types);
+  return mappedValueRef(name, name, ranks, registry, target);
 }
 
 /**
@@ -2717,39 +2695,11 @@ export function callbackArgumentRanks(
 }
 
 /**
- * For each value that a consumer passes to a callback mapped with `ranks`,
- * true when its static type (`types[i]`) admits an absent value at a
- * mapped level, so the Python comprehension must test it with `is None`
- * (`pythonMapCall()`). A value with no known type is not flagged: its rank
- * was settled from a type, so `types[i]` is known when `ranks[i] > 0`.
- */
-export function pythonCallbackAbsentFlags(
-  ranks: ReadonlyArray<number>,
-  types: ReadonlyArray<Type | undefined> | undefined
-): boolean[] {
-  return ranks.map((r, i) => {
-    const t = types?.[i];
-    return t !== undefined && admitsAbsentAtMappedLevel(t, r);
-  });
-}
-
-/**
  * The name suffix of a static-map wrapper for the ranks `ranks`: the ranks
- * (`1_0`), and on Python the indices of the values tested for absence
- * (`pythonCallbackAbsentFlags()`), so two wrappers whose code differs never
- * share one name.
+ * (`1_0`).
  */
-export function mapWrapperSuffix(
-  ranks: ReadonlyArray<number>,
-  types: ReadonlyArray<Type | undefined> | undefined,
-  target: CompileTarget<Expression>
-): string {
-  const base = ranks.join('_');
-  if (target.language !== 'python') return base;
-  const flagged = pythonCallbackAbsentFlags(ranks, types)
-    .map((f, i) => (f ? i : -1))
-    .filter((i) => i >= 0);
-  return flagged.length === 0 ? base : `${base}$a${flagged.join('_')}`;
+export function mapWrapperSuffix(ranks: ReadonlyArray<number>): string {
+  return ranks.join('_');
 }
 
 /**
@@ -2757,32 +2707,16 @@ export function mapWrapperSuffix(
  * `ranks` (`callbackArgumentRanks()`): `callee` itself when every rank is
  * 0, else an arrow of `ranks.length` parameters that maps `callee` over the
  * list values, `(_tv1) => _SYS.mapFn(callee, [1], _tv1)` on JavaScript and
- * `_IA.mapFn` on interval-js, and a nested comprehension on Python
- * (`pythonMapCall()`). The callee is bound once, so the arrow is not built
- * again at each element. `undefined` on a target with no map.
- *
- * `types` are the static types of the values that the consumer passes
- * (`CallbackArguments.types`). On Python, a value whose type admits an
- * absent value at a mapped level (`list<real> | missing`) is tested with
- * `is None` at that level, and an absent value goes to the callee
- * unchanged (`pythonCallbackAbsentFlags()`). The JavaScript and interval
- * helpers do this at run time for every value, so they need no flag.
+ * `_IA.mapFn` on interval-js. The callee is bound once, so the arrow is
+ * not built again at each element. `undefined` on a target with no map.
+ * The JavaScript and interval helpers test an absent value at run time.
  */
 export function staticMapCallback(
   callee: string,
   ranks: ReadonlyArray<number>,
-  target: CompileTarget<Expression>,
-  types?: ReadonlyArray<Type | undefined>
+  target: CompileTarget<Expression>
 ): string | undefined {
   if (!ranks.some((r) => r > 0)) return callee;
-  if (target.language === 'python') {
-    const params = ranks.map(() => tempVar(target));
-    const named = /^[A-Za-z_][A-Za-z0-9_]*$/.test(callee);
-    const fn = named ? callee : tempVar(target);
-    const absent = pythonCallbackAbsentFlags(ranks, types);
-    const inner = `(lambda ${params.join(', ')}: ${pythonMapCall(fn, ranks, params, [], target, absent)})`;
-    return named ? inner : `((lambda ${fn}: ${inner})(${callee}))`;
-  }
   const helper =
     target.language === 'javascript'
       ? '_SYS.mapFn'
@@ -3001,7 +2935,7 @@ function localFunctionCallback<T>(
     passed,
     passed.types.length
   );
-  const mapped = staticMapCallback(code, ranks, target, passed.types);
+  const mapped = staticMapCallback(code, ranks, target);
   if (mapped === undefined)
     throw new Error(
       `Could not compile the callback \`${callback.symbol}\`: its consumer ` +

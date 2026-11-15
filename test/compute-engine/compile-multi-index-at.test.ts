@@ -10,13 +10,8 @@
  * modes `auto` and `strict`. The compiler now rewrites the chain to the
  * nested access before it calls the lowering of a target.
  */
-import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { TEST_PYTHON } from './test-python';
 
 /** The declared type of `R` and the value given to it. */
 const BASES: [string, unknown[]][] = [
@@ -222,46 +217,6 @@ describe('A chained read has the type of the nested read', () => {
   });
 });
 
-describe('Python: an index that is a collection declines', () => {
-  // The Python lowering of `At` reads a scalar index only. It compared the
-  // list index `[2, 1]` with integers and raised a `TypeError` at run time.
-  // The interpreter reads the gather.
-  test.each([
-    [['At', 'R', ['List', 2, 1]]],
-    [['At', 'R', ['List', 2, 1], 1]],
-    [['At', 'R', ['List', 'True', 'False']]],
-  ])('%j', (json) => {
-    const ce = engine('list<list<real>>');
-    expect(() =>
-      new PythonTarget().compileFunction(ce.box(json as never), 'f', ['R'])
-    ).toThrow(/the index .* is or may be a collection/);
-  });
-
-  test('a `broadcastable<integer>` index', () => {
-    // A `broadcastable<integer>` value is an integer or a list of integers
-    // at run time, and it is not a subtype of `collection`.
-    const ce = new ComputeEngine();
-    ce.declare('L', 'list<real>');
-    ce.declare('bi', 'broadcastable<integer>');
-    expect(() =>
-      new PythonTarget().compileFunction(
-        ce.box(['At', 'L', 'bi'] as never),
-        'f',
-        ['L', 'bi']
-      )
-    ).toThrow(/the index .* is or may be a collection/);
-    // A scalar integer index still compiles.
-    ce.declare('i', 'integer');
-    expect(() =>
-      new PythonTarget().compileFunction(
-        ce.box(['At', 'L', 'i'] as never),
-        'f',
-        ['L', 'i']
-      )
-    ).not.toThrow();
-  });
-});
-
 describe('The interval target compiles a chained At', () => {
   // `R[1, 2]` of a rank-3 tensor is a row, which an interval cannot hold:
   // `_IA.at` answered `entire` where the interpreter gives `[3, 4]`. The
@@ -306,57 +261,5 @@ describe('Shader targets read a chained At as the nested access', () => {
     expect(() =>
       compile(ce.box(['At', 'R', 1, 2] as never), { to, fallback: false })
     ).toThrow(message);
-  });
-});
-
-function pythonHasNumpy(): boolean {
-  try {
-    if (TEST_PYTHON === undefined || !fs.existsSync(TEST_PYTHON)) return false;
-    execFileSync(TEST_PYTHON, ['-c', 'import numpy'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-const describePython = pythonHasNumpy() ? describe : describe.skip;
-
-describePython('Python: a chained At compiles as the nested access', () => {
-  // Python has no lowering of a call of an engine-level function, and no
-  // arithmetic on a row, so only the reads are compiled here. The gather
-  // `R[[2, 1], 1]` declines on Python (see the test below).
-  test.each(BASES.map(([t, v]) => [t, v]))('%s', (type, value) => {
-    const reads = READS.slice(0, 5);
-    const lines: string[] = ['import numpy as np', 'import math'];
-    const expected: string[] = [];
-    reads.forEach((json, i) => {
-      const ce = engine(type);
-      lines.push(
-        new PythonTarget().compileFunction(ce.box(json as never), `f${i}`, [
-          'R',
-          'n',
-        ]),
-        `_r = f${i}(${JSON.stringify(value)}, 2)`,
-        `print(__import__('json').dumps(_r if not (isinstance(_r, float) and math.isnan(_r)) else 'nan'))`
-      );
-      const v = interpreted(type, value, json);
-      expected.push(
-        JSON.stringify(
-          typeof v === 'number' && Number.isNaN(v)
-            ? 'nan'
-            : v === 'Missing'
-              ? null
-              : v
-        )
-      );
-    });
-    const out = execFileSync(TEST_PYTHON!, ['-c', lines.join('\n')], {
-      encoding: 'utf-8',
-    })
-      .trim()
-      .split('\n')
-      .map((line) => JSON.stringify(JSON.parse(line)));
-    expect(reads.map((r, i) => [r, out[i]])).toEqual(
-      reads.map((r, i) => [r, expected[i]])
-    );
   });
 });

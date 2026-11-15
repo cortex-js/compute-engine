@@ -921,15 +921,13 @@ GLSL a result of a run-time length; one of a stated length is a `vecN` or a
 
 `compile(expr, { profile: 'ir' })` on the `javascript` target compiles with this
 pipeline (experimental: the option can change or go without notice). All the
-glue is in `adapter.ts`; `compile-expression.ts` dispatches to it next to the
-`numeric-kernel` profile.
+glue is in `adapter.ts`; `compile-expression.ts` dispatches to it.
 
 - **A decline** (`Decline`, also a refusal of the target) is the public
   diagnostic `'outside-profile'`, with the head in `operator` and the node in
   `value`; any other error of the pipeline (`SliceInternalError`, a printer
-  error) is a `'compile-error'`. Both follow `fallback` as for the
-  `numeric-kernel` profile: the interpreter, or a throw with `fallback: false`.
-  A `CancellationError` is thrown as it is.
+  error) is a `'compile-error'`. Both follow `fallback`: the interpreter, or a
+  throw with `fallback: false`. A `CancellationError` is thrown as it is.
 - **Options.** One table classifies every option of `compile()` (`IR_OPTIONS` in
   `adapter.ts`; `compile-expression.ts` fails the type check when an option has
   no class). Mapped: `iterationBudget` ("Loops and the runtime"), `vars`
@@ -1009,10 +1007,9 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it next to the
 - **The measures.** `CE_JS_PROFILE=ir` makes the engine's own compilations
   (`implicitCompile()`) try the profile first and fall back to the existing
   compiler; `CE_JS_PROFILE_SHADOW=ir` also compiles every JavaScript `compile()`
-  with the profile, discards the result and counts it (`CE_JS_PROFILE_SHADOW=1`
-  still measures `numeric-kernel`). With `CE_JS_PROFILE_STATS=<dir>`,
-  `node scripts/js-profile-stats.mjs <dir>` prints the counts
-  (`docs/plans/2026-11-10-js-profile-first-consumer.md`).
+  with the profile, discards the result and counts it. With
+  `CE_JS_PROFILE_STATS=<dir>`, `node scripts/js-profile-stats.mjs <dir>` prints
+  the counts (`docs/plans/2026-11-10-js-profile-first-consumer.md`).
 
 `compile(expr, { to: 'glsl', profile: 'ir' })` compiles with this pipeline too
 (`adapter-glsl.ts`, batch G1 of

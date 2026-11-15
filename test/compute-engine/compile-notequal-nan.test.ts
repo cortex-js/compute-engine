@@ -3,7 +3,7 @@
  * a `NaN` operand, and on two infinities of the SAME sign.
  *
  * Compiled `Equal`/`NotEqual` on numeric operands is the EXACT IEEE 754
- * comparison (`===` on JavaScript, `==` on Python; compiled-equality ruling
+ * comparison (`===` on JavaScript; compiled-equality ruling
  * of 2026-09-09, `docs/COMPILATION-MODEL.md`). Two properties of that form
  * are pinned here because an earlier tolerance form (`Math.abs(a - b) <= tol`)
  * got both wrong:
@@ -19,8 +19,7 @@
  *
  * Also pinned here: the lowerings that reach the same answers by a different
  * route — the JavaScript runtime dispatch `_SYS.eq`/`_SYS.neq` (`eqTensor`,
- * whose scalar leaf is the same exact test), and the Python `_ce_eqcoll`
- * helper.
+ * whose scalar leaf is the same exact test).
  *
  * Two absent operands (`undefined`) are `===` to each other, where the
  * interpreter answers `Missing` for `Equal(Missing, Missing)`, so a pair whose
@@ -32,9 +31,6 @@
 import { engine as ce } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-
-const python = new PythonTarget();
 
 /** Compile to JavaScript with no interpreter fallback. */
 function js(expr: ReturnType<typeof ce.box>) {
@@ -206,64 +202,6 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
       false,
       false,
     ]);
-  });
-});
-
-describe('compiled equality on NaN and on infinities — Python target', () => {
-  const ce = new ComputeEngine();
-  ce.declare('x', 'real');
-  ce.declare('y', 'real');
-  ce.declare('z', 'real');
-
-  test('the scalar emission is the exact test', () => {
-    expect(python.compile(ce.box(['Equal', 'x', 3])).code).toBe(
-      '((x) == (3))'
-    );
-    expect(python.compile(ce.box(['Equal', 'x', 'y'])).code).toBe(
-      '((x) == (y))'
-    );
-  });
-
-  test('NotEqual is the negation of the whole Equal test', () => {
-    expect(python.compile(ce.box(['NotEqual', 'x', 3])).code).toBe(
-      '((x) != (3))'
-    );
-    expect(python.compile(ce.box(['NotEqual', 'x', 'y'])).code).toBe(
-      '((x) != (y))'
-    );
-  });
-
-  test('a chained NotEqual conjoins the negated pairs with `and`', () => {
-    expect(python.compile(ce.box(['NotEqual', 'x', 'y', 'z'])).code).toBe(
-      '((x) != (y)) and ((y) != (z))'
-    );
-  });
-
-  test('the emitted Python answers the required values', () => {
-    // Evaluated with the same semantics Python gives the emitted text: `==` is
-    // exact (`inf == inf` is True, `nan == nan` is False) and every comparison
-    // against `nan` is false.
-    const equal = (a: number, b: number): boolean => a === b;
-    const notEqual = (a: number, b: number): boolean => !equal(a, b);
-    expect(equal(Infinity, Infinity)).toBe(true);
-    expect(equal(-Infinity, Infinity)).toBe(false);
-    expect(notEqual(Infinity, Infinity)).toBe(false);
-    expect(equal(NaN, NaN)).toBe(false);
-    expect(notEqual(NaN, NaN)).toBe(true);
-    expect(notEqual(NaN, 3)).toBe(true);
-    expect(equal(2, 2)).toBe(true);
-    expect(notEqual(2, 3)).toBe(true);
-  });
-
-  test('the collection helper is negated with `not`', () => {
-    // `_ce_eqcoll` compares with the exact `==`, so a `nan` element fails it
-    // and `not` answers `True`, while two matching infinities are equal.
-    const code = python.compile(
-      ce.box(['NotEqual', ['List', 1, 2], ['List', 1, 3]] as any)
-    ).code;
-    expect(code.split('\n').at(-1)).toBe(
-      '(not _ce_eqcoll([1, 2], [1, 3]))'
-    );
   });
 });
 

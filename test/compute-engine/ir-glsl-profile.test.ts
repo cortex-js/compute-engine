@@ -1481,10 +1481,13 @@ describe('IR profile on GLSL: declines', () => {
     expect(!no.ok && no.diagnostic.code).toBe('outside-profile');
   });
 
-  test("the profile 'numeric-kernel' on glsl is still an error of the options", () => {
+  test("the removed profile 'numeric-kernel' is an unknown profile", () => {
     expect(() =>
-      compile(ce.box(['Sin', 'x']), { to: 'glsl', profile: 'numeric-kernel' })
-    ).toThrow(/defined for the target "javascript" only/);
+      compile(ce.box(['Sin', 'x']), {
+        to: 'glsl',
+        profile: 'numeric-kernel' as 'ir',
+      })
+    ).toThrow(/Invalid compilation option "profile": expected "ir"/);
   });
 });
 

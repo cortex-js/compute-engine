@@ -403,11 +403,10 @@ describe('`storage` option — validated everywhere, ignored off the shader targ
   const ce = boardEngine();
   const js = ce._getCompilationTarget('javascript')!;
   const interval = ce._getCompilationTarget('interval-js')!;
-  const python = ce._getCompilationTarget('python')!;
 
   test('an unknown storage kind is an error on every target', () => {
     const bad = { storage: { S: 'buffer' } } as any;
-    for (const target of [glsl, js, interval, python]) {
+    for (const target of [glsl, js, interval]) {
       const m = message(() => target.compile(read(ce), bad));
       expect(m).toMatch(/Invalid compilation option "storage"/);
       expect(m).toMatch(/"buffer", which is not one this version knows/);
@@ -437,7 +436,7 @@ describe('`storage` option — validated everywhere, ignored off the shader targ
   test('a hint naming something that is not a free symbol is an error on every target', () => {
     // The typo the validation exists for: `s` for `S`.
     const typo = { storage: { s: 'sampler2D' } } as const;
-    for (const target of [glsl, js, interval, python]) {
+    for (const target of [glsl, js, interval]) {
       const m = message(() => target.compile(read(ce), typo));
       expect(m).toMatch(/Invalid compilation option "storage"/);
       expect(m).toMatch(/"s" is not a free symbol of the expression/);
@@ -549,7 +548,7 @@ describe('`storage` option — validated everywhere, ignored off the shader targ
     );
   });
 
-  test('a valid hint is IGNORED on the JavaScript, interval and Python targets', () => {
+  test('a valid hint is IGNORED on the JavaScript and interval targets', () => {
     // One options bag serves every lane: the JavaScript lane receives the
     // same list in its argument bag, and the emitted code is unchanged.
     const plain = js.compile(read(ce), NO_FOLD);
@@ -565,11 +564,6 @@ describe('`storage` option — validated everywhere, ignored off the shader targ
     const iHinted = interval.compile(read(ce), { ...NO_FOLD, ...SAMPLER });
     expect(iHinted.success).toBe(true);
     expect(iHinted.code).toBe(iPlain.code);
-
-    const pPlain = python.compile(read(ce), NO_FOLD);
-    const pHinted = python.compile(read(ce), { ...NO_FOLD, ...SAMPLER });
-    expect(pHinted.success).toBe(true);
-    expect(pHinted.code).toBe(pPlain.code);
 
     // The engine-level entry too, on its default (JavaScript) target.
     expect(ce._compile(read(ce), { ...NO_FOLD, ...SAMPLER }).code).toBe(

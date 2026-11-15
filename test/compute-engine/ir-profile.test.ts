@@ -123,7 +123,7 @@ describe('the option selects the IR compiler', () => {
   });
   test('the option is an error with another target', () => {
     expect(() =>
-      compile(box(['Add', 'x', 1]), { ...IR, to: 'python' } as never)
+      compile(box(['Add', 'x', 1]), { ...IR, to: 'wgsl' } as never)
     ).toThrow(
       /the profile "ir" is defined for the targets "javascript", "glsl" and "interval-js" only/
     );
@@ -700,7 +700,7 @@ describe('stored code', () => {
 describe('the switch of the engine', () => {
   test('the engine tries the profile ir for its own compilations', () => {
     const engine = new ComputeEngine();
-    engine._jsProfile = { profile: 'ir' };
+    engine._jsProfile = {};
     const lambda = engine.box(['Function', ['Multiply', 'u', 2], 'u']);
     const admitted = implicitCompile(engine, lambda, 'nd');
     expect(admitted?.profile).toBe('ir');

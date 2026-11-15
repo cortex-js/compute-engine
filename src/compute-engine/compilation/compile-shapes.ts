@@ -258,9 +258,8 @@ export function vectorComponentCount(
  * (its operand fallback sees the complex arm).
  *
  * Returns `undefined` when no coercion applies — an all-real branch, or a
- * target with its own complex representation (Python's native `complex`
- * mixes freely with floats; GPU targets fail closed on complex earlier) —
- * and arms are then emitted unchanged.
+ * target with its own complex representation (GPU targets fail closed on
+ * complex earlier) — and arms are then emitted unchanged.
  */
 export function branchComplexCoercion(
   values: ReadonlyArray<Expression | undefined>,

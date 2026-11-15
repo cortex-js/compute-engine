@@ -2979,8 +2979,7 @@ function mulCollectionsWith(
  * a string the comparison is content equality with no tolerance, the
  * interpreter's own string semantics (`compare.ts`). Without it the leaf fell
  * through to the numeric leaf, which is `false` on strings, so two EQUAL
- * string lists answered `false`. It is the mirror of the Python target's `_ce_eqcoll` string
- * leaf, and it is faithful for a MIXED leaf pair too (`Equal("a", 1)` is
+ * string lists answered `false`. It is faithful for a MIXED leaf pair too (`Equal("a", 1)` is
  * `False` in the interpreter, and `eqText("a", 1)` is `false`) — though only the
  * all-string shapes are ADMITTED at compile time
  * (`isStringCollectionEquality`). It compares CONDITIONED content (`eqText`),
@@ -8123,7 +8122,7 @@ export type StoredJavaScript = {
    * profile the code was compiled with. It records how the code was made,
    * for a host that keeps stored code with its compile options; the
    * loaders run the code the same way with or without it. */
-  profile?: 'numeric-kernel' | 'ir';
+  profile?: 'ir';
 };
 
 /**

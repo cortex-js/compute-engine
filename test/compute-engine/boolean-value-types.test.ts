@@ -230,10 +230,8 @@ describe('boolean value types — compiler consumption', () => {
 
   test('a proven test folds to the target literal on every target', () => {
     expect(code(eq())).toBe('true');
-    expect(code(eq(), 'python')).toBe('True');
     expect(code(eq(), 'glsl')).toBe('true');
     expect(code(fn('If', [eq(), sym('x'), sym('y')]), 'glsl')).toBe('x');
-    expect(code(fn('If', [eq(), sym('x'), sym('y')]), 'python')).toBe('x');
     expect(code(fn('If', [eq(), sym('x'), sym('y')]), 'interval-js')).toBe(
       '_.x'
     );

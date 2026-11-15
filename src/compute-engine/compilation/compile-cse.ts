@@ -881,8 +881,8 @@ export function openCseSession(
     isStringVar: options.isStringVar,
     isVarsKey: options.isVarsKey,
     notACandidate: options.notACandidate,
-    // A target may decline the symbol-square exemption (the Python target
-    // does — see `CompileTarget.shareSymbolSquares`). Carried on the
+    // A target may decline the symbol-square exemption (see
+    // `CompileTarget.shareSymbolSquares`). Carried on the
     // session so nested harvests of user-function bodies apply it too.
     shareSymbolSquares: target.shareSymbolSquares,
     // Likewise the expression reading of a block's last `If`

@@ -460,27 +460,6 @@ describe('compiled code', () => {
     ]);
   });
 
-  it('Python calls np.matmul for matrix types', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'matrix<number>');
-    ce.declare('q', 'matrix<number>');
-    ce.declare('v', 'list<number>');
-    const py = (expr: MathJsonExpression) =>
-      compile(ce.box(expr), { to: 'python', fallback: false }).code;
-    expect(py(['Multiply', 'p', 'q'])).toBe('np.matmul(p, q)');
-    expect(py(['Multiply', 2, 'q', 'p'])).toBe('(2 * np.matmul(q, p))');
-    expect(py(['Multiply', 'p', 'v'])).toBe('np.matmul(p, v)');
-  });
-
-  it('Python refuses a product whose ranks are known only at run time', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'tensor<number>');
-    ce.declare('q', 'tensor<number>');
-    expect(() =>
-      compile(ce.box(['Multiply', 'p', 'q']), { to: 'python', fallback: false })
-    ).toThrow();
-  });
-
   it('GLSL declines a matrix symbol: the GLSL fragment has no matrix type', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'matrix<number^(2x2)>');
@@ -548,19 +527,6 @@ describe('compiled code', () => {
       },
     });
     expect(r.run!({} as never)).toEqual([3, 8]);
-  });
-
-  it('Python keeps a sum that scales a matrix product in parentheses', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'matrix<number>');
-    ce.declare('q', 'matrix<number>');
-    ce.declare('x', 'real');
-    expect(
-      compile(ce.box(['Multiply', ['Add', 'x', 1], 'p', 'q']), {
-        to: 'python',
-        fallback: false,
-      }).code
-    ).toBe('((x + 1) * np.matmul(p, q))');
   });
 
   it('a list of points times a broadcastable<number> scales each point', () => {

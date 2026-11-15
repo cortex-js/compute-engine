@@ -162,10 +162,9 @@ does not use a shadowed library operator. A call of a user function that
 shadows a library function, such as `function Gamma(x) { x + 100 }`, compiles
 as a call of the user function. These are interpreted instead: a user
 definition of an operator that the language builds by name, such as `+`, `<`,
-`and`, `If` and `Sum`; a multi-clause function; a function with its own
+`and`, `If` and `Sum`; a multi-clause function; and a function with its own
 `compile` handler, `derivative`, `lazy`, `broadcastable` or declared effects
-(the compiler uses its `compile` handler when it has one); and any call of a
-user function on the Python target.
+(the compiler uses its `compile` handler when it has one).
 
 The markers `Nothing` and `Missing` are the exception:
 they cannot be rebound, and a binding of one of them is an error

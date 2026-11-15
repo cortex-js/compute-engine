@@ -41,7 +41,7 @@ module.exports = {
   // on the machine, such a test can wait longer than 5 s for a core.
   // `CE_FULL_SUITE` marks such a run: `scripts/test.sh` sets it for its
   // `test`, `coverage` and `snapshot` variants, whatever Jest arguments
-  // follow, and `scripts/test-python.mjs` sets it for the Python tests. Every
+  // follow. Every
   // other local run (`bash scripts/test.sh <name>`, `npx jest -- <path>`)
   // keeps the default, so that an asynchronous test that becomes slow still
   // fails during development. A test that names its own

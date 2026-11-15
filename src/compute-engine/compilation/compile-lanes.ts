@@ -304,7 +304,7 @@ export function realOperandChain(
     isMaybe(args[i]) ? [isReal(temps[i])] : [];
   const valueOf = (i: number): string =>
     isMaybe(args[i]) ? real(temps[i]) : temps[i];
-  // The conjunction of the target (`and` in Python).
+  // The conjunction of the target.
   const and = target.chainOp ?? '&&';
   // Scope i binds operand i. For i ≥ 1 it then tests that operands i−1
   // (bound by the enclosing scope) and i are real, compares them, and

@@ -32,7 +32,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  *   a fully concrete `real` parameter — maximal type information, complex
  *   admission present — and still measuring `Math.sqrt` and `NaN`.
  *
- * RESOLUTION for half 2: `mode: 'complex'` on `javascript`/`python`
+ * RESOLUTION for half 2: `mode: 'complex'` on `javascript`
  * promotes `Sqrt`/`Ln`/`Log` of an operand of unknown sign. The default
  * `mode: 'strict'` keeps the real kernel, and its value is `NaN` where the
  * exact value is complex (`docs/COMPILATION-MODEL.md`, "Caveats of
@@ -333,27 +333,6 @@ describe('promotion in mode: complex', () => {
     expect(plain.run!({ u: 0.3 })).toBeNaN();
   });
 
-  test('python: promotion reaches that target too', () => {
-    const ce = new ComputeEngine();
-    ce.declare('u', 'real');
-    // `np.sqrt` is the lowering of the default `strict` mode; the
-    // complex mode promotes.
-    for (const options of [
-      { to: 'python' as const },
-      { to: 'python' as const, mode: 'strict' as const },
-    ]) {
-      const off = compile(ce.parse('\\sqrt{u-1}', { strict: false }), options)!;
-      expect(off.code).toContain('np.sqrt');
-      expect(off.code).not.toContain('np.emath.sqrt');
-    }
-    const on = compile(ce.parse('\\sqrt{u-1}', { strict: false }), {
-      to: 'python',
-      mode: 'complex',
-    })!;
-    // `np.emath`, not `cmath` — see the zero-domain test below.
-    expect(on.code).toContain('np.emath.sqrt');
-  });
-
   test('a COLLECTION-returning body does not make an extracted scalar complex', () => {
     // The user-function look-through must decline a body that may build a
     // collection: `isComplexValued` answers for a list from `ops.some(…)`, so
@@ -398,24 +377,6 @@ describe('promotion in mode: complex', () => {
     const r = compile(expr, { target: explicit, mode: 'complex' });
     expect(r.success).toBe(false);
     expect(r.diagnostic!.code).toBe('unsupported-mode');
-  });
-
-  test('python promotes through np.emath, which is defined at zero', () => {
-    // `cmath.log(0)` raises `ValueError` where the interpreter answers `-∞`,
-    // and `cmath` rejects the numpy arrays this target supports elsewhere.
-    // `np.emath` is the domain-relaxed variant: complex for a negative input,
-    // `-inf` at zero.
-    const ce = new ComputeEngine();
-    ce.declare('u', 'real');
-    const on = compile(ce.parse('\\ln(u-1)', { strict: false }), {
-      to: 'python',
-      mode: 'complex',
-    })!;
-    expect(on.code).toContain('np.emath.log');
-    expect(on.code).not.toContain('cmath.log');
-    expect(ce.parse('\\ln(0)', { strict: false }).N().toString()).toEqual(
-      '-oo'
-    );
   });
 
   test('glsl keeps the real kernel regardless (item 144’s render states)', () => {

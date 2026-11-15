@@ -2,7 +2,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 
 /**
@@ -724,15 +723,6 @@ describe('PointList — GPU construction and the other targets are unchanged', (
       new GLSLTarget().compile(ce.box(['PointList', -6, 'v']))
     ).toThrow(
 /a point of the GLSL fragment has real components/
-    );
-  });
-
-  it('python still declines a collection-valued component', () => {
-    const ce = zipEngine();
-    expect(() =>
-      new PythonTarget().compile(ce.box(['PointList', -6, 'n']))
-    ).toThrow(
-      /Could not compile `PointList`: component 2 is collection-valued .* target 'python'/
     );
   });
 

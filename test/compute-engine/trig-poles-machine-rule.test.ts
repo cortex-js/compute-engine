@@ -1,7 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import {
   isMachineTrigPole,
   TRIG_POLE_ARGUMENT_CAP,
@@ -20,7 +19,7 @@ import {
 // radians, so a huge argument such as `10²²` is not a pole. The big-decimal
 // rule uses `min(1, |x|)` instead, because there a large argument can be an
 // exact integer that is reduced exactly. The interpreter, the machine-list
-// kernels and compiled JavaScript and Python apply the same rule, so that
+// kernels and compiled JavaScript apply the same rule, so that
 // every route gives the same value.
 //
 // Before, the rule was a fixed limit: a value of more than a million in
@@ -228,19 +227,6 @@ describe('the machine-list kernel agrees with the scalar route', () => {
     const actual = [...list.each()].map((v) => v.json);
     const expected = xs.map((x) => ce.box([head, x]).N().json);
     expect(actual).toEqual(expected);
-  });
-});
-
-describe('compiled Python has the same rule and constant', () => {
-  const py = new PythonTarget();
-  const ce = machineEngine();
-  test.each(HEADS)('%s', (head) => {
-    const code = py.compileLambda(ce.box([head, 'x']), ['x']);
-    expect(code).toContain(
-      'np.abs(_y) * np.minimum(np.abs(_x), 1099511627776.0) * 1.1102230246251565e-14 >= 1'
-    );
-    expect(code).toContain('np.isinf(_y)');
-    expect(code).not.toContain('1e6');
   });
 });
 

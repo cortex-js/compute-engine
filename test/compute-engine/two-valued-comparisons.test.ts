@@ -373,14 +373,6 @@ describe('a NaN value of a number operand decides a comparison', () => {
     expect(compiled.run({ w: 2 })).toBe(1);
   });
 
-  test('Python compiles the plain comparison', () => {
-    const compiled = compile(engine().box(json), {
-      to: 'python',
-    } as never) as any;
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).not.toContain('w == w');
-  });
-
   test.each(['interval-js', 'glsl'])('%s compiles it', (to) => {
     const compiled = compile(engine().box(json), { to } as never) as any;
     expect(compiled.success).toBe(true);

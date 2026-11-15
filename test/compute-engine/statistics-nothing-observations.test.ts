@@ -92,7 +92,7 @@ describe('paired statistics and a Nothing observation', () => {
       const ce = new ComputeEngine();
       ce.declare('xs', 'list<real | nothing>');
       ce.declare('ys', 'list<real>');
-      for (const to of ['javascript', 'python'] as const) {
+      for (const to of ['javascript'] as const) {
         const compiled = compile(ce.box([op, 'xs', 'ys']), { to });
         expect(compiled.success).toBe(false);
         // The operand type is not a subtype of the parameter type.

@@ -45,10 +45,6 @@ documented residual it tracks; see the per-suite notes below.
 | `assume-verify-matrix.test.ts` | the assume→verify identity `assume(P) ∈ {ok,tautology} ⇒ verify(P) = true` over a broad predicate battery (extends the 11-case core in `verify.test.ts`) | 27 tests | ~0.8 s |
 | `js-parity-fuzz.test.ts` | compiled-JS vs interpreter `.N()` over ~140 expressions × their point sets (~2.4 k points); compared where the interpreter is finite-real (the real target's domain) | 164 tests | ~1.1 s |
 
-The **Python-target** parity is a separate, venv-gated suite,
-`test/compute-engine/compile-python-parity.test.ts` (not nightly-gated — it skips
-when the venv is absent). This nightly JS fuzz needs no external toolchain.
-
 ## mpmath reference fixture
 
 `mpmath-kernels.test.ts` reads a **static** JSON fixture,

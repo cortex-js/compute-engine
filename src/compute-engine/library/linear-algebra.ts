@@ -9573,7 +9573,7 @@ const FLATTEN_NON_ARRAY_LEAF_TYPE = parseType(
 
 /**
  * True when a compiled `Flatten(xs, depth)`, which opens every nested array in
- * JavaScript (`xs.flat(depth)`) and every nested list in Python, can open a
+ * JavaScript (`xs.flat(depth)`), can open a
  * value that the interpreter keeps as one element, for an operand `xs` of type
  * `type`. Compiled code can hold a tuple as an array or a list. The interpreter
  * keeps a set and a tuple: `Flatten([(1, 2), (3, 4)])` is `[(1, 2), (3, 4)]`,

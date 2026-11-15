@@ -1,6 +1,3 @@
-import { execFileSync } from 'child_process';
-import { TEST_PYTHON } from './test-python';
-
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { core } from '../../src/compute-engine/compilation/compiler-core-hooks';
 
@@ -191,99 +188,7 @@ describe('Real-only lowerings over a statically non-real operand', () => {
         /No signature of `Erf` in the GLSL fragment takes operands of the types \(complex\)/
       );
   });
-
-  // `GammaLn` is not listed: `scipy.special.loggamma` takes a different
-  // branch than the interpreter (`compile-linear-algebra-lanes.test.ts`).
-  it('Python: Erf, Erfc and Gamma take a complex argument', () => {
-    const ce = engine();
-    const Z = ['Add', 'x', 'ImaginaryUnit'];
-    for (const [json, helper] of [
-      [['Erf', Z], 'scipy.special.erf('],
-      [['Erfc', Z], 'scipy.special.erfc('],
-      [['Gamma', Z], 'scipy.special.gamma('],
-    ] as const) {
-      const r = compile(ce.box(json as any), {
-        to: 'python',
-        fallback: false,
-      } as any) as any;
-      expect([json[0], r.success]).toEqual([json[0], true]);
-      expect(r.code).toContain(helper);
-      expect(r.code).not.toContain('_ce_cisreal');
-    }
-  });
 });
-
-// The Python of `CE_PYTHON` or of the repo's virtual environment, when
-// present (`test-python.ts`). The value checks are skipped without it.
-const PYTHON = TEST_PYTHON;
-
-(PYTHON === undefined ? describe.skip : describe)(
-  'Python values of a special function over a complex argument',
-  () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    const Z = ['Add', 'x', 'ImaginaryUnit'];
-    // The interpreter has no complex `Erfc` (it leaves `Erfc(0.5 + i)`
-    // unevaluated), so its reference value is `1 − Erf(z)`, the definition
-    // of `Erfc`.
-    for (const [json, reference] of [
-      [
-        ['Erf', Z],
-        ['Erf', Z],
-      ],
-      [
-        ['Erfc', Z],
-        ['Subtract', 1, ['Erf', Z]],
-      ],
-      [
-        ['Gamma', Z],
-        ['Gamma', Z],
-      ],
-      [
-        ['Arcosh', ['Subtract', Z, 3]],
-        ['Arcosh', ['Subtract', Z, 3]],
-      ],
-      [
-        ['Log2', Z],
-        ['Log2', Z],
-      ],
-      [
-        ['Determinant', ['List', ['List', Z, 2], ['List', 1, 'x']]],
-        ['Determinant', ['List', ['List', Z, 2], ['List', 1, 'x']]],
-      ],
-    ] as const)
-      it(json[0], () => {
-        const expr = ce.box(json as any);
-        const r = compile(expr, {
-          to: 'python',
-          fallback: false,
-        } as any) as any;
-        // The helper receives the complex value as it is, not through the
-        // run-time realness rule.
-        expect(r.code).not.toContain('_ce_cisreal');
-        const program = [
-          'import numpy as np',
-          'import scipy.special',
-          'import cmath',
-          'import math',
-          'x = 0.5',
-          r.preamble ?? '',
-          `v = complex(${r.code})`,
-          'print(repr(v.real), repr(v.imag))',
-        ].join('\n');
-        const out = execFileSync(PYTHON!, ['-c', program], {
-          encoding: 'utf8',
-        }).trim();
-        const [re, im] = out.split(/\s+/).map(Number);
-        const expected = ce
-          .box(reference as any)
-          .subs({ x: 0.5 })
-          .N();
-        expect(re).toBeCloseTo(expected.re, 9);
-        expect(im).toBeCloseTo(expected.im, 9);
-      });
-  }
-);
 
 describe('The lane question about a user-function call', () => {
   // A parent asks for the lane of a call before the call compiles, and the

@@ -195,10 +195,9 @@ export function realPowerBranchTerms(
  * exponent to: the global working precision (`BigDecimal.precision`), which
  * is what rounded the exponent, clamped to [15, 17] (a double never carries
  * more than 17 significant digits, and a precision configured below machine
- * precision must not widen the window). The compiled Python helper `_ce_pow`
- * is given this value when the code is generated, and a compiled JavaScript
- * result carries it as `reconstructionDigits`: the runtime has its own
- * `BigDecimal`, whose precision says nothing about the engine's.
+ * precision must not widen the window). A compiled JavaScript result carries
+ * it as `reconstructionDigits`: the runtime has its own `BigDecimal`, whose
+ * precision says nothing about the engine's.
  */
 export function realPowerReconstructionDigits(): number {
   const precision = BigDecimal.precision;

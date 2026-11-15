@@ -40,7 +40,7 @@ function jsCode(ce: ComputeEngine, expr: unknown): string {
 
 /** The absence axis that a discharge of the symbol `name` takes on the
  * JavaScript target: `'object'` when it is the axis with the null literal.
- * The JavaScript and Python targets spell the test of both axes alike (a
+ * The JavaScript target spells the test of both axes alike (a
  * discharge reads an absent operand whatever its spelling, R3 of
  * `docs/plans/2026-11-01-absent-value-contract.md`), so the axis chosen is
  * read from `absenceAxisForType`, not from the emitted code. */

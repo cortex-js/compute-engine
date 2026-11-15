@@ -545,8 +545,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         );
         if (onAxis !== undefined) return onAxis ?? undefined;
         // Real args use the machine/bignum kernel; a complex argument uses
-        // `erfc(z) = 1 − erf(z)` with the complex `Erf` kernel, as the
-        // compiled Python target does.
+        // `erfc(z) = 1 − erf(z)` with the complex `Erf` kernel.
         return apply(
           x,
           (x) => erfc(x),

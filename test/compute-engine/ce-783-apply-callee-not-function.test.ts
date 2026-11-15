@@ -18,7 +18,7 @@ const WITNESS: MathJsonExpression = [
 ];
 
 describe('an Apply whose callee is not a function value declines', () => {
-  test.each(['javascript', 'python', 'interval-js', 'glsl'])(
+  test.each(['javascript', 'interval-js', 'glsl'])(
     'the witness on %s',
     (to) => {
       const ce = new ComputeEngine();
@@ -113,15 +113,7 @@ describe('a callee of a function type reaches the call', () => {
     expect(r.run!({ c: false })).toBe(4);
   });
 
-  test.each([
-    ['a list parameter', LIST_PARAMETER],
-    ['an If between two literals', CHOSEN_LITERAL],
-  ])('on Python, %s', (_, json) => {
-    const r = compile(engine().box(json), { to: 'python' } as never);
-    expect(r.success).toBe(true);
-  });
-
-  test.each(['javascript', 'python'])(
+  test.each(['javascript'])(
     'on %s, an If between a literal and a number declines',
     (to) => {
       const ce = engine();

@@ -26,14 +26,13 @@ import type { CompileTarget, TargetSource } from './types.js';
  * mixes numbers with objects; a position provably outside the numbers (a
  * string, a list) uses `absence.object`. The predicate is
  * `absentDomainIsObject`, the same one the selection lowerings use to
- * PRODUCE an absent value (`absenceKind`). On the JavaScript and Python
- * targets both axes read the object null AND the numeric marker as absent:
+ * PRODUCE an absent value (`absenceKind`). On the JavaScript
+ * target both axes read the object null AND the numeric marker as absent:
  * a discharge reads an absent operand whatever its spelling (R3 of
  * `docs/plans/2026-11-01-absent-value-contract.md`), and an object-domain
  * position can hold the numeric marker at run time, from a producer that
  * picks its marker from a wider type (`_SYS.atWithValueMarker` returns a
- * `NaN` element as it is) or, on Python, from a written `Missing`, which is
- * `math.nan` there. A point position (`pointArity()`) uses
+ * `NaN` element as it is). A point position (`pointArity()`) uses
  * `absence.point` when the target has it, which reads a `NaN` point as
  * absent too. Throws
  * (fail closed) when the target declares no absence capability at all, or
@@ -96,8 +95,8 @@ export function absenceAxisForType(
  * object, `undefined` in JavaScript. A result whose type is unknown keeps
  * `NaN`: it is a number until proven otherwise, and the object null would
  * turn every arithmetic consumer of the value into a `TypeError` instead
- * of a propagated NaN. See `absenceKind`, which the restriction and
- * the Python target's selection handlers share, so every selection form
+ * of a propagated NaN. See `absenceKind`, which the restriction
+ * the selection handlers share, so every selection form
  * answers absence the same way on a target. A target that declares no
  * object literal uses `NaN` for both.
  */
@@ -126,9 +125,9 @@ export function noBranchValue(
  * here (see `noBranchValue`), and so is a mix of numeric and object arms,
  * whose consumers are arithmetic more often than not.
  *
- * Shared by the JavaScript lowering (`noBranchValue`) and the Python
- * target's `If`/`Which` handlers, so the two targets answer
- * absence by the same rule with their own spelling.
+ * Shared by the JavaScript lowering (`noBranchValue`) and the `If`/`Which`
+ * handlers, so every target answers absence by the same rule with its own
+ * spelling.
  */
 export function absenceKind(
   types: ReadonlyArray<Type>,

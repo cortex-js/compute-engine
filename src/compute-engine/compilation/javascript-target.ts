@@ -1,11 +1,3 @@
-import {
-  bindScalarFragmentFunction,
-  scalarResultIsComplex,
-  scalarOperandIsComplex,
-  scalarOperandConversion,
-  scalarOperandRepresentation,
-  scalarConvertOperand,
-} from './javascript-fragment-facts.js';
 import { harmonicNumberDesugared } from './complex-continuation.js';
 import { derivativeClosedForm } from './derivative-closed-form.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
@@ -27,7 +19,6 @@ import {
   type SysHelpers,
   kindBroadcastError,
   bigintBroadcastError,
-  SYS_HELPERS,
 } from './javascript-runtime.js';
 import type {
   Expression,
@@ -1380,7 +1371,7 @@ function isStringScalarEquality(args: ReadonlyArray<Expression>): boolean {
  * `Equal(["a","b"], ["a","b"])` is the whole-collection `True`, and
  * `Equal(["a","b"], "a")` the element-wise `[True, False]` (both probed).
  *
- * This mirrors the Python target's `_ce_eqcoll` admission. The deliberately
+ * The deliberately
  * narrow predicate excludes a mixed participant (`list<string | number>`),
  * which fails closed even though the kernel was probed faithful on it, and a
  * numeric participant (`Equal(["a","b"], 1)`) fails closed under the tier-0
@@ -1540,8 +1531,8 @@ function compileJSEquality(
   // equal or unequal arity. Mixed shapes still decline because one non-tuple
   // participant makes `every` fail. Chained forms are excluded.
   //
-  // The numeric-component requirement mirrors the Python target's and closes
-  // that helper's numeric element leaf: its tolerance test coerces a boolean
+  // The numeric-component requirement closes the numeric element leaf of
+  // the helper: its tolerance test coerces a boolean
   // (`Math.abs(true - 1)` is 0), so `Equal(Tuple(True, 2), Tuple(1, 2))` ran to
   // `true` and `NotEqual` of the same to `false`, against the interpreter's
   // `False`/`True`. A boolean, `unknown` or otherwise non-numeric component now
@@ -4661,9 +4652,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Add: (args, compile, target) => {
     if (args.length === 1) return compile(args[0]);
-    const anyComplex =
-      scalarResultIsComplex(target) ??
-      args.some((a) => BaseCompiler.isComplexValued(a));
+    const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
     if (!anyComplex) {
       // Try full constant fold
       const constants = args.map(tryGetConstant);
@@ -4684,41 +4673,18 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // literals stay inline (free to duplicate; keeps simple shapes
     // byte-identical to the previous emission).
     const bindings: Array<[name: string, value: string]> = [];
-    const parts = args.map((a, index) => {
-      // On the scalar fragment route, the recorded conversion of the operand
-      // must be the one this sum applies, given the representation in the
-      // operand's own facts: `none` for a complex operand, and
-      // `real-to-complex` for any other, which the sum below writes as a
-      // real part only (its imaginary part is 0). Another kind, or a kind
-      // that does not match the operand's facts, fails closed. On the
-      // ordinary target the conversion is `undefined` and nothing is
-      // checked.
-      const conversion = scalarOperandConversion(index, target);
-      if (
-        conversion !== undefined &&
-        conversion !==
-          (scalarOperandRepresentation(a, target) === 'complex'
-            ? 'none'
-            : 'real-to-complex')
-      )
-        throw new Error(
-          'JS scalar fragment invariant: the conversion of a complex sum operand does not match the operand'
-        );
+    const parts = args.map((a) => {
       // A complex operand whose value is known at compile time — the
       // imaginary unit, or a complex literal — contributes its two components
       // as constants, so the object holding them is never built and never
       // read back (`x + i` is `{ re: x, im: 1 }`).
-      const literal =
-        (scalarOperandIsComplex(index, target) ??
-        BaseCompiler.isComplexValued(a))
-          ? complexLiteralParts(a)
-          : undefined;
+      const literal = BaseCompiler.isComplexValued(a)
+        ? complexLiteralParts(a)
+        : undefined;
       if (literal !== undefined)
         return { re: String(literal.re), im: String(literal.im) };
       const code = compile(a);
-      const isComplex =
-        scalarOperandIsComplex(index, target) ??
-        BaseCompiler.isComplexValued(a);
+      const isComplex = BaseCompiler.isComplexValued(a);
       if (isComplex && !isSymbol(a) && !isNumber(a)) {
         const name = BaseCompiler.tempVar(target);
         bindings.push([name, code]);
@@ -6172,7 +6138,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // code has no record value and no cluster-index translation, so those fail
   // closed with a diagnostic rather than silently reporting code-unit
   // offsets, which would disagree with the interpreter. Absent from the
-  // Python and shader targets for the same reason those targets have no
+  // shader targets for the same reason those targets have no
   // string surface at all.
   RegExp: () => {
     throw new Error(
@@ -8367,8 +8333,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Could not compile \`Range\`: a non-finite bound (\`${args.find((a) => a != null && isNonFiniteBound(a))!.toString()}\`) does not materialize — an infinite ` +
           `range compiles only under \`Take\`/\`TakeWhile\`.`
       );
-    // `Range(n)` is 1..n inclusive (matching the interpreter and the Python
-    // target) — not 0..n-1. Canonicalization normally rewrites the
+    // `Range(n)` is 1..n inclusive (matching the interpreter)
+    // — not 0..n-1. Canonicalization normally rewrites the
     // 1-argument form to `Range(1, n)`, so this branch is a rarely-reached
     // fallback for non-canonical input.
     // A bound that is provably not a number — a collection, a string, a
@@ -8743,10 +8709,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.sinh(${compile(args[0])})`;
   },
   Sqrt: (args, compile, target) => {
-    if (
-      scalarOperandIsComplex(0, target) ??
-      BaseCompiler.isComplexValued(args[0])
-    ) {
+    if (BaseCompiler.isComplexValued(args[0])) {
       return complexUnary(target, '_SYS.csqrt', compile(args[0]));
     }
     const c = tryGetConstant(args[0]);
@@ -8767,13 +8730,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // NaN-poison it. In `strict` mode an unknown-sign operand keeps
     // `Math.sqrt` (pinned; `promotesToComplexLane` mirrors the
     // `isComplexValued` Sqrt/Ln/Log carve-out so the parent agrees).
-    if (scalarResultIsComplex(target) ?? promotesToComplexLane('Sqrt', args))
+    if (promotesToComplexLane('Sqrt', args))
       return complexUnary(
         target,
         '_SYS.csqrt',
-        scalarResultIsComplex(target) !== undefined
-          ? scalarConvertOperand(0, compile(args[0]), target)!
-          : complexOperandCode(args[0], compile)
+        complexOperandCode(args[0], compile)
       );
     return `Math.sqrt(${compile(args[0])})`;
   },
@@ -8993,21 +8954,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Negate: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Negate`: no argument');
-    const annotated = scalarResultIsComplex(target);
-    if (!(annotated ?? BaseCompiler.isComplexValued(x))) {
+    if (!BaseCompiler.isComplexValued(x)) {
       const c = tryGetConstant(x);
       if (c !== undefined) return String(-c);
       return `(-(${compile(x)}))`;
     }
-    // On the scalar fragment route, the operand is read with its recorded
-    // conversion (a real operand of a complex negation becomes `{re, im}`).
-    return complexUnary(
-      target,
-      '_SYS.cneg',
-      annotated === undefined
-        ? compile(x)
-        : scalarConvertOperand(0, compile(x), target)!
-    );
+    return complexUnary(target, '_SYS.cneg', compile(x));
   },
   Multiply: (args, compile, target) => {
     if (args.length === 1) return compile(args[0]);
@@ -11298,8 +11250,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         options.entryChecks !== false,
         options.broadcast === true
           ? (names) => this.compileBatchBody(expr, options, names)
-          : undefined,
-        this.bodyEmitter(prepared.target)
+          : undefined
       );
     } finally {
       endPoolLoopCollection(poolLoops);
@@ -11591,20 +11542,6 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       ...(split.hoisted ? { preambleOnce: split.hoisted } : {}),
       ...(perCall ? { preamblePerCall: perCall } : {}),
     };
-  }
-
-  /**
-   * The emitter that writes the body of the compilation whose prepared
-   * target is `target`, in place of the existing emitter, or `undefined`
-   * for the existing emitter. This target always gives `undefined`. The
-   * internal scalar fragment target (`javascript-fragment-target.ts`)
-   * gives its structured emitter on its structured route. It is not a
-   * member of `CompileTarget` and not a compile option.
-   */
-  protected bodyEmitter(
-    _target: CompileTarget<Expression>
-  ): JavaScriptBodyEmitter | undefined {
-    return undefined;
   }
 
   /**
@@ -12439,110 +12376,11 @@ function defaultFillFunction(
   return `((...$args) => { let [${bound.join(', ')}] = $args; ${body} })`;
 }
 
-/** The names that `compileToTarget()` gives to a `JavaScriptBodyEmitter`. */
-export type JavaScriptBodyNames = {
-  /** The source of a read of the input `name`: the parameter of that name
-   *  of a root `Function` literal, or the entry of the vars object. */
-  readonly input: (name: string) => string;
-  /** A name that no other name of the compilation uses. */
-  readonly fresh: () => string;
-};
-
-/** The body of a compilation that a `JavaScriptBodyEmitter` writes. */
-export type JavaScriptBody = {
-  /** Function definitions that the statements call. Each reads no input.
-   *  They go in the preamble (for a root `Function` literal, at the start
-   *  of the body of the arrow function) and run on each call: they are
-   *  never hoisted into `preambleOnce`. */
-  readonly definitions: readonly string[];
-  /** Declarations of constants that the definitions and the statements
-   *  read by name. They run once per artifact, before the definitions: the
-   *  runner holds them in `preambleOnce`, and `preamble` and `code` hold
-   *  them first. */
-  readonly constants?: readonly string[];
-  /** The statements of the body, in order, then the value of the body. */
-  readonly statements: readonly string[];
-  readonly value: string;
-  /** The names of the inputs that the body reads. */
-  readonly inputs: ReadonlySet<string>;
-  /** The helpers of the runtime object `_SYS` that the body calls. */
-  readonly runtime: ReadonlySet<string>;
-  /** The compile mode that the result reports (`CompilationResult.mode`). */
-  readonly mode: 'strict' | 'complex' | 'bigint';
-  /** When present, the result is shippable only when this is `true` and
-   *  the checks of the assembly say so too (`CompilationResult.shippable`):
-   *  the emitter knows facts of the program that the text of the code does
-   *  not show. */
-  readonly shippable?: boolean;
-};
-
-/**
- * An emitter that writes the body of a compilation in place of the existing
- * emitter (`JavaScriptTarget.bodyEmitter()`). `compileToTarget()` calls it
- * where it would compile the body, and builds the result from its body as
- * from the body of the existing emitter.
- */
-export type JavaScriptBodyEmitter = (
-  names: JavaScriptBodyNames
-) => JavaScriptBody;
-
-/**
- * Call `emit` with the names of the compilation of `target`, and give the
- * body as `compileToTarget()` uses it: `code`, an expression (the value, or
- * the statements in one arrow function that is called at once);
- * `statementBody`, the statements and a `return` of the value, which the
- * runner runs; the definitions; and the inputs that it reads. The state
- * that the outermost compilation of the existing emitter writes and that the
- * assembly reads is written here: the mode report, and no value kind.
- */
-function emitDelegatedBody(
-  emit: JavaScriptBodyEmitter,
-  target: CompileTarget<Expression>,
-  input: (name: string) => string
-): {
-  code: string;
-  statementBody: string;
-  /** The constants, then the definitions: the text of the preamble. */
-  definitions: string;
-  /** The constants, which the runner evaluates once per artifact. */
-  hoisted: string;
-  /** The definitions, which run on each call. */
-  perCall: string;
-  inputs: ReadonlySet<string>;
-  shippable?: boolean;
-} {
-  const body = emit({ input, fresh: () => BaseCompiler.tempVar(target) });
-  for (const helper of body.runtime)
-    if (!Object.hasOwn(SYS_HELPERS, helper))
-      throw new Error(`The runtime has no helper _SYS.${helper}`);
-  BaseCompiler._lastReport = { mode: body.mode };
-  BaseCompiler._lastKindLowering = undefined;
-  const statements = body.statements.join(' ');
-  return {
-    code:
-      statements === ''
-        ? body.value
-        : `(() => { ${statements} return ${body.value}; })()`,
-    statementBody:
-      statements === ''
-        ? `return ${body.value};`
-        : `${statements} return ${body.value};`,
-    definitions: [...(body.constants ?? []), ...body.definitions]
-      .map((d) => `${d}\n`)
-      .join(''),
-    hoisted: (body.constants ?? []).map((d) => `${d}\n`).join(''),
-    perCall: body.definitions.map((d) => `${d}\n`).join(''),
-    inputs: body.inputs,
-    ...(body.shippable !== undefined ? { shippable: body.shippable } : {}),
-  };
-}
-
 function compileToTarget(
   expr: Expression,
   target: CompileTarget<Expression>,
   entryChecks = true,
-  batchBody?: (names: ReadonlySet<string>) => StoredBatchBody | undefined,
-  bodyEmitter?: JavaScriptBodyEmitter
+  batchBody?: (names: ReadonlySet<string>) => StoredBatchBody | undefined
 ): CompilationResult<'javascript'> {
   // The discipline this compilation runs under, for the D3 entry plans built
   // after the compilation proper (when `BaseCompiler.mode` is restored).
@@ -12587,7 +12425,6 @@ function compileToTarget(
         ...BaseCompiler.literalDeclaredParamTypes(expr),
       },
     };
-    bindScalarFragmentFunction(target, lambdaTarget, expr, args[0].canonical);
     // A root literal whose parameters are scalar compiles its scalar
     // variant (decision D3 of the CE-712.2 design,
     // `docs/plans/2026-10-31-static-shape-compilation.md` rule R2): the
@@ -12625,36 +12462,23 @@ function compileToTarget(
     //
     // A write to a parameter with a generated name writes that name
     // (`withWritableLoopIndices` makes `assignLValue` accept it).
-    //
-    // With `bodyEmitter`, that emitter writes the body; an input is the
-    // parameter of its name.
-    const emitted =
-      bodyEmitter === undefined
-        ? undefined
-        : emitDelegatedBody(bodyEmitter, target, (name) => {
-            const i = declared.indexOf(name);
-            if (i < 0) throw new Error(`No parameter ${name} to read`);
-            return params[i];
-          });
-    const body =
-      emitted?.code ??
-      BaseCompiler.withWritableLoopIndices(
-        params.filter((p, i) => p !== declared[i]),
-        () =>
-          BaseCompiler.withEnforcedParams(
-            expr as Expression & FunctionInterface,
-            () =>
-              BaseCompiler.compileCseRoot(expr, target, 0, () =>
-                BaseCompiler.compileOp(
-                  expr,
-                  0,
-                  lambdaTarget,
-                  0,
-                  args[0].canonical
-                )
+    const body = BaseCompiler.withWritableLoopIndices(
+      params.filter((p, i) => p !== declared[i]),
+      () =>
+        BaseCompiler.withEnforcedParams(
+          expr as Expression & FunctionInterface,
+          () =>
+            BaseCompiler.compileCseRoot(expr, target, 0, () =>
+              BaseCompiler.compileOp(
+                expr,
+                0,
+                lambdaTarget,
+                0,
+                args[0].canonical
               )
-          )
-      );
+            )
+        )
+    );
     // The value kinds whose compile contracts the code reads or makes: the
     // value of a call is then returned raw (`valueKindFields`).
     const kinds = BaseCompiler.kindLoweringReport();
@@ -12681,8 +12505,7 @@ function compileToTarget(
         javascriptStatements(target)
       );
     }
-    const definitions =
-      emitted?.definitions ?? BaseCompiler.userFunctionsPreamble(target);
+    const definitions = BaseCompiler.userFunctionsPreamble(target);
     // With the `iterationBudget` option, code that counts `Loop` passes starts
     // each call of the lambda with a count of 0. The reset comes before the
     // definitions, which can run a loop when they hold a value.
@@ -12707,12 +12530,9 @@ function compileToTarget(
     // The definitions that read no lambda parameter are evaluated once per
     // artifact; the rest stay inside the per-call body (see
     // `splitPreambleDefs`). `toString()` and `code` keep the single-body form.
-    // The definitions of `bodyEmitter` run on each call, its constants once.
-    const definitionSplit = emitted
-      ? { hoisted: emitted.hoisted, perCall: emitted.perCall, perCallNames: [] }
-      : target.userFunctions
-        ? splitPreambleDefs(target.userFunctions, params, false)
-        : { hoisted: '', perCall: '', perCallNames: [] };
+    const definitionSplit = target.userFunctions
+      ? splitPreambleDefs(target.userFunctions, params, false)
+      : { hoisted: '', perCall: '', perCallNames: [] };
     const split = {
       ...definitionSplit,
       perCall: passReset + definitionSplit.perCall,
@@ -12738,9 +12558,9 @@ function compileToTarget(
         ? aroundDefaultFill(split.perCallNames)
         : { before: split.perCall, after: '' };
     const statements = javascriptStatements(target);
-    const statementBody =
-      emitted?.statementBody ??
-      (statements?.has(body) ? statements.functionBody(body) : undefined);
+    const statementBody = statements?.has(body)
+      ? statements.functionBody(body)
+      : undefined;
     // Without the entry checks the entry still lifts a number passed to a
     // complex-lane parameter: the body reads `.re` and `.im` off it, and an
     // implicit caller passes a number (the numeric derivative of
@@ -12853,16 +12673,7 @@ function compileToTarget(
     }
   }
 
-  // With `bodyEmitter`, that emitter writes the body; an input is the entry
-  // of its name of the vars object, and each input that the body reads is
-  // recorded as such a read.
-  const emitted =
-    bodyEmitter === undefined
-      ? undefined
-      : emitDelegatedBody(bodyEmitter, target, varsObjectAccess);
-  if (emitted)
-    for (const name of emitted.inputs) target.varsObjectRefs?.add(name);
-  const js = emitted?.code ?? BaseCompiler.compileCseRoot(expr, target);
+  const js = BaseCompiler.compileCseRoot(expr, target);
   // The value kinds whose compile contracts the code reads or makes: the
   // value of a call is then returned raw, the code cannot be stored, and it
   // is shippable only when every contract says so (below).
@@ -12885,8 +12696,7 @@ function compileToTarget(
       javascriptStatements(target)
     );
   }
-  const userDefs =
-    emitted?.definitions ?? BaseCompiler.userFunctionsPreamble(target);
+  const userDefs = BaseCompiler.userFunctionsPreamble(target);
   // With the `iterationBudget` option, code that counts `Loop` passes starts
   // each call with a count of 0. The reset comes first in the preamble, which
   // runs on every call, because a definition can run a loop when it holds a
@@ -12909,12 +12719,9 @@ function compileToTarget(
   // value reaching caller-supplied source is not on `userFunctions.hoistable`.
   // `preamble` above, the text a consumer splices itself, keeps the
   // single-body form.
-  // The definitions of `bodyEmitter` run on each call, its constants once.
-  const split = emitted
-    ? { hoisted: emitted.hoisted, perCall: emitted.perCall }
-    : target.userFunctions
-      ? splitPreambleDefs(target.userFunctions, [], true)
-      : { hoisted: '', perCall: '' };
+  const split = target.userFunctions
+    ? splitPreambleDefs(target.userFunctions, [], true)
+    : { hoisted: '', perCall: '' };
   const perCall = target.preamble
     ? `${target.preamble}\n${split.perCall}`
     : split.perCall || undefined;
@@ -12923,8 +12730,7 @@ function compileToTarget(
     : undefined;
   const broadcastOutputs = broadcastStrideOfType(expr.type.type);
   const reconstructionDigits = realPowerReconstructionDigits();
-  const statementBody =
-    emitted?.statementBody ?? javascriptStatements(target)?.functionBody(js);
+  const statementBody = javascriptStatements(target)?.functionBody(js);
   const fn = new ComputeEngineFunction(
     expr.engine,
     js,
@@ -13025,8 +12831,7 @@ function compileToTarget(
     shippable:
       target.hostNames !== true &&
       isShippableCode(`${split.hoisted}\n${perCall ?? ''}\n${result.code}`) &&
-      kindCodeIsShippable(kinds?.contracts, entryPlan) &&
-      emitted?.shippable !== false,
+      kindCodeIsShippable(kinds?.contracts, entryPlan),
     iterationLimit: () => engine.iterationLimit,
     slice: (inputs, options, out, slice) => {
       if (kinds !== undefined) throw kindBroadcastError(kinds.kinds);
@@ -15012,9 +14817,6 @@ function fnArg(
  *   cannot give, so it throws.
  * - `prefix` (`TakeWhile`, `DropWhile`): only `True` continues the prefix,
  *   and any other value ends it, with no error.
- *
- * The Python target uses the same table and the same rule
- * (`predicateResultCheck`) for its helper `_ce_predicate`.
  */
 export const PREDICATE_RESULT_MODES: Readonly<
   Record<string, 'select' | 'quantify' | 'prefix'>
@@ -15773,32 +15575,6 @@ function listAccumulatorStep(
   );
 }
 
-/**
- * Fail closed unless the collection's elements compile to JS primitives
- * with value equality. `includes`/`Set` use SameValueZero, which is reference
- * identity for compound elements (nested lists compile to arrays, tuples and
- * complex numbers to objects), diverging from the interpreter's structural
- * equality. Structural element types (tuple/list/vector) and declared-complex
- * element types are rejected by the type check; a numeric collection reports
- * the generic `number` element type whether its elements are real or complex,
- * so complex *content* is caught by `isComplexValued` (which inspects literal
- * operands).
- */
-export function requirePrimitiveElements(kind: string, arg: Expression): void {
-  const elt = collectionElementType(jsType(arg));
-  if (
-    elt !== undefined &&
-    isPrimitiveElementType(elt) &&
-    !BaseCompiler.isComplexValued(arg)
-  )
-    return;
-  throw new Error(
-    `Could not compile \`${kind}\`: the interpreter compares elements ` +
-      `structurally, but only real/boolean/string elements compare by ` +
-      `value on the JavaScript target.`
-  );
-}
-
 function isPrimitiveElementType(elt: Type): boolean {
   return (
     elt === 'number' ||
@@ -15835,10 +15611,13 @@ function isStructuralListElementType(elt: Type, depth = 0): boolean {
 }
 
 /**
- * `requirePrimitiveElements`, widened to collections whose elements are lists
- * of primitives. Returns true for those (the caller then emits the structural
- * element test `_SYS.eqs`), false for primitive elements; other element types
- * still fail closed.
+ * Fail closed unless the collection's elements compile to JS primitives
+ * with value equality, or are lists of primitives. `includes`/`Set` use
+ * SameValueZero, which is reference identity for compound elements (nested
+ * lists compile to arrays, tuples and complex numbers to objects), diverging
+ * from the interpreter's structural equality. Returns true for lists of
+ * primitives (the caller then emits the structural element test `_SYS.eqs`),
+ * false for primitive elements; other element types still fail closed.
  */
 function requireComparableElements(
   kind: string,

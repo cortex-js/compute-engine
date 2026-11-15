@@ -14,7 +14,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
-const TARGETS = ['javascript', 'interval-js', 'glsl', 'python'];
+const TARGETS = ['javascript', 'interval-js', 'glsl'];
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();

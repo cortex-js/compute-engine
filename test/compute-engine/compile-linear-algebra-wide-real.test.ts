@@ -299,3 +299,21 @@ describe('A COLLECTION READ ON THE REAL LANE IS NOT CHECKED ENTRY BY ENTRY', () 
     }
   });
 });
+
+describe('Dot of two tuples of five reals', () => {
+  test('gives +0 where the sum of the products gives -0', () => {
+    const ce = new ComputeEngine();
+    ce.declare('P5', 'tuple<real, real, real, real, real>');
+    ce.declare('Q5', 'tuple<real, real, real, real, real>');
+    const r = compile(ce.box(['Dot', 'P5', 'Q5']), {
+      cse: false,
+      constantFold: false,
+      fallback: false,
+    } as never);
+    const run = r.run as unknown as (v: object) => number;
+    expect(
+      Object.is(run({ P5: [0, 0, 0, 0, 0], Q5: [-1, -1, -1, -1, -1] }), 0)
+    ).toBe(true);
+    expect(run({ P5: [1, 2, 3, 4, 5], Q5: [1, 1, 1, 1, 2] })).toBe(20);
+  });
+});

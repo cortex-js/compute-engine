@@ -348,12 +348,6 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
     expect(r.run!()).toBe(5);
   });
 
-  test('Python: the same shape declines identically', () => {
-    const ce = new ComputeEngine();
-    const py = ce._getCompilationTarget('python')!;
-    expect(() => py.compile(ce.box(KEYED))).toThrow(/not provably numeric/);
-  });
-
   test('a NUMERIC index over the same could-be base compiles on both targets', () => {
     const ce = new ComputeEngine();
     const NUMERIC = ce.box(['Function', ['At', 'v', 1], 'v']);
@@ -364,12 +358,6 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
     const js = jsCompile(ce, NUMERIC);
     expect(js.success).toBe(true);
     expect((js.run! as any)([10, 20, 30])).toBe(10);
-
-    const py = ce._getCompilationTarget('python')!.compile(NUMERIC);
-    expect(py.success).toBe(true);
-    // The Python emission mirrors `_SYS.at`'s runtime shape dispatch: a base
-    // that is not a sequence projects to nan rather than raising.
-    expect(py.code).toContain('isinstance(_l, (list, tuple, np.ndarray))');
   });
 
   test('a PROVABLY indexed base is unaffected by the index gate', () => {

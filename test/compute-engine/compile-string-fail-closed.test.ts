@@ -28,8 +28,7 @@
  *     compares `a.string === b.string`). It generalizes the §3.F Kleene-guarded
  *     `string | missing` inner, which already emitted `===`.
  *   - all-string COLLECTION equality keeps the `_SYS.eq`/`_SYS.neq` dispatch,
- *     whose scalar leaf gained a string branch — the mirror of the Python
- *     target's `_ce_eqcoll`, closing a documented JS/Python divergence.
+ *     whose scalar leaf gained a string branch.
  *
  * Still fully closed: a MIXED provable-string/provable-number equality, the
  * CHAINED form, and a NESTED or mixed-element string collection.
@@ -480,8 +479,7 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
     // with the numeric tolerance test, so two EQUAL string lists answered
     // `false` where the interpreter answers `True`. The leaf now has a strict
     // `===` STRING branch (`eqTensor`), so the same dispatch is faithful, and
-    // the flat all-string shapes are admitted — the mirror of the Python
-    // target's `_ce_eqcoll` admission.
+    // the flat all-string shapes are admitted.
     test.each([
       [
         'Equal over two equal string lists',
@@ -555,7 +553,7 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
     });
 
     // The admission side is the NARROW flat predicate (the same one the
-    // orderings use, and the same one Python's `_ce_eqcoll` admission uses).
+    // orderings use).
     // These three shapes were probed FAITHFUL under the new string leaf, and
     // still decline — the wrong direction to guess in is admission.
     test.each([
@@ -910,8 +908,7 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
     // to the union `integer | string`), and is now caught one step earlier by
     // `isNumericTupleParticipant` — a string component is not a provable number.
     // Same outcome (fail closed, interpreter answers); the string gate still runs
-    // afterwards for the non-tuple shapes. Python declines this shape on the same
-    // predicate, for the same reason.
+    // afterwards for the non-tuple shapes.
     const T = ['Tuple', 1, { str: 'a' }];
     for (const [head, expected] of [
       ['Equal', '"True"'],
@@ -929,8 +926,7 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
     // [head, a, b, interpreter answer]
     // `_SYS.eq`'s element leaf is the NUMERIC tolerance test, under which
     // `Math.abs(true - 1)` is 0: these compiled and ran to `true`/`false`, the
-    // exact inverse of the interpreter, behind a `success: true`. Mirrors the
-    // Python target's boolean-component pins (`True == 1` there).
+    // exact inverse of the interpreter, behind a `success: true`.
     ['Equal', ['Tuple', 'True', 2], ['Tuple', 1, 2], '"False"'],
     ['NotEqual', ['Tuple', 'True', 2], ['Tuple', 1, 2], '"True"'],
     // Even the both-boolean shape declines: admission requires provable
@@ -1123,9 +1119,7 @@ describe('the gate does not reach past string operands', () => {
 // interpreter answers 0; and a needle merely within `engine.tolerance` of an
 // element was "found" where the interpreter's exact `.isSame()` answers 0.
 // Ruled 2026-08-08: fixed in the emitted predicate (adapter), not a
-// compile-time gate, so these all keep compiling. The Python target's
-// `_ce_indexof` adapter is the mirror
-// (`compile-python-string-fail-closed.test.ts`).
+// compile-time gate, so these all keep compiling.
 // -----------------------------------------------------------------------------
 describe('IndexOf element test is exact and boolean-aware (executed parity)', () => {
   const cases: Array<{ name: string; expr: any; expected: number }> = [

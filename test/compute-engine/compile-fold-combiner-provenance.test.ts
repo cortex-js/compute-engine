@@ -1,9 +1,8 @@
 /**
- * The combiner of a compiled `Reduce` or `Scan` on the JavaScript and Python
- * targets.
+ * The combiner of a compiled `Reduce` or `Scan` on the JavaScript target.
  *
  * The targets fold with the kernel that the name of the combiner spells
- * (`Math.max` or `max` for `Max`, `+` for `Add`), and the fixed-width pass
+ * (`Math.max` for `Max`, `+` for `Add`), and the fixed-width pass
  * writes a `Reduce` over a written-out list as the n-ary head
  * (`Max(a, b, c)`). Both are correct only for the library operator. A user
  * definition with the same name can be binary and not associative:
@@ -13,13 +12,8 @@
  * library kernel either. In both cases the compilation now declines, and the
  * interpreter evaluates the fold.
  */
-import * as fs from 'fs';
-import { execFileSync } from 'child_process';
-import { TEST_PYTHON } from './test-python';
-
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 const WRITTEN = ['List', 'x', ['Add', 'x', 1], ['Add', 'x', 2]];
 
@@ -145,7 +139,7 @@ const LOCAL_FOLDS: Record<string, unknown> = {
 
 describe('a combiner named Max that the expression binds itself', () => {
   for (const [name, json] of Object.entries(LOCAL_FOLDS)) {
-    for (const to of ['javascript', 'interval-js', 'python']) {
+    for (const to of ['javascript', 'interval-js']) {
       test(`${name}, on ${to}: the local function, or a decline`, () => {
         const ce = engine();
         let r: ReturnType<typeof compile> | undefined;
@@ -227,102 +221,3 @@ describe('a user-defined Max over strings', () => {
     expect(message).not.toMatch(/elements are not numbers/);
   });
 });
-
-describe('a Reduce or Scan combiner on the Python target', () => {
-  // The Python target folds with the reduction that the name spells too
-  // (`max(_l)`, `itertools.accumulate(…, max)`).
-  const toPython = (ce: ComputeEngine, json: unknown, options: object = {}) =>
-    compile(ce.box(json as never), {
-      to: 'python',
-      fallback: false,
-      ...options,
-    } as never);
-
-  function declinesOnPython(ce: ComputeEngine, json: unknown): boolean {
-    try {
-      return toPython(ce, json).success === false;
-    } catch {
-      return true;
-    }
-  }
-
-  test('a user-declared binary Max declines', () => {
-    const ce = engine();
-    ce.declare('Max', {
-      signature: '(number, number) -> number',
-      evaluate: ([a, b], { engine: e }) =>
-        e.box(['Add', ['Multiply', 2, a], b]).evaluate(),
-    });
-    // Before: `max`, which gave 3 and [1, 2, 3] where the interpreter gives
-    // 11 and [1, 4, 11].
-    for (const json of FOLDS) expect(declinesOnPython(ce, json)).toBe(true);
-  });
-
-  test('the `functions` option does not reach this target', () => {
-    // The Python target has no `functions` override option, so the library
-    // `Max` is compiled, as without the option.
-    const ce = engine();
-    for (const json of FOLDS) {
-      const r = toPython(ce, json, {
-        functions: { Max: (a: number, b: number) => 2 * a + b },
-      });
-      expect(r.success).toBe(true);
-      expect(r.code).toBe(toPython(ce, json).code);
-    }
-  });
-
-  test('the library Max still compiles to the reduction', () => {
-    const ce = engine();
-    for (const json of FOLDS) {
-      const r = toPython(ce, json);
-      expect(r.success).toBe(true);
-      expect(r.code).toMatch(/max\(|np\.maximum\(/);
-    }
-  });
-
-  (pythonHasNumpy() ? test : test.skip)(
-    'the library Max gives the interpreter value when the code runs',
-    () => {
-      const ce = engine();
-      const lines = ['import numpy as np'];
-      FOLDS.forEach((json, i) => {
-        lines.push(
-          new PythonTarget().compileFunction(ce.box(json as never), `f${i}`, [
-            'x',
-            'V',
-          ]),
-          `_r = f${i}(1, [1, 2, 3])`,
-          `print([float(v) for v in _r] if isinstance(_r, list) else float(_r))`
-        );
-      });
-      const out = execFileSync(TEST_PYTHON!, ['-c', lines.join('\n')], {
-        encoding: 'utf-8',
-      })
-        .trim()
-        .split('\n');
-      const want = FOLDS.map((json) => {
-        const v = ce
-          .box(json as never)
-          .subs({ x: 1, V: ce.box(['List', 1, 2, 3]) })
-          .evaluate();
-        return v.isCollection
-          ? `[${Array.from(v.each())
-              .map((c) => c.re.toFixed(1))
-              .join(', ')}]`
-          : v.re.toFixed(1);
-      });
-      expect(out).toEqual(want);
-    }
-  );
-});
-
-/** Is there a Python with NumPy to run the compiled code? */
-function pythonHasNumpy(): boolean {
-  try {
-    if (TEST_PYTHON === undefined || !fs.existsSync(TEST_PYTHON)) return false;
-    execFileSync(TEST_PYTHON, ['-c', 'import numpy'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}

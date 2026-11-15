@@ -11,11 +11,8 @@
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { shaderFunctions } from './gpu-shader-f32-eval';
-import { TEST_PYTHON } from './test-python';
-import { execFileSync } from 'child_process';
 
 const PRECISIONS = ['machine', 7, 21, 50] as const;
 
@@ -155,38 +152,6 @@ describe('compiled: sin(πx), cos(πx), tan(πx) and e^{iπx}', () => {
           `${latex} at ${x}: ${c.re} + ${c.im}i, expected ${i.re} + ${i.im}i`
         );
     }
-  });
-
-  (TEST_PYTHON === undefined ? it.skip : it)('Python', () => {
-    const py = new PythonTarget({ includeImports: true });
-    let program = '';
-    HEADS.forEach(([latex], k) => {
-      program += py.compileFunction(ce.parse(latex), `f${k}`, ['x']) + '\n';
-    });
-    program += 'import json\nout = []\n';
-    program += `for x in ${JSON.stringify(POINTS.map(([x]) => x))}:\n`;
-    HEADS.forEach((_, k) => {
-      program += `  r = complex(f${k}(float(x)))\n  out.append([r.real, r.imag])\n`;
-    });
-    program += 'print(json.dumps(out))\n';
-    const values = JSON.parse(
-      execFileSync(TEST_PYTHON!, ['-c', program], { encoding: 'utf8' }).replace(
-        /Infinity/g,
-        '1e999'
-      )
-    ) as [number, number][];
-    const failures: string[] = [];
-    let n = 0;
-    for (const [x, exact] of POINTS)
-      for (const [latex] of HEADS) {
-        const [re, im] = values[n++];
-        const i = interpreted(ce, latex, exact);
-        if (!same({ re, im }, i))
-          failures.push(
-            `${latex} at ${x}: ${re} + ${im}i, expected ${i.re} + ${i.im}i`
-          );
-      }
-    expect(failures).toEqual([]);
   });
 
   for (const [language, Target] of [['glsl', GLSLTarget]] as const)
@@ -345,45 +310,12 @@ describe('compiled: the sign of a zero part, e^{x + iπ}, and sin(πL)', () => {
     expect(mapped.run!({ x: 0.5, p: 1 })).toBeCloseTo(Math.sin(0.5), 15);
   });
 
-  (TEST_PYTHON === undefined ? it.skip : it)(
-    'Python: a scalar tan(πx) is a float, and a zero part is +0',
-    () => {
-      const py = new PythonTarget({ includeImports: true });
-      let program = '';
-      program +=
-        py.compileFunction(ce.parse('\\tan(\\pi x)'), 'f_tan', ['x']) + '\n';
-      program +=
-        py.compileFunction(ce.parse('\\sin(\\pi x)'), 'f_sin', ['x']) + '\n';
-      program +=
-        py.compileFunction(ce.parse('e^{x+i\\pi}'), 'f_exp', ['x']) + '\n';
-      program += 'import json, math\n';
-      program +=
-        'print(json.dumps([isinstance(f_tan(1.0), np.ndarray), ' +
-        'math.copysign(1.0, float(f_tan(1.0))), ' +
-        'math.copysign(1.0, float(f_sin(1.0))), ' +
-        'complex(f_exp(1.0)).real, complex(f_exp(1.0)).imag]))\n';
-      const [isArray, tanSign, sinSign, re, im] = JSON.parse(
-        execFileSync(TEST_PYTHON!, ['-c', program], { encoding: 'utf8' })
-      );
-      expect(isArray).toBe(false);
-      expect(tanSign).toBe(1);
-      expect(sinSign).toBe(1);
-      expect(re).toBeCloseTo(-Math.E, 14);
-      expect(im).toBe(0);
-    }
-  );
-
   test('a power with a Random() exponent does not draw when it is compiled', () => {
-    // The Python and shader targets read a constant exponent's value to
-    // decide the real root of a negative base; a draw would be frozen into
-    // the code.
+    // The shader target reads a constant exponent's value to decide the real
+    // root of a negative base; a draw would be frozen into the code.
     const engine = new ComputeEngine();
     engine.declare('x', 'real');
     const spy = jest.spyOn(engine as any, '_random');
-    // The Python target has no lowering of `Random` and declines it.
-    try {
-      new PythonTarget().compile(engine.box(['Power', 'x', ['Random']]));
-    } catch {}
     // The GLSL fragment refuses `Random` before the target reads the exponent.
     expect(() =>
       new GLSLTarget().compile(engine.box(['Power', 'x', ['Random']]))
@@ -396,7 +328,7 @@ describe('compiled: the sign of a zero part, e^{x + iπ}, and sin(πL)', () => {
 // A user binding of a library constant name (`Pi`, `ExponentialE`) gives the
 // name another value. Before 2026-10-16 every target read the constant from
 // its table by name, so `Pi·x` with `Pi := 1` compiled to `Math.PI * x`
-// (`np.pi * x` in Python, `3.14159265359 * x` in a shader), where the
+// (`3.14159265359 * x` in a shader), where the
 // interpreter computes `1·x`.
 describe('compiled: a user binding of a library constant name', () => {
   let ce: ComputeEngine;
@@ -434,14 +366,6 @@ describe('compiled: a user binding of a library constant name', () => {
       kind: 'interval',
       value: { lo: 0.5, hi: 0.5 },
     });
-  });
-
-  test('Python', () => {
-    const code = new PythonTarget().compile(
-      ce.box(['Add', ['Multiply', 'Pi', 'x'], 'ExponentialE'])
-    ).code;
-    expect(code).not.toContain('np.pi');
-    expect(code).not.toContain('np.e');
   });
 
   test.each([['GLSL', () => new GLSLTarget()]])('%s', (_label, make) => {

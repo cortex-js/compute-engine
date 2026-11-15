@@ -20,7 +20,6 @@
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 type Json = Parameters<ComputeEngine['box']>[0];
 
@@ -180,8 +179,6 @@ describe('Shape and Rank of a collection-typed operand with no value', () => {
  * them declines.
  */
 describe('compiled Shape and Rank', () => {
-  const python = new PythonTarget();
-
   test.each<[string, string]>([
     ['S', 'set<integer>'],
     ['U', 'number | set<integer>'],
@@ -195,9 +192,6 @@ describe('compiled Shape and Rank', () => {
     for (const op of ['Rank', 'Shape']) {
       const expr = ce2.box([op, name]);
       expect(() => compile(expr, { fallback: false })).toThrow(
-        new RegExp(`Could not compile \`${op}\``)
-      );
-      expect(() => python.compile(expr, { fallback: false })).toThrow(
         new RegExp(`Could not compile \`${op}\``)
       );
     }
@@ -232,9 +226,6 @@ describe('compiled Shape and Rank', () => {
         ],
       } as never)
     ).toEqual([2, 2]);
-    expect(
-      python.compile(ce2.box(['Rank', 'L']), { fallback: false }).code
-    ).toBe('np.ndim(L)');
   });
 });
 

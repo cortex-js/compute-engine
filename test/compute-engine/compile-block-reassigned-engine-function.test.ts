@@ -39,11 +39,4 @@ describe('a call of a function that the enclosing block assigns', () => {
     expect(r.success).toBe(false);
     expect(r.error).toMatch(DECLINE);
   });
-
-  test('Python declines', () => {
-    const ce = setup();
-    expect(() =>
-      compile(ce.box(SRC as any), { to: 'python', fallback: false })
-    ).toThrow(DECLINE);
-  });
 });

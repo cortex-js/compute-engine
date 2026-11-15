@@ -7,29 +7,19 @@
  *    the function gets a fresh name. GLSL emitted a redeclaration of the
  *    parameter (`float f(float U) { float[10] U;`).
  *  - A nested `Block` in statement position compiles as a statement: a
- *    compound statement (`{ … }`) on the shader targets, and statements in
- *    the enclosing list with fresh local names on Python. A block with one
+ *    compound statement (`{ … }`) on the shader targets. A block with one
  *    statement that is itself a block does the same. Before, the nested
  *    block was a value, and its last statement became a `return`.
  *  - A block that uses a local before its `Declare` is the static error
  *    `read-before-declaration`, in a block and in a loop body.
  *  - A local of a nested block in a loop body or a branch no longer writes
- *    an outer variable of the same name (JavaScript and Python).
- *  - On Python, a `Declare` with a value assigns the value, so a local of a
- *    loop body no longer keeps the value of the previous pass. A `Declare`
- *    or an `Assign` whose value compiles to several statements declines.
- *  - On Python, a `Loop` index with the name of another variable of the
- *    function (a parameter, a local, a free symbol, a name that a `vars`
- *    entry reads) gets a fresh name, and the body can still assign it.
+ *    an outer variable of the same name (JavaScript).
  *  - Programs whose branch conditions read a block local compile as before.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { execFileSync } from 'child_process';
-import { TEST_PYTHON } from './test-python';
 
 const glsl = new GLSLTarget();
 const NO_FOLD = { constantFold: false };
@@ -230,72 +220,6 @@ describe('CE-583: the GLSL output does not change', () => {
   });
 });
 
-describe('CE-583: a nested Block in statement position on Python', () => {
-  // Python has no block scope and no compound statement: the statements of
-  // the nested block are put in the enclosing list, with no `return`, and
-  // each of its locals gets a fresh name.
-  const python = new PythonTarget();
-  const shapes: Array<[string, unknown, string, string, number]> = [
-    [
-      'a block that assigns an outer local',
-      [
-        'Block',
-        ['Declare', 'W', "'real'", 0],
-        ['Block', ['Assign', 'W', ['Multiply', 2, 'x']]],
-        ['Add', 'W', 1],
-      ],
-      'W = 0\nW = 2 * x\nreturn W + 1',
-      'def f(x):\n    W = 0\n    W = 2 * x\n    return W + 1\n',
-      6,
-    ],
-    [
-      'a block with a value that nothing reads',
-      [
-        'Block',
-        ['Block', ['Declare', 'V', "'real'", 'x'], 'V'],
-        ['Add', 'x', 1],
-      ],
-      '_tv1 = x\n_tv1\nreturn x + 1',
-      'def f(x):\n    _tv1 = x\n    _tv1\n    return x + 1\n',
-      3.5,
-    ],
-    [
-      'a block local that hides an outer local',
-      [
-        'Block',
-        ['Declare', 'V', "'real'", 3],
-        [
-          'Block',
-          ['Declare', 'V', "'real'", 'x'],
-          ['Assign', 'V', ['Add', 'V', 1]],
-        ],
-        ['Add', 'V', 'x'],
-      ],
-      'V = 3\n_tv1 = x\n_tv1 = _tv1 + 1\nreturn V + x',
-      'def f(x):\n    V = 3\n    _tv1 = x\n    _tv1 = _tv1 + 1\n    return V + x\n',
-      5.5,
-    ],
-  ];
-  for (const [label, json, code, def, value] of shapes) {
-    test(label, () => {
-      const ce = engine();
-      const expr = ce.box(json as any);
-      expect(python.compile(expr, NO_FOLD).code).toBe(code);
-      const fn = python.compileFunction(expr, 'f', ['x']);
-      expect(fn.trimEnd()).toBe(def.trimEnd());
-      // The interpreter gives the same value.
-      ce.assign('x', 2.5);
-      expect(expr.evaluate().re).toBe(value);
-      if (TEST_PYTHON === undefined) return;
-      const out = execFileSync(TEST_PYTHON, [
-        '-c',
-        `${fn}\nprint(repr(float(f(2.5))))`,
-      ]).toString();
-      expect(Number(out.trim())).toBe(value);
-    });
-  }
-});
-
 describe('CE-583: a use of a block local before its Declare declines', () => {
   // The local exists from the start of the block, so a statement before
   // the `Declare` uses the local. The canonical form holds the static error
@@ -332,7 +256,7 @@ describe('CE-583: a use of a block local before its Declare declines', () => {
         'Error(ErrorCode("read-before-declaration", "U"))'
       );
       const decline = /read-before-declaration/;
-      for (const to of ['javascript', 'python'])
+      for (const to of ['javascript'])
         expect(() => compile(expr, { to, fallback: false })).toThrow(decline);
       // The fragment refuses the invalid expression (an `Error` head).
       expect(() => compile(expr, { to: 'glsl', fallback: false })).toThrow(
@@ -368,11 +292,9 @@ describe('CE-583: a use of a block local before its Declare declines', () => {
 
 describe('CE-583: a block local in a loop body or a branch', () => {
   // A local of a nested block must not write a variable of the same name of
-  // the enclosing code. Python has no block scope, so the local gets a fresh
-  // name. A JavaScript loop body puts the nested block in braces.
-  const python = new PythonTarget();
+  // the enclosing code. A JavaScript loop body puts the nested block in braces.
   const D = (n: string) => ['Declare', n, "'real'"];
-  const shapes: Array<[string, unknown, number, string | undefined]> = [
+  const shapes: Array<[string, unknown, number]> = [
     [
       'a block in a loop body',
       [
@@ -390,8 +312,6 @@ describe('CE-583: a block local in a loop body or a branch', () => {
         'V',
       ],
       8,
-      'def f(x):\n    V = 1\n    for k in range(1, 4):\n        _tv1 = 100\n' +
-        '        V = 2 * V\n    return V',
     ],
     [
       'a block in a branch',
@@ -407,8 +327,6 @@ describe('CE-583: a block local in a loop body or a branch', () => {
         'V',
       ],
       1,
-      'def f(x):\n    V = 1\n    if 0 < x:\n        _tv1 = 7\n    else:\n' +
-        '        V = 5\n    return V',
     ],
     [
       'a block nested in a block of a branch',
@@ -429,10 +347,9 @@ describe('CE-583: a block local in a loop body or a branch', () => {
         'V',
       ],
       3,
-      undefined,
     ],
   ];
-  for (const [label, json, value, def] of shapes) {
+  for (const [label, json, value] of shapes) {
     test(label, () => {
       const ce = new ComputeEngine();
       ce.declare('x', 'real');
@@ -442,16 +359,8 @@ describe('CE-583: a block local in a loop body or a branch', () => {
       expect((js.run as (v: Record<string, unknown>) => number)({ x: 3 })).toBe(
         value
       );
-      const fn = python.compileFunction(expr, 'f', ['x']);
-      if (def !== undefined) expect(fn.trimEnd()).toBe(def);
       ce.assign('x', 3);
       expect(expr.evaluate().re).toBe(value);
-      if (TEST_PYTHON === undefined) return;
-      const out = execFileSync(TEST_PYTHON, [
-        '-c',
-        `${fn}\nprint(repr(float(f(3))))`,
-      ]).toString();
-      expect(Number(out.trim())).toBe(value);
     });
   }
 });
@@ -459,7 +368,7 @@ describe('CE-583: a block local in a loop body or a branch', () => {
 describe('CE-583: the order checks also run on a loop body', () => {
   // `U` is a local of the loop body, and the first statement of the body
   // reads it before its `Declare`. The interpreter answers an error; the
-  // compiled code read the input `U` (Python gave 100).
+  // compiled code read the input `U`.
   test('a read before the Declare in a loop body declines', () => {
     const ce = new ComputeEngine();
     ce.declare('U', 'real');
@@ -484,11 +393,8 @@ describe('CE-583: the order checks also run on a loop body', () => {
       's',
     ] as any);
     const decline = /read-before-declaration/;
-    for (const to of ['javascript', 'python'])
+    for (const to of ['javascript'])
       expect(() => compile(expr, { to, fallback: false })).toThrow(decline);
-    expect(() => new PythonTarget().compileFunction(expr, 'f', ['U'])).toThrow(
-      decline
-    );
     const interval = compile(expr, { to: 'interval-js', fallback: false });
     expect(interval.success).toBe(false);
     expect(interval.error).toMatch(decline);
@@ -497,62 +403,10 @@ describe('CE-583: the order checks also run on a loop body', () => {
   });
 });
 
-describe('CE-583: a Python block local has no value from a previous pass', () => {
-  // `t` is a local of the loop body: each pass has a new `t`, which starts
-  // at 0 and becomes 5 only in the pass where `k = 1`. Python kept the value
-  // 5 of the first pass and gave 5 in the pass where `k = 2`; the value is 0.
-  test('a local declared in a loop body', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box([
-      'Block',
-      ['Declare', 's', "'real'", 0],
-      [
-        'Loop',
-        [
-          'Block',
-          ['Declare', 't', "'real'", 0],
-          ['If', ['Equal', 'k', 1], ['Assign', 't', 5], 'Nothing'],
-          ['Assign', 's', ['Add', 's', ['If', ['Equal', 'k', 2], 't', 0]]],
-        ],
-        ['Element', 'k', ['Range', 1, 3]],
-      ],
-      's',
-    ] as any);
-    expect(expr.evaluate().re).toBe(0);
-    const fn = new PythonTarget().compileFunction(expr, 'f', []);
-    expect(fn).toContain('    for k in range(1, 4):\n        _tv1 = 0\n');
-    if (TEST_PYTHON === undefined) return;
-    const out = execFileSync(TEST_PYTHON, ['-c', `${fn}\nprint(f())`])
-      .toString()
-      .trim();
-    expect(Number(out)).toBe(0);
-  });
-
-  test('a name assigned in a nested block does not reach the outer read', () => {
-    // `W` is a local of the nested block (its `Declare` is there), so the
-    // read after the block is not that local: it is the free symbol `W`. Python wrote `W` in the scope of the
-    // function and gave 9.
-    const ce = new ComputeEngine();
-    const expr = ce.box([
-      'Block',
-      ['Declare', 's', "'number'", 0],
-      ['Block', ['Declare', 'W', "'unknown'", ['Add', 'x', 1]]],
-      ['Assign', 's', ['Add', 's', 'W']],
-      's',
-    ] as any);
-    expect(expr.evaluate().toString()).toBe('W');
-    const fn = new PythonTarget().compileFunction(expr, 'f', ['x', 'W']);
-    expect(fn).toContain('    _tv1 = x + 1\n');
-    expect(fn).not.toMatch(/^\s*W = /m);
-  });
-});
-
-describe('CE-583: a Python Declare in a nested block', () => {
+describe('CE-583: a Declare in a nested block', () => {
   const D = (n: string, t = "'real'") => ['Declare', n, t];
 
-  // `Declare(m, real, i)` gives the local `m` the value `i`. The `declare`
-  // hook of the Python target emits nothing, and the value was lost: the
-  // code read `_tv1`, which nothing assigned, and raised `NameError`.
+  // `Declare(m, real, i)` gives the local `m` the value `i`.
   test('a Declare with a value assigns the value', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
@@ -572,13 +426,6 @@ describe('CE-583: a Python Declare in a nested block', () => {
     expect(expr.evaluate().re).toBe(15);
     const js = compile(expr, { to: 'javascript', fallback: false });
     expect((js.run as () => number)()).toBe(15);
-    const fn = new PythonTarget().compileFunction(expr, 'f', []);
-    expect(fn).toContain('        _tv1 = i\n        s = _tv1 + s');
-    if (TEST_PYTHON === undefined) return;
-    const out = execFileSync(TEST_PYTHON, ['-c', `${fn}\nprint(f())`])
-      .toString()
-      .trim();
-    expect(Number(out)).toBe(15);
   });
 });
 
@@ -588,7 +435,7 @@ describe('CE-583: a branch on a block local that the compiled code reads', () =>
   // value on every run. They compile and give the value of the interpreter,
   // as before CE-583. The local starts at 0, because a declaration has a
   // value.
-  const cases: Array<[string, unknown, number, boolean]> = [
+  const cases: Array<[string, unknown, number]> = [
     [
       'both arms of an If assign',
       [
@@ -598,7 +445,6 @@ describe('CE-583: a branch on a block local that the compiled code reads', () =>
         ['If', ['Greater', 'n', 1], 10, 20],
       ],
       20,
-      true,
     ],
     [
       'an assignment whose value reads the local',
@@ -610,7 +456,6 @@ describe('CE-583: a branch on a block local that the compiled code reads', () =>
         ['If', ['NotEqual', 'n', 1], 10, 20],
       ],
       10,
-      false,
     ],
     [
       'a first value in the first pass of a loop',
@@ -634,7 +479,6 @@ describe('CE-583: a branch on a block local that the compiled code reads', () =>
         'm',
       ],
       5,
-      true,
     ],
     [
       'a function literal called after the write',
@@ -646,7 +490,6 @@ describe('CE-583: a branch on a block local that the compiled code reads', () =>
         ['Apply', 'f'],
       ],
       10,
-      true,
     ],
     [
       'a loop over a list literal',
@@ -657,10 +500,9 @@ describe('CE-583: a branch on a block local that the compiled code reads', () =>
         ['If', ['NotEqual', 'n', 1], 10, 20],
       ],
       10,
-      true,
     ],
   ];
-  for (const [label, json, expected, python] of cases) {
+  for (const [label, json, expected] of cases) {
     test(label, () => {
       const ce = new ComputeEngine();
       ce.declare('x', 'real');
@@ -668,30 +510,11 @@ describe('CE-583: a branch on a block local that the compiled code reads', () =>
       expect(expr.subs({ x: 1 }).evaluate().re).toBe(expected);
       const js = compile(expr, { to: 'javascript', fallback: false });
       expect((js.run as (v: object) => number)({ x: 1 })).toBe(expected);
-      if (!python) return;
-      const fn = new PythonTarget().compileFunction(expr, 'f', ['x']);
-      if (TEST_PYTHON === undefined) return;
-      expect(runPython(fn, 'f(1)')).toBe(expected);
     });
   }
 });
 
-/**
- * Run the Python function `fn` with the argument list `call` (`f()`, `g(1)`)
- * and give the printed value as a number. `preamble` is Python code that
- * runs first (a module global).
- */
-function runPython(fn: string, call: string, preamble = ''): number {
-  const out = execFileSync(TEST_PYTHON!, [
-    '-c',
-    `import numpy as np\nimport math\n${preamble}${fn}\nprint(${call})`,
-  ])
-    .toString()
-    .trim();
-  return Number(out);
-}
-
-describe('CE-583: a Python loop index does not overwrite another variable', () => {
+describe('CE-583: a loop index does not overwrite another variable', () => {
   const D = (n: string, t = "'integer'") => ['Declare', n, t];
   const loop = (body: unknown, index: string, lo: number, hi: number) => [
     'Loop',
@@ -700,11 +523,6 @@ describe('CE-583: a Python loop index does not overwrite another variable', () =
   ];
   const add = (v: unknown) => ['Assign', 's', ['Add', 's', v]];
 
-  // Python has no block scope: a `for` statement assigns its index in the
-  // scope of the whole function. Before the fix, an inner loop over `i`
-  // changed the `i` of the outer loop: `Range(1, 0)` is 1, 0, so the inner
-  // loop left `i = 0` and the outer body added 0 (Python gave 0 where the
-  // interpreter gives 15).
   const cases: Array<[string, unknown, number]> = [
     [
       'an inner loop over the index of the outer loop',
@@ -751,194 +569,19 @@ describe('CE-583: a Python loop index does not overwrite another variable', () =
       expect(expr.evaluate().re).toBe(expected);
       const js = compile(expr, { to: 'javascript', fallback: false });
       expect((js.run as () => number)()).toBe(expected);
-      const fn = new PythonTarget().compileFunction(expr, 'f', []);
-      if (TEST_PYTHON === undefined) return;
-      expect(runPython(fn, 'f()')).toBe(expected);
     });
   }
-
-  test('a loop over the name of a parameter', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box([
-      'Block',
-      ['Declare', 's', "'integer'", 0],
-      loop(add('x'), 'x', 1, 3),
-      ['Add', 's', 'x'],
-    ] as any);
-    expect(expr.subs({ x: 1 }).evaluate().re).toBe(7);
-    const fn = new PythonTarget().compileFunction(expr, 'f', ['x']);
-    expect(fn).not.toMatch(/for x in/);
-    if (TEST_PYTHON === undefined) return;
-    expect(runPython(fn, 'f(1)')).toBe(7);
-  });
-
-  // A loop index with the name of a free symbol made the name a local of
-  // the function: a read of the module global before the loop raised
-  // `UnboundLocalError`, and a read after the loop gave the last index.
-  test('a loop over the name of a free symbol', () => {
-    const ce = new ComputeEngine();
-    ce.declare('y', 'real');
-    const after = ce.box([
-      'Block',
-      ['Declare', 's', "'integer'", 0],
-      loop(add('y'), 'y', 1, 3),
-      ['Add', 's', 'y'],
-    ] as any);
-    const before = ce.box([
-      'Block',
-      ['Declare', 's', "'integer'", 'y'],
-      loop(add('y'), 'y', 1, 3),
-      's',
-    ] as any);
-    for (const expr of [after, before]) {
-      expect(expr.subs({ y: 10 }).evaluate().re).toBe(16);
-      const fn = new PythonTarget().compileFunction(expr, 'f', []);
-      expect(fn).not.toMatch(/for y in/);
-      if (TEST_PYTHON === undefined) continue;
-      expect(runPython(fn, 'f()', 'y = 10\n')).toBe(16);
-    }
-  });
-
-  // An index with no other variable of that name keeps its name, and a
-  // comprehension has its own scope in Python 3, so its variable keeps its
-  // name too. `s` is a `number`: `Length` has the type `real | signed_infinity`,
-  // and a reassignment must keep the type of the local.
-  test('other indices keep their names', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box([
-      'Block',
-      ['Declare', 's', "'number'", 0],
-      loop(
-        add([
-          'Add',
-          ['Length', ['Comprehension', 'i', ['Element', 'i', ['Range', 1, 2]]]],
-          'i',
-        ]),
-        'i',
-        1,
-        3
-      ),
-      's',
-    ] as any);
-    expect(expr.evaluate().re).toBe(12);
-    const fn = new PythonTarget().compileFunction(expr, 'f', []);
-    expect(fn).toContain('for i in range(1, 4):');
-    expect(fn).toContain('for i in range(1, 3)]');
-    if (TEST_PYTHON === undefined) return;
-    expect(runPython(fn, 'f()')).toBe(12);
-  });
-});
-
-describe('CE-583: a Python loop index with a fresh name can be assigned', () => {
-  const D = (n: string, t = "'integer'") => ['Declare', n, t];
-  // The index `x` has the name of the parameter, so Python spells it with
-  // a fresh name (`pythonLoopIndexCollides`). Before the fix the fresh
-  // name was not a target that an `Assign` accepts, and the compiler
-  // refused the program.
-  test('a body that doubles its index', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box([
-      'Block',
-      ['Declare', 's', "'integer'", 0],
-      [
-        'Loop',
-        [
-          'Block',
-          ['Assign', 'x', ['Multiply', 2, 'x']],
-          ['Assign', 's', ['Add', 's', 'x']],
-        ],
-        ['Element', 'x', ['Range', 1, 3]],
-      ],
-      ['Add', 's', 'x'],
-    ] as any);
-    // 2 + 4 + 6, then the parameter x = 1.
-    expect(expr.subs({ x: 1 }).evaluate().re).toBe(13);
-    const fn = new PythonTarget().compileFunction(expr, 'f', ['x']);
-    expect(fn).not.toMatch(/for x in/);
-    if (TEST_PYTHON === undefined) return;
-    expect(runPython(fn, 'f(1)')).toBe(13);
-  });
-});
-
-describe('CE-583: a Python Declare whose value is a block', () => {
-  // A top-level block of `compileFunction` compiles through
-  // `BaseCompiler.compileBlock`, which has its own `Declare` lowering.
-  // Python returned 2 for x = 1, the value of the inner block.
-  test('a block that is the body of the function', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    const expr = ce.box([
-      'Block',
-      [
-        'Declare',
-        'n',
-        "'real'",
-        [
-          'Block',
-          ['Declare', 'a', "'real'", 'x'],
-          ['Multiply', 'a', 2],
-        ],
-      ],
-      ['Add', 'n', 1],
-    ] as any);
-    expect(expr.subs({ x: 1 }).evaluate().re).toBe(3);
-    expect(() => new PythonTarget().compileFunction(expr, 'f', ['x'])).toThrow(
-      /Could not compile `Declare`: the value of "n" lowers to a statement sequence/
-    );
-  });
-
-  // The value of `t` compiles to several statements. Put after `t = `, the
-  // `return` of the inner block left the function at the first pass of the
-  // loop. The compilation now declines, as for an `Assign` of such a value.
-  test('the compilation declines', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box([
-      'Block',
-      ['Declare', 's', "'real'", 0],
-      [
-        'Loop',
-        [
-          'Block',
-          [
-            'Declare',
-            't',
-            "'real'",
-            ['Block', ['Declare', 'u', "'real'", 'i'], ['Add', 'u', 1]],
-          ],
-          ['Assign', 's', ['Add', 's', 't']],
-        ],
-        ['Element', 'i', ['Range', 1, 3]],
-      ],
-      's',
-    ] as any);
-    expect(expr.evaluate().re).toBe(9);
-    expect(() => new PythonTarget().compileFunction(expr, 'f', [])).toThrow(
-      /Could not compile `Declare`: the value of "t" lowers to a statement sequence/
-    );
-  });
 });
 
 describe('CE-583: a nested block with one statement, in statement position', () => {
   // The lone statement of the middle block is a block. It was compiled as
-  // a value, so its last statement became a `return`: Python returned `t`
-  // (2 for x = 2) before `return x + 1`, and GLSL stored it in a temporary
-  // that it then wrote as a statement (`_tv1;`).
+  // a value, so its last statement became a `return`, and GLSL stored it in a
+  // temporary that it then wrote as a statement (`_tv1;`).
   const json = [
     'Block',
     ['Block', ['Block', ['Declare', 't', "'real'", 'x'], 't']],
     ['Add', 'x', 1],
   ];
-
-  test('Python', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    const expr = ce.box(json as any);
-    expect(expr.subs({ x: 2 }).evaluate().re).toBe(3);
-    const fn = new PythonTarget().compileFunction(expr, 'f', ['x']);
-    expect(fn).not.toMatch(/return _tv1|return t\b/);
-    if (TEST_PYTHON === undefined) return;
-    expect(runPython(fn, 'f(2)')).toBe(3);
-  });
 
   test('GLSL', () => {
     const ce = new ComputeEngine();
@@ -975,99 +618,5 @@ describe('CE-583: a nested block with one statement, in statement position', () 
     expect(expr.evaluate().re).toBe(6);
     const code = glsl.compileFunction(expr, 'g', 'float', []);
     expect(code).not.toContain('_tv1');
-    const fn = new PythonTarget().compileFunction(expr, 'f', []);
-    // One `return`: the one of the function.
-    expect(fn.match(/\breturn\b/g)).toHaveLength(1);
-    if (TEST_PYTHON === undefined) return;
-    expect(runPython(fn, 'f()')).toBe(6);
-  });
-});
-
-describe('CE-583: a Python loop index and the code of a vars entry', () => {
-  // `vars: { y: 'k' }` compiles a read of `y` to the Python variable `k`.
-  // A loop over `k` overwrote it, and the read after the loop gave the last
-  // index (3) instead of 10.
-  test('a loop over the name that a vars entry reads', () => {
-    const ce = new ComputeEngine();
-    ce.declare('y', 'real');
-    const expr = ce.box([
-      'Block',
-      ['Declare', 's', "'real'", 0],
-      [
-        'Loop',
-        ['Assign', 's', ['Add', 's', 'k']],
-        ['Element', 'k', ['Range', 1, 3]],
-      ],
-      ['Add', 's', 'y'],
-    ] as any);
-    expect(expr.subs({ y: 10 }).evaluate().re).toBe(16);
-    const result = compile(expr, {
-      to: 'python',
-      fallback: false,
-      vars: { y: 'k' },
-    });
-    expect(result.success).toBe(true);
-    expect(result.code).not.toMatch(/for k in/);
-    if (TEST_PYTHON === undefined) return;
-    const fn =
-      'def f():\n    k = 10\n' +
-      result.code
-        .split('\n')
-        .map((line) => `    ${line}`)
-        .join('\n');
-    expect(runPython(fn, 'f()')).toBe(16);
-  });
-});
-
-describe('CE-583: a Python loop index and a name read through a value', () => {
-  // `a` holds `k + 1`, so the compiled code reads the Python variable `k`
-  // where it reads `a`. The loop over `k` overwrote it.
-  test('a symbol whose value reads the name of the index', () => {
-    const ce = new ComputeEngine();
-    ce.assign('a', ce.box(['Add', 'k', 1]));
-    const expr = ce.box([
-      'Block',
-      ['Declare', 's', "'real'", 0],
-      [
-        'Loop',
-        ['Assign', 's', ['Add', 's', 'k']],
-        ['Element', 'k', ['Range', 1, 3]],
-      ],
-      ['Add', 's', 'a'],
-    ] as any);
-    const fn = new PythonTarget().compileFunction(expr, 'f', []);
-    expect(fn).not.toMatch(/for k in/);
-    if (TEST_PYTHON === undefined) return;
-    // 1 + 2 + 3, then a = k + 1 with the module global k = 10.
-    expect(runPython(fn, 'f()', 'k = 10\n')).toBe(17);
-  });
-
-  // The scan of the code of a `vars` entry follows the Unicode rule of
-  // Python identifiers.
-  test('a vars entry with a name that is not ASCII', () => {
-    const ce = new ComputeEngine();
-    ce.declare('y', 'real');
-    const alpha = { sym: 'α' };
-    const expr = ce.box([
-      'Block',
-      ['Declare', 's', "'real'", 0],
-      [
-        'Loop',
-        ['Assign', 's', ['Add', 's', alpha]],
-        ['Element', alpha, ['Range', 1, 3]],
-      ],
-      ['Add', 's', 'y'],
-    ] as any);
-    const result = new PythonTarget().compile(expr, { vars: { y: 'α' } });
-    expect(result.success).toBe(true);
-    expect(result.code).not.toMatch(/for α in/);
-    if (TEST_PYTHON === undefined) return;
-    const fn =
-      'def f():\n' +
-      result.code
-        .split('\n')
-        .map((line) => `    ${line}`)
-        .join('\n');
-    expect(runPython(fn, 'f()', 'α = 10\n')).toBe(16);
   });
 });

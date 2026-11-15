@@ -118,17 +118,6 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
     }
   });
 
-  test('compiled Python compares with the native operator', () => {
-    const ce = new ComputeEngine();
-    ce.declare('w', 'number');
-    const r = compile(ce.box(['Greater', 'w', 0]), {
-      to: 'python',
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('0 < w');
-  });
-
   test('the GPU targets keep the IEEE reading, with no guard', () => {
     const ce = new ComputeEngine();
     ce.declare('w', 'number');
@@ -167,16 +156,6 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
     expect(r.run!({ w: 0.5 } as never)).toBe(true);
   });
   // Second review of CE-93.
-  test('compiled Python reads a NaN input as a value', () => {
-    const ce = new ComputeEngine();
-    ce.declare('w', 'number');
-    const r = compile(ce.box(['Less', 'w', 1]), {
-      to: 'python',
-      fallback: false,
-    });
-    expect(r.code).toBe('w < 1');
-  });
-
   test('a chain of lists keeps its own lowering', () => {
     const ce = new ComputeEngine();
     ce.declare('w', 'number');

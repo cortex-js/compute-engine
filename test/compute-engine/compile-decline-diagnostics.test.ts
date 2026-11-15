@@ -2,7 +2,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
@@ -181,9 +180,8 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
         ['Function', ['Greater', '_', 2]],
       ]);
 
-    it('the 1-arg cardinality form still compiles on both targets', () => {
+    it('the 1-arg cardinality form still compiles on JavaScript', () => {
       expect(new JavaScriptTarget().compile(cardinality()).success).toBe(true);
-      expect(new PythonTarget().compile(cardinality()).success).toBe(true);
       expect(compile(cardinality())?.run?.({ n: 5 })).toBe(5);
     });
 
@@ -195,15 +193,6 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
         /Could not compile `Count`: .*value form \(`Count\(xs, v\)`\)/s
       );
       expect(new JavaScriptTarget().compile(byPredicate()).success).toBe(true);
-    });
-
-    it('python names the unsupported arity', () => {
-      expect(() => new PythonTarget().compile(byValue())).toThrow(
-        /Could not compile `Count`: only the single-argument cardinality form compiles/s
-      );
-      expect(() => new PythonTarget().compile(byPredicate())).toThrow(
-        /Could not compile `Count`: only the single-argument cardinality form compiles/
-      );
     });
 
     it('the interpreted fallback answers what the interpreter answers', () => {

@@ -7,19 +7,14 @@
  * value (`(−8)^{0.25}` is `1.189 + 1.189i`). The compiled code follows the
  * same rule on every target that can decide it:
  * - JavaScript at run time (`_SYS.pow`, `_SYS.cpow`);
- * - Python at run time (the helper `_ce_pow`), and for a constant exponent
- *   when the code is generated;
  * - GLSL for a constant exponent, when the code is generated. A shader
  *   cannot decide it for a variable exponent, which it holds as an f32, and
  *   keeps `pow`.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { shaderFunctions } from './gpu-shader-f32-eval';
-import { TEST_PYTHON } from './test-python';
-import { execFileSync } from 'child_process';
 
 // [base, exponent]
 const POINTS: [number, number][] = [
@@ -80,108 +75,6 @@ describe('JavaScript', () => {
     const i = interpreted(ce, x, y);
     expect([c.re === 0, c.im === 0]).toEqual([i.re === 0, i.im === 0]);
     expect(close(c.re, i.re) && close(c.im, i.im)).toBe(true);
-  });
-});
-
-describe('Python', () => {
-  const ce = new ComputeEngine();
-  ce.declare('x', 'real');
-  ce.declare('y', 'real');
-  ce.declare('z', 'complex');
-
-  (TEST_PYTHON === undefined ? it.skip : it)(
-    'x^y, x^0.4 and z^0.4 agree with the interpreter',
-    () => {
-      const py = new PythonTarget({ includeImports: true });
-      let program = '';
-      program +=
-        py.compileFunction(ce.box(['Power', 'x', 'y']), 'f_xy', ['x', 'y']) +
-        '\n';
-      program +=
-        py.compileFunction(ce.box(['Power', 'x', 0.4]), 'f_x04', ['x']) + '\n';
-      program +=
-        py.compileFunction(ce.box(['Power', 'z', 0.4]), 'f_z04', ['z']) + '\n';
-      program += 'import json\nout = []\n';
-      program += `for (x, y) in ${JSON.stringify(POINTS)}:\n`;
-      program += `  r = complex(f_xy(float(x), float(y)))\n`;
-      program += `  out.append([r.real, r.imag])\n`;
-      program += `for x in [-8.0, 8.0, -1e-3]:\n`;
-      program += `  r = complex(f_x04(x))\n`;
-      program += `  out.append([r.real, r.imag])\n`;
-      program += `  r = complex(f_z04(complex(x, 0.0)))\n`;
-      program += `  out.append([r.real, r.imag])\n`;
-      // An array base: the rule applies element by element.
-      program += `r = f_xy(np.array([-8.0, 8.0, -8.0]), np.array([0.4, 0.4, 0.3333333333333333]))\n`;
-      program += `out.append([float(v) for v in r])\n`;
-      program += 'print(json.dumps(out))\n';
-      // The array-base line makes numpy warn on its standard error
-      // ("invalid value encountered in power") for the element whose real
-      // power is NaN; the warning is expected. Capture the standard error
-      // instead of inheriting it, so it stays out of the test output; a
-      // failing run still carries it on the thrown error.
-      const raw = execFileSync(TEST_PYTHON!, ['-c', program], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      const values = JSON.parse(raw.replace(/NaN/g, 'null')) as (
-        number | null
-      )[][];
-      const failures: string[] = [];
-      let k = 0;
-      const check = (
-        label: string,
-        [re, im]: (number | null)[],
-        expected: { re: number; im: number }
-      ) => {
-        const r = re ?? NaN;
-        const i = im ?? NaN;
-        // Python's own principal value (`(-8.0) ** 0.25`) is computed in
-        // polar form, to about 1e-15.
-        if (!close(r, expected.re, 1e-14) || !close(i, expected.im, 1e-14))
-          failures.push(
-            `${label}: ${r} + ${i}i, expected ${expected.re} + ${expected.im}i`
-          );
-      };
-      for (const [x, y] of POINTS)
-        check(`x^y (${x}, ${y})`, values[k++], interpreted(ce, x, y));
-      for (const x of [-8, 8, -1e-3]) {
-        check(`x^0.4 (${x})`, values[k++], interpreted(ce, x, 0.4));
-        check(`z^0.4 (${x})`, values[k++], interpreted(ce, x, 0.4));
-      }
-      const array = values[k++] as number[];
-      expect(array[0]).toBeCloseTo(interpreted(ce, -8, 0.4).re, 12);
-      expect(array[1]).toBeCloseTo(interpreted(ce, 8, 0.4).re, 12);
-      expect(array[2]).toBeCloseTo(-2, 12);
-      expect(failures).toEqual([]);
-    }
-  );
-
-  it('compileLambda compiles x^y without the helper', () => {
-    // A bare lambda has no place for the module helper `_ce_pow`: it keeps
-    // the power of Python, so it gives the principal value for a negative
-    // base under a variable float exponent, where `compileFunction` gives
-    // the real root of the interpreter.
-    const py = new PythonTarget();
-    expect(py.compileLambda(ce.box(['Power', 'x', 'y']), ['x', 'y'])).toBe(
-      'lambda x, y: (x ** y)'
-    );
-    expect(py.compileLambda(ce.box(['Power', 'z', 'y']), ['y', 'z'])).toBe(
-      'lambda y, z: (z ** y)'
-    );
-  });
-
-  it('a variable exponent takes the helper, a constant one is decided now', () => {
-    const py = new PythonTarget();
-    expect(py.compile(ce.box(['Power', 'x', 'y'])).code).toContain(
-      '_ce_pow(x, y)'
-    );
-    const constant = py.compile(ce.box(['Power', 'x', 0.4])).code;
-    expect(constant).not.toContain('_ce_pow');
-    expect(constant).toContain('np.power(np.abs(');
-    // An even denominator has no real root at a negative base: in the
-    // default `strict` mode the power stays on the real lane, and it is NaN
-    // there.
-    expect(py.compile(ce.box(['Power', 'x', 0.25])).code).toBe('x ** 0.25');
   });
 });
 

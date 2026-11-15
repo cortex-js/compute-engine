@@ -45,7 +45,6 @@ import {
 import {
   _compileParents,
   _cseInlineCode,
-  assertAssignmentIsStatement,
   assertExpressionValue,
   assertNoStatementOperand,
   builtinCallbackRefusal,
@@ -81,7 +80,6 @@ import {
   argumentProvesParameterType,
   assertBuiltinCallbackUsable,
   assertCallbackLaneMatch,
-  assertCapturedCallableBindings,
   assertUserFunctionFreeBindings,
   beginRootPreprocessing,
   bodyWithArguments,
@@ -358,7 +356,6 @@ import {
   reachesAbsArg,
   realBoundOf,
   recordJumpFoldReads,
-  resetCompilationMemos,
   staticCollectionSize,
   tryConstantFold,
   unsafeIntegerOperands,
@@ -376,7 +373,6 @@ import {
   readsAngularDefinition,
   recordedTypeLists,
   referencesVarsSymbol,
-  resetSharedCompilationBudgets,
   setAntiderivativeAttemptBudgetForTesting,
   shadowedOperandSymbols,
   storedDefinitions,
@@ -410,7 +406,6 @@ import {
   compileExprApplyField,
   compileExprAssign,
   compileExprBroadcastJavaScript,
-  compileExprBroadcastPython,
   compileExprCapturedBody,
   compileExprCoalesce,
   compileExprDeclare,
@@ -455,7 +450,6 @@ import {
   emitFusedBroadcast,
   rememberPlainBroadcast,
   tryCompileBroadcast,
-  tryCompilePythonElementwise,
 } from './compile-broadcast.js';
 import { compileBlock, compileStatementList } from './compile-blocks.js';
 import {
@@ -470,13 +464,11 @@ import {
   bindsLocalFunctions,
   blockLocalOf,
   blockLocalValueFrame,
-  freshBlockLocalName,
   localNameKey,
   nestedAssignmentsTo,
   refuseEffectContractViolations,
   unassignedLocalRead,
   withDefineFunctionDeclares,
-  withFreshBlockLocals,
   withWritableLoopIndices,
 } from './compile-locals.js';
 import {
@@ -781,7 +773,6 @@ export class BaseCompiler {
     withVarsMappedUserFunctionHeads;
   static readonly absenceAxisForType = absenceAxisForType;
   static readonly compileValueOperand = compileValueOperand;
-  static readonly assertAssignmentIsStatement = assertAssignmentIsStatement;
   static readonly assertNoStatementOperand = assertNoStatementOperand;
   static readonly canHoist = canHoist;
   static readonly hoistStatement = hoistStatement;
@@ -795,8 +786,6 @@ export class BaseCompiler {
   static readonly joinShaderStatements = joinShaderStatements;
   static readonly compileListStatement = compileListStatement;
   static readonly compileRoot = compileRoot;
-  static readonly assertCapturedCallableBindings =
-    assertCapturedCallableBindings;
   static readonly assertUserFunctionFreeBindings =
     assertUserFunctionFreeBindings;
   static get _kindLowering() {
@@ -1061,7 +1050,6 @@ export class BaseCompiler {
   static readonly containsNonFiniteLiteral = containsNonFiniteLiteral;
   static readonly tryConstantFold = tryConstantFold;
   static readonly beginRootPreprocessing = beginRootPreprocessing;
-  static readonly resetCompilationMemos = resetCompilationMemos;
   static get _foldValueMemo() {
     return CompilerState._foldValueMemo;
   }
@@ -1235,7 +1223,6 @@ export class BaseCompiler {
   static readonly compileExprTupleCall = compileExprTupleCall;
   static readonly compileExprBroadcastJavaScript =
     compileExprBroadcastJavaScript;
-  static readonly compileExprBroadcastPython = compileExprBroadcastPython;
   static readonly compileExprOperator = compileExprOperator;
   static readonly compileExprFunctionLiteral = compileExprFunctionLiteral;
   static readonly checkedAppliedLiteralCompile = checkedAppliedLiteralCompile;
@@ -1289,7 +1276,6 @@ export class BaseCompiler {
   static readonly emitFusedBroadcast = emitFusedBroadcast;
   static readonly rememberPlainBroadcast = rememberPlainBroadcast;
   static readonly compileBroadcastUnary = compileBroadcastUnary;
-  static readonly tryCompilePythonElementwise = tryCompilePythonElementwise;
   static readonly declareValueOperand = declareValueOperand;
   static readonly declareTypeOperand = declareTypeOperand;
   static readonly declaredTypeSource = declaredTypeSource;
@@ -1343,17 +1329,9 @@ export class BaseCompiler {
     assertLocalsAssignedBeforeRead;
   static readonly assertNoUseBeforeDeclare = assertNoUseBeforeDeclare;
   static readonly unassignedLocalRead = unassignedLocalRead;
-  static get _freshBlockLocals() {
-    return CompilerState._freshBlockLocals;
-  }
-  static set _freshBlockLocals(v: (typeof CompilerState)['_freshBlockLocals']) {
-    CompilerState._freshBlockLocals = v;
-  }
   static readonly _freshLocalNames = _freshLocalNames;
   static readonly _writableLoopIndices = _writableLoopIndices;
   static readonly withWritableLoopIndices = withWritableLoopIndices;
-  static readonly withFreshBlockLocals = withFreshBlockLocals;
-  static readonly freshBlockLocalName = freshBlockLocalName;
   static readonly assignLValue = assignLValue;
   static readonly compileBlock = compileBlock;
   static readonly compileForLoop = compileForLoop;
@@ -1533,7 +1511,6 @@ export class BaseCompiler {
   ) {
     CompilerState.antiderivativeStepsLeft = v;
   }
-  static readonly resetSharedCompilationBudgets = resetSharedCompilationBudgets;
   static readonly antiderivativeTimeouts = antiderivativeTimeouts;
   static readonly definitionIds = definitionIds;
   static get nextDefinitionId() {
@@ -1962,7 +1939,4 @@ export {
   pointHasBroadcastComponent,
   explicitBroadcastPointNorm,
 } from './compiler-type-facts.js';
-export {
-  statementBodyHead,
-  isTailAssignmentBlock,
-} from './compile-statements.js';
+export { statementBodyHead } from './compile-statements.js';

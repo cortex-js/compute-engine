@@ -13,11 +13,9 @@
  * Each case compares the compiled value with `evaluate()`.
  */
 
-import { execFileSync } from 'node:child_process';
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { TEST_PYTHON } from './test-python';
 
 type Value = number | Value[];
 
@@ -62,27 +60,6 @@ function expectClose(actual: Value, expected: Value): void {
     expect((actual as Value[]).length).toBe(expected.length);
     expected.forEach((e, i) => expectClose((actual as Value[])[i], e));
   } else expect(actual).toBeCloseTo(expected, 12);
-}
-
-/** The value of the Python code of `expr` with the inputs of `VARS`. The
- * code of a block is a sequence of statements that ends with a `return`, so
- * it is run as the body of a function. */
-function pythonValue(code: string): Value {
-  const assign = Object.entries(VARS).map(
-    ([k, v]) =>
-      `${k} = ${Array.isArray(v) ? `(${v.join(', ')})` : JSON.stringify(v)}`
-  );
-  const script = [
-    'import json, math',
-    'import numpy as np',
-    ...assign,
-    'def _value():',
-    ...code.split('\n').map((line) => `    ${line}`),
-    'print(json.dumps(_value()))',
-  ].join('\n');
-  return JSON.parse(
-    execFileSync(TEST_PYTHON!, ['-c', script], { encoding: 'utf8' })
-  );
 }
 
 function expectCompiledValue(
@@ -130,26 +107,12 @@ describe('CE-712.2: `At` of a call of a function with no declared result', () =>
 
   // On interval-js, a call of a block-local function whose value is a
   // collection declines unless the value is consumed whole, so the
-  // block-local cases run on JavaScript and Python.
+  // block-local cases run on JavaScript.
   test.each([
     ['a block-local q, At(q(x), 2)', ['Block', G_LOCAL, ['At', ['q', 'x'], 2]]],
     ['a block-local q, At(q(p), 2)', ['Block', G_LOCAL, ['At', ['q', 'p'], 2]]],
   ])('%s', (_label, json) => {
     expectCompiledValue(engine(), json, 'javascript', false);
-  });
-
-  const python = TEST_PYTHON ? test : test.skip;
-  // The Python case with a point argument is left out: the block-local
-  // literal multiplies the point with the Python `*`, which repeats a tuple
-  // (`2 * (3, 4)` is `(3, 4, 3, 4)`), where the interpreter gives `(6, 8)`.
-  python('python: a block-local q, At(q(x), 2)', () => {
-    for (const json of [['Block', G_LOCAL, ['At', ['q', 'x'], 2]]]) {
-      const ce = engine();
-      const expr = ce.box(json as any);
-      const r = compile(expr, { to: 'python', fallback: false } as any);
-      expect(r.success).toBe(true);
-      expectClose(pythonValue(r.code), interpreted(ce, expr));
-    }
   });
 });
 

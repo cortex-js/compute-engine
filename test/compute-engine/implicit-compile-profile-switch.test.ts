@@ -8,8 +8,8 @@ import {
   _resetMapAutoCompileStats,
 } from '../../src/compute-engine/library/map-auto-compile';
 
-// The internal switch of `implicitCompile()` that tries the `numeric-kernel`
-// profile first (docs/plans/2026-11-10-js-profile-first-consumer.md, step 1).
+// The internal switch of `implicitCompile()` that tries the profile `ir`
+// first (docs/plans/2026-11-10-js-profile-first-consumer.md, step 1).
 
 let savedPrecision: number;
 beforeAll(() => {
@@ -26,7 +26,7 @@ type Route = 'off' | 'on' | 'jit-off';
  * change these tests. */
 function engine(route: Route, machine = true): ComputeEngine {
   const ce = new ComputeEngine(machine ? { precision: 'machine' } : undefined);
-  ce._jsProfile = route === 'on' ? { profile: 'numeric-kernel' } : undefined;
+  ce._jsProfile = route === 'on' ? {} : undefined;
   if (route === 'jit-off') ce.jit = 'off';
   return ce;
 }
@@ -111,11 +111,9 @@ describe('switch on, Map', () => {
     } finally {
       restore();
     }
-    const profiled = seen.filter(
-      (s) => s.options?.profile === 'numeric-kernel'
-    );
+    const profiled = seen.filter((s) => s.options?.profile === 'ir');
     expect(profiled.length).toBe(1);
-    expect(profiled[0].result?.profile).toBe('numeric-kernel');
+    expect(profiled[0].result?.profile).toBe('ir');
     // The profile gave the code: the existing compiler did not run.
     expect(seen.length).toBe(1);
     expect(on).toEqual(values(admittedMap(engine('off'))));
@@ -144,10 +142,7 @@ describe('switch on, Map', () => {
     expect(on.values).toEqual(run('jit-off').values);
 
     // One attempt of the profile, then the existing compiler.
-    expect(on.seen.map((s) => s.options?.profile)).toEqual([
-      'numeric-kernel',
-      undefined,
-    ]);
+    expect(on.seen.map((s) => s.options?.profile)).toEqual(['ir', undefined]);
     expect(on.seen[1].result?.success).toBe(true);
     expect(on.seen[1].result?.profile).toBeUndefined();
 
@@ -167,7 +162,7 @@ describe('switch on, Map', () => {
       failed: 0,
     });
     expect(Object.keys(stats.declinedMessages)).toEqual([
-      "Could not compile with the profile 'numeric-kernel': unsupported head BetaRegularized",
+      "Could not compile with the profile 'ir': BetaRegularized(x, 2, 3): the operator BetaRegularized is not in the slice",
     ]);
   });
 
@@ -210,7 +205,7 @@ describe('switch on, Map', () => {
 describe('when the profile is not tried', () => {
   test('a consumer that is not in the list', () => {
     const ce = engine('off');
-    ce._jsProfile = { profile: 'numeric-kernel', consumers: new Set(['nd']) };
+    ce._jsProfile = { consumers: new Set(['nd']) };
     const { seen, restore } = spyCompile(ce);
     try {
       values(admittedMap(ce));
@@ -340,10 +335,9 @@ describe('switch on: a consumer whose program the profile admits gives the resul
   });
 });
 
-// A parameter with no declared type is a real number in the `strict` mode
-// (docs/plans/2026-11-10-js-numeric-kernel-profile-spec.md, "Names with no
-// declared type"): the profile admits the untyped programs of these
-// consumers.
+// The profile `ir` reads a scalar input with no declared type as a `real`
+// (docs/COMPILATION-MODEL.md, "The `ir` profile of the JavaScript target"):
+// it admits the untyped programs of these consumers.
 describe('switch on: a consumer whose program has untyped parameters', () => {
   test.each<Program>([
     ['nd', (ce) => ce.box(['ND', ['Function', ['Sin', 'x'], 'x'], 1]).N()],
@@ -414,17 +408,18 @@ describe('the environment variables', () => {
   });
 
   test('CE_JS_PROFILE and CE_JS_PROFILE_CONSUMERS set the switch of a new engine', () => {
-    process.env.CE_JS_PROFILE = 'numeric-kernel';
+    process.env.CE_JS_PROFILE = 'ir';
     delete process.env.CE_JS_PROFILE_CONSUMERS;
-    expect(new ComputeEngine()._jsProfile).toEqual({
-      profile: 'numeric-kernel',
-    });
+    expect(new ComputeEngine()._jsProfile).toEqual({});
 
     process.env.CE_JS_PROFILE_CONSUMERS = 'map, nd';
     expect(new ComputeEngine()._jsProfile).toEqual({
-      profile: 'numeric-kernel',
       consumers: new Set(['map', 'nd']),
     });
+
+    // The removed profile `numeric-kernel` leaves the switch off.
+    process.env.CE_JS_PROFILE = 'numeric-kernel';
+    expect(new ComputeEngine()._jsProfile).toBeUndefined();
 
     delete process.env.CE_JS_PROFILE;
     expect(new ComputeEngine()._jsProfile).toBeUndefined();

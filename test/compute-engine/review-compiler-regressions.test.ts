@@ -1,9 +1,6 @@
-import { execFileSync } from 'child_process';
 import { ComputeEngine } from '../../src/compute-engine';
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { TEST_PYTHON } from './test-python';
 
 const compiler = BaseCompiler as any;
 
@@ -320,39 +317,4 @@ describe('compiler review regressions', () => {
     expect(compiler.bigOpIterations(reducedMap)).toBe(20);
     expect(compile(reducedMap, { fallback: false }).run!({} as never)).toBe(55);
   });
-});
-
-const hasNumpy = (() => {
-  if (TEST_PYTHON === undefined) return false;
-  try {
-    execFileSync(TEST_PYTHON, ['-c', 'import numpy'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
-(hasNumpy ? test : test.skip)('Python Mod guards integer inputs promoted to float', () => {
-  const ce = new ComputeEngine();
-  const python = new PythonTarget();
-  const expr = ce.box(['Mod', 'x', 'm']);
-  const source = python.compile(expr).code.split('\n');
-  const expression = source.pop()!;
-  const lambda = python.compileLambda(expr, ['x', 'm']);
-  const program = [
-    'import numpy as np',
-    ...source,
-    `def f(x, m):\n    return ${expression}`,
-    `g = ${lambda}`,
-    'for fn in (f, g):',
-    '    for x, m in ((np.uint64(2**63 + 1), np.int64(10)), (np.uint64(2**63 + 1), np.uint64(10)), (np.uint64(2**63 + 1), 10), (17.0, 10), (2**100, 10.0)):',
-    '        try:',
-    '            print(int(fn(x, m)))',
-    '        except ValueError:',
-    "            print('ValueError')",
-  ].join('\n');
-  expect(execFileSync(TEST_PYTHON!, ['-c', program]).toString().trim().split('\n')).toEqual([
-    'ValueError', '9', '9', '7', 'ValueError',
-    'ValueError', '9', '9', '7', 'ValueError',
-  ]);
 });

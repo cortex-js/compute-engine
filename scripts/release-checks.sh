@@ -3,8 +3,8 @@
 # Usage: bash scripts/release-checks.sh
 #
 # Runs the checks of `npm run ci` that the full test suite does not run
-# (scripts/ci-nightly.sh runs the typecheck, the declaration tests, the
-# Python tests and the Jest tests): lint, the documentation references, the
+# (scripts/ci-nightly.sh runs the typecheck, the declaration tests and the
+# Jest tests): lint, the documentation references, the
 # circular-import check, the tests of the scripts, and the corpus pipeline.
 # Before them, it formats the source with Prettier and commits the files
 # that changed (scripts/release-format.sh): no commit hook formats the

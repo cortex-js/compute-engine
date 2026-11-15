@@ -1067,11 +1067,9 @@ export function gpuSlotNames(slots: ReadonlySet<number>): string {
  * `Arcsch`, `(1 - cos(vec2(x, y))) / 2` for `Haversine`), behind
  * `success: true`. Several of these heads have a complex lowering on another
  * target: the JavaScript target lowers `Arccot`, `Arcsch` and
- * `InverseHaversine` with a complex form (`_SYS.cacot`, …), and the Python
- * target lowers `Gamma`, `Factorial` and `Erf` with `scipy.special`
- * routines that take a complex argument. `Root` is not listed: a complex
+ * `InverseHaversine` with a complex form (`_SYS.cacot`, …). `Root` is not listed: a complex
  * radicand lowers through `_gpu_cpow` (see the `Root` lowering). `Variance`
- * has a complex value in the interpreter and on the Python target, but the
+ * has a complex value in the interpreter, but the
  * shader lowering sums `float` values. `Mean` and `StandardDeviation` are not
  * listed: the shader targets have no lowering for them, so they fail closed
  * for every operand.

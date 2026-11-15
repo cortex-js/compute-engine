@@ -42,7 +42,7 @@ const REASSIGN_IN_BRANCH: MathJsonExpression = [
 ];
 
 describe('COMPILED BLOCK LOCALS: the programs that compile', () => {
-  test.each(['javascript', 'glsl', 'python'])(
+  test.each(['javascript', 'glsl'])(
     'a declaration with a value, then a declaration that reads it, on %s',
     (to) => {
       const r = compiled(DECLARE_THEN_READ, to);
@@ -51,7 +51,7 @@ describe('COMPILED BLOCK LOCALS: the programs that compile', () => {
     }
   );
 
-  test.each(['javascript', 'glsl', 'python'])(
+  test.each(['javascript', 'glsl'])(
     'the accumulator loop, on %s',
     (to) => {
       const r = compiled(ACCUMULATOR, to);
@@ -60,8 +60,6 @@ describe('COMPILED BLOCK LOCALS: the programs that compile', () => {
     }
   );
 
-  // Python declines this block today, for another reason: the `If` with no
-  // `else` branch has no Python lowering ("wrong number of arguments").
   test.each(['javascript', 'glsl'])(
     'a reassignment in a branch, on %s',
     (to) => {
@@ -78,7 +76,7 @@ describe('COMPILED BLOCK LOCALS: the programs that compile', () => {
 describe('COMPILED BLOCK LOCALS: the programs that decline', () => {
   // An `Assign` to a name with no binding in a block is the error
   // `assignment-to-undeclared-variable`, and an invalid expression declines.
-  test.each(['javascript', 'glsl', 'python'])(
+  test.each(['javascript', 'glsl'])(
     'an assignment to an undeclared name declines, on %s',
     (to) => {
       const r = compiled(
@@ -89,7 +87,7 @@ describe('COMPILED BLOCK LOCALS: the programs that decline', () => {
     }
   );
 
-  test.each(['javascript', 'glsl', 'python'])(
+  test.each(['javascript', 'glsl'])(
     'a write to a symbol declared in the engine declines, on %s',
     (to) => {
       const ce = engine();
@@ -114,7 +112,7 @@ describe('COMPILED BLOCK LOCALS: the programs that decline', () => {
     expect(r.error).toMatch(/"x" is not a local of the compiled expression/);
   });
 
-  test.each(['javascript', 'glsl', 'python'])(
+  test.each(['javascript', 'glsl'])(
     'the value of a loop assigned to a local declines, on %s',
     (to) => {
       const r = compiled(
@@ -133,7 +131,7 @@ describe('COMPILED BLOCK LOCALS: the programs that decline', () => {
     }
   );
 
-  test.each(['javascript', 'glsl', 'python'])(
+  test.each(['javascript', 'glsl'])(
     'a block that ends in an assignment, where its value is used, declines, on %s',
     (to) => {
       const root = compiled(
@@ -151,7 +149,7 @@ describe('COMPILED BLOCK LOCALS: the programs that decline', () => {
         expect(root.error).toMatch(
           /is a statement, and it stands where a value is expected/
         );
-      else if (to !== 'python')
+      else
         expect(root.error).toMatch(/an assignment or a declaration is a statement/);
       // The JavaScript code gave `[1, 2]`, where the interpreter gives
       // `[1, Nothing]`.
@@ -167,7 +165,7 @@ describe('COMPILED BLOCK LOCALS: the programs that decline', () => {
     }
   );
 
-  test.each(['javascript', 'glsl', 'python'])(
+  test.each(['javascript', 'glsl'])(
     'a block with an assignment as an operand declines, on %s',
     (to) => {
       const r = compiled(
@@ -184,8 +182,7 @@ describe('COMPILED BLOCK LOCALS: the programs that decline', () => {
         to
       );
       expect(r.success).toBe(false);
-      if (to !== 'python')
-        expect(r.error).toMatch(/a block with a statement other than a declaration with a value is an operand/);
+      expect(r.error).toMatch(/a block with a statement other than a declaration with a value is an operand/);
     }
   );
 
@@ -269,16 +266,6 @@ describe('COMPILED BLOCK LOCALS: a block of declarations is a value', () => {
       expect(r.success).toBe(true);
       expect(r.code).toContain('floor(a)');
     }
-  });
-
-  // The Python target has no statement sink for a block in an operand
-  // position, and declines it with its own reason; the rule on block
-  // values does not refuse it.
-  test('python declines for its own reason, not for the block value', () => {
-    const ce = pointEngine();
-    const r = compile(ce.parse(SCALAR), { to: 'python' } as any) as any;
-    expect(r.success).toBe(false);
-    expect(r.error ?? '').not.toMatch(/a block with an assignment/);
   });
 
   test('the MathJSON form with Declare compiles; with Assign it is invalid and declines', () => {

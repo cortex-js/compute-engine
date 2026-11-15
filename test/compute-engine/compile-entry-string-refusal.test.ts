@@ -17,9 +17,6 @@ import { isFreeName } from '../../src/compute-engine/boxed-expression/type-guard
  * runs and agrees with the interpreter. A binding whose type a string
  * inhabits through a text member (`string`, `string | list<number>`) is not
  * affected.
- *
- * The Python target binds its parameters as bare Python names with no entry
- * check, so it has no equivalent of this refusal.
  */
 
 const EMOJI_A = '😀a';

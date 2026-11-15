@@ -163,7 +163,7 @@ describe('Shapes the interpreter refuses for a restricted point', () => {
     const expr = ce.box(json as never);
     expect(expr.isValid).toBe(false);
     expect(JSON.stringify(expr.json)).toContain(code);
-    for (const to of ['javascript', 'glsl', 'python'])
+    for (const to of ['javascript', 'glsl'])
       expect(declines(json, to)).toBe(true);
   });
 
@@ -181,21 +181,6 @@ describe('Shapes the interpreter refuses for a restricted point', () => {
     ['a number plus a plain point', ['Add', 't', P]],
   ])('%s fails closed on the shader targets', (_l, json) => {
     expect(declines(json, 'glsl')).toBe(true);
-  });
-
-  test.each([
-    ['a scalar times the point', ['Multiply', 't', gated()]],
-    ['the point divided by a scalar', ['Divide', gated(), 't']],
-  ])('%s fails closed on Python', (_l, json) => {
-    expect(declines(json, 'python')).toBe(true);
-  });
-
-  test('the magnitude of the point is its norm on Python, not a component-wise abs', () => {
-    const r = compile(engineWithT().box(['Abs', gated()] as never), {
-      to: 'python',
-    } as never);
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('np.linalg.norm');
   });
 });
 
@@ -429,21 +414,6 @@ describe('A point with an undecided component type beside a list', () => {
     expect(declines(['Multiply', ['List', 1, 2], ['List', 3, 4]], 'glsl')).toBe(
       false
     );
-  });
-});
-
-describe('Dot of a restricted operand', () => {
-  test.each([
-    [
-      'a restricted list of points',
-      [
-        'Dot',
-        gated(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]),
-        ['Tuple', 1, 1],
-      ],
-    ],
-  ])('%s fails closed on Python', (_l, json) => {
-    expect(declines(json, 'python')).toBe(true);
   });
 });
 

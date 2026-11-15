@@ -5,7 +5,7 @@
  *
  * The interpreter reads a string by grapheme cluster: `First(p)` of `"😀b"`
  * is `"😀"`. The generic compiled lowerings read it as an array, by UTF-16
- * code unit on JavaScript and by code point on Python, so such an operand
+ * code unit on JavaScript, so such an operand
  * fails closed and the interpreter evaluates it:
  *
  * - JavaScript, `p: broadcastable<broadcastable<string>>` (and an alias of
@@ -15,10 +15,6 @@
  *   read.
  * - JavaScript, `p: broadcastable<any>`, `broadcastable<value>` or `any`:
  *   `First(p)` gave `"\ud83d"`, where `At` and `Last` already declined.
- * - Python, `p: broadcastable<string>` or `string | list<string>`: `At(p, 1)`
- *   gave `nan` for `"abc"`, and `First(p)` emitted `_l[0]`.
- *
- * Python is not run here: the tests check that the compile is refused.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -44,7 +40,7 @@ function interpreted(
 function compiles(
   decl: string,
   json: unknown,
-  to: 'javascript' | 'python',
+  to: 'javascript',
   setup?: (ce: ComputeEngine) => void
 ): boolean {
   const ce = new ComputeEngine();
@@ -116,27 +112,9 @@ describe('JavaScript: First of an operand with a top type', () => {
   });
 });
 
-describe('Python: an operand that may be one string', () => {
-  test.each([
-    'broadcastable<string>',
-    'string | list<string>',
-    'broadcastable<broadcastable<string>>',
-  ])('the element reads and the selectors of p: %s fail closed', (decl) => {
-    for (const [json] of READS)
-      expect(compiles(decl, json, 'python')).toBe(false);
-    for (const json of SELECTORS)
-      expect(compiles(decl, json, 'python')).toBe(false);
-  });
-
+describe('an operand that may be one string', () => {
   test('the interpreter reads one string by grapheme cluster', () => {
     for (const [json, value] of READS)
       expect(interpreted('broadcastable<string>', json)).toBe(value);
-  });
-
-  test('a provable list of numbers still compiles', () => {
-    for (const [json] of READS)
-      expect(compiles('list<number>', json, 'python')).toBe(true);
-    for (const json of SELECTORS)
-      expect(compiles('list<number>', json, 'python')).toBe(true);
   });
 });

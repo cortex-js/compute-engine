@@ -396,8 +396,6 @@ export class CompilerState {
    * has nowhere to write: fail closed rather than emit a write the reads
    * cannot see.
    */
-  /** The depth of the `withFreshBlockLocals` calls that are running. */
-  static _freshBlockLocals = 0;
   /**
    * Lexical frames of `Block` locals, innermost last, each mapping a local's
    * name to its inferred complex-ness. Pushed/popped by `compileBlock` around

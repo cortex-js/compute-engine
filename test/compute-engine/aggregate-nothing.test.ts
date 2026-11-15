@@ -114,7 +114,7 @@ describe('numeric aggregates over a Nothing element', () => {
     (op) => {
       const ce = new ComputeEngine();
       ce.declare('xs', 'list<integer | nothing>');
-      for (const to of ['javascript', 'python'] as const) {
+      for (const to of ['javascript'] as const) {
         const result = compile(ce.box([op, 'xs']), { to });
         expect(result.success).toBe(false);
         // Some targets do not support the operator at all; either refusal is sound.

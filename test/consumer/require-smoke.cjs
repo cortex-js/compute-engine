@@ -33,7 +33,7 @@ function fail(message) {
 const ENTRIES = {
   'compute-engine': ['ComputeEngine', 'compile', 'parse', 'GLSLTarget'],
   core: ['ComputeEngine', 'simplify'],
-  compile: ['compile', 'GLSLTarget', 'PythonTarget'],
+  compile: ['compile', 'GLSLTarget'],
   'math-json': ['isSymbolObject'],
   'latex-syntax': ['LatexSyntax', 'parse'],
   interval: ['ok', 'point'],
@@ -67,7 +67,7 @@ function load(name) {
 
 // `core` and `compile` first, and the core engine below is made BEFORE the
 // full entry loads: a program that loads `./core` alone has the two built-in
-// targets. The full entry then adds `glsl` and `python` to the
+// targets. The full entry then adds `glsl` to the
 // program-wide table of default targets, which every engine reads on each
 // lookup, so the same core engine resolves them afterwards (checked below).
 for (const name of ['core', 'compile']) load(name);
@@ -100,31 +100,33 @@ const glsl = loaded.compile.compile(
 );
 if (!glsl.success || !/x \+ 1\.0/.test(glsl.code))
   fail(`the GLSL target did not compile x + 1 on a core engine: ${glsl.code}`);
+// A second core engine that registers no target of its own.
+const plain = new loaded.core.ComputeEngine();
 
 // 1. (continued) The other entries, the full entry among them.
 for (const name of Object.keys(ENTRIES)) if (!loaded[name]) load(name);
 
-// Once the full entry is loaded, every engine of the program has the four
-// targets: one made after the load, and the core engine made before it (the
+// Once the full entry is loaded, every engine of the program has the three
+// targets: one made after the load, and a core engine made before it (the
 // default engine that the free functions of `./core` cache is in the same
-// position, so `compile(…, { to: 'python' })` of the full entry must not
+// position, so `compile(…, { to: 'glsl' })` of the full entry must not
 // throw on it).
 const full = new loaded['compute-engine'].ComputeEngine();
 const fullNames = full._listCompilationTargets();
-if (fullNames.join(',') !== 'javascript,interval-js,glsl,python')
+if (fullNames.join(',') !== 'javascript,interval-js,glsl')
   fail(`a full-entry engine registers ${JSON.stringify(fullNames)}`);
-const upgraded = ce._listCompilationTargets();
-if (upgraded.join(',') !== 'javascript,interval-js,glsl,python')
+const upgraded = plain._listCompilationTargets();
+if (upgraded.join(',') !== 'javascript,interval-js,glsl')
   fail(`the core engine made before the full entry loaded registers ${JSON.stringify(upgraded)}`);
-const python = loaded.compile.compile(ce.box(['Add', 'x', 1]), { to: 'python', fallback: false });
-if (!python.success) fail('the core engine made before the full entry loaded does not compile to Python');
+const upgradedGlsl = loaded.compile.compile(plain.box(['Add', 'x', 1]), { to: 'glsl', fallback: false });
+if (!upgradedGlsl.success) fail('the core engine made before the full entry loaded does not compile to GLSL');
 loaded.core.expr(1); // the free functions of `./core` cache a default engine
 const viaFreeFunction = loaded['compute-engine'].compile(
   loaded['compute-engine'].parse('x + 1'),
-  { to: 'python', fallback: false }
+  { to: 'glsl', fallback: false }
 );
 if (!viaFreeFunction.success)
-  fail('the default engine of the free functions does not compile to Python');
+  fail('the default engine of the free functions does not compile to GLSL');
 
 const js = loaded['compute-engine'].compile(full.parse('x^2 + 1'));
 if (!js.success || js.run({ x: 3 }) !== 10)

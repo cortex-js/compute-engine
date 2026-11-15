@@ -223,8 +223,7 @@ Corollary rules for the strict regime:
   gives. The fused emitter (`emitFusedBroadcast`, `base-compiler.ts`) folds
   a chain of heads into ONE call, so `Sin(N) + M` with `N = []` and
   `M = [1, 2]` reaches the helper as one length mismatch and answers NaN,
-  where the interpreter answers the `incompatible-dimensions` error. The
-  Python comprehension lowering answers the empty list for the same shapes.
+  where the interpreter answers the `incompatible-dimensions` error.
 - Compiled pairing site (2026-07-31): the JavaScript `PointList` zip lowering
   (`JAVASCRIPT_FUNCTIONS.PointList`, `javascript-target.ts`) emits
   shortest-zip via `Math.min` over the source lengths — the pairing-regime

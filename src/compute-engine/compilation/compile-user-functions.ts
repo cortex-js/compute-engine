@@ -2827,7 +2827,7 @@ export function tryCompileLocalFunctionCall(
   // binds the point whole: with `g := t ↦ 2t` local to the block, `g(r)`
   // is `(2, 4)` for `r = (1, 2)`. The block binds the literal compiled for
   // a scalar parameter, so the call gave `NaN` for each coordinate on
-  // JavaScript, and repeated the tuple on Python. On JavaScript the call
+  // JavaScript. On JavaScript the call
   // applies the literal compiled with the parameter typed as the point, as
   // the call of a function defined on the engine takes its copy for one
   // point; a point that may be absent goes to the local as it is bound
@@ -3019,24 +3019,12 @@ export function tryCompileLocalFunctionCall(
       );
   }
 
-  // PYTHON. The block binds the local as a Python value
-  // (`h = lambda k: k + 1`). A call of a local whose parameters are scalar
-  // is compiled as on JavaScript (`emitUserFunctionCall`): the static type
-  // of each argument selects the direct call `h(n)`, or a comprehension
-  // that maps `h` over a list argument, as the interpreter does
-  // (`[h(e) for e in L]`). A local with a parameter that binds a
-  // collection whole is called directly only when no argument can be a
-  // collection: the Python operators of the body repeat or concatenate a
-  // list. The run-time tests of the JavaScript call are not spelled on
-  // Python: a test of a declared parameter type and a test that an
-  // argument is present. Each of these shapes fails closed, and the
-  // interpreter evaluates the call. CE-237.
   // A tuple at a parameter with no declared type is bound whole by the
   // interpreter: with `g := t ↦ 2t`, `g(y)` is `(2, 4)` for `y = (1, 2)`.
   // On a target other than JavaScript, which writes such a call with the
   // body of the function above, the block binds the literal compiled for
-  // a scalar parameter: the Python product `2 * y` repeats the tuple, and
-  // the interval product gives an empty interval. The call declines.
+  // a scalar parameter: the interval product gives an empty interval. The
+  // call declines.
   if (target.language !== 'javascript') {
     const tupleAt = args.findIndex((_a, i) => {
       const pt = annotations[i];
@@ -3054,41 +3042,6 @@ export function tryCompileLocalFunctionCall(
           `'${target.language ?? 'unknown'}' target compiles the function ` +
           `for a scalar parameter.`
       );
-  }
-
-  if (target.language === 'python') {
-    const reason = (why: string): Error =>
-      new Error(
-        `Could not compile a call of the block-local function \`${h}\` ` +
-          `on the Python target: ${why} The interpreter evaluates it instead.`
-      );
-    const scalarParams =
-      signature === undefined ? true : paramsAreScalar(signature);
-    const notScalar = args.findIndex((a) => {
-      if (scalarParams) return false;
-      const t = resolveTypeForCompilation(a.type.type);
-      return !(
-        t !== 'never' &&
-        (isSubtype(t, 'number') ||
-          isSubtype(t, 'boolean') ||
-          isSubtype(t, 'string'))
-      );
-    });
-    if (notScalar >= 0)
-      throw reason(
-        `argument ${notScalar + 1} has the type ` +
-          `\`${typeToString(args[notScalar].type.type)}\`, which is not ` +
-          `provably a number, a boolean or a string. The interpreter maps ` +
-          `a function over a list argument, and the Python call passes ` +
-          `the argument whole.`
-      );
-    return emitUserFunctionCall(
-      target.var(h) ?? h,
-      args,
-      target,
-      args.map(() => false),
-      scalarParams
-    );
   }
 
   // Parameter-typed, not argument-typed — see the sibling computation in

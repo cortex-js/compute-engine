@@ -2,13 +2,8 @@
 // `Iterate` under a consumer that bounds it, and of `Pipe`. Each compiled
 // value is compared with the value of the interpreter for the same input.
 
-import * as fs from 'fs';
-import { execFileSync } from 'child_process';
-import * as os from 'os';
-import * as path from 'path';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { TEST_PYTHON } from './test-python';
 import { isLaneMismatchError } from '../../src/compute-engine/compilation/diagnostics';
 
 type Json = any;
@@ -943,44 +938,5 @@ describe('COMPILED PIPE', () => {
   test('a free slot outside a stage is still an input with no type', () => {
     const expr = ['List', '_', ['Pipe', 'y', ['Add', '_', 1]]];
     expect(declined(expr)).toMatch(/the input `_` has no type/);
-  });
-
-  const python = TEST_PYTHON ?? '';
-  const pythonTest = fs.existsSync(python) ? test : test.skip;
-
-  pythonTest('Python: a call stage, an operator stage, a lifted stage', () => {
-    const map = ['Pipe', ['List', 1, 2], ['Map', key(['Multiply', 2, 'x'])]];
-    const sort = ['Pipe', ['List', 3, 1, 2], 'Sort'];
-    const take = ['Pipe', ['List', 3, 1, 2], ['Take', '_', 2]];
-    const lines = [map, sort, take].map((expr) => {
-      const result: any = compile(
-        ce.box(expr) as any,
-        {
-          to: 'python',
-          fallback: false,
-        } as any
-      );
-      expect(result.success).toBe(true);
-      return result.code;
-    });
-    const file = path.join(
-      os.tmpdir(),
-      `ce-py-pipe-${process.pid}-${Math.random().toString(36).slice(2)}.py`
-    );
-    fs.writeFileSync(
-      file,
-      ['import json', `print(json.dumps([${lines.join(', ')}]))`].join('\n')
-    );
-    try {
-      expect(
-        JSON.parse(execFileSync(python, [file], { encoding: 'utf8' }))
-      ).toEqual([
-        [2, 4],
-        [1, 2, 3],
-        [3, 1],
-      ]);
-    } finally {
-      fs.unlinkSync(file);
-    }
   });
 });

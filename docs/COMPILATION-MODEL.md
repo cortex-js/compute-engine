@@ -26,8 +26,7 @@ when it compiles. A difference that this list does not name is a defect.
   takes no arm, the written symbol `Missing`; the producer gives `NaN` for
   a numeric type, a point whose coordinates are all `NaN` for a point type
   (`At([(1, 2), (3, 4)], 5)` is `(NaN, NaN)` on every route), and the
-  target's absent object (`undefined` on `javascript`, `None` on
-  `python`) otherwise. A declared type cannot name `missing` (user
+  target's absent object (`undefined` on `javascript`) otherwise. A declared type cannot name `missing` (user
   decision of 2026-11-02, `docs/ERROR-MODEL.md`, "`Missing` is a result
   only"), so an input is never declared absent. The structure that moves it without computing on it:
   `At`, `First`, `Last`, `Rest`, `Length`, `Reverse`, and the binding of a
@@ -35,7 +34,7 @@ when it compiles. A difference that this list does not name is a defect.
   on every route). Its discharge: `IsMissing`, `Coalesce` (`??`),
   `AssertPresent` (`?!`), which give the
   interpreter's value for an absent operand of any spelling (`Missing`,
-  `NaN`, `undefined`, `None`). A parameter default is not a discharge: it
+  `NaN`, `undefined`). A parameter default is not a discharge: it
   fills only an argument that the call leaves out (see "Function values").
   A point (a tuple of numbers, `tuple<real,
   real>` included) is tested at a discharge with the point
@@ -45,7 +44,7 @@ when it compiles. A difference that this list does not name is a defect.
   the static type; the emitted code tests no type at run time. A false
   restriction of a point, `If(c, (1, 2))`, is the point of `NaN`
   coordinates (user decision of 2026-11-03) on `javascript` (`[NaN, NaN]`),
-  `python` (a tuple of `nan`), the shader targets (a `vec2` of
+  the shader targets (a `vec2` of
   `NaN`) and `interval-js` (a point of `empty` coordinates).
   Every other operator over an absent operand
   (arithmetic, a point operation, a comparison, `Not`, `And`, `Or`, a branch
@@ -129,23 +128,19 @@ interpreter's value. A line is removed when the case declines or is fixed.
 
 - `javascript`, `x: real`: `Digamma(x)` at `x = +Infinity` gives `NaN`. The
   interpreter gives `+Infinity`.
-- `plausible?` — `python`, `x: real`: `BetaRegularized(x, 2, 3)` at `x = 2`
-  calls `scipy.special.betainc`, which scipy defines for `x` in `[0, 1]`
-  only; the interpreter gives `8`. Not run: scipy is not installed on the
-  development machine.
 - `javascript` (crafted), `x: real`, `g` assigned `0.75` with no declared
   type, `angularUnit = 'deg'`, the `complex` mode: in
   `Block(Declare(t, real, x), Assign(t, Block(Declare(b0, unknown, g), Arctan(b0))), t)`
   the existing compiler writes `57.29577951308232 * _SYS.catan(_SYS.cplx(b0))`,
-  a number times a complex object, and gives `NaN`; the `numeric-kernel`
-  profile gives `36.86989764584402`.
-- `javascript` (crafted), `x`, `y: real`, both routes: the real kernels of
+  a number times a complex object, and gives `NaN`; the interpreter gives
+  `36.86989764584402`.
+- `javascript` (crafted), `x`, `y: real`: the real kernels of
   `BesselJ(x, y)`, `BesselY`, `BesselI`, `BesselK` do not end for an order
   `x` of a magnitude of `2^53` or more (`x = 2^60, y = -2.5`), nor
   `Gamma(x, y)` (`_SYS.gammaUpper`) for `x = -1e300, y = 0.3`. The
   interpreter leaves the Bessel functions unevaluated and gives `+∞` for the
   `Gamma`.
-- `javascript`, `x: real`, `z: complex`, both modes, both routes: an
+- `javascript`, `x: real`, `z: complex`, both modes: an
   intermediate double overflows and the code gives `NaN` (or `Infinity`)
   where the interpreter has a finite value:
   - `Coth(x)` at `x = 1000` gives `NaN`; the interpreter gives `1`.
@@ -156,7 +151,7 @@ interpreter's value. A line is removed when the case declines or is fixed.
     gives `0`.
   - `Arcsch(x)` at `x = 1e-309` gives `Infinity` (`Math.asinh(1 / x)`); the
     interpreter gives `712.19194091572`.
-- `javascript` (crafted), `z: complex`, both routes, also the profile `ir`:
+- `javascript` (crafted), `z: complex`, also the profile `ir`:
   the complex `Cot` kernel loses precision near 0, off the pole: `Cot(z)` at
   `z = 1e-8 + 2e-8i` gives `1.8014e7 − 3.6029e7i`; the interpreter gives
   `2e7 − 4e7i` (relative error 8e-8 at `|z|` about 1e-5, 5e-12 at 1e-3,
@@ -202,7 +197,7 @@ interpreter's value. A line is removed when the case declines or is fixed.
   an operand that is a zero computed as `-0` (`Arctan2(Negate(0·x), y)`) is
   off by π in the software renderer, and has the other sign on a GPU for
   `x = -0`. The complex lane compares its parts with 0 first.
-- `javascript` (crafted), both routes, also the profile `ir`: at the
+- `javascript` (crafted), also the profile `ir`: at the
   threshold of the sRGB transfer function, `AsRgb(Rgb(0.04045, 0.04, 0.05))`
   gives `c0 = 0.040449970408` (the round trip through OKLCh crosses to the
   other branch of the transfer); the interpreter gives `0.04045`.
@@ -234,75 +229,23 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `Function(Block(Declare(A, 'list<integer>', Comprehension(j, Element(j, Range(1, 2 + Random(Range(1, 3)))))), Declare(r, 'real', Random()), 1000·r + Length(A)), u)`
   applied to `0.5` under the seed 1 gives `211.47662186831073`. The interpreter gives
   `987.4569781146947`: its comprehension is a lazy view, so it draws for `r`
-  before it draws for the range. The `numeric-kernel` profile declines a
-  draw in the range of a comprehension.
-- `javascript`, profile `numeric-kernel`: a sum that is not in canonical
-  form and has a sum as an operand (`Add(Add(x, 1), Add(x, 1))`, nested four
-  times) can differ in the last place from the existing compiler with
-  `cse: false` (`20.800000000000008` and `20.8`): the existing emitter writes
-  the terms of the nested sums as one sum from left to right
-  (`_.x + 1 + _.x + 1`), the profile adds each nested sum first. A canonical
-  sum has no sum as an operand
-  (`docs/plans/2026-11-11-structured-shared-subexpressions.md`).
-- `javascript`, profile `numeric-kernel` (crafted): a parameter named
-  `ImaginaryUnit` (`Function(ImaginaryUnit·x, Typed(ImaginaryUnit, 'real'),
-  Typed(x, 'real'))`, and the parameter of a lambda of `Map`) is read as
-  the parameter by the profile (`1.5` at `(0.5, 3)`), as the imaginary unit
-  by the existing compiler (`{re: 0, im: 3}`); so is the arithmetic of a
-  list (`ImaginaryUnit·L`). The element-wise functions and selections of a
-  list decline such a name.
-- `javascript`, profile `numeric-kernel` (crafted), `x: real`:
-  `Inverse([[Log(x, 10), 1], [-0.25, 3]])` at `x < 0` gives cells `NaN`;
-  the existing compiler gives cells `{re: NaN, im: NaN}`: the type of
-  `Log(x, 10)` is complex, and it inverts on the complex lane
-  (`_SYS.complexInv`), where the profile calls `_SYS.inv`. Both give the
-  same numbers for `x > 0` (random tester, seed 264).
-- `javascript`, profile `numeric-kernel` (crafted): the existing compiler
-  searches again for the closed form of an integral at each place where it
-  writes it (each occurrence, each term of an unrolled `Sum`), and the
-  searches of one compilation share a pool of 600,000 steps; when its
-  searches spend the pool, a later integral gets quadrature
-  (`_SYS.integrate`) where the profile, which searches once per node and
-  declines a program whose searches spend more than 10,000 steps, writes
-  the closed form. The doubles then differ in the last places.
-- `javascript`, profile `numeric-kernel` (crafted): a search for a closed
-  form also stops at a wall-clock guard of 30 s (`closedFormIntegral()`),
-  shared by the searches of one compilation. A search near the guard can
-  find a closed form on one compiler and stop on the other; the record of
-  a search that timed out makes the next compilation skip it.
-- `javascript`, profile `numeric-kernel` (crafted): in an integral with no
-  closed form, the existing compiler searches for the closed forms of the
-  integrals of its integrand before those of its bounds, from the last
-  clause to the first; the profile searches the bounds first, clause by
-  clause, then the integrand. The two orders spend the shared pool of
-  steps alike unless it runs out, as in the line above.
-- `javascript`, profile `numeric-kernel` (crafted): a name of the
-  integrand that is assigned after the integral is boxed is read as an
-  input in the closed form. `e = ce.box(['Integrate', ['Multiply', 'x',
-  'y'], ['Limits', 0, 1]])`, then `ce.assign('y', 5)`: the profile writes
-  `0.5 * _.y` (`NaN` for `run({})`), the existing compiler `(0.5 * 5)`,
-  the interpreter 5/2. With `y` assigned before boxing, both give 2.5
-  (since slice 1, `f56cd5f29`; `binder-mechanism.test.ts`).
+  before it draws for the range.
 - `javascript`, with a `symbolDeps` capture, `seven` and `tenth` assigned
   `7/10` and `1/10` with no declared type: `x + Mod(seven, tenth)` is not
   folded and gives `x + _SYS.floorMod(0.7, 0.1)`, about `x + 0.0999…`;
   without `symbolDeps` it is folded to `x + 0`. The interpreter gives `x`.
-  The profile `numeric-kernel` gives the code of the existing compiler in
-  both cases.
 - `javascript`, `x: real`, `strict` mode: `WithRandomSeed(3, ln(x)) + x` at
   `x = 3` gives `{ re: NaN, im: undefined }`. The node has the type
   `complex | signed_infinity`, so the parent
   reads the parts of a complex value, and the handler writes the real body
-  `Math.log(x)`. The interpreter gives `4.0986…`. The profile
-  `numeric-kernel` declines it.
+  `Math.log(x)`. The interpreter gives `4.0986…`.
 - `javascript` (crafted), `complex` mode, `x: real`, `u` with no declared
   type, `fr` assigned `(v: real) ↦ v/(v² + 1)`: in
   `If(Not(0.5 ≤ -1), u, fr(u)) / x` the existing compiler selects the branch
   `u` and writes `_.u / _.x`, a real quotient: `Infinity` at `x = 0`,
   `u = 5e-324`. With `sin(u)` in the other branch, and for `u / x`, it lifts
-  `u` (`_SYS.cplx`) and gives `{re: Infinity, im: NaN}`, as the profile
-  `numeric-kernel` does for the three programs. The interpreter gives
-  `ComplexInfinity`.
+  `u` (`_SYS.cplx`) and gives `{re: Infinity, im: NaN}`. The interpreter
+  gives `ComplexInfinity`.
 - `javascript`, `complex` mode, `t` with no declared type: `-1/(t·ln t)`,
   `1/(t·ln(t)^2)` and `sin(ln t)/t` at `t = ±Infinity` give `NaN`. The
   interpreter gives `0`.
@@ -443,10 +386,7 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `javascript`: in a loop with an outer `a = 100`, `function f() { a }` and
   `let (a, b) = (k, f())`, the compiled `b` is `k`; the interpreter gives
   `b = 100` (was CE-756).
-- `python`: `At(L, 1.5)` with `L: list<real>` holding `[10, 20]` reads
-  `_l[int(_i) - 1]` and gives `10`; the interpreter gives `NaN` (a finite
-  index that is not an integer reads the absent value of the domain).
-- `javascript`, `python`: dependent `Sum` clauses with an outer `k = 3`,
+- `javascript`: dependent `Sum` clauses with an outer `k = 3`,
   `Sum(j + k, Limits(j, 1, k), Limits(k, 1, k))`, give 36; the interpreter
   gives 24.
 - `javascript`, `w: real`, `y: real` at `w = y = 0`: `Take(Range(1, ∞), w/y)`
@@ -456,13 +396,6 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `c = true`, `w = y = 0`: `Unique(If(c, Take(xs, w/y), xs))` gives `[]` (the
   `If` hides the slice with no value from the guard of `Unique`); the
   interpreter leaves it unevaluated.
-- `python`, `c: boolean | integer`: `If(c, 1, 2)` at `c = 1` compiles to
-  `((1) if (c) else (2))` and gives `1`; the interpreter leaves it
-  unevaluated. The JavaScript target declines it.
-- `python`, `n: integer`: `Linspace(0, 1e20, n)` at `n = 2` raises a NumPy
-  `UFuncTypeError`. The target writes `1e20` as the Python integer
-  `100000000000000000000`, which `np.linspace` cannot convert to a float. The
-  interpreter gives `[0, 1e20]`.
 - `javascript`, the interpreter fallback of a decline: with `L: list<real>`
   and `p: any` assigned `2L`, `compile(p + 1, { constantFold: false })`
   declines and `run({ L: [1, 2] })` gives `null` (the fallback does not pass
@@ -485,13 +418,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `javascript`, a `vars` entry whose code is not a primary expression: with
   `p: real` and `vars: { p: '2+3' }`, `2p` compiles to `2 * 2+3` and gives 7
   (the code is spliced without parentheses); the interpreter, with `p = 5`,
-  gives 10. The `python` target groups such code.
+  gives 10.
 - `javascript`: `Fold((acc, x = 100) ↦ If(IsMissing(x), acc, acc + x), 0,
   [1, 2, Missing])` gives 103; the interpreter gives 3. The callback's
   default is a JavaScript default parameter, which also fills a supplied
   `undefined` (the compiled `Missing`), so the discharge `IsMissing(x)` in
-  the body reads 100. The `python` callback fills a supplied `None` the same
-  way (`100 if x is None else x`). The same wrapper is used for the value of
+  the body reads 100. The same wrapper is used for the value of
   a user function with a default passed as a callback.
 - `javascript`, `constantFold: false`, `vars: { Pi: '_.Pi' }`: with
   `f := (x, k = Pi) ↦ x + k`, `f(1)` at `Pi = 3` gives 4 (the default `Pi`
@@ -540,13 +472,6 @@ interpreter's value. A line is removed when the case declines or is fixed.
   is not a list or a set at run time` (the function compiled with the
   parameter typed `string` is used only for an argument whose static type is
   a string); the interpreter gives 3.
-- `python`, `t: string` at a `t` of three code points, `e`, U+0301
-  (combining acute accent) and `x` (crafted: a character made of two code
-  points): `Block(Assign(g, s ↦ Reverse(s)), g(t))` gives the code points
-  `x`, U+0301, `e` (the body is compiled for a list, as `s[::-1]`, which
-  reverses the code points of a string); the interpreter gives the code
-  points `x`, U+00E9, the accented `e` kept as one character.
-  `Reverse(t)` written without the function declines.
 - `javascript`, a `+=` inside a dictionary value of a `parallel for` body
   (crafted, MathJSON only): `Block(Declare(s, 0), ParallelLoop(Block(
   Dictionary(KeyValuePair('a', AddTo(s, k)))), Element(k, Range(1, 4))), s)`
@@ -574,21 +499,14 @@ interpreter's value. A line is removed when the case declines or is fixed.
   not checked again.
 - `javascript`, the `complex` mode, `u` with no declared type (crafted):
   `u + Round(0)` at `u = -0` gives `-0` with the existing compiler, which
-  writes the sum without its term `Round(0)`. The `numeric-kernel` profile
-  and the interpreter give `0`.
-- `javascript`, both routes, `A: matrix` at `A = [[1, 2, 3], [4, 5, 6]]`
+  writes the sum without its term `Round(0)`. The interpreter gives `0`.
+- `javascript`, `A: matrix` at `A = [[1, 2, 3], [4, 5, 6]]`
   (crafted: a matrix that is not square): `Trace(A)` gives `6` and
   `MatrixPower(A, 1)` gives `A`; the interpreter gives the error
   `expected-square-matrix`.
-- `javascript`, both routes, `v: list<real>` at `v = []` (crafted):
+- `javascript`, `v: list<real>` at `v = []` (crafted):
   `Diagonal(v)` gives `[]`; the interpreter keeps `Diagonal([])`
   unevaluated.
-- `javascript`, the `numeric-kernel` profile, `A: matrix` at `A = [[]]`
-  (crafted: a matrix of no column): a local declared `matrix` that holds
-  `Transpose(A)`, the empty list, is read as a matrix of one row or more
-  (`hasRows()` trusts the declared type of a name), so `Sum(S)` of it gives
-  `[]` where the existing compiler gives `0` (the sum of no row); the
-  interpreter keeps `Sum(Transpose([[]]))` unevaluated.
 - `plausible?` — `javascript`, `y: real`, `g(t) := t^{100} e^{-t}`:
   `\int_0^y g(x)\,dx` at `y = 1500` gives `NaN` (the quadrature meets
   `∞·0` in the integrand, and the log-space fallback `_SYS.finiteOr` is not
@@ -1006,10 +924,7 @@ and the name of the input in `unsupported`: with `m` undeclared,
 declared type has the type that the compiled expression requires of it
 (below). A declared union of
 shapes (`real | list<real>`) is a type, and compiles (R4). "An input with no
-type declines", under "Fail closed", gives the details. One exception: the
-experimental `numeric-kernel` profile of the JavaScript target takes an input
-with no declared type as a scalar number ("The `numeric-kernel` profile of
-the JavaScript target", below).
+type declines", under "Fail closed", gives the details.
 
 **R2. The static type of an argument selects the code of a call.** A
 function is compiled once for each argument shape that the program gives
@@ -1612,7 +1527,7 @@ make a local simple to compile, and compiled code adds three declines:
 | ------------------------------------------------------------- | -------------------------------------------------- |
 | `Block(Declare(a, 1), Assign(b, a + 1), b)`                   | compiles                                           |
 | `Block(Assign(s, 0), Loop(Assign(s, s + f(i)), i ∈ 1..n), s)` | compiles                                           |
-| `Block(Assign(a, 1), If(c, Assign(a, 2)), a)`                 | compiles (JavaScript, GLSL; Python declines the `If` with no `else`) |
+| `Block(Assign(a, 1), If(c, Assign(a, 2)), a)`                 | compiles (JavaScript, GLSL)                        |
 | `Block(Declare(a), If(c, Assign(a, 1)), a)`                   | static error: `a` has no value                     |
 | `Block(Assign(a, 1), Assign(a, "x"), a)`                      | static error: `"x"` is not a `number`              |
 | `f(a ≔ 2) + a`                                                | static error: an assignment is a statement         |
@@ -1651,11 +1566,11 @@ a `Return` and is the body of its function, or the last statement of a block
 in tail position. For example, with `x: real`, the search loop
 `((p) ↦ Loop(If(k > p, Return(k)), k ∈ 1..5))(x)` gives `3` for `x = 2` and
 `Nothing` for `x = 9`, where no `Return` runs; the compiled function gave
-`undefined` (JavaScript) or `None` (Python) for `x = 9`, so the loop
+`undefined` (JavaScript) for `x = 9`, so the loop
 declines. To compile a search loop, put the loop in a statement position,
 store the value that it finds in a local, and end the block with that local:
 `Block(r ≔ 0; Loop(If(k > x, Block(r ≔ k, Break())), k ∈ 1..5); r)` compiles
-on JavaScript and Python, and gives `3` for `x = 2` and `0` for `x = 9`, as
+on JavaScript, and gives `3` for `x = 2` and `0` for `x = 9`, as
 the interpreter does for this block. No compiled form gives `Nothing` when
 no value is found: the initial value of the local (here `0`) takes its
 place, and `r ≔ Nothing` declines. A loop in a case of a `Match` whose value
@@ -1755,7 +1670,7 @@ Contract B's `propagate` policy.
 For a form with no value (`0/0`, `0 · ∞`, `0^0`, `Mod(x, 0)`) the
 interpreter answers `NaN` on the exact route, with a float operand and
 under `.N()`, and every compiled target answers the IEEE `NaN`: `NaN` in
-JavaScript, `np.nan` in Python and `_gpu_nan()` in the shaders. The input
+JavaScript and `_gpu_nan()` in the shaders. The input
 spelling `Indeterminate` is `NaN` (user decision of 2026-11-02,
 `docs/ERROR-MODEL.md`, "One static error, one dynamic non-value per
 domain").
@@ -1800,7 +1715,7 @@ differences are accepted; they are not defects:
 |---|---|---|---|
 | `Heaviside(x)` | `x = ~oo` | `1` | `Error(incompatible-type, "real \| signed_infinity", "~oo")` |
 | `x > 0` | `x = ~oo` | `true` | `False` (`~oo` has no order, user decision 2026-10-21; before, `0 < ~oo`, not decided) |
-| `\{1/x > 0: 1, 0\}` | `x = 0` | `1` (also `python`, with a NumPy `x`) | `0` (`~oo` has no order, user decision 2026-10-21) |
+| `\{1/x > 0: 1, 0\}` | `x = 0` | `1` | `0` (`~oo` has no order, user decision 2026-10-21) |
 | `Sign(1/x)` | `x = 0` | `1` | `NaN` |
 | `Floor(1/x)` | `x = 0` | `Infinity` | `~oo` |
 
@@ -1815,7 +1730,7 @@ operand of `Less`, `LessEqual`, `Greater` or `GreaterEqual` is a closed
 operand whose exact value is `~oo` (`1/0`, `(-1)!`, `1/0 + 2`, a symbol
 assigned `1/0`), the comparison compiles to the target's `False` on every
 target, as the interpreter answers (`~oo` has no order, user decision
-2026-10-21): `x < 1/0` at `x = 1` is `false` on `javascript`, `python`,
+2026-10-21): `x < 1/0` at `x = 1` is `false` on `javascript`,
 `glsl` and `interval-js` (`'false'`), and so is `0 < 1/0`. This
 applies when the other operands are pure and cannot be lists at run time;
 otherwise the comparison keeps its code, with the pole as `Infinity`
@@ -1826,7 +1741,7 @@ interpreter's answers both in an ordering and in arithmetic: `NaN` gives
 interpreter answers `~oo`, which the projection spells `Infinity`. An
 equality is not changed: `x = 1/0` compiles to `x === Infinity`, `false`
 for a finite `x`, as the interpreter answers, and `1/0 = 1/0` folds to
-`false` on `javascript`, `glsl` and `python`, also under
+`false` on `javascript` and `glsl`, also under
 `constantFold: false`. `interval-js` does not fold an equality and answers
 `'true'` for `1/0 = 1/0` (`docs/ERROR-MODEL.md`, "a value with no order").
 
@@ -1887,14 +1802,14 @@ behavior.
 
 A second value carve-out is ruled (compiled-equality ruling, 2026-09-09):
 compiled `Equal` and `NotEqual` on numeric operands are EXACT, the IEEE 754
-comparison (`===` on JavaScript, `==` on Python, `==` on the shader targets),
+comparison (`===` on JavaScript, `==` on the shader targets),
 with no tolerance. The interpreter compares two numbers within
 `engine.tolerance`, so `0.1 + 0.2 = 0.3` evaluates to `True` and compiles to
 `false`. The compiled lanes serve plot kernels, where every comparison runs
 per sample and a tolerance test costs a subtraction, an absolute value and a
 compare each time, and where the exact answer is the one the reference
 graphing calculators give. The same rule covers `KroneckerDelta`, the
-element-wise and whole-collection equality helpers (`_SYS.eq`, `_ce_eqcoll`),
+element-wise and whole-collection equality helpers (`_SYS.eq`),
 and the `IndexOf` element test, which was already exact. `NotEqual` is the
 negation of the `Equal` test, so it answers `true` on a `NaN` operand, as the
 interpreter does. The value of a comparison over an absent operand is not
@@ -1925,8 +1840,7 @@ branch with an absent condition takes its next arm, as in the interpreter.
 The element-wise selection runtime (`_SYS.select`) reads an absent condition cell the same way:
 the position is not selected by that clause, and a later clause can select
 it. A comprehension guard that is not provably a boolean is tested with
-`=== true` on JavaScript and with the Python test of `pythonGuardTest()` on
-Python. `KroneckerDelta` is not a comparison: its codomain is numeric, and
+`=== true` on JavaScript. `KroneckerDelta` is not a comparison: its codomain is numeric, and
 it gives `0` where the operands are not equal.
 
 A consumer that needs tolerant equality evaluates through the interpreter, or
@@ -1950,10 +1864,8 @@ infinite operand, is an error. The compiled JavaScript throws a `RangeError`
 that names the operation and the value (`Mod: Infinity is beyond the safe
 integer range of compiled code …`). The CLI's compile mode reports it as an
 error value. The operations are `Mod`, `Remainder`, `GCD` and `LCM` (the
-runtime helper `integerOperand` in `compilation/javascript-runtime.ts`). The
-Python target raises a `ValueError` for `Mod` and `Remainder` (`GCD` and `LCM`
-have no Python lowering); there a Python integer is exact at any magnitude and
-passes `Mod`. A `NaN` operand is not an error: it propagates as through the
+runtime helper `integerOperand` in `compilation/javascript-runtime.ts`). A
+`NaN` operand is not an error: it propagates as through the
 other arithmetic. `Mod` by the literal `1` is not checked, because the
 remainder by `1` of every double beyond the range is `0`, which is also the
 exact answer.
@@ -2041,8 +1953,8 @@ it). `run.SYS` is built from the same factory.
 
 ## Target boundaries
 
-The JavaScript target supports the broadest dynamic representation. Python,
-GLSL, interval, and other targets expose narrower capabilities and must
+The JavaScript target supports the broadest dynamic representation. GLSL,
+interval, and other targets expose narrower capabilities and must
 decline outside them. A feature implemented for JavaScript is not implicitly a
 cross-target promise.
 
@@ -2116,8 +2028,7 @@ affected: `string` itself is compiled as text, and a union with a string
 member (`string | list<number>`) does not compile and runs on the
 interpreter. `indexed_collection<character>` and `collection<character>` are
 an open case: a string inhabits them, the entry does not refuse it, and the
-compiled code still reads it as UTF-16 code units. The Python target binds its parameters as plain Python names and
-has no entry check, so it has no equivalent of this refusal. Typed arrays
+compiled code still reads it as UTF-16 code units. Typed arrays
 are not used inside the artifact: a typed pipeline measured no faster than the
 plain one on the witness that asked for it, so the container would add
 per-helper result-kind rules for no gain. The measurements and the decision
@@ -2246,8 +2157,11 @@ the error. Its answer depends only on the expression, the options and the
 declarations that the expression reaches (the types of its free symbols, the
 definitions of the functions it calls), so a host can keep it until one of
 those declarations changes. Only `glsl` has a fragment: for another target
-the answer is `ok: false`, with a message that says so, except for
-`javascript` with the `numeric-kernel` profile (below).
+the answer is `ok: false`, with a message that says so, except with the
+option `profile: 'ir'` (below): `canCompile()` then runs the whole
+compilation with `fallback: false` and answers `{ ok: true, shippable }`
+when it gives code, or `{ ok: false, diagnostic }` with the diagnostic of the
+decline. Its cost is the cost of `compile()`.
 
 ```js
 canCompile(ce.parse('\\sin(x) + x^2'), { to: 'glsl' });
@@ -2302,343 +2216,14 @@ float _tv2 = _tv1;
 return _gpu_passes > 100 ? _gpu_nan() : _tv2;
 ```
 
-The `javascript`, `interval-js` and `python` targets have no fragment: they
-take the whole language with their own declines. The `numeric-kernel`
-profile of `javascript` (below) is a list of the same kind.
+The `javascript` and `interval-js` targets have no fragment: they
+take the whole language with their own declines.
 
 The list and the decisions are in `docs/plans/2026-11-08-glsl-fragment-spec.md`
 (section 2 and decisions 1 to 18); the typing pass is
 `src/compute-engine/compilation/fragment.ts` and
 `src/compute-engine/compilation/glsl-fragment.ts`, and its design is
 `docs/plans/2026-11-08-glsl-fragment-annotation-design.md`.
-
-### The `numeric-kernel` profile of the JavaScript target
-
-**Experimental.** With the option `profile: 'numeric-kernel'`, `compile()`
-to `javascript` uses the structured compiler of the JavaScript target: an
-admission and a typing pass (`javascript-fragment-target.ts`), a lowering
-to a structured representation (`javascript-structured-lower.ts`), a
-verifier, an emitter (`javascript-structured-emit.ts`), and the assembly of
-the existing JavaScript target, which gives the result its `run`,
-`broadcast`, `broadcastAsync` and `runAsync`. For each program it admits,
-the value equals the interpreter's within the caveats of compiled code, and
-the doubles equal those of the existing compiler with `cse: false` and
-`constantFold: false`. The profile folds no constant: against the default
-options of the existing compiler, which fold `√2 + √3 + 1/3` to one
-literal, a result can differ in the last place. Without the option,
-nothing changes.
-
-| Admitted | Examples |
-| --- | --- |
-| Arithmetic of reals, integers and complex numbers | `Add`, `Negate`, `Multiply`, `Divide`, `Power` of a real base with the exponent 2, an integer exponent 3 to 5 or −2, another constant exponent that the existing emitter writes with `Math.pow` (`x^10`, `x^-3`, `x^1.1`, `x^(5/2)`), 1.5, the base `e`, a real exponent that is not a literal (`s^(d/2)`, a real result), or a float literal exponent with an odd recovered denominator and a base not proved non-negative (`u^1.6`); `Root` with the degree 3 or a degree that is not a literal; `Power` and `Root` of two finite number literals, written as the literal that the existing emitter folds them to (`10^1.5` is `31.622776601683793`, `(-8)^(2/3)` is `4`, `Root(-8, 3)` is `-2`, `(-8)^(3/2)` the complex value `-22.627…i`). With a complex operand: a product of any number of operands, a real operand not converted (`x·z`, `i·x`, `x + i·y`, `2i·x·y`); a quotient, with the guarded formula of the existing emitter for a complex divisor (`z/x`, `1/(t·ln t)`); `Power` of a complex base with a number literal exponent (`z^3`, `z^1.1`), and `Power` with a complex base or exponent and an exponent that is not a number literal (`z^x`, `x^z`, `2^z`: `_SYS.cpow`) |
-| Functions | `Sqrt`, `Ln`, `Log` (base 10, 2 or a real base of a real logarithm), `Exp`, `Sin`, `Cos`, `Tan` (also of `π·u`), `Cot`, `Sec`, `Csc`, `Tanh`, `Sinh`, `Cosh`, `Arctan`, `Arsinh`, `Arcsin`, `Arccos`, `Arcosh`, `Artanh` (complex where the type of the node is complex: `Arcsin(x)` with `x: real`), `Arctan2`, `Hypot` (two operands), `Abs`, `Sign`, `Gamma` (one operand), `Erf`, `Erfc`, `Digamma`, `Haversine`, `Conjugate`, `Min`, `Max`, `Floor`, `Ceil`, `Round` (ties away from zero), `Truncate`, `Fract` (of an arithmetic operand or a call with no identity lowering), `Mod`, `Factorial`, `Factorial2`, `Arccot`, `Arcsch`, `Arccsc`, `Arcsec`, `Arcoth`, `Arsech` (complex where the type of the node is complex: `Arccsc(x)` with `x: real`), `Coth`. The library functions that the existing emitter writes as calls of real kernels, of real and integer operands: `Heaviside`, `GammaLn`, `Sinc`, `Erfi`, `ErfInv`, `Trigamma`, `FresnelS`, `FresnelC`, `SinIntegral`, `CosIntegral` of a non-negative operand (the existing kernel gives `Ci(|x|)` for a negative `x`, where the value is complex; CE-1225), `ExpIntegralEi`, `LogIntegral`, `DirichletEta`, `DirichletBeta`, `Zeta` (one or two operands), `StieltjesGamma` (one or two), `GammaRegularized` of a non-negative second operand, `Beta` of positive operands, `Binomial`, `Choose`, `ClausenCl`, `EllipticF`, `EllipticPi` and `EllipticE` of two operands, `BesselJ`, `BesselY`, `BesselI`, `BesselK`, `AGM` of non-negative operands, `PolyGamma`, `Chop`, `Remainder`, `GCD` and `LCM` (two operands or more), `KroneckerDelta`, `Clamp`, `Boole`, and `Real`, `Imaginary` and `Argument` of a real operand; `HurwitzZeta`, `PolyLog`, `LambertW`, `EllipticK`, `EllipticE` of one operand and `Gamma` of two operands (of a non-negative second operand), in the `complex` mode only where the existing compiler proves the value real (`complexContinuation()`: `HurwitzZeta(k, y)` with `k: integer`, `Gamma(s, p)` with `p: real<0..>`). An operand that names a parameter, a local or an index is not provably in the range of a kernel, and in the `complex` mode such an operand of a continuation head or of `Chop` declines: the engine answers its sign and its type from an engine symbol of the same name (`Function(CosIntegral(t), t)` with `t := 5`). `KroneckerDelta`, `GCD` and `LCM` of three operands or more decline when an operand after the second can throw (`GCD(x, y, Remainder(x, y))`): the existing compiler evaluates every operand before it compares or folds. A complex operand, in both modes: any for `Sin`, `Cos`, `Tan`, `Cot`, `Sec`, `Csc`, `Arctan`, `Arsinh`, `Arcsin`, `Arccos`, `Arccot`, `Arcsch`, `Arccsc`, `Arcsec`, `Arcoth`, `Arsech`, `Sign`, `Gamma`, `Ln`, `Sqrt` and `Conjugate` (`cos(arccos(a))` with `a: real`, `sin(t)/t` in the `complex` mode); one that does not read `Pi` for `Exp`, `Sinh`, `Cosh`, `Tanh`, `Coth`, `Sech` and `Csch` (`e^(i·x)`); a name for `Abs`, and for `Arcosh` and `Artanh` in the `strict` mode |
-| Conditions | `If`, `If(c, v)` and `Which` with real or integer values (`NaN` when no condition holds and there is no `True` clause), `Less`, `LessEqual`, `Equal`, `NotEqual` (real and integer operands), also as a chain of three operands or more (`0 < x < 1`, `a = b = c`): the conjunction of its adjacent pairs, each operand evaluated once, a later operand only when the pairs before it hold, `And`, `Or`, `Not` |
-| Sums and products | `Sum` and `Product` of a real or integer body over one or more `Limits(k, a, b)` clauses, with bounds that are number literals, captured numbers, or real or integer values of the program (floored, as the existing compiler does); with an iteration budget, a range over it gives `NaN`; `Sum` and `Product` of a body that is a list of reals or of integers (`Sum(L·k, k, 1, 3)`, `Sum([k, 2k], k, 1, 3)`), when every bound is a number literal, each range is not empty or the type of the body states its width (`Sum(V·k, k, 1, 0)` of `V: vector<3>` is `[0, 0, 0]`), and the body has one length in every term: the first term, then each later term added (multiplied) element by element, every term evaluated |
-| Names | inputs of a numeric or boolean type, `list<real>`, `list<integer>`, unnamed `tuple<real, …>` and lists of such tuples (`list<tuple<real, real>>`) as inputs and parameters, in the `strict` mode also with `number` elements (`list<number>`, `vector<n>`, `vector`, `list<tuple<number, number, number, integer>>`, real there, as the existing compiler reads them: `_SYS.atNumeric(L, i, "number")`), captured numbers (a snapshot), captured lists of finite real numbers and lists of such lists (`L: list<integer> = [10, 20, 30]`, `rows := [[1, 2], [3]]`: one array of the doubles of the elements, or of the rows, made once when the compiled function is made (`preambleOnce`) and shared by every call and every helper; no update writes it or one of its rows, and a value of the program that can be that array, a row of it, or hold one as a row is a copy to that depth (`rows` is `_tv1?.map((_r) => _r?.slice())`), and a value of rank 3 or more declines (`[rows, rows]`, `[[CL]]`); the name is in `symbolDeps`), captured complex numbers with finite parts (`z0 := -0.524 - 0.566i`, written at each read as the object of its parts, as the existing compiler writes it, in both modes), a name whose value is an expression (`lv := x + 1`, `ls := [x, 2y]`, `sv := y`, a chain `b := 2a + sin(x)`: the value, rewritten for the angular unit, computed once per call, before the body, where its names are the inputs, as the existing compiler computes `const _val_lv = _.x + 1;`, and a value that is a name read at each read, as the existing compiler writes it (a value of a name declared `complex` that is not complex-valued declines: the existing compiler lifts it to the complex lane); the name and each name whose value it reads are in `symbolDeps`, and a new compilation reads a new value), the value of a name in the frame of the call that the interpreter is making (`d` in `f(d) := Sum(Map(x ↦ x + d, …))`), names with no declared type and names declared `number` (below); a parameter of the root `Function` that the body never reads, whatever its type (`(p: real, q: any) ↦ 2p`) |
-| Nodes that read no input | a jump function of closed exact operands that the existing compiler folds (`closedExactJump()`, `tryConstantFold()`, also with `constantFold: false`): `Floor((25! − 1)/24!)`, `Sign(offset)`, `Less(a, b)` of two captured rationals; the profile writes the same literal. `Mod(a, 1)` of a dividend that is not integer-valued, as `_SYS.fract(a)` |
-| Functions of the program | a `Function` literal with typed parameters, a body with locals (`Declare`, `let`, `let c: integer = …`), writes to locals, `If` statements, `Loop` over `Element(k, Range(a, b))`, over a range with a step (`Range(1, 9, 3)`, made as a list first) or over the elements of a list value (`for c in all`, `Element(c, Reverse(L))`), a `Loop` over several index sets (nested, the first outermost), each `Range` clause tested against 2^32 − 1 elements before its first pass where the existing compiler writes that test (bounds that are not literals), a `Loop` with no index set (`while (true)`, never removed: it may not terminate), `Break` at the end of a branch of an `If` in a loop (not in a loop over several index sets), `Continue` at the end of a branch of an `If` that is a statement of the loop body (the statements after the `If` run in the other branch), destructuring declarations and writes of a literal tuple or of the tuple value of a user function (`Declare((a, b), {value: (b, a + b)})`, `(a, b) ≔ (b, a + b)`, every component computed before a name is written; `strict` mode), `Return(v)` in tail position of a body or of the expression (a branch of a tail `If` too); calls of user functions with a declared signature (a parameter of the `Function` literal with no annotation has the type of the signature) or with no declared signature (below), also with a parameter with a default value (the engine completes the call, `f(3)` is `f(3, 2)`), whose body is one value or a body of the same form (locals, writes, `If` statements, loops, `Break`). Each such function is compiled once, not inlined; a function that calls itself, directly or through others, declines. The body of such a function can read the inputs of the program (`g(t) := t + x`): it reads them where it runs, as the existing compiler reads `_.x` in `const _fn_g = (t) => t + _.x;`, also where the call is under a local, an index or a lambda parameter named `x` (the body is outside every binder); with a root `Function` it declines, as on the existing compiler. A name whose value is an expression that the body reads (`lv := x + 1`) is computed once per call, at the start of the root, and passed to the function at each call, through each function that calls it; it declines where the function is a function operand (`Map(h, L)`), is called by a local function, or where a form of the program or a parameter of a function that passes it binds the name. A `Block` with statements as the root of the compiled expression has the body of the same form, and its free symbols are the inputs (`{ a ⩴ x^2; a + 1 }`) |
-| Blocks and locals | a block statement, whose locals are not visible after it; a block in a block (`Block(Block(…))`, the form of an Epsil program), and a block with statements as the value of a body; a block whose statements are declarations with a value, as an operand (`{ a ⩴ 3.7x; a − ⌊a⌋ } + 1`, the body of a `Sum`, a branch, a condition), written in the region of the operand, in order; a local declared `unknown` with a value (`m \coloneq x + 1`), which has the type of its value, as a `let`; in the `strict` mode a local declared `number`, which is a real local; a first write to a name that the block binds and no `Declare` declares (`s ⩴ x²` with `s` new), as in the interpreter and the existing compiler (`let s; s = …`) |
-| Local functions | in the `strict` mode, a statement `Declare(g, 'function', (t) ↦ …)` (or `unknown`, or a `let`), `DefineFunction(g, …)` or a first write `g ≔ (t) ↦ …` of the body of the root: a function of the program compiled once, whose parameters are those of the literal, then the names of the body around it that the literal reads (an input, a parameter, a local declared before the definition), passed at each call with their values there, as a closure reads them (`a ⩴ 2x; g(t) \coloneq t + a; a ⩴ 10; g(3)` gives `13`) |
-| Lists and tuples | A list literal of reals or integers (`[x, y, 1]`, `[]`) and a tuple of reals (`(x, y)`), as values of the program, of a local (also of a nested block, of a block of declarations as an operand, of `Declare(a, 'unknown', v)` and of a first write to an undeclared name), of a branch of an `If`, as parameters and results of a local function, and as results of the program and of a user function (a JavaScript array); `At` and `Length` of a list or a tuple; `Sum`, `Product`, `Max` and `Min` of one list or tuple (`Max` of an empty list is `NaN`); element-wise `Add`, `Subtract`, `Negate`, `Multiply` and `Divide` of a list and reals or integers (`L + 1`, `2·L`, `x/L`), and of two lists whose lengths are equal by construction (the same name, list literals of one length, `L + 2·L`, two comprehensions over one range with no guard) or whose types state one width (`vector<3>`, `list<real^3>`); in the `strict` mode, the scalar functions applied to each element of a list and real operands, and of two such lists, with the element code of the existing compiler (`_SYS.pow(e, 3)` for `L^3`, `_SYS.pow(Math.E, e)` for `Exp(L)`, `Math.log(e) / Math.log(2)` for `Log(L, 2)`): `Power` (but an exponent that is an exact fraction of odd denominator, `L^(2/3)`, which the existing compiler applies as a real root: `_SYS.pow2(Math.cbrt(e))`), `Root`, `Sqrt`, `Exp`, `Ln`, `Log`, `Lb`, `Lg`, the trigonometric and hyperbolic functions but the inverse ones of a complex lane (`Arctan`, `Arsinh`, `Arccot`, `Arcsch` are admitted), `Abs`, `Sign`, `Floor`, `Ceil`, `Round`, `Truncate`, `Mod`, `Remainder`, `Hypot`, `Arctan2`, `Clamp`, `Chop`, `Binomial`, and the special functions of one or two real operands that need no proof of a domain (`Gamma`, `Erf`, `Zeta`, `BesselJ`, …); `Comprehension(body, Element(j, Range(a, b)))`, also with a pure guard (`[k for k in 1..64 if B[k] == p]`) whose bounds are integer literals or a `Length`; a `Comprehension` with several generators (nested loops, the first outermost; a filter reads its own and the earlier indexes), over a list value or a range with a step, when the body, the filters and the sources after the first are pure; `ReplaceAt`. A list of tuples of one size: a literal (`[(1, 2), (x, 3)]`), a comprehension of tuples, `At`, `First` and `Last` (`_SYS.atPoint`, a tuple of `NaN` out of range), `Length`, `Count`, a local declared `list<tuple<…>>` (from `[]` too) |
-| The `bigint` mode (`mode: 'bigint'`) | a program that the lane analysis of the mode accepts ("The `bigint` mode"), with `integer` inputs (each read once at the entry, a `number` converted): `Add`, `Subtract`, `Negate`, `Multiply`, `Power` with an exponent typed `integer<0..>` and `(−1)^k`, `Abs`, `Sign`, `Min`, `Max`, `Mod`, `Remainder`, `GCD`, `LCM`, `Factorial`, `Factorial2`, `Binomial`, `Fibonacci`, `IsPrime`, `Boole`, `If`, `Which`, `And`, `Or`, `Not`, the comparisons, also with a rational constant (`n < 7/2` is `2n < 7`); `Floor`, `Ceil`, `Round`, `Truncate` and an integer `Typed` of a quotient, a product with a rational factor, a power and (not `Typed`) a square root, rounded exactly; constants folded exactly from `evaluate()` (`2^70 + n`), and constant poles (`(−1)! + n`); `Sum` and `Product` with integer bounds (no pass when the upper bound is less than the lower one); the calls of a user function that is not recursive and reads no input; `list<integer>` inputs, `List`, `Range` (also with a step), `At`, `First`, `Last`, `Length`, `Count`, `Take`, `Drop` and `ReplaceAt`, and a list result; a `Function` literal at the root, whose parameters are its inputs. The `bigint`, `boolean`, each element of a list, and the error of the existing compiler with `cse: false, constantFold: false`; a pole is a `number` (`NaN`, `Infinity`), also an index of `At` out of range |
-| Random draws | `Random()`, `Random(Interval(a, b))` with number literals `a < b`, `Random(Range(…))` of number literals with an integer first element and step; `WithRandomSeed(seed, body)` with a scalar body and a real seed, a complex seed in the `complex` mode, or a number or string literal; calls of functions whose body draws, or whose signature states `random`. The same draws as the existing compiler, in the same order, the same number of times, on the same paths: a compiled function called inside an interpreted `WithRandomSeed` draws from that frame |
-| Functions of lists and function operands | `Norm` (no order), `Mean`, `Median`, `Variance` of a list or a tuple; `Dot` of two lists or two tuples of one length (two lists of different lengths give `NaN`, as `_SYS.matmul` does); `Take`, `Drop` with an integer or a real count (`.slice`; a negative count from the end; a real count rounded with `Math.round`), `Rest`, `Reverse`, `Sort`, `Join` of lists; `First`, `Last` (`NaN` for an empty list), `Count` of a list or a tuple; `Range(n)`, `Range(a, b)` with integer bounds and `Range(a, b, s)` with real or integer operands as a value (`Range(1, 0)` is `[1, 0]`; `_SYS.range`, which throws for more than 2^32 − 1 elements); `RotateLeft`, `RotateRight` of a list (`_SYS.rotl`, `_SYS.rotr`), also as operands of an element-wise sum (`life`); `Take`, `Drop`, `Rest`, `Reverse`, `Join`, `ListJoin`, a rotation, `Map` with a function literal, `Filter` and `Count` with a predicate literal of a list of tuples (a new outer array that holds the tuples of its operand; `Map` can make tuples); `Map(f, L)` and `Map(f, P)` with a function literal of one parameter, or (`strict` mode) the operators `Sin`, `Cos`, `Tan`, `Sec`, `Cot`, `Arctan`, `Arcsin`, `Exp`, `Ln`, `Abs`, `Tanh`, `Sinh`, `Cosh`, `Arsinh`, `Sign`, `Erf`, `Erfc`, `Gamma`, `Factorial`, `Factorial2`, `Truncate`, `Coth`, `Arccot`, `Arcsch`, `Sqrt`, `Negate`, and `Floor` in both modes; `Filter(L, p)` and `Count(L, p)` with a predicate literal; `Reduce(L, op)` and `Scan(L, op)` with `Add`, `Multiply`, `Max` or `Min`, with or without an initial value, and with a function literal of two parameters (`Reduce` with an initial value); `Apply` of a function literal to numbers (`strict` mode); in the `strict` mode a user function in place of each function literal (`Map(f, L)`, `Reduce(L, g, 0)`, one call of the helper per element). A function operand is written inline, once per element in index order, as the existing compiler calls it; its body is pure. The functions of flat lists of numbers: `PopulationVariance`, `StandardDeviation`, `PopulationStandardDeviation`, `Skewness`, `Kurtosis`, `Mode`, `InterquartileRange` of a list or a tuple, `Covariance` and `Correlation` of two lists (the runtime helpers); `Ordering`, `Unique`, `IndexOf`, `Contains` (`-0` is `0`, a `NaN` matches a `NaN`), `Second`, `Third`, `Most`, `IsEmpty`, `Append(L, x)`; `Repeat(x, n)` with an integer count, `Linspace(a, b, n)` and `Linspace(a, b)` with finite literal bounds, `Slice(L, a, b)`; `At(L, x)` with a real index (`NaN` for a fraction) and `At(L, I)` with a list or a `Range` of indexes (a gather, `NaN` at an index out of range); `CountIf`, `Any`, `All` (stopping at the first element that decides, as `some` and `every`), `Find` (`NaN` for none), `IndexWhere`, `Position`, `TakeWhile`, `DropWhile` with a predicate literal or a user function, and `Tabulate(f, n)` of one dimension with an integer count |
-| Lists of booleans and element-wise selection | in the `strict` mode, a comparison of a list and reals (`L < 0`, `x <= L`, `L == 3`, `L != x`, of two lists of one length: `L < L + 1`) and `Not`, `And`, `Or` of such lists and booleans, as values (a JavaScript array of booleans); `At` (`undefined` out of range, as the existing compiler reads it) and `Length` of one; the value of the program; `If(c, a, b)`, `If(c, a)` and `Which(c1, a1, …, True, d)` whose conditions are such lists: at each position the first clause whose condition holds, the element of a list arm or a scalar arm, `NaN` where none holds, when every arm is a real, an integer or a list of them of the length of the conditions, and cannot draw, call the host, call a helper or throw (the route evaluates every arm, the existing compiler only the arms that a position selects) |
-| User functions of lists, extrema and equality of lists | a user function (declared, inferred, a local function, through `Apply`) with real or integer parameters called with a list of reals or of integers (`f(L)`, `g(L, x)`, `g(L, L)`, `f(A)` of a list of lists): the list of its values, one call per element in index order, the other arguments evaluated once; two list arguments of lengths equal by construction or of one stated width, a list of lists as the one list argument; the value of the function a real or an integer. `Max` and `Min` of a list (or a list of lists) and reals, or of lists (`NaN` when they have no element): one number. `Equal` and `NotEqual` of two lists of numbers (`strict` mode): one boolean (`true` for equal lengths and every pair `===`) |
-| Lists of lists | in the `strict` mode, inputs, parameters, locals and helper results of the types `list<list<real>>`, `list<list<integer>>`, `matrix`, `matrix<m×n>` (`number` cells read as reals), `list<list<tuple<real, real>>>` and rank 3 (a JavaScript array of arrays); literals of rows, ragged too (`[[x, 1], [2]]`); a row read `At(M, i)` (`undefined` out of range, as the existing compiler reads it) as the base of an `At`, the operand of `Length` (`NaN` for an absent row), an element of a list literal, the body of a comprehension, the row of a `ReplaceAt` (a swap of two rows), a branch of an `If` and the value of the program; `At(M, i, j)` and a chained `At` (`NaN` for an absent row); `Length` of each level; `First`, `Last`, `Count`, `Rest`, `Take`, `Drop`, `Reverse`, `RotateLeft`, `RotateRight`, `Join`, `ListJoin` of rows (a new outer array that holds the rows); comprehensions of rows; `ReplaceAt` of a row and of an element of a row (`ReplaceAt(M, i, j, x)`: row `i` copied); helpers that take and return lists of lists; element-wise `Add`, `Multiply` by a number, `Negate` and `Divide` of lists of lists with real operands, and of two lists of lists whose lengths are equal at every depth by construction (one name, an element-wise result, stated dimensions: `matrix<2x2> + matrix<2x2>`); `Sum` and `Product` of the rows of a matrix of one row or more by its type; `Map` of a function literal over the rows, with a number or a row as its value; the matrix functions `Determinant`, `Trace`, `Inverse`, `MatrixPower` (an integer exponent), `MatrixMultiply`, `Dot` of a matrix, `Transpose` and `Diagonal` of a matrix by its type, `RowReduce`, `Flatten`, `Norm` of any rank and with a numeric order, each the runtime helper of the existing compiler (`_SYS.det`, `_SYS.inv`, `_SYS.matpow`, `_SYS.matmul`, …); the product `A·B` of two matrices, of a matrix and a list, of a list and a matrix whose types state their ranks (`_SYS.mul`). A matrix result that can have no value (a singular `Inverse`, a `MatrixPower` with an exponent that can be negative, a product whose dimensions the types do not prove to agree: `NaN` in place of the matrix, as on the existing compiler) is admitted as the value of the program, as the operand of a matrix function and as the list of `At` only. Inputs are never written at any depth; a result can share rows with an input, and is read-only |
-| Integrals and derivatives with a closed form | in the `strict` mode, `Integrate` with one or more `Limits` clauses (constant bounds, input bounds, bounds that are expressions, nested integrals, an integral in a `Sum`, an `If`, a list or the body of a helper) and an indefinite `Integrate`, `D` of one or more variables, `ND` at a number, and `Apply(Derivative(f, n…), x…)` of a library function, a user function or a function literal, when the engine finds a closed form at compile time: the node is the closed form that the existing compiler writes in its place (`closedFormIntegral()`, `derivativeClosedForm()`), found once per node at the admission. Each name whose stored definition the closed form can hold (a value, a user function, at any depth) is in `symbolDeps` |
-| Integrals with no closed form | in the `strict` mode, a definite `Integrate` over one or more `Limits(t, a, b)` clauses with no closed form: the call `_SYS.integrate` of the existing compiler, the integrand a function of its variable, one call per clause, nested, the first clause outermost (`∫₀ᵃ √(1 + t⁴) dt`, `∫₀¹∫₀ᵘ sin(u v³) dv du`), with the same starting panel count; bounds that are numbers, `±∞`, inputs or expressions (a bound of a later clause can read the variables before it); an integrand that reads inputs, captured numbers, the locals of a block, a loop index, the parameter of a function literal, or calls a user function; an integral in a branch, a `Loop`, `Map`, `Apply`, a nested integral, the body of a user function. The integrand is evaluated at the same points, in the same order, as on the existing compiler, and the result is not `pure` (the runtime keeps the count of the integrals in progress and an evaluation budget between calls, and samples the entropy source of the engine when an outermost integral does not converge) and not `shippable`. An integrand that the existing compiler computes again in log space where its value is not finite (`∫₀ᵃ t^{b+3} e^{-t} dt`, `logSpaceProduct()`) has the same second function and `_SYS.finiteOr`; with the option `quadrature: 'monte-carlo'`, each clause is `_SYS.integrateMC`, which draws its 10⁷ points from the same entropy source as the existing code |
-| Derivatives and limits computed numerically | in the `strict` mode, a derivative with no closed form that the engine finds at compile time: `D(body, v)` of one symbol, `ND(f, x)` and `Apply(Derivative(f, n), x)` of a function literal of one parameter or of a user function whose definition is one, whose result type is a number: the stencil `_SYS.nd(f, n, 'scalar')(x)` of the existing compiler (`D(ζ(x), x)`, `ND(t ↦ ζ(t)·t, x)`); `Limit(f, x)` and `Limit(f, x, d)` of a function literal of one parameter at a point of the type `real` or `integer`, a finite literal, or `±∞` from the side of its sign: `_SYS.limit(f, x[, d])`, the call that the existing compiler writes with `constantFold: false` (no symbolic attempt: a constant limit that the default options fold, `lim_{t→0} sin t / t`, gives the double of the extrapolation, `1.0000000000000002`). The variable can have the name of a name around it (`D(ζ(x), x)` in a block that reads `x`). The body is evaluated at the same points, in the same order, as on the existing compiler, at each occurrence; the result is `pure` and keeps the `shippable` answer of the existing compiler. A derivative in a `Sum` or a `Product` is admitted (`_SYS.nd` does not throw), a limit there declines (row of sums below) |
-
-| Declined with `outside-profile` | Example |
-| --- | --- |
-| A head outside the list | `BetaRegularized(x, a, b)`, `LerchPhi`, `Hypergeometric1F1` and `EllipticPi` of three operands (the representation has functions of one and two operands only), `Pipe`, `EvaluateAt`, `Cross`, `LogGamma(x)`, `NIntegrate`, `RandomChoice(L, 2)` (`operator: 'RandomChoice'`), `RandomSample`, `RandomShuffle` |
-| A calculus node with no closed form, or outside the form | a derivative with no closed form of a function whose value is a point or a list, or whose result type says nothing (the existing compiler writes the vector stencil, or probes the function once); a derivative with no closed form of several variables, of a multi-index `Derivative`, of a local function, or of a function literal whose parameter is not a plain name; a limit of a function that is not a literal (`Limit(g, a)`), whose body draws or reads the host, at an infinity whose sign is not the sign of the direction (1 when there is none: `_SYS.limit` computes the limit at the infinity of the sign of the direction, `Limit(arctan, -∞)` is π/2 there and -π/2 on the interpreter), or at a point whose type admits an infinity (`a: real | signed_infinity`, `w: number`, `1/a`); an indefinite integral with no closed form; an integral with no closed form whose bound reads the variable of its own clause or of a later one (`∫₀ˣ √(1 + x⁴) dx`), or whose integrand reads or calls the host, holds a `Loop` or a `WithRandomSeed` or calls a user function that does; a `Sum` or a `Product` whose terms hold such an integral (the row of sums below); an integral whose integrand draws; a derivative that is a function (`Derivative(Sin)`); an applied derivative that the existing compiler computes with Taylor jets; a variable that can hold a list (`Integrate(g², g)` with `g: list<real>`, which the existing compiler declines too); a variable of `D` that holds a value; a complex number in the node or its closed form (`(∫ᵢ⁰ t dt)²`: the existing compiler reads the node on the complex lane); a closed form `0` as an operand (the existing compiler writes the term `(0)`); any calculus node in the `complex` mode; a program whose closed-form searches spend more than 10,000 steps |
-| A draw outside the form | a draw in the body of a `Comprehension` (the interpreter's comprehension draws when an element is read), `Random` of a domain with a symbol or of a list (`Random(Range(1, n))`), a `WithRandomSeed` with a boolean seed, a seed that is a string expression or a list body, a statement that is only a draw, a binding whose value draws (`r := Random()`), a function value that draws (`Map`); two or more draws when one is in a complex value (`Random() + Sqrt(Random(Range(-2, 8, 2)))` in the `complex` mode: the existing emitter evaluates the complex operand first); a `WithRandomSeed` with a real body whose type the existing compiler reads as complex in the `strict` mode (`WithRandomSeed(3, ln(x))`), or whose type is neither real nor wide in the `complex` mode (`integer \| missing`, `infinity \| nan \| real`) |
-| A form the existing emitter writes in a special way | `x^0.5`, `x^(8/5)`, `Mod(k, 1)` of an integer dividend (`%`, which is `-0` at `-0`), a `Which` with a condition of the type `false` before a condition that is not constant (`Which(3 < 2, x, x < 1, y, True, 0)`, which it writes with the first clause dropped; an `If` or a `Which` whose constant conditions select a branch is that branch at the root of the program or of a function body, `If(2 < 3, x, Sqrt(y))` is `x`, and as an operand only when the branch is a symbol with no value), such a selection as an operand of another branch (`z + Which(2 < 3, 0, True, 1)`, `2 / Which(2 < 3, hav(t), True, 0)`: it writes the selection as a computed operand in parentheses, where the route would write the branch in the parent), an `If` of three operands whose condition has a constant type and whose selected branch is not a symbol or a number (`2 · If(2 < 3, x + 1, 0)`, which it writes `2 * _.x + 1`, with no parentheses around the branch; CE-1224), such a selection whose selected branch is a complex constant (`x + Which(2 < 3, i, True, 0)`, which it reads as a computed complex value: `{re: 0, im: 1}` at `x = -0`), such a selection whose node has a type that is not a number type (a dead branch `u` with no declared type: the existing compiler writes the parent from that type, `2/3 · (x + Which(1.5 ≤ 1, u, True, 0.5))` as a broadcast), in the `complex` mode a continuation head whose value can be complex (`HurwitzZeta(x, y)`, `Gamma(x, y)`, `LambertW(x)`: the complex kernel of lifted operands) and a `Chop` of the type `number` (`Chop(7 · (1/x))`, which it reads as a complex value), in an angular unit other than radians a `Product` of a list literal with an element that is an inverse trigonometric function (`Product([p, Arcsec(-1)])`, which it writes `_.p * 57.29577951308232 * Math.acos(…)`, a product in another order), `Sinh(i·π·x)`, `e^(x + i·π·y)`, `\|x + i\|`, a closed comparison, a power or a root of two literals that it folds to `NaN` where the interpreter has a finite value (`Root(-2, -4)`), the literal `-(0^-1)` (an undirected infinity that it writes `Infinity`), an ordering with a closed operand whose value is the undirected infinity (`x ≤ 1/0`, `x ≤ cot(π)`, which it writes `false`), a `Haversine` where it writes the haversine in its parent with no parentheses (`2 / hav(x)`, `h · (hav(1)/x)`, a product of haversines, a local whose value is a haversine, a haversine as the value of an operand block, `0.5·hav(r)` with `r` a read of the host), `Sech` and `Csch` of a real operand (`1 / Math.cosh(x)`, which a parent groups as written: `2 / sech(x)` is `2 / 1 / Math.cosh(x)`), `Fract` of an operand whose code can be a name or digits (`2 * b - Math.floor(b)` for `2·Fract(b)` and for `2·Fract(Abs(p))` with `p: real<0..>`), an `At` of a list whose element type is not real (`x · At(Comprehension(√y, …), 2)`, which it reads as a complex value), and in the `complex` mode a real call or square that it wraps as a complex value (`x·sin(a/y)`, `ln(a^2)^2` with `a`, `y` real), a read of a scalar `let` local whose type is not real (`let t = 1/b; t`), except as a bound or an index, and a real value of a local declared `complex` (`Declare(t, 'complex', x)`, which it holds as a number and reads as `{re: 4, im: 0}` after a write and `NaN` with none) |
-| A value of a local of another kind than its declared type | `let t: real = 1 + 2i`, `let t: real = sqrt(x)` in the `strict` mode (`x: real`), `Declare(R, "list<real>", 3)`; an integer value of a `real` local and a list of integers of a `list<real>` local are admitted |
-| A complex form with no compilation of the engine that needs it | `Real(z)`, `Imaginary(z)`, `Argument(z)`, `KroneckerDelta(z)`, a complex operand of a real kernel (`GammaRegularized(z, y)`), `Equal(z, w)`; a complex power whose exponent has no unknown (`z^π`, which the existing emitter can read as a constant) |
-| A list or a tuple outside the form | a list literal of lists and other values (`[[x], y]`, `operator: 'List'`), a list literal of tuples of two sizes, `ReplaceAt` of a list of tuples, in the `complex` mode `At` and `ListJoin` of a list of tuples and a quotient by a list whose engine element type is not real (`1.5 / [cn for j in 3..2]` with `cn: number`, which the existing compiler divides on the complex lane), a list of booleans as an input, a parameter, a local, an argument or the value of a helper, an arm of a selection or the operand of any head but `At`, `Length`, `Not`, `And`, `Or` and the condition of an element-wise selection (`Sum(L < 0)`), a list or a tuple of complex numbers, a tuple of booleans, element-wise arithmetic on a tuple (`P + (1, 2)`) or with a complex operand, two lists whose lengths are not equal by construction (`L + M` or `Hypot(L, M)` of two inputs of the type `list<real>`, `If(L > M, L, M)`: the existing compiler gives `NaN` for different lengths; the remedy is a stated width, `L, M: list<real^3>` or `vector<3>`), every element-wise function in the `complex` mode, an element-wise operation of a list whose elements the existing compiler reads on the complex lane (`operandElementLane()`: `Arctan(C)`, `1 / C` with `C = [√k for k in 1..n]`, of the engine type `list<complex>`), two lists whose length key reads a value of the host (`Hypot([k for k in 1..n], [2k for k in 1..n])` with `vars: { n: … }`), an element-wise function or selection that reads a parameter or a local named as a library constant (`Root(ExponentialE, L)` with a parameter `ExponentialE`), `Arcsin`, `Arccos`, `Arcosh`, `Artanh`, `Arccsc`, `Arcsec`, `Arcoth`, `Arsech` of a list (the existing compiler applies the real function to each element, where its scalar code is complex), `Beta`, `AGM`, `CosIntegral`, `GammaRegularized` and `Gamma(s, z)` of a list (the scalar rule proves a domain), `Sech`, `Csch`, `Fract`, `KroneckerDelta` of a list, `Sin(π·L)` (the half-turn kernel), `Floor(L + 1/3)`, a chain of comparisons with a list (`L < 1 < 2`), `Equal` of two lists of lists or of a list and a tuple, an element-wise selection with an arm that draws or can throw (`If(L > 0, Random(), 0)`, `If(L > 0, Mod(L, 3), 0)`), a tuple arm or a scalar condition beside a list condition, `Max` or `Min` of a list of lists beside another list or of a list and a tuple, a user function applied to two lists of unequal keys (`g(L, M)`; declare one width), to two lists of lists or to a list at an integer parameter, or whose value is not a real or an integer (a boolean, a list), a `Sum` or a `Product` of a list body with a bound that is not a number literal (`Sum(L·k, k, 1, n)`: the existing compiler gives the number `NaN` where the bound is not a safe integer and the number `0` for an empty range; write literal bounds, or a `Sum` of the rows of a `Map`), over an empty range of a body of unstated width, or whose body has a length that changes with the index (`Sum(Range(1, k), k, 1, 3)`), a guard of a `Comprehension` that is not pure (`Random()`) or a bound of a guarded `Comprehension` that is an input, a captured value that is not pure (`r := 2 + Random()`, which the existing compiler draws at each read), that reads a name or a function of the host (a `vars` entry; a list value in a compilation with `functions`), that reads a name that a form binds where it is read (`Sum(lv·x, x, 1, 3)` with `lv := x + 1`: the existing compiler reads the `x` of the engine there, and refuses a parameter of the root `Function`), that a local function reads, that a helper reads in the cases of the row of the functions of the program, whose operations can throw or abort (`mv := Mod(k, y)`: the place where it is computed is then seen), that reads its own name (`c1 := c2 + 1`, `c2 := c1 + 1`), and a real value of a name declared `complex` (the existing compiler reads `_SYS.cplx(5)`), in the `complex` mode `list<number>` and `vector<n>`, a list local read by a local function (it would be an extra parameter), and in the `complex` mode a tuple local; a fold of an operand other than a name whose type is not real (`Sum(I/2.5)` with `I: list<real>`; in the `strict` mode only when the operand has a node whose type is a number that is not real, or that makes a type that is not real from real operands: `Sum(L·√x)` with `x: real`, which the existing compiler folds on the complex lane, while `Sum(L + 1)` with `L: list<number>` and `Max((2, x))` are admitted), an argument of a user function whose parameter is declared a list of a stated width and whose type does not state that width (`f(L)` with `f: (list<real^3>) -> real` and `L: list<real>`: the existing compiler reads the width), and in the `complex` mode a `Sum` or a `Product` of a local or of a type with `NaN` or an infinity (the existing compiler wraps these in `_SYS.cplx`); `Sum` of a list literal with a sum as an element (`Sum([2, x - 0.1])`) and `Product` of one with a product as an element, which the existing emitter writes as one chain, and in the body of a helper an `At` of an element-wise sum or product of a list literal (`([1, 2] + (x - 0.1))[2]`, which the existing compiler writes there as one sum in an order of its own); in the `complex` mode element-wise arithmetic with a name of no declared type (in the `strict` mode such a name is a real scalar, and `L·u` is admitted); an operation other than a comparison or a connective with an operand whose type admits a list and a number (`10·(2/f(L))` and `exp(f(L) + 2)` with `f: (list<real>) -> real`, whose call has the type `list<any> \| real`) or an expression of the type `any` (`g·(-f(L)/x)`), except a sum or a negation of real operands in the `strict` mode |
-| A list of lists outside the form | `tensor` and a union of ranks (`list<matrix<2x2> \| vector<2>>`), complex cells, the `complex` and `bigint` modes; `M·M` and `M^2` of a `list<list<real>>` or a `tensor` (the existing compiler chooses the product by the value: declare `matrix`), a product of more than two factors (`x·A·B`); two lists of lists whose lengths are not equal by construction (`A + B` of two `matrix` inputs) or of different ranks (`M + v`); `Sum` and `Product` of rows that can have different lengths or no row (`Sum(M)` of a `list<list<real>>`); `Map` of an operator over rows, `Filter`, `Reduce`, `Scan`, `Sort`, `Max`, `Min` of rows; `Trace` of a `list<list<real>>` (the type `number \| tensor`), `Transpose` and `Diagonal` of rows of different lengths, a matrix function of a value whose type is not a list (`Determinant(MatrixMultiply(A, B))`: the existing compiler declines it), `MatrixPower` with an exponent that is not an integer by its type, `Norm` with a named order, `Flatten([])` (of the type `list`), `IdentityMatrix`, `Shape`, `Rank`, `Reshape`; a `Sum` or a `Product` with an index whose term computes `Inverse` or `MatrixPower` other than with the same operands in every term (`Sum(Det(A^k), k)`: `_SYS.matpow` throws for a matrix that is not square, where the existing compiler stops at its first `NaN` term); a matrix product of an element-wise sum whose shape its type does not state (`A·B + A` of `matrix<2x3>` and `matrix<3x2>`); a matrix of a stated count of no row as a fold of rows (`Sum(A)`, `A: matrix<0x3>`); element-wise arithmetic, `Sum`, `Product`, `Map` and the matrix functions of a list of lists in a program that places a row read in a list (`Map(r ↦ -r, ReplaceAt(M, -1, At(M, k)))`: the existing compiler gives `NaN` for an absent row; `RowReduce([[1, 0], At(M, i)])`: `_SYS.rref` throws for it); a matrix that can have no value used elsewhere than as the value of the program, an operand of a matrix function or the list of `At` (`Length(Inverse(A))`, `Inverse(A) + 1`, an argument, a local, the value of a helper); a row read as a local, an argument, the value of a helper or the operand of any other head (`Sum(At(M, i))`); `Length` of an `If` of row reads; `ReplaceAt` with more than two indexes or of a list whose type does not settle a list at each level; an element of rows whose engine type is `missing` (`At([[]], k, -1)`); in the `complex` mode, a captured list of lists |
-| A function of lists or a function operand outside the form | `Norm(L, "Frobenius")` (a named order), `Take` of a tuple, `Repeat(x, y)` with a real count (the existing code throws for a fraction), `Linspace` with a bound that is not a finite number literal (the existing code gives the number `NaN`, not a list), `Tabulate` of two dimensions or of a real count, `Ordering(L, f)`, `Find` of a list of tuples, `Contains`, `IndexOf` and `Unique` of a list of tuples or of lists, `Element(x, L)`, `Quartiles`, `DeleteAt`, `Insert`, `Partition`, `Chunk`, `Zip`, `ListFrom`, a predicate that is an operator, `At` of a list of tuples or of lists with a real or a list index, `Range(1, n, 0)` (a literal step 0) and `Range(a, b)` with a real bound, `RotateLeft(L, x)` with a real shift, `Sort` of a list of tuples, `Dot(L, P)`, `Sort(L, f)`, `Map` over two lists, `Map(f, L)` with a user function `f` that has no function literal as its value, a local function (`Map(lg, L)`: the engine types its call `unknown`), a user function whose name a `vars`, `functions` or `operators` entry maps, a parameter annotation that the element type does not prove (`(p: tuple<integer, integer>) ↦ …` over `list<tuple<real, real>>`, a user function or a function literal), or in the `complex` mode, `Map(Ceil, L)`, `Map(Fract, L)` and the other operators outside the list, a function literal and `Apply` in the `complex` mode, a mapped operator other than `Floor` in the `complex` mode, a trigonometric operator when the angular unit is not radians, a function whose value is a boolean or a list (`Map((t) ↦ t < 1, L)`), `Reduce` with a function literal and no initial value (the existing compiler declines it), `Reduce` by `Subtract`, `Reduce` of a tuple, a function of the elements of the empty list literal (`Map(Sin, [])`), a value whose elements are numbers that are not real (`Map(Ln, L)`, of the type `list<complex | signed_infinity>`: the existing compiler reads it on the complex lane), a function body that is not pure, draws, reads or calls the host or holds a `Loop` or a `WithRandomSeed` (`Map((t) ↦ t + Random(), L)`: the interpreter's `Map`, `Filter` and `Scan` compute an element when it is read), a library operator as the function that a `vars` entry maps (`Map(Sin, L)` with `vars: { Sin: … }`: the existing compiler calls the source) |
-| A sum, a product or a `Which` outside the form | `Sum(x)` of a number, a bound `+∞`, a bound that does not floor to a safe integer, a complex body, `Which` with the value `Nothing`; a `Sum` or a `Product` whose term can throw, integrates numerically or computes a limit, also through a user function or a function that `Map` or `Reduce` calls (`Sum(Mod(1, j/k), Limits(j, 0, n))`: the existing compiler stops at the first term that is `NaN`, at `k = 0` the first, and gives `NaN`; the later terms, which throw or sample an integrand, are not evaluated). A `Mod` throws only for an operand beyond ±(2^53 − 1), and one whose operands are each an index of the aggregate, an integer literal, or (where every term evaluates it) the same value in every term is admitted (`Sum(Mod(k, 3))`, `Sum(Mod(k, m))` with an input `m`); a `Mod` of another operand in a term declines, also where it cannot exceed the range (`Sum(Mod(k·y, 3))`, which the existing compiler gives the same value; a call of a user function whose body has a `Mod`). A `Sum` or a `Product` of fewer than 4 written-out terms (constant bounds) is not refused: the existing compiler writes it as one chain and evaluates every term |
-| A name declared with a type that is not numeric | `x + u` with `u` declared `any` (`binding: 'u'`), a parameter of the type `tuple<x: real, y: real>` (`binding` is its name) |
-| An input of a union of shapes | `u + 1` with `u: list<real> \| real`, `2v` with `v: integer \| vector<integer^2>`: the existing compiler compiles one body per member, with one test of the shape at the binding (R4: `(Array.isArray(_.u) ? _SYS.bcast(…) : _.u + 1)`); the profile has no such dispatch. Declare one member, or compile one function per member |
-| A comparison chain outside the form | a chain with a list or a tuple operand (an element-wise comparison); an ordering chain whose first operand draws or calls the host and that calls a helper (a local function is caller code of the existing compiler); an equality chain whose middle operand reads or calls the host or calls a helper (the existing emitter evaluates it once per pair) |
-| A statement outside the list | `ParallelLoop` and `ParallelComprehension` (the existing compiler installs the frames of the passes, which consume an index of an enclosing seeded frame, and records the loop for the worker pool), `Continue` other than at the end of a branch of an `If` of the loop body (in a nested `If`, `operator: 'Continue'`), a `Break` that is not the last statement of a branch of an `If`, a `Break` in a `Loop` over several index sets (the existing compiler declines it), a `Loop` index set with a guard, a `Return` that is not in tail position (`If(x < 0, Return(0)); x + 1`), a destructuring declaration with a declared type, a destructuring of a tuple input (the interpreter rejects it) and in the `complex` mode, a parameter with a default value of the root `Function` and of a local function, a helper that reads an input or a value that is an expression (`unsupported helper capture`), a `Comprehension` whose filter reads a later generator or whose body, filter or later source is not pure, a write to a name of the engine or an input, a `Block` with a statement other than a declaration with a value as an operand (`{ a ⩴ 0; a ≔ x; 2a } + 1`, which the existing compiler declines too), a block operand of a type that is not numeric or boolean, an empty `Block` |
-| A local or a local function outside the form | a product, a quotient or a power with an operand that is an arithmetic expression of a call of a local function (`x · (-1/3) / lf(1)`: the existing compiler reads the call, of the type `unknown`, as a possible list and writes the operand as one value with `_SYS.bcast`); in the `strict` mode a call of a local function whose value is complex (the existing compiler reads it as a real number: `tanh(lf(0.3))` is `NaN`); a local of a nested block with the name of a parameter, an input or an outer local (no shadowing), a first write that reads the name, in the `strict` mode a `let` local written a real and a complex value (as the existing compiler declines it); a local function in a branch, a loop, a nested block statement, an operand or the body of a user function, one that calls itself, is defined twice, is declared with a signature, has the name of an operator of the library (`Declare(sin, 'function', …)`), whose parameter has the name of a local, or that is used as a value (`Map(L, g)`, also in the body of another local function); a local function in the `complex` mode (the existing compiler reads the value of its calls as a complex value); one that reads a read of the host (`vars: { T: 'next()' }`: the existing closure reads it where its body does), or an input while the options have a read of the host or a host function that is not declared pure (which can change the inputs object between the call and the read); in another angular unit than radians, a `let` local or a local function with its value in a dictionary (`Declare(a, {value: sin(x)})`, `Declare(g, {value: (t) ↦ sin(t)})`, which the rewrite for the angular unit does not reach, CE-1207), and in the `complex` mode a first write that declares a local (`t ≔ x; arctan(t)`: the existing compiler reads the local of the rebuilt block as a complex value, and gives `NaN`) |
-| An option outside the profile | the function form of `operators`; in the `bigint` mode, `vars`, `functions`, `operators`, `preamble` and `imports` |
-| A program of the `bigint` mode outside the form | a decline of the lane analysis of the mode (`n/2`, `n + x` with `x: real`), with its reason; `Map`, `Reduce` and `Fold` (a function operand), a recursive user function, a user function that reads an input, a nested list (the existing compiler compiles them); a constant that the interpreter leaves unevaluated (`Fibonacci(10^9)`) |
-| An entry of an option of the host outside the form (below) | a `functions` or `operators` entry for an operator of the library (`functions: { Sin: … }`), an `operators` entry that is an infix operator (`['+', 11]`), a `vars` source that is not one operand (`'Math.PI / 4'`), a `vars` entry for a constant of the library (`Pi`) or for a name with a value and no declared type, a mapped name that the body of the root `Function` or of a user function reads, a read or a call of the host in the `complex` mode, a function of the host whose result type is not real, integer or `number` |
-| A program of more than 100,000 operations | a subexpression in both branches of an `If`, nested 14 times: the profile writes it once per branch (no `operator`) |
-
-**The `bigint` mode under the profile.** The admission is the lane analysis
-of the mode ("The `bigint` mode"), and the program is lowered with a second
-policy of the JavaScript target, in which an integer is a `bigint` and a
-real number has no representation: the verifier refuses a real value. A
-pole aborts the program: the code catches the `NonFiniteValue` that the
-helper throws, as the existing compiler does, and the call gives `NaN` or
-`Infinity`; the size limit of 10^6 digits and an `exact` quotient with a
-remainder (`Typed(n/2, integer)` at odd `n`) throw a `RangeError`. When
-two operations can abort, the first in the order of the existing compiler
-decides the result. A node object reached twice is computed once where the
-first occurrence dominates the second, also when it can abort, but not
-across the body of a loop or of a function. A `Sum` or a `Product` is a
-loop with a `bigint` counter, with no iteration budget, as in the existing
-compiler; a user function is one function of the code, with no catch of its
-own; a list of integers is an array of `bigint` values, which the call does
-not change (`ReplaceAt` copies). The result
-reports `mode: 'bigint'`, `pure: true` and `shippable: true`, and
-`broadcast()` throws as for the existing compiler. The design is
-`docs/plans/2026-11-11-structured-bigint-mode.md`.
-
-**A name with no declared type.** Under the profile, a parameter of a
-`Function` literal or a free symbol with no declared type is a real number
-in the `strict` mode and a complex number in the `complex` mode (the
-compiled code then accepts a number or a complex value for it). Boxing
-writes no type on a definition of the host's scopes, so a type there comes
-from a call of the host: `ce.infer()`, `ce.assume()` or `ce.assign()`
-(an evaluated assignment too). Such a type is read as a declared type is,
-with the same kinds: after `ce.infer([ce.box(['Mod', 'x', 2])])`, `x` is
-real in both modes and is not in `defaultedSymbols`, and after
-`ce.assume(ce.parse('x > 0'))` it has the type `real<0<..>`; after
-`ce.infer([ce.parse('x + 1')])` it is `number`. So a host declares each
-name, or calls
-`ce.infer()` before `compile()`. A type that boxing writes on a parameter
-of a `Function` literal or on a local of the program is not read, so the
-kind of a name never depends on what was boxed before.
-The host supplies a scalar number for a name with no declared type; a
-value of another shape is outside its type. The result,
-and the positive answer of `canCompile()`, list these names in
-`defaultedSymbols`: with `u` undeclared, `x + u` compiles and `u` is an
-input. A symbol with a value and no declared type (`ce.assign('a', 3)`) is
-captured as a number copied at compile time, with the kind of its value. A
-name declared `number` (an input, a parameter of a `Function` literal or of
-a user function) has the same kind as a name with no declared type, as on
-the existing compiler: real in the `strict` mode, complex in the `complex`
-mode, where an input or a parameter of the root accepts a number or a
-complex value; a name declared a union of a real type with `nan` or
-`signed_infinity` (`nan | real | signed_infinity`) is real in both modes.
-Such a name has a declared type, so `defaultedSymbols` does not list it. A
-user function declared with the result `number` returns the kind of its
-body, as on the existing compiler (`(real) -> number` with the body `t + 1`
-returns a number in the `complex` mode). In the `complex` mode a parameter
-of a user function declared `number` is complex, and a real argument
-declines (the existing compiler converts it in the body). A parameter of
-the `Function` literal of a user function with a declared signature that
-has no annotation has the type of the signature when that type is a base
-kind (`real`, `integer`, `number`, `complex`, `boolean`), a list or a tuple
-of the profile (`list<real>`, `list<number>`, `vector<2>`,
-`tuple<number, number>`), as on the
-existing compiler, which writes the same function with and without the
-annotation (`g: (real) -> real`, `g := t ↦ 2t`); a parameter whose
-signature type is `unknown` (`f: (unknown) -> number`, `f := t ↦ t² + 1`)
-has the default kind of the mode, with the rule of a signature that the
-engine inferred (below); another signature type (`broadcastable<real>`,
-`collection`, `string`) declines with its name; a signature type with a
-range or a literal (`(real<0..>) -> real`) declines, because the existing
-compiler reads the range in the body (`Abs(t)` is `t`) and asks for an
-annotation. A name declared
-`number` with a real number value is captured as a number, with the kind of
-its value. A name declared with a type that the profile has no kind for
-(`any`, `finite_number`) declines. A local declared `number` is real in
-the `strict` mode and declines in the `complex` mode, where the existing
-compiler reads each read of it as `_SYS.cplx(a)`. The same rule applies to a call of a user function whose
-signature the engine inferred (`f(x) := x^2 + 1`, or a literal with an
-annotation on some parameters only): each parameter with no annotation
-has the default kind, the result has the kind of the body, an argument of
-another kind declines (a list, a boolean, a real argument in the `complex`
-mode), and `defaultedSymbols` lists the name of the function. A function
-declared `function` (`ce.declare('f', 'function')`, then a `Function`
-literal as its value) has the same rule in the `strict` mode, with the
-annotation of a parameter of the literal as its type, and declines in the
-`complex` mode, where the existing compiler reads each parameter and the
-value as complex values. A function with an optional or a variadic
-parameter, a type parameter or an effect other than `random` declines.
-Four limits:
-
-- A body that uses the name as a list, as a condition or as an integer (a
-  loop bound, an index) declines: declare the name.
-- Some rules read the type of a node, which the engine computes from the
-  type that the uses of the name in the expression require. Another use can
-  then make a program decline (`Exp(Sqrt(x)) + Mod(x, 2)`, where
-  `Exp(Sqrt(x))` alone compiles); it never changes the code of a program
-  that compiles.
-- An assumption does not change the kind: with `n` assumed an integer and
-  not declared, `Floor(n)` is `Math.floor(_.n)`, the interpreter's value for
-  every real `n`. The existing compiler reads the assumption and writes
-  `_.n`.
-- In the `complex` mode, the existing compiler reads such a name by the
-  type that the engine inferred from its uses, also from a use that the
-  canonical form drops: `(0·3·Mod(1, u) + x)/u` is `x/u`, which the
-  existing compiler writes `_.x / _.u` (the type of `u` is real, from
-  `Mod`) and the profile as the complex quotient of `_SYS.cplx(_.u)`. The
-  value is the same; its shape is `{re, im}` on the profile.
-
-**The options of the host.** Under the profile, `vars`, `functions`,
-`operators`, `imports`, `preamble` and `broadcast` give the code of the
-existing compiler with `cse: false` and `constantFold: false`, and the host
-calls and reads in the same number and order:
-
-- A `vars` entry whose source reads an entry of the vars object (`_.w`,
-  `_["w"]`) makes the name an input that the code reads at that source. The
-  name has its declared type, also when it has a value (the compilation
-  hides the value, as on the existing compiler), or the default kind, and
-  `defaultedSymbols` then lists it. `varsObjectRefs` records the source
-  only when it is the spelling of the name itself (`u: '_.u'`), as on the
-  existing compiler, and only such an input gets the entry check of its
-  type.
-- A `vars` entry with another source that is one operand (a name, a
-  number, a call, a member access or an expression in parentheses:
-  `next()`, `state.t`) is a read of the host: an operation whose effect is
-  `unknown`. Each occurrence of the name reads the source once, in the order
-  of the program, and is bound to a `const`; the result is not `pure` and not
-  `shippable`. The name has its declared real, integer or `number` type, or
-  the default kind. `Power(u, -2)` of a mapped name is `Math.pow(u, -2)`,
-  as the existing emitter writes it for such a name.
-- A `functions` entry (a string, a function value, or `{ source, pure }`)
-  for a head that is not an operator of the library, and an `operators`
-  entry `[name, precedence]` whose operator is a name, make each call of the
-  head a call of the host: one operation whose effect is `pure` when the
-  entry declares it pure (`entryIsPure()`, as for the existing compiler) and
-  `unknown` otherwise. Its operands are evaluated first, in order; each call
-  is evaluated once, also a pure one that occurs twice, and is bound to a
-  `const`. A pure call keeps the result `pure`, and a result with a call of
-  the host is never `shippable`: a worker does not have the function. The
-  signature of the head gives the types: its result must be real, integer
-  or `number`. A function value goes in the preamble, as on the existing
-  route. The existing emitter evaluates the source of the callee before
-  the arguments, and the profile after them, so the source must be a name,
-  a dotted path of names (`Math.hypot`, `_.f`) or a function expression in
-  parentheses with a pure arithmetic body (`((t) => t * t + 1)`,
-  `inferSourcePurity()`); another source (`_.getTransform()`) declines.
-- `imports` and `preamble` go to the assembly of the existing route: an
-  import that is not a function throws ``Unsupported import `x` ``, and a
-  preamble makes the result not `shippable`. A preamble that is not blank
-  runs on every call, and the profile does not read it: the result is not
-  `pure`. An import is a function definition, which runs only when the code
-  calls it (through `functions`), so it changes neither fact.
-- A source of `vars` or `functions` with a line terminator or a comment
-  (`'\n next()'`, `'_.w // width'`) declines: the existing emitter writes
-  the source as it is, where `return` followed by a line terminator returns
-  `undefined` without evaluating the source.
-- `broadcast` is ignored: the result has no `batch`, and the values are
-  those of `broadcast: false`, which equal those of the batch body of the
-  existing compiler.
-
-Reads and calls of the host are in the `strict` mode only: in the `complex`
-mode the existing compiler evaluates a host read once per part of a complex
-value (`_SYS.cplx(next())`). A read or a call of the host counts as a draw
-in the rule of two draws (above): two or more draws, reads or calls of the
-host decline when one of them is in a complex value (`next() + i·f(x)`),
-because the existing emitter evaluates the complex operand first. In the
-body of a `Comprehension` or of a `Sum`, the host is called once per
-element, as on the existing compiler. A `Sum` or a `Product` that calls a
-function declared pure declines: the existing emitter skips such a call in
-the terms after a sum of `NaN`. An `If` statement whose branch calls the
-host is kept, also when its result is not read, because the existing
-compiler evaluates the call there. A read or a call of the host that is not
-declared pure can change the vars object: no value computed before it is
-reused after it (`h(√x, g(x), √x)` with one node object for `√x`
-computes the square root twice, as the existing compiler does). In a
-program with such a read or call, a read of an input counts as a draw in
-the rule of two draws: `x + g(1)·Arcosh(x)` declines, because the existing
-emitter reads `_.x` for the real operand after the complex operand that
-calls `g`.
-
-```js
-const ce = new ComputeEngine();
-ce.declare('x', 'real');
-ce.declare('f', '(real, real) -> real');
-compile(ce.box(['Add', 'x', 'u']), {
-  profile: 'numeric-kernel',
-  vars: { u: '_.w' },
-}).code;
-// ➔ "_.w + _.x"
-compile(ce.box(['Add', ['f', 'x', 1], 1]), {
-  profile: 'numeric-kernel',
-  functions: { f: { source: 'Math.hypot', pure: true } },
-});
-// ➔ code "(() => { const _tv1 = Math.hypot(_.x, 1); return _tv1 + 1; })()",
-//   pure: true, shippable: false
-```
-
-The decline follows the `fallback` option, as any other decline: with
-`fallback: true` (the default of `compile()`), `success: false` and the
-interpreter; with `fallback: false`, a `CompileDeclineError`. The diagnostic
-has the code `outside-profile`, the kind `capability`, the message of the
-refusal, the node in `value` (absent for a node whose text would write more
-than 100,000 nodes, such as a subexpression reached on many paths), and its
-head in `operator` or a name in `binding`. A decline that the preparation of the existing compiler gives
-first keeps its own code. The existing
-compiler is never used for a part of the program. An error of the lowering,
-the verifier, the analysis or the emitter is not a decline of the profile:
-it is a `compile-error` whose message names the phase.
-
-The message of an `outside-profile` decline names the profile: the
-refusals of the structured compiler say "the profile" for "the structured
-route", and a clause that compares with the existing compiler is removed
-(`publicReason()` in `javascript-fragment-target.ts`). An error of the
-preparation that is not a refusal of the profile (a `TypeError` of a
-defect, for example) is a `compile-error` too.
-
-`cse` and `constantFold` are ignored under the profile: the structured
-compiler does neither, and the code is the same with or without them. An
-empty object of `functions`, `operators` or `vars` is an absent option. With
-another target than `javascript`, with a direct target, or in the
-`compile()` method of a target object (`new JavaScriptTarget().compile()`,
-and the same for the GLSL, Python and interval targets), the option
-is an error, thrown whatever `fallback` says.
-
-**The facts of the result.** A result compiled with the profile has
-`profile: 'numeric-kernel'`, `pure` and `shippable`, from the analysis of
-the structured program (`analyzeExecution()` in `structured-execution.ts`):
-`pure` when no operation of the program or of a function it calls has an
-effect or an effect that its definition does not state, and no array that
-the host passed is written. A draw from the random stream outside every
-`WithRandomSeed` region is such an effect: two calls give different values,
-and a call inside an interpreted `WithRandomSeed` advances its frame. A
-`WithRandomSeed` region whose body only draws has no effect, so a program
-whose draws are all in such regions is `pure`. A read of the host (a
-`vars` source that is not an entry of the vars object) and a call of a
-function of the host that is not declared pure are effects too; a call
-declared pure is not. A `preamble` option that is not blank makes the
-result not `pure`. `shippable` when, in
-addition, every function the code calls is in the program (a call of the
-host, also a pure one, is not), every captured
-value is a number, the code neither draws nor seeds the random stream, also
-in a region, and the checks of the existing assembly (no random helper in
-the code) agree. A `Function` literal has `shippable` too under the profile. The
-kernel pool reads the same value: a result that is not shippable never goes
-to a worker.
-
-**`canCompile()`.** With the profile, `canCompile(expr, options)` runs the
-whole compilation with `fallback: false` and answers `{ ok: true, pure,
-shippable }` when it gives code, or `{ ok: false, diagnostic }` with the
-diagnostic of the decline. Its cost is the cost of `compile()`.
-
-```js
-const ce = new ComputeEngine();
-ce.declare('x', 'real');
-canCompile(ce.box(['Add', 'x', ['Sin', 'x']]), { profile: 'numeric-kernel' });
-// ➔ { ok: true, pure: true, shippable: true }
-canCompile(ce.box(['Add', 'x', ['Random']]), { profile: 'numeric-kernel' });
-// ➔ { ok: true, pure: false, shippable: false }
-canCompile(ce.box(['WithRandomSeed', 42, ['Add', 'x', ['Random']]]), {
-  profile: 'numeric-kernel',
-});
-// ➔ { ok: true, pure: true, shippable: false }
-ce.declare('L', 'list<real>');
-canCompile(ce.box(['RandomChoice', 'L', 2]), { profile: 'numeric-kernel' })
-  .diagnostic;
-// ➔ { code: 'outside-profile', kind: 'capability',
-//     message: "Could not compile with the profile 'numeric-kernel': unsupported head RandomChoice",
-//     operator: 'RandomChoice', value: 'RandomChoice(L, 2)' }
-```
-
-The decisions are in `docs/plans/2026-11-10-js-numeric-kernel-profile-spec.md`;
-the rules of each admitted form, with the cases where the existing emitter
-writes other code, are in `docs/plans/2026-11-09-js-pilot-emission-rewrites.md`.
 
 ### The `ir` profile of the JavaScript target
 
@@ -2647,7 +2232,7 @@ option `profile: 'ir'`, `compile()` to `javascript` uses the IR compiler of
 `src/compute-engine/compilation/ir` (its `README.md` has the contracts and,
 under "Selecting the pipeline", the options it maps or declines). A program
 or an option outside it declines with `outside-profile`, and `fallback`
-applies as for the `numeric-kernel` profile; an internal error is a
+applies as for any other decline; an internal error is a
 `compile-error`. It reads an undeclared scalar input as a `real`. It has no
 guard for an integer of 2^53 or more: its `Mod` of such an operand is the
 remainder of the double, an unspecified value, where the existing compiler
@@ -3116,9 +2701,7 @@ that the host calls, and stored code reads only `_SYS` and `_` (see "Running
 stored JavaScript"). `createJavaScriptRuntime()` and `createIntervalRuntime()`
 keep the limit.
 
-**Targets.** Python declines a program with a `Loop` when the option is set,
-because its code has no count. A `Sum` or a `Product` still compiles there, with
-no limit. A shader cannot throw, so GLSL has a cap of its own, with a default
+**Targets.** A shader cannot throw, so GLSL has a cap of its own, with a default
 of 10,000 passes and `NaN` over it ("The GLSL fragment and `canCompile()`",
 "The pass cap"); a `Loop` with no indexing set declines there.
 
@@ -3156,8 +2739,7 @@ compiles the same function with the option itself gets the throw.
 
 The `mode` option selects how the compiled code computes numeric values:
 `strict`, `complex` or `bigint`. The `javascript` target offers the three
-modes, `python` offers the first two, and `interval-js` and `glsl`
-offer `strict` only. A request for a mode that the target does not offer
+modes, and `interval-js` and `glsl` offer `strict` only. A request for a mode that the target does not offer
 declines with the code `'unsupported-mode'`. The default is `strict` on
 every target. The first two modes select how the code handles complex
 values (below). The `bigint` mode selects how it computes integers ("The
@@ -3336,7 +2918,7 @@ capture. The structural code computes the operands as doubles, and a double
 can be on the other side of the jump from the exact value:
 `Floor((25! − 1)/24!)` is `24`, but the double of the operand is `25.0`. The
 fold reads the exact value, as the interpreter does. A comparison folded this
-way is emitted as the target's boolean constant (`True` on Python). Under a
+way is emitted as the target's boolean constant. Under a
 `symbolDeps` capture the fold records every symbol whose value it reads, and
 declines when the operand calls a user function. Operands with a free
 variable, operands with a float literal, and operands that are all integer
@@ -3390,7 +2972,7 @@ one root is complex; `√L < 1` is `false` at a complex root; `L < w` at a
 complex scalar `w` is `false` at every element (the value keeps the head's
 shape). In `strict` mode nothing changes: such an operand fails closed.
 Targets provide the projection through the `complexRealElements` hook
-(`_SYS.crealElements` on JavaScript, `_ce_creal_elems` on Python); a target
+(`_SYS.crealElements` on JavaScript); a target
 without it keeps the compile-time decline. The `complexPromotion` option, a
 compatibility alias of `mode: 'complex'` since 0.115.0, is removed with no
 warning: a call that still passes `true` is compiled in the default
@@ -3627,8 +3209,7 @@ mode 'bigint' cannot be broadcast`. The stored JavaScript records the mode
 that `load()` rebuilds gives the same values as `run()`, because the
 conversion of the inputs and the catch are in the emitted code.
 
-The Python target does not offer the mode: a Python integer is exact at
-any size already. Design and the deferred shapes (ROADMAP CE-715.2 to
+Design and the deferred shapes (ROADMAP CE-715.2 to
 CE-715.8): `docs/plans/2026-10-31-ce715-bigint-compile-mode.md`.
 
 ## User functions and dispatch
@@ -3650,8 +3231,7 @@ A recursive or mutually recursive user function compiles to real recursion on
 the JavaScript target, with no depth guard: a runaway recursion throws a
 `RangeError` from the JavaScript stack, as an unbounded `Loop` already runs
 without a guard. The shader targets cannot recurse, so a recursive function
-fails closed there with a message that asks for a bounded loop. The Python
-target declines it too.
+fails closed there with a message that asks for a bounded loop.
 
 Protocol calls resolve directly when static typing proves one implementation.
 Dynamic JavaScript dispatch uses the receiver's runtime nominal tag. Targets
@@ -3852,12 +3432,9 @@ parameters, the emitted function fills each left-out argument:
 - JavaScript, a function literal compiled at the root of `compile()`: the
   function fills each argument that the host leaves out (`undefined`) before
   its entry checks, after the definitions of its preamble.
-- Python, a function literal compiled as a value: the parameter is declared
-  `k=None`, and the body runs with `d if k is None else k`, so that `[]` is a
-  new list at each call.
 
-A JavaScript default parameter also fills `undefined`, and the Python fill
-fills `None`, which are the spellings of `Missing` in compiled code. The
+A JavaScript default parameter also fills `undefined`, which is the spelling
+of `Missing` in compiled code. The
 interpreter passes such an argument to the body; the result of an operator
 on an absent operand is unspecified in compiled code, so the two agree within
 the caveats. A multi-clause function cannot have a default (it is a
@@ -3928,7 +3505,7 @@ complex value (`x ↦ √x`) declines. The compiled sort orders the positions of
 the elements with `Array.prototype.sort`, as the interpreter does, so the two
 routes ask the same comparisons in the same order.
 
-`Pipe(x, stage)` compiles on the JavaScript and Python targets as the
+`Pipe(x, stage)` compiles on the JavaScript target as the
 expression that it evaluates (`pipeApplication`): a call that is missing one
 argument receives `x` in the slot that the interpreter selects
 (`Pipe(xs, Map(f))` is `Map(f, xs)`), a function literal with one parameter is
@@ -3947,7 +3524,7 @@ arithmetic broadcast (`Add`, `Multiply`, … through `tryCompileBroadcast`) asks
 the static type of the operand. A change to one does not change the other.
 
 A symbol declared `any` or `value` can hold a number or a list, and compiled
-code does not test the shape of a value at run time. The JavaScript, Python
+code does not test the shape of a value at run time. The JavaScript
 and `interval-js` targets decline an element-wise site, `Max`, `Min`, `Sum` and
 `Product` over such a symbol (a parameter declared `any` or `value`, an input
 declared `value`, or a symbol declared `any` or `value` that has a value), with
@@ -4022,27 +3599,6 @@ broadcasts. Declining the shape instead would refuse every untyped point
 parameter whose body takes a norm, the commonest shape a document function
 has, and the nested point is not a value the plotting consumers produce.
 
-The Python target maps no function over a list argument, and its arithmetic
-operators do not map over a list (`2 * [[1, 2], [3, 4]]` repeats the list). It
-reads a parameter that is not declared with a collection type as a scalar. So
-an application of a function literal (`Apply`, `ApplyWhole`) declines when an
-argument can be a collection (it is one, or its type is a collection type or a
-union with one) and its parameter is not declared with a collection type: at a
-scalar parameter the interpreter maps the function over the elements
-(`((t) ↦ 2t)([[1, 2], [3, 4]])` is `[[2, 4], [6, 8]]`, and `((t) ↦ 1)([1, 2])`
-is `[1, 1]`), and at a parameter declared `any` or `value` that the body reads
-it binds the collection whole and maps each element-wise operator over it. A
-callback of `Map`, `Reduce`, `Filter`, … declines for the same reason when a
-parameter declared `any` or `value` that the body reads receives a value that
-can be a collection: `Map((t: any) ↦ 2t, [[1, 2], [3, 4]])` declines, and the
-interpreter gives `[[2, 4], [6, 8]]`. An argument of a top type (`unknown`,
-`any`, `value`) is read as a scalar, as everywhere else on this target. A
-parameter declared with a collection type (`list<number>`) compiles, through
-the list lowerings of the body. This is the simple, sound version: a precise
-one would map the lambda over the collection, or compile the body at the type
-of the argument (`assertPyAppliedLiteralBindsScalars` and
-`assertPyCallbackWideParams` in `python-target.ts`).
-
 Implicit Map compilation obeys the engine-wide `jit` gate. Exact-mode Map
 compilation requires an explicit proof that native-number execution preserves
 the requested exact result. Structural or ABI failures are cached at the
@@ -4055,9 +3611,8 @@ JavaScript target, the block copies the list once, at the first update, and
 then writes that copy in place, when no other value can hold a reference to
 it (`ownedLocalUpdateChains()` in `compilation/in-place-update.ts` states the
 conditions). Otherwise each update copies the list, and in a loop that visits
-each element once the copies cost O(n²). The Python target always copies a
-block local (ROADMAP CE-329); the step of a fold can update its accumulator in
-place on both targets (`inPlaceUpdateChains()`).
+each element once the copies cost O(n²). The step of a fold can update its
+accumulator in place (`inPlaceUpdateChains()`).
 
 When a JavaScript compilation keeps the copying form for an update
 `xs = ReplaceAt(xs, …)` (a chain of `ReplaceAt` included) in the body of a
@@ -4078,10 +3633,9 @@ not change the emitted code (`copyingUpdateInLoop()`).
 
 ### Dictionary literals
 
-A dictionary literal compiles on the `javascript` and `python` targets, with
-each value compiled: `{a -> x + 1}` is `({"a": _.x + 1})` in JavaScript and
-`{"a": x + 1}` in Python. Each evaluation makes a new object, which has the
-run-time form of a `dictionary` input (a plain object, a `dict`). A key is a
+A dictionary literal compiles on the `javascript` target, with each value
+compiled: `{a -> x + 1}` is `({"a": _.x + 1})`. Each evaluation makes a new
+object, which has the run-time form of a `dictionary` input (a plain object). A key is a
 string literal; the JavaScript literal writes the key `__proto__` as the
 computed key `["__proto__"]: v`, because the plain form `"__proto__": v` sets
 the prototype of the object instead of making an own key. The shape of each
@@ -4091,8 +3645,7 @@ literal; an untyped free input is refused by the admission of the inputs,
 which names it in `unsupported`; an untyped parameter or local is not an
 input there, and declines here). A value whose type can be `Nothing` declines:
 the interpreter keeps such an entry with the value `Nothing`, and the
-compiled object has no form for it. Each value compiles as a value operand (`compileValueOperand()`), so an
-assignment in a value declines on Python, as in any other operand. The
+compiled object has no form for it. Each value compiles as a value operand (`compileValueOperand()`). The
 values are not operands of the node, so the shared-subexpression pass does
 not enter them, but it records each assignment in them: a subexpression is
 not shared across a write in a value (`recordDictionaryAssignments()` in
@@ -4581,21 +4134,19 @@ bound once it occurs three times: every interval operation is an allocating
 ## Compiler internals
 
 A lowering that rewrites one statement into several statements must be added
-to each of the four places that compile a list of statements, because none of
+to each of the three places that compile a list of statements, because none of
 them goes through another:
 
 1. `BaseCompiler.compileBlock` (`base-compiler.ts`) compiles a `Block` that is
    compiled as an expression.
 2. `BaseCompiler.compileLoopBody` compiles the loop bodies of the JavaScript
    and interval targets.
-3. `compilePythonStatements` (`python-target.ts`) is the Python dispatcher for
-   statements.
-4. `BaseCompiler.compileStatementList` compiles the loop bodies of the shader
+3. `BaseCompiler.compileStatementList` compiles the loop bodies of the shader
    targets, which reach statements through the ordinary `compile` route. It
    calls `compileBlock` with the value of the last statement unused, so the
    last statement is not emitted as a `return`.
 
-On a target with a `declare` hook (Python and the shader targets), the
+On a target with a `declare` hook (the shader targets), the
 `Declare` case emits only the declaration, and `compileBlock` emits the initial
 value as a separate assignment. A rewrite that emits `Declare(sym, type,
 value)` from one of the other places therefore loses the value on those
@@ -4604,6 +4155,6 @@ A temporary from `BaseCompiler.tempVar` must also be registered as a local of
 the statement list (`BaseCompiler.loopBodyTempTarget` does this), or it is
 emitted as a read of the caller's scope object (`_.name`).
 
-Check such a lowering on `javascript`, `python` and `glsl` by reading
+Check such a lowering on `javascript` and `glsl` by reading
 `.code`: a comparison of `run()` with the interpreter checks the JavaScript
 target only.

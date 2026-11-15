@@ -337,7 +337,7 @@ describe('Match with a loop-form Sum in a case body (CE-274)', () => {
 // operands evaluates to `Error("missing")`, and the lowerings emitted invalid
 // code for it (`clamp(u + 1.0)`, `Math.max(_.u + 1, )`).
 describe('Clamp with fewer than three operands fails closed', () => {
-  test.each(['glsl', 'javascript', 'python'])('%s', (to) => {
+  test.each(['glsl', 'javascript'])('%s', (to) => {
     for (const json of [
       ['Clamp', ['Add', 'u', 1]],
       ['Clamp', ['Add', 'u', 1], 0],

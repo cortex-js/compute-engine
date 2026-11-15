@@ -204,12 +204,14 @@ describe('VALUE KINDS: COMPILE CONTRACT', () => {
 
   test('a target the contract does not answer for declines', () => {
     const ce = engineWithG({ type: gf8Contract(), value: gValue });
-    expect(() =>
-      compile(ce.box(['Add', 'g', ['G', 2]]), {
-        to: 'python',
-        fallback: false,
-      })
-    ).toThrow("holds a value of the kind type 'gf8' to target 'python'");
+    const result = compile(ce.box(['Add', 'g', ['G', 2]]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(result.success).toBe(false);
+    expect(String(result.error)).toContain(
+      "holds a value of the kind type 'gf8' to target 'interval-javascript'"
+    );
   });
 
   test('a kind with only `compile.value` declines', () => {

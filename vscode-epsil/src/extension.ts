@@ -397,12 +397,6 @@ const VIEWS = [
     suffix: '.compiled.js',
   },
   {
-    id: 'python',
-    label: 'Compiled Python',
-    description: 'The program compiled by the Python (NumPy) target',
-    suffix: '.compiled.py',
-  },
-  {
     id: 'glsl',
     label: 'Compiled GLSL',
     description: 'The program compiled by the GLSL (GPU shader) target',

@@ -305,7 +305,7 @@ describe('Compiled accessors of a restricted point', () => {
   // is the interpreter's `(-1, 2, -1)`. A false restriction of a point is
   // the point of `NaN` coordinates, and so is the cross product of it, as
   // the interpreter answers. This lowering was verified against the
-  // interpreter on JavaScript only; Python keeps its decline.
+  // interpreter on JavaScript only.
   test('Cross of a restricted point compiles on javascript', () => {
     const json = ['Cross', RP3, ['Tuple', 1, 1, 1]];
     expect(run(json, 2)).toEqual([-1, 2, -1]);

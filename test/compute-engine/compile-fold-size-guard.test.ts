@@ -11,7 +11,7 @@
  * - The JavaScript-family targets bind each folded compound value ONCE as a
  *   preamble local (`const _val_f7 = …;`) and read it by name, so the tower
  *   emits three nodes per level (see `compile-fold-shared-values.test.ts`).
- * - A target without that channel (Python here) keeps the inline fold, and a
+ * - A target without that channel (GLSL here) keeps the inline fold, and a
  *   guard measures the EXPANDED (per-path) node count — not the number of
  *   distinct nodes — with a walk that memoizes each node object so it stays
  *   linear in the DISTINCT node count. Above the limit the compiler fails
@@ -64,25 +64,25 @@ describe('COMPILE: fold-size guard for DAG-shared symbol values', () => {
     const { code, run } = js.compile(ce.box('f8'));
     expect(code).not.toContain('_.f7');
     expect(run!({ x: 2 })).toBe(2 * 3 ** 8);
-    const py = ce._getCompilationTarget('python')!;
-    expect(py.compile(ce.box('f8')).code).not.toContain('f7');
+    const glsl = ce._getCompilationTarget('glsl')!;
+    expect(glsl.compile(ce.box('f8')).code).not.toContain('f7');
   });
 
-  describe('above the limit on a target that folds inline (Python)', () => {
+  describe('above the limit on a target that folds inline (GLSL)', () => {
     it('the direct registered-target route refuses with a compile-time error', () => {
       // Level 15 expands to 131 069 nodes — past the limit, and ~400 KB of
       // source if it were baked in.
       const ce = towerEngine(15);
-      const py = ce._getCompilationTarget('python')!;
+      const glsl = ce._getCompilationTarget('glsl')!;
       const started = Date.now();
-      expect(() => py.compile(ce.box('f15'))).toThrow(
+      expect(() => glsl.compile(ce.box('f15'))).toThrow(
         /above the fold-size limit/
       );
       const elapsed = Date.now() - started;
       // The message names the symbol, the measured expansion and the reason.
-      expect(() => py.compile(ce.box('f15'))).toThrow(/f15/);
-      expect(() => py.compile(ce.box('f15'))).toThrow(/131069 nodes/);
-      expect(() => py.compile(ce.box('f15'))).toThrow(
+      expect(() => glsl.compile(ce.box('f15'))).toThrow(/f15/);
+      expect(() => glsl.compile(ce.box('f15'))).toThrow(/131069 nodes/);
+      expect(() => glsl.compile(ce.box('f15'))).toThrow(
         /once per reference path/
       );
       // A loose ceiling: refusing costs a walk over ~46 distinct nodes, while
@@ -95,7 +95,7 @@ describe('COMPILE: fold-size guard for DAG-shared symbol values', () => {
 
     it('the public route degrades to the interpreter and still computes the right value', () => {
       const ce = towerEngine(15);
-      const result = compile(ce.box('f15'), { to: 'python' });
+      const result = compile(ce.box('f15'), { to: 'glsl' });
       // The refusal is a compile-time decline, so `fallback: true` (the
       // default) hands back an interpreter-backed runner rather than throwing.
       expect(result.success).toBe(false);
@@ -108,7 +108,7 @@ describe('COMPILE: fold-size guard for DAG-shared symbol values', () => {
     // Level 30 expands to 4 294 967 293 nodes. A per-path walk would never
     // finish; the memoized walk resolves each of the 31 stored values once.
     const ce = towerEngine(30);
-    const py = ce._getCompilationTarget('python')!;
+    const glsl = ce._getCompilationTarget('glsl')!;
 
     // `_getSymbolValue` is the walk's only lookup, so counting its calls is a
     // load-independent measure of how much of the graph was visited.
@@ -123,7 +123,7 @@ describe('COMPILE: fold-size guard for DAG-shared symbol values', () => {
 
     const started = Date.now();
     try {
-      expect(() => py.compile(ce.box('f30'))).toThrow(
+      expect(() => glsl.compile(ce.box('f30'))).toThrow(
         /above the fold-size limit/
       );
     } finally {
@@ -133,8 +133,9 @@ describe('COMPILE: fold-size guard for DAG-shared symbol values', () => {
     }
     const elapsed = Date.now() - started;
 
-    // Two symbol nodes per level plus the root, each looked up once.
-    expect(lookups).toBeLessThan(200);
+    // A bounded number of lookups per level: 688 for level 30 (373 for
+    // level 15) on GLSL, where a per-path walk would make billions.
+    expect(lookups).toBeLessThan(1000);
     // The lookup count above is the proof that the walk is linear. The time
     // depends on the load of the machine (it went above 4 s when other test
     // runs shared the cores), so it is asserted only in a `CE_PERF=1` run.

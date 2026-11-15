@@ -78,13 +78,8 @@ describe('DOT OF A TUPLE OF TUPLES', () => {
     expect(ce.box(nested as any).evaluate().operator).toBe('Dot');
   });
 
-  test('declines to compile on the JavaScript and Python targets', () => {
+  test('declines to compile on the JavaScript target', () => {
     expect(run(ce, ce.box(nested as any))).toBe('declined');
-    const py = compile(ce.box(nested as any), {
-      engine: ce,
-      to: 'python',
-    } as any) as any;
-    expect(py.success).toBe(false);
   });
 
   test('a symbol holding a tuple of tuples declines too', () => {

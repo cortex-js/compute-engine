@@ -13,15 +13,8 @@
  * about one unit in the last place, as in any float code.
  */
 
-import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { TEST_PYTHON } from './test-python';
 
 const ce = new ComputeEngine();
 ce.declare('n', 'integer');
@@ -94,45 +87,6 @@ describe('Sum of a rounding of a loop index plus an exact constant', () => {
       expect(loop).toMatch(/\+ 24\.0\)/);
     }
   });
-
-  const pythonAvailable = (() => {
-    if (TEST_PYTHON === undefined) return false;
-    try {
-      execFileSync(TEST_PYTHON, ['-c', 'import numpy'], { stdio: 'ignore' });
-      return true;
-    } catch {
-      return false;
-    }
-  })();
-
-  (pythonAvailable ? test : test.skip)(
-    'Python, unrolled and loop forms',
-    () => {
-      const python = new PythonTarget();
-      const cases = [
-        sumOf('Floor', 1, 3),
-        sumOf('Floor', 1, 300),
-        sumOf('Truncate', -40, 3),
-        sumOf('Round', -40, 300),
-      ];
-      let program = 'import numpy as np\nimport math, json\n\n';
-      cases.forEach((e, i) => {
-        program += `${python.compileFunction(e, `fn_${i}`, ['x'])}\n`;
-      });
-      program += `print(json.dumps([float(f(1)) for f in [${cases
-        .map((_, i) => `fn_${i}`)
-        .join(', ')}]]))\n`;
-      const file = path.join(os.tmpdir(), `ce-py-jump-shift-${process.pid}.py`);
-      fs.writeFileSync(file, program);
-      let out = '';
-      try {
-        out = execFileSync(TEST_PYTHON!, [file], { encoding: 'utf8' });
-      } finally {
-        fs.unlinkSync(file);
-      }
-      expect(JSON.parse(out)).toEqual(cases.map(interpreted));
-    }
-  );
 });
 
 describe('Rounding of an integer-typed variable plus an exact constant', () => {
