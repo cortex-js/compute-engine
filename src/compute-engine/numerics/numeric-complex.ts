@@ -4937,9 +4937,77 @@ export function carlsonRDComplex(x: Complex, y: Complex, z: Complex): Complex {
 // quasi-periodic extension for |Re φ| > π/2.
 //
 
+/** |Im φ| above which the incomplete integrals take the rescaled form: `cos φ`
+ * and `sin φ` grow like e^|Im φ| and their squares and cubes leave the double
+ * range near 355 (F) and 236 (E), long before the value does. */
+const ELLIPTIC_SCALED_IM = 20;
+
+/** E past this |Im φ| grows beyond the double range (like e^|Im φ|). */
+const ELLIPTIC_E_MAX_IM = 709;
+
+/** R_D(x, y, z) for z = s², given s: the first duplication step takes the
+ * root `s` directly, because z (= e^(−2t), t = |Im φ|) underflows past
+ * t = 372 while its root does not. */
+function carlsonRDGivenRootZ(
+  x: Complex,
+  y: Complex,
+  z: Complex,
+  sz: number
+): Complex {
+  const sx = x.sqrt();
+  const sy = y.sqrt();
+  const lm = sx.mul(sy).add(sx.mul(sz)).add(sy.mul(sz));
+  const zl = z.add(lm);
+  // R_D(x, y, z) = 3/(√z (z + λ)) + R_D(x′, y′, z′)/4 (DLMF 19.26.19)
+  return new Complex(3, 0)
+    .div(zl.mul(sz))
+    .add(
+      carlsonRDComplex(x.add(lm).div(4), y.add(lm).div(4), zl.div(4)).div(4)
+    );
+}
+
+/**
+ * F(φ|m), or E(φ|m) with `incompleteE`, for |Re φ| ≤ π/2 and a large |Im φ|.
+ * For t = Im φ > 0 write cos φ = eᵗĉ, sin φ = eᵗŝ with
+ * ĉ = e^(−iRe φ)(1 + w)/2, ŝ = i·e^(−iRe φ)(1 − w)/2, w = e^(2iφ), and scale
+ * the Carlson arguments by the positive real λ = |w| = e^(−2t) (R_F has degree
+ * −1/2, R_D −3/2):
+ *   F = ŝ·R_F(ĉ², λ − mŝ², λ)
+ *   E = F − (m/3)·ŝ³·R_D(ĉ², λ − mŝ², λ)
+ * Every argument is O(1). A positive real factor keeps their phases, so the
+ * branch cuts are those of the unscaled arguments. Im φ < 0 by oddness.
+ */
+function ellipticScaledImag(
+  phi: Complex,
+  m: Complex,
+  incompleteE: boolean
+): Complex {
+  if (phi.im < 0) return ellipticScaledImag(phi.neg(), m, incompleteE).neg();
+  const t = phi.im;
+  if (incompleteE && t > ELLIPTIC_E_MAX_IM) return C_NAN;
+  const lam = Math.exp(-2 * t);
+  const x = phi.re;
+  const half = new Complex(Math.cos(x) / 2, -Math.sin(x) / 2); // e^(−ix)/2
+  const w = new Complex(lam * Math.cos(2 * x), lam * Math.sin(2 * x));
+  const ch = half.mul(C_ONE.add(w));
+  const sh = half.mul(C_ONE.sub(w)).mul(new Complex(0, 1));
+  const cc = ch.mul(ch);
+  const yh = new Complex(lam, 0).sub(m.mul(sh).mul(sh));
+  const L = new Complex(lam, 0);
+  const F = sh.mul(carlsonRFComplex(cc, yh, L));
+  if (!incompleteE) return F;
+  return F.sub(
+    m
+      .div(3)
+      .mul(sh.pow(3))
+      .mul(carlsonRDGivenRootZ(cc, yh, L, Math.exp(-t)))
+  );
+}
+
 /** Incomplete elliptic integral of the first kind F(φ|m), complex. */
 export function ellipticFComplex(phi: Complex, m: Complex): Complex {
   if (phi.isNaN() || m.isNaN()) return C_NAN;
+  if (m.isZero()) return phi;
   if (Math.abs(phi.re) > Math.PI / 2) {
     // F(φ + kπ|m) = F(φ|m) + 2k·K(m)
     const k = Math.round(phi.re / Math.PI);
@@ -4947,6 +5015,8 @@ export function ellipticFComplex(phi: Complex, m: Complex): Complex {
     if (K.isNaN() || !Number.isFinite(K.re)) return C_NAN;
     return K.mul(2 * k).add(ellipticFComplex(phi.sub(k * Math.PI), m));
   }
+  if (Math.abs(phi.im) > ELLIPTIC_SCALED_IM)
+    return ellipticScaledImag(phi, m, false);
   const s = phi.sin();
   const c = phi.cos();
   const y = C_ONE.sub(m.mul(s).mul(s));
@@ -4956,6 +5026,7 @@ export function ellipticFComplex(phi: Complex, m: Complex): Complex {
 /** Incomplete elliptic integral of the second kind E(φ|m), complex. */
 export function ellipticEIncompleteComplex(phi: Complex, m: Complex): Complex {
   if (phi.isNaN() || m.isNaN()) return C_NAN;
+  if (m.isZero()) return phi;
   if (Math.abs(phi.re) > Math.PI / 2) {
     // E(φ + kπ|m) = E(φ|m) + 2k·E(m)
     const k = Math.round(phi.re / Math.PI);
@@ -4972,6 +5043,8 @@ export function ellipticEIncompleteComplex(phi: Complex, m: Complex): Complex {
   // complete kernel passes an exact 0 and has the m = 1 value.
   if (phi.im === 0 && Math.abs(Math.abs(phi.re) - Math.PI / 2) < 1e-15)
     return ellipticEComplex(m).mul(Math.sign(phi.re));
+  if (Math.abs(phi.im) > ELLIPTIC_SCALED_IM)
+    return ellipticScaledImag(phi, m, true);
   const s = phi.sin();
   const c = phi.cos();
   const cc = c.mul(c);
