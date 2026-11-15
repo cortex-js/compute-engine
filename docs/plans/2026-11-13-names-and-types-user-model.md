@@ -427,6 +427,20 @@ The order of the uses does not matter (since the next release, CE-1270):
 `(determinant(A), determinant(B), A * B - B * A)` gives
 `(-2, -1, [[-1, -3], [3, 1]])`. In 0.188.0 the first gave zeros.
 
+The same reading holds for a name of a host application that has no type
+when the expression is written (user decision 2026-11-14, CE-1317: the
+reading is documented, a product of untyped names is not kept in order):
+
+```js
+const e = ce.expr(['Multiply', 'q', 'p']);   // ["Multiply", "p", "q"]
+ce.assign('p', ce.expr(['List', ['List', 1, 2], ['List', 3, 4]]));
+ce.assign('q', ce.expr(['List', ['List', 0, 1], ['List', 1, 0]]));
+e.evaluate();                                 // [[2, 1], [4, 3]], which is p·q
+```
+
+Declare `p` and `q` as matrices, assign them before the expression is
+written, or write `MatrixMultiply(q, p)`: each gives `[[3, 4], [1, 2]]`.
+
 **The same expression written directly and through a function can
 differ.** `max([1, 2, 3], 2)` is `3`; `low(x) = max(x, 2)` with the same
 list is `[2, 2, 3]`. Written directly, the list is an operand of `max`.
