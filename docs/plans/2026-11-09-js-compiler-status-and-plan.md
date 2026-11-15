@@ -1837,6 +1837,132 @@ main tree at `c8b8ff6033810afb30c299c66e81534eaf79e720` plus the patch;
 No test fails in the shadow run and no internal error is counted; with the
 switch on, the one test of CE-1267.
 
+Tycho's run of the build of `d4e8d87819f53fa014559a0891d8b96c27b109ec` (G10;
+session `tycho-desk`, 2026-11-15):
+
+- The complex lane in a picture (a page on the machine's GPU, four loads per
+  entry, 960,000 pixels each): the showcase entry `domain-coloring`, whose
+  one function shader comes from the profile, and `kepler-orbit` (one of four
+  shaders from the profile; one `Which` declines on Tycho's handler): no
+  pixel differs between the build with the profile on both seams and the
+  same build without it, and no shader fails to compile. Neither picture
+  reaches the complex `Sqrt` of 0, the overflow of `Tan` and `Tanh`, or a
+  negative base with a fractional exponent.
+- `c` of buddhabrot with the list declared `list<integer^90001>`: not yet
+  testable in a page, since both rows decline on Tycho's `At` handler first.
+- Every count equals the run before, on both seams; no value difference, no
+  internal error, every admitted shader valid.
+- GLSL declines left over every state: Tycho's handlers 342 (`Which` 267,
+  `At` 75); a colour value that reads other names 48; `Block` 26 (one
+  document: a user function that returns the list
+  `Mod(Floor(n / 2^Range(0, 10)), 2)`, which the existing GLSL target declines
+  too); `Add` 8 (a tree with `Error` nodes); `Function` 7 (a function that
+  returns a point of unknown element type); a bound that is not an integer
+  5; the pass bound 4; a name with a value that is not a number 5; `PointX`
+  4; `Break` 3; `Polygon`, `Mandelbrot`, `Segment`, `Tuple`, a real
+  `Factorial` 2 each; ten causes with 1 each.
+- What the switch loses (a second run of `tycho-desk` on the same build,
+  which records per call the cause and whether the existing compiler
+  compiles the same call), without Tycho's handlers and the colour values
+  that read other names. GLSL: 82 calls decline, and the existing target
+  compiles 65 of them. JavaScript: 546 calls decline, and the existing
+  compiler compiles 524. The record of every cause with its message, options
+  and one program is `_TASKS/2026-11-14-ir-batches/tycho-t9-declines.json`.
+  The JavaScript causes by size: a bound of a `Sum` or `Product` that is not
+  an integer 77; an input that is a list of tuples 62; `Apply` of a function
+  literal 48; arithmetic on points (`Add` or `Abs` of a tuple, `Distance`, a
+  function that returns a point, `PointList` of lists) about 120;
+  `RandomChoice` and `RandomShuffle` 42; a `Comprehension` of several
+  clauses 29; `ListJoin` 25 and `Zip` 10; a name whose value is not a number
+  about 33; a function with a parameter that is a list of tuples 16; a
+  `Range` of reals 14; a write to a list local 7; `Choose` 7; `Break` 5.
+  On GLSL: a function that returns a list made by a `Range` 25; a tree with
+  `Error` nodes 7; a function that returns a point 7; the pass bound 4.
+  Batches G11 (points) and G12 (bounds, `Apply`) take the largest groups.
+
+Batches G11 and G12, 2026-11-15, made side by side and landed together.
+
+G11, arithmetic on points. What the interpreter gives was measured first:
+`P + Q`, `-P`, `2P`, `P/2` are component by component; `P + 2`, `P·Q`, `P/Q`
+are errors; `Abs` of a point is its Euclidean norm, of a list the list of
+absolute values; `Distance` is the norm of the difference. Admitted on both
+targets: `Abs` of a point (a rule `norm` of the tuple table, built from
+existing rows), `Distance`, a user function with no stated result that
+returns a point, and a parameter with no declared type that is a point: it
+takes the shape of the lowered argument of the function's first call, by
+the mechanism of G10, one function per binding, and a later call with
+another shape declines. On JavaScript, lists of points: a point plus a list
+of points, `Abs`, `PointX` and `Distance` over a list of points,
+`PointList(L1, L2)` of lists (as long as the shorter). A name that holds
+`PointList` of numbers is that point. The fold pass memoizes an element read
+of an operation on lists per region: it ran once per path of a shared graph
+(out of memory at 20 levels on JavaScript). Reviews, three rounds: no wrong
+value and no invalid shader in about 2,000 shader runs and 9,000 random
+programs; the first form of the parameter rule read the static type of the
+argument, so whether a program compiled depended on which call came first
+(48 of 5,000 random pairs), fixed by reading the lowered argument; an
+internal error on an empty tuple; inferred types `broadcastable` and unions
+taken as "no stated type". The last delta was read by the session.
+
+G12, bounds and `Apply`. A bound of a `Sum` or `Product` of a real type is
+floored, the rule of the interpreter's `normalizeIndexingSet()`, on both
+targets. `Range` takes real operands on JavaScript (the elements
+`lo + k·step`). `Apply` of a function literal to scalar arguments is the
+body with the parameters bound, each argument evaluated once, in order.
+Reviews: `Apply` bound a list argument whole where the interpreter maps the
+function over it (now any list or tuple argument declines); a constant
+infinite bound compiled to code that throws, where the base declined and
+the interpreter has the value of the series (a constant bound or `Range`
+operand that is not finite declines). Not covered: the four GLSL calls over
+the pass bound are a nested loop whose inner count reads the outer index.
+Known limitation recorded: a bound that doubles compute just under an
+integer. Filed: CE-1327 (`ce.withValues()` and a sum index of the same name
+in a mapped function), CE-1328 (a `Range` step with `Random()` draws at
+boxing).
+
+Measured in the main tree at `d4e8d87819f53fa014559a0891d8b96c27b109ec` plus
+the two patches; 7,254 lines in `ir/`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,539 of 10,859 (97.1%) |
+| Every JavaScript compile | 25,006 of 38,952 (64.2%) |
+| Public JavaScript `compile()` calls | 14,459 of 28,086 (51.5%) |
+| GLSL `compile()` calls | 1,156 of 2,392 (48.3%); 1,077 of the 1,595 that the existing target compiles (67.5%) |
+
+No test fails in the shadow run and no internal error is counted; with the
+switch on, the one test of CE-1267.
+
+The census of the default (2026-11-15, an agent at
+`d4e8d87819f53fa014559a0891d8b96c27b109ec`; records in
+`_TASKS/2026-11-15-default-census/`). A test-only switch,
+`CE_JS_PROFILE_PUBLIC=ir` (88 lines, not committed), makes every public
+`compile()` for JavaScript or GLSL that names no profile try the profile
+first and fall back to the existing target. With it 2,475 of the suite's
+tests fail, in 287 files; no hang and no internal error. By class: pinned
+text of the existing compiler 1,121; a field of the result or an expected
+decline 254; a value that differs within the caveats 860 (780 of them the
+bit-for-bit differential tests of the structured route); the profile right
+and the existing compiler wrong 53; other 84; and 103 where the profile is
+wrong, in six groups:
+
+- D1, 13 tests: a product or a power of matrices is computed element by
+  element.
+- D2, 46 tests: a jump (`Floor`, `Ceil`, `Round`, `Mod`, a comparison) of
+  an operand that is exact in the interpreter and not in doubles:
+  `Floor(x/49)` at `x = 49` gives 0, because the code is
+  `Math.floor(0.0204…·x)`; `Floor(29k/50)` at `k = 100` gives 57.
+- D3, 4 tests: `∫₀^∞ x^100·e^−x dx` gives a wrong finite number that
+  changes between runs.
+- D4, 2 tests: `At(Map(f, Range(1, ∞)), 3)` throws at run time (G12 now
+  declines a `Range` with an infinite operand).
+- D5, 36 tests: `Arcsin(u)` with `u: real` at `u = 2` is NaN where the
+  interpreter and the existing compiler give a complex number. A question
+  for the user: the rule of the README is NaN in the `strict` mode.
+- D6, 2 tests: an assignment in a bound of a `Sum` takes effect (crafted).
+
+The next batch fixes D1, D2, D3 and D6, and lands the switch.
+
 Tycho's run of the build of `511a446b8c4dc43b50c9fac75c6735861b6be580` (G5
 and G6; session `tycho-desk`, 2026-11-14), the profile on both seams:
 

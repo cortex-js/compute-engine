@@ -284,10 +284,10 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // A draw of the active `WithRandomSeed` frame, or a live draw outside one.
   row('Random',       0,          [[[], R, 'draw']],             { ...list, effect: 'effectful' }),
   // The number of elements of `Range(a, b, step)`: the engine's `rangeCount`
-  // (`b` can be a real: `Range(1, 3.5)` is `[1, 2, 3]`).
-  row(undefined,      3,          [[[I, R, I], I, 'rangecount']], { ...list, fold: rangeCount }),
+  // (of reals: `Range(1, 3.5)` is `[1, 2, 3]`).
+  row(undefined,      3,          [[[R, R, R], I, 'rangecount']], { ...list, fold: rangeCount }),
   // The step of `Range(a, b)`: 1, or -1 when `b < a`.
-  row(undefined,      2,          [[[I, R], I, 'rangestep']],    { ...list, fold: (a: number, b: number) => (b >= a ? 1 : -1) }),
+  row(undefined,      2,          [[[R, R], I, 'rangestep']],    { ...list, fold: (a: number, b: number) => (b >= a ? 1 : -1) }),
   // Colours (README, "The colour lane"): a constructor of its channels, and
   // a conversion to the space it names. A list operand declines.
   row('Rgb',          3,          [[[R, R, R], K, 'rgb']],       list),

@@ -275,7 +275,19 @@ const fold: Pass = (p, rows) => {
   const fx = effects(p, rows);
   const constants = new Map<V, Literal>();
   const defs = new Map<V, Instr>();
-  return rewrite(p, (i, subst) => {
+  // The element of an operation on lists, by list and index, written in the
+  // region or a region around it: a shared graph is rewritten once per
+  // element, not once per path.
+  const scopes = [new Map<string, V>()];
+  const enter = (inside: () => void) => {
+    scopes.push(new Map());
+    try {
+      inside();
+    } finally {
+      scopes.pop();
+    }
+  };
+  const step = (i: Instr, subst: Map<V, V>): Instr[] | undefined => {
     for (const o of outsOf(i)) defs.set(o, i);
     if (i.k === 'const') constants.set(i.out, i.value);
     const at = atToElem(
@@ -294,6 +306,12 @@ const fold: Pass = (p, rows) => {
         return [];
       }
       if (list?.k === 'op' && fx.speculatable(list) && threads(rows, list.op)) {
+        const key = `${a},${k}`;
+        const known = scopes.find((s) => s.has(key))?.get(key);
+        if (known !== undefined) {
+          subst.set(i.out, known);
+          return [];
+        }
         // The operation on the elements of its list operands; a new value
         // of the operation's element type (`i.out` can have a wider lane).
         const out: Instr[] = [];
@@ -303,6 +321,7 @@ const fold: Pass = (p, rows) => {
         const o = fresh(p, elementType(p.types[list.out]));
         out.push({ k: 'op', out: o, op: list.op, args });
         subst.set(i.out, o);
+        scopes[scopes.length - 1].set(key, o);
         return out;
       }
     }
@@ -330,7 +349,8 @@ const fold: Pass = (p, rows) => {
       return taken.body;
     }
     return undefined;
-  });
+  };
+  return rewrite(p, step, enter);
 };
 
 /** `if (c) { …y } else { false }` is `and(c, y)`, `if (c) { true } else

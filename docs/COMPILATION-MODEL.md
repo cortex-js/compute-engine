@@ -187,6 +187,10 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `|Re(z)|` about 44.4 and `Tan(z)` from `|Im(z)|` about 44.4 (`cosh` of
   twice the part overflows a single float), where the value is close to
   `±1` and `±i`.
+- `javascript` and `glsl`, profile `ir` (crafted), `x: real`:
+  `Sum(1, Limits(k, 1, Sqrt(x)^2))` at `x = 3` gives `2`: the bound is
+  floored, and doubles compute `Sqrt(3)^2` just under 3. The interpreter
+  gives `3`.
 - `glsl`, profile `ir` (crafted), `x: real`, `y: real`: `Arctan2(y, x)` with
   an operand that is a zero computed as `-0` (`Arctan2(Negate(0·x), y)`) is
   off by π in the software renderer, and has the other sign on a GPU for

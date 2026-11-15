@@ -76,14 +76,15 @@ export function listLowering(cx: Lowering) {
       decline(e, 'a scalar where a list is required');
     }
     if (e.nops < 2 || e.nops > 3) decline(e, `a Range of ${e.nops} operands`);
-    // An upper bound can be a real; the elements are integers.
-    const [lo, hi, given] = e.ops.map((x, i) => {
+    // Real operands: the elements are the reals `lo + k·step`, as the
+    // interpreter's (`Range(0.5, 3.7)` is `[0.5, 1.5, 2.5, 3.5]`).
+    const [lo, hi, given] = e.ops.map((x) => {
       const v = cx.scalar(x);
-      if (type(v).lane !== 'integer' && (i !== 1 || type(v).lane !== 'real'))
-        decline(
-          x,
-          'a Range of reals (a first element or a step that is not an integer)'
-        );
+      if (type(v).lane !== 'integer' && type(v).lane !== 'real')
+        decline(x, 'a Range of an operand that is not a real number');
+      const c = cx.constant(v);
+      if (c !== undefined && !Number.isFinite(c))
+        decline(x, 'a Range of an operand that is a constant infinity or NaN');
       return v;
     });
     const step = given ?? cx.apply(e, op('rangestep'), [lo, hi]);
@@ -140,10 +141,18 @@ export function listLowering(cx: Lowering) {
     const index = limits.ops[0];
     if (limits.nops !== 3 || !isSymbol(index))
       decline(e, 'not one index with two bounds');
+    // The interpreter counts from the floor of each bound to the floor of
+    // the other (`normalizeIndexingSet()`): `Sum(k, Limits(k, 0.5, 3.7))`
+    // is 6.
     const [lo, hi] = [limits.ops[1], limits.ops[2]].map((x) => {
       const v = cx.scalar(x);
+      // The interpreter sums a window of an infinite range; NaN is 1.
+      const c = cx.constant(v);
+      if (c !== undefined && !Number.isFinite(c))
+        decline(x, 'a bound that is a constant infinity or NaN');
+      if (type(v).lane === 'real') return cx.apply(x, cx.row('Floor'), [v]);
       if (type(v).lane !== 'integer')
-        decline(x, 'a bound that is not an integer');
+        decline(x, 'a bound that is not a real number');
       return v;
     });
     const init = integer(REDUCTIONS.get(e.operator)!.identity);
@@ -300,5 +309,5 @@ export function listLowering(cx: Lowering) {
     return v;
   };
 
-  return { source, reduce, reduction, build, comprehension };
+  return { source, listSource, reduce, reduction, build, comprehension };
 }

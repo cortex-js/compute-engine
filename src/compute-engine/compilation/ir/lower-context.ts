@@ -77,18 +77,22 @@ export type Source = { length: V; at: (k: V) => V; value: () => V };
  *  with scalars (`2^Tuple(1, 2)`); `all`, every operand a tuple (`Add`);
  *  `scale`, one tuple and scalars (`Multiply`), the tuple first for
  *  `Divide` (`2/Tuple(1, 2)` is an error). A difference of tuples is an
- *  `Add` of a negated tuple in the canonical form. A threading row of one operand
- *  other than `Abs` (the norm of a point) is `each`. */
-export const TUPLE_RULES: Readonly<Record<string, 'each' | 'all' | 'scale'>> =
-  Object.freeze({
-    Power: 'each',
-    Mod: 'each',
-    Root: 'each',
-    Arctan2: 'each',
-    Add: 'all',
-    Multiply: 'scale',
-    Divide: 'scale',
-  });
+ *  `Add` of a negated tuple in the canonical form. `norm`: the Euclidean norm
+ *  of a tuple of numbers (`Abs(Tuple(3, 4))` is 5). A threading row of one
+ *  operand other than `Abs` is `each`. A list of tuples with a tuple (`all`),
+ *  and a list of tuples under `norm`, is read tuple by tuple: the
+ *  interpreter adds a point to each point of a list. */
+type TupleRule = 'each' | 'all' | 'scale' | 'norm';
+export const TUPLE_RULES: Readonly<Record<string, TupleRule>> = Object.freeze({
+  Power: 'each',
+  Mod: 'each',
+  Root: 'each',
+  Arctan2: 'each',
+  Add: 'all',
+  Multiply: 'scale',
+  Divide: 'scale',
+  Abs: 'norm',
+});
 
 /** The operations of the walk (`lower.ts`) that the other parts call. */
 export type Lowering = {

@@ -65,7 +65,8 @@ the inputs object for its free names: `run(3, 4, { x: 1.5 })`.
 A free name that has a value in the engine (a constant, or a variable) is that
 value, lowered at compile time as a literal, only when the value is a number of
 the engine (an integer, a rational, a radical such as `Sqrt(2)`, a complex), a
-list of such numbers or a tuple of them (a point, `P = (2.64, 17)`), or a
+list of such numbers or a tuple of them (a point, `P = (2.64, 17)`, also
+written `PointList(2.64, 17)`), or a
 colour constructor (`Rgb`, `Hsl`, `Hsv`, `Oklab`, `Oklch`) of three real
 numbers (`C = Hsv(270, 0.4, 0.95)`, which is lowered as that application on the
 colour lane): no symbol and no other application; a constructor with an alpha or
@@ -440,9 +441,11 @@ lengths differ, the result is unspecified: with `D` and `E` of two lengths,
 not show, and the compiled value is a list as long as `D`, NaN where `E` has
 no element; `Range(1, 2) + List(1, 2, 3)` gives `[2, 4]`. Lists of rank 2 or
 more whose lengths are not one length value decline (`Q + R` of two inputs of
-type `list<list<real^2>>`). A `Range` can have a real upper bound, its elements are integers
-(`Range(1, N)` at `N = 3.5` is `[1, 2, 3]`, the count of `rangeCount`); a real
-first element or step declines. Whether a list result can
+type `list<list<real^2>>`). The operands of a `Range` are reals or integers: its
+elements are `lo + k·step` for `k` from 0, of the count of `rangeCount`, the
+interpreter's (`Range(1, N)` at `N = 3.5` is `[1, 2, 3]`, `Range(-h, h)` at
+`h = 2.5` is `[-2.5, -1.5, …, 2.5]`), integers when the first element and the
+step are. GLSL has no spelling of a run-time count. Whether a list result can
 hold an input is read from the rows (`alias`): such a result is returned as a
 copy.
 
@@ -467,8 +470,10 @@ list of 2 to 4 elements, a tuple or not, is a `vec2`, `vec3` or `vec4`
 stated length); a tuple of tuples declines. `PointList` with no list component
 is the tuple of its components; with list components it is the list of the
 tuples of their elements at each index, a scalar component in every tuple, as
-long as the shortest component when the lengths are stated, or of one length
-value (`PointList(D, Map(f, D))`); other lengths decline. A list of tuples, a
+long as the shortest component, as in the interpreter: a stated length, one
+length value (`PointList(D, Map(f, D))`), or the `Min` of the lengths at run
+time (`PointList(A1, A2, A3)` of three inputs of type `list<real>`). A list of
+tuples, a
 build of tuples (`Comprehension(Tuple(f(k), g(k)), Element(k, R))`) and the
 element of a list of tuples are tuples at their axis.
 
@@ -479,13 +484,26 @@ probed in the interpreter (`TUPLE_RULES`): a threading row of one operand other
 than `Abs` (`Sin(Tuple(1, 2))`), `Power`, `Mod`, `Root` and `Arctan2` element by
 element; `Add` of tuples only (a difference is an `Add` of a negated tuple);
 `Multiply` of one tuple and scalars (`2·Tuple(x, 1)`) and `Divide` of a tuple
-by a scalar; `At`; and `Length`, `Sum`, `Max` and `Min`. `PointX`, `PointY`
-and `PointZ` of a tuple of scalars are `At` of index 1, 2 and 3 (`PointZ` of a
-point of 2 coordinates is an `incompatible-dimensions` error of the canonical
-form, and declines); of a list, or of a list of points,
-they decline. Any other reader
+by a scalar; `At`; and `Length`, `Sum`, `Max` and `Min`. A product or a
+quotient of two points, and a point plus a scalar or a list of numbers, are
+errors of the canonical form, and decline. `Abs` of a tuple of real or integer
+numbers is its Euclidean norm (`Abs(Tuple(3, 4))` is 5), the square root of the
+sum of the squares of its elements on both targets (`sqrt((u * u) + (v * v))`;
+no guard against the overflow of a square); of a tuple of complex numbers it
+declines. `Distance(a, b)` of two tuples is `Abs(a + -b)`; of tuples of two
+lengths, or of a list of numbers, it declines. A list of points is read point
+by point, by a build over it (JavaScript; GLSL has no list of points): under
+`Abs` and `PointX`, and under `Add` with a point, which the interpreter adds to
+each point of the list (`P + List(Tuple(1, 2), Tuple(3, 4))`), so
+`Distance(P, L)` of a list `L` of points is the list of the distances, and
+`Distance(L, M)` of two lists of points the list of the distances pair by pair
+(lists of two lengths decline).
+`PointX`, `PointY` and `PointZ` of a tuple of scalars are `At` of index 1, 2
+and 3 (`PointZ` of a point of 2 coordinates is an `incompatible-dimensions`
+error of the canonical form, and declines); of a list of points, the list of
+those coordinates; of a list of numbers, they decline. Any other reader
 declines a tuple
-operand: `Abs(Tuple(3, 4))` is the norm 5, `Equal(Tuple(1, 2), List(1, 2))` is
+operand: `Equal(Tuple(1, 2), List(1, 2))` is
 `False`, a comparison of a tuple stays unevaluated, `Map`, `Filter`, `Reduce`,
 `Loop` and `Comprehension` over a tuple, and the arms of a conditional of which
 one is a tuple and the other a list. The positions that hold a value (the root,
@@ -547,7 +565,13 @@ with `passes`) also calls `_SYS.countLoopPass(budget)`, which adds one to one
 count for a call, nested loops and the loops of user functions included; over
 the budget, the call throws a `CancellationError` with the cause
 `iteration-limit-exceeded` (`docs/COMPILATION-MODEL.md`, "A limit on `Loop`
-passes"). The count is in the runtime; the entry starts with
+passes"). A bound of a `Sum` or a `Product` with `Limits` of a real type is
+its `Floor`, as the interpreter counts (`normalizeIndexingSet()`):
+`Sum(k, Limits(k, 0.5, 3.7))` is 0 + 1 + 2 + 3, and `Limits(k, 1, -0.5)` is
+empty (the identity); a complex bound declines, and in the `bigint` mode a real
+one, and so does a bound that is a constant infinity or NaN (the interpreter
+sums a window of an infinite range: `Sum(x^k/k!, Limits(k, 0, +∞))`). An
+operand of a `Range` that is such a constant declines too. The count is in the runtime; the entry starts with
 `_SYS.resetLoopPasses()` when the code counts passes. A `Sum` or a `Product`
 with `Limits` whose count of passes is more than the budget is NaN
 (`hi - lo < budget` is false), each loop by its own count: the lowering writes
@@ -589,7 +613,26 @@ chooses its samples), as do two variables and the option
 
 A user function is lowered once per compilation, keyed by its definition: the
 parameter types from the signature of its binding (`real` when unknown), the
-result from the signature or the body. A recursive one needs a result type
+result from the signature or the body. A result of no stated type (none,
+`unknown`, `number`, `any`, a `broadcastable` type, or a union that is no IR
+type, as the engine infers
+`list<…> | number | tuple` for `Sqrt(PointX(p)^2 + PointY(p)^2)`) is the type
+of the body: a scalar, or a point (a tuple of real or integer numbers,
+`Function(Block(PointList(x, y)), x, y)`), and the result of a call is then a
+tuple; a result that is a tuple of such elements or of real or integer scalars
+(`tuple<unknown, unknown>`, `tuple<number, unknown>`) takes a point body of
+that length; a list body declines. A parameter of no declared type, or of a
+type that is not a scalar (`collection<any> | tuple`, inferred from `PointX(p)`
+in the body), takes the point of its argument at the function's first call:
+the arguments of that call are lowered before the function, and a parameter
+whose lowered argument is a point (a tuple of real or integer numbers) is a
+point of its length, whatever the static type of the argument (a parameter
+passed on, `(1 − t)·a + t·b`); one function per binding, as for a list
+parameter below. `C_mod(C_mul(A, X(x, y)))` of three functions assigned with
+no declaration compiles on both targets. A later call with an argument of
+another shape declines, naming the function and the parameter. When the
+lowered argument of the first call is not a point, a parameter of no declared
+type is a real, and one of a type that is not a scalar declines. A recursive one needs a result type
 (declared, or inferred by the engine). An input of the compilation that the body
 reads (a free name with no value, or a name of `symbolic` or `inputs`) is a
 parameter after the function's own, in the order of its first read in the body
@@ -612,8 +655,16 @@ parameter, or has a value; an input of a list of a run-time length or of
 booleans; a name with a value read in the body whose binding where the call is
 compiled is not the body's (see the values of free names above); another
 `vars` name. A recursive function that reads no input
-compiles. A function value other than the literal of a `Map` or `Filter` or the
-root, and a list argument for a scalar parameter (the interpreter maps the
+compiles. `Apply(Function(body, p1, …), a1, …)` with one parameter per argument,
+each a name, is the body with each parameter bound to its argument, the
+arguments lowered once, in order, before the body (as a `Block` of locals); a
+parameter shadows an input or a local of its name, and an argument reads the
+names outside. A list or a tuple argument declines (the interpreter maps a
+literal of scalar parameters over it, `applyLiteralMaps()`, and binds it whole
+when the literal's signature takes a collection), as do a typed parameter and
+another count of arguments; `Apply(g, x)` of a name is
+the call `g(x)` in the canonical form. A function value other than the literal
+of a `Map`, a `Filter`, an `Apply` or the root, and a list argument for a scalar parameter (the interpreter maps the
 function over the list) decline. A declared result `complex` of a real body is
 the body converted to the complex lane. A declared result `color` takes a body
 on the colour lane ("The colour lane"); a parameter `color` declines.
@@ -687,6 +738,9 @@ length; one of a stated length is a `vecN` or a `float[n]`
   recursion, and `Max` of 1,000 operands is a chain of 1,000 `max`. A
   program on which a walk of the pipeline still exceeds the call stack (a
   tree of depth 20,000) declines: "an expression too deep to compile".
+- The `fold` pass writes the element of an operation on lists (`elem` of an
+  `add` of points) once per list and index in a region and the regions in it,
+  not once per path of a shared graph.
 - On GLSL `scalarize` writes an element-wise operation as one expression per
   element for a list of at most 64 elements (`SCALARIZE_LIMIT`); over a
   longer list, an array or a list in storage, the operation declines
@@ -696,7 +750,7 @@ length; one of a stated length is a `vecN` or a `float[n]`
   its `int` bounds to ±2^30. GLSL has no run-time length, region, draw, frame or
   recursion.
 - A list of lists of run-time length (other than an input's outer list), a
-  `Range` of a real first element or step, a string seed, a list of run-time length made in a random
+  string seed, a list of run-time length made in a random
   frame, and `Random` of a domain decline.
 - A copied list result is a `structuredClone`: two rows that are the same list
   in the result (`[L, L]`) stay one object in the copy.

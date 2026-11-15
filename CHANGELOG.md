@@ -98,6 +98,26 @@
   return a colour. An alpha, a colour input or parameter and a list of
   colours decline. A GLSL number is now written with the fewest digits that
   give the same single float (`0.1`, where it was `0.10000000149011612`).
+- **The experimental profile `'ir'` compiles arithmetic on points, sums with
+  bounds that are not integers, and `Apply` of a function literal.** With
+  `P` and `Q` of type `tuple<real, real>`: `P + 2Q` is a point, `Abs(P)` is
+  its length (5 at `P = (3, 4)`), `Distance(P, Q)` is the length of `P − Q`,
+  on JavaScript and on GLSL; on JavaScript a point can be added to a list of
+  points, `Abs` and `PointX` apply to a list of points, and
+  `PointList(L1, L2)` of two lists is a list of points as long as the
+  shorter one. A product of two points and a point plus a number decline, as
+  the interpreter refuses them. A user function with no declared types can
+  take and return points: a parameter with no declared type is a point when
+  the argument of the function's first call is one, and a later call with
+  an argument of another shape declines. A name that holds a point written
+  as `PointList(0.7, -0.4)` compiles as that point. A bound of a `Sum` or a
+  `Product` of a real type is floored, as the interpreter does:
+  `Sum(k, Limits(k, 1, n))` at `n = 3.7` is 6. On JavaScript a `Range` takes
+  real operands (`Range(0.5, 3.7)` is `[0.5, 1.5, 2.5, 3.5]`). A bound or an
+  operand of `Range` that is a constant infinity or `NaN` declines.
+  `Apply(Function(body, p), a)` with scalar arguments compiles as the body
+  with the parameter bound; a list or tuple argument declines, since the
+  interpreter may map the function over it.
 - **The code of the experimental profile `'ir'` can be stored, loaded and
   sent to a worker.** A result of `compile(expr, { profile: 'ir' })` now has
   `runtimeVersion`, `preambleOnce` and `entryPlan`, as a result of the

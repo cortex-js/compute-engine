@@ -9,7 +9,8 @@
  *   its name; any other head declines. Only then is it a construct of the
  *   walk (`If`, `Which`, `Block` with `Declare` and `Assign`, `List`, `At`,
  *   `Length`, `Range`, `Map`, `Filter`, `Reduce`, `Tuple`, `PointList`,
- *   `Comprehension`, `WithRandomSeed`, `And`, `Or`), a reduction (`REDUCTIONS`) or a row of `operators.ts`. A name
+ *   `Comprehension`, `WithRandomSeed`, `Apply` of a function literal, `And`,
+ *   `Or`), a reduction (`REDUCTIONS`) or a row of `operators.ts`. A name
  *   bound in the walk's frames is that value, also when it is the name of
  *   a library constant.
  * - A sub-expression whose heads are all rows that are not effectful
@@ -423,7 +424,16 @@ export function lower(
       if (tuple !== undefined) {
         const rule =
           TUPLE_RULES[r.head!] ??
-          (r.arity === 1 && r.threads && r.head !== 'Abs' ? 'each' : undefined);
+          (r.arity === 1 && r.threads ? 'each' : undefined);
+        // A list of points with a point (`all`), or under `norm`: point by
+        // point.
+        if (
+          given.some((v) => tuples.get(v) === 1) &&
+          (rule === 'norm' ||
+            (rule === 'all' && given.some((v) => tuples.get(v) === 0)))
+        )
+          return eachPoint(node, r.head!, given, operation);
+        if (rule === 'norm') return norm(node, tuple);
         const lists = given.filter((v) => type(v).shape.length > 0);
         if (
           r.head !== 'At' &&
@@ -471,6 +481,60 @@ export function lower(
     if (typeof r.arity === 'number' || r.arity === 'chain')
       return operation(args);
     return args.slice(1).reduce((x, y) => operation([x, y]), args[0]);
+  };
+
+  /** The Euclidean norm of the point `p` (a tuple of real or integer
+   *  numbers): the square root of the sum of the squares of its elements. */
+  const norm = (node: Expression, p: V): V => {
+    const t = type(p);
+    const n = t.shape[0];
+    if (
+      tuples.get(p) !== 0 ||
+      t.shape.length !== 1 ||
+      typeof n !== 'number' ||
+      (t.lane !== 'real' && t.lane !== 'integer')
+    )
+      decline(node, 'the norm of a value that is not a point of numbers');
+    const squares = Array.from({ length: n }, (_, k) => {
+      const x = b.op('elem', [p, b.constant(k, 'integer')], scalarType(t.lane));
+      return apply(node, row('Multiply'), [x, x]);
+    });
+    const sum = squares.reduce((s, x) => apply(node, row('Add'), [s, x]));
+    return apply(node, row('Sqrt'), [sum]);
+  };
+
+  /** `f` of `given` point by point: a build over the lists of points among
+   *  them (of one shape), which reads their element at each index; a point
+   *  and a scalar are read as they are. */
+  const eachPoint = (
+    node: Expression,
+    head: string,
+    given: V[],
+    f: (xs: V[]) => V
+  ): V => {
+    const first = given.find((v) => tuples.get(v) === 1)!;
+    const shape = type(first).shape;
+    for (const v of given) {
+      const t = type(v);
+      if (
+        t.shape.length > 0 &&
+        !(tuples.get(v) === 0 && t.shape.length === 1) &&
+        !(tuples.get(v) === 1 && same(t.shape, shape))
+      )
+        decline(
+          node,
+          `${head} of a list of points and a value of another shape`
+        );
+    }
+    const k = b.newValue(scalarType('integer'));
+    const at = (v: V) => lists.listSource(v).at(k);
+    return region(
+      'build',
+      [lists.listSource(first).length],
+      [k],
+      () => [f(given.map((v) => (tuples.get(v) === 1 ? at(v) : v)))],
+      node
+    )[0];
   };
 
   /** Lower `e`. With `want` false its value is not used (a statement). */
@@ -620,11 +684,26 @@ export function lower(
         // The coordinate of a point, an `At` of a tuple of scalars (a
         // coordinate past the last one is an `incompatible-dimensions`
         // error of the canonical form, which declines first).
+        // Of a list of points, the list of the coordinates.
         const p = value(e.ops[0])!;
+        const k = ['PointX', 'PointY', 'PointZ'].indexOf(e.operator) + 1;
+        const coordinate = ([q]: V[]) =>
+          apply(e, row('At'), [q, b.constant(k, 'integer')]);
+        if (e.nops === 1 && tuples.get(p) === 1 && type(p).shape.length === 2)
+          return eachPoint(e, e.operator, [p], coordinate);
         if (e.nops !== 1 || tuples.get(p) !== 0 || type(p).shape.length !== 1)
           decline(e, `${e.operator} of a value that is not a point`);
-        const k = ['PointX', 'PointY', 'PointZ'].indexOf(e.operator) + 1;
-        return apply(e, row('At'), [p, b.constant(k, 'integer')]);
+        return coordinate([p]);
+      }
+      case 'Distance': {
+        // The norm of the difference of two points, or point by point with
+        // a list of points; a list of numbers declines.
+        if (e.nops !== 2) break;
+        const [p, q] = e.ops.map((op) => value(op)!);
+        if (!tuples.has(p) || !tuples.has(q))
+          decline(e, 'Distance of a value that is not a point');
+        const d = apply(e, row('Add'), [p, apply(e, row('Negate'), [q])]);
+        return apply(e, row('Abs'), [d]);
       }
       case 'Log': {
         // `Log(x, 10)` is `log10`, a real `Log(x, 2)` is `log2` (exact at a
@@ -684,12 +763,49 @@ export function lower(
       case 'Integrate':
       case 'NIntegrate':
         return integral(e);
+      case 'Apply': {
+        // `Apply(Function(body, p1, …), a1, …)`: the body with each
+        // parameter bound to its argument, each argument evaluated once, in
+        // order, before it. (`Apply(g, x)` of a name is the call `g(x)` in
+        // the canonical form.)
+        const [f, ...args] = e.ops;
+        const names = isFunction(f, 'Function')
+          ? f.ops.slice(1).map((p) => (isSymbol(p) ? p.symbol : ''))
+          : [];
+        if (
+          !isFunction(f, 'Function') ||
+          names.length !== args.length ||
+          names.includes('')
+        )
+          decline(
+            e,
+            'Apply of a value that is not a function literal of one untyped parameter per argument'
+          );
+        // A list or a tuple argument declines: the interpreter maps a
+        // literal over it unless its signature takes a collection
+        // (`applyLiteralMaps()`).
+        const values = args.map((a) => {
+          const v = value(a)!;
+          if (type(v).shape.length > 0)
+            decline(
+              a,
+              'a list or a tuple argument of Apply (the interpreter may map the function over it)'
+            );
+          return v;
+        });
+        return withFrame(false, (frame) => {
+          names.forEach((n, i) =>
+            frame.names.set(n, { v: values[i], role: 'index' })
+          );
+          return value(f.ops[0], want);
+        });
+      }
       case 'Declare':
         decline(e, 'Declare outside a block');
       case 'Function':
         decline(
           e,
-          'a function value that is not the program or the literal of a Map or a Filter'
+          'a function value that is not the program or the literal of a Map, a Filter or an Apply'
         );
       case 'Error':
         decline(e, 'an error of the canonical form');
@@ -829,7 +945,8 @@ export function lower(
   };
 
   /** The value of the free name `e`, which holds `v` in the engine: a
-   *  literal when `v` is a number, a list or a tuple of numbers, or a colour
+   *  literal when `v` is a number, a list, a tuple or a `PointList` of
+   *  numbers, or a colour
    *  constructor of three real numbers (`Hsv(270, 0.4, 0.95)`; no symbol, no
    *  other application); any other value declines, as its names have
    *  bindings of their own. The name is a capture (`symbolDeps`) unless its
@@ -837,7 +954,8 @@ export function lower(
   const captured = (e: Expression, name: string, v: Expression): V => {
     const numbers = (x: Expression): boolean =>
       isNumber(x) ||
-      ((isFunction(x, 'List') || isFunction(x, 'Tuple')) &&
+      (isFunction(x) &&
+        ['List', 'Tuple', 'PointList'].includes(x.operator) &&
         x.nops > 0 &&
         x.ops.every(numbers));
     // A constructor of the colour lane (a row of three real channels).
@@ -1218,25 +1336,22 @@ export function lower(
   /** `PointList`: the tuple of its components when none is a list;
    *  otherwise the list of the tuples of the elements of its list
    *  components at each index (a scalar is in every tuple), as long as the
-   *  shortest component (static lengths), or of one length value. */
+   *  shortest component: the `Min` of the lengths. */
   const pointList = (e: Fn): V => {
     const parts = e.ops.map((op) => value(op)!);
     if (parts.some((v) => tuples.has(v) || type(v).shape.length > 1))
       decline(e, 'a component that is a point or a list of lists');
     const n = parts.flatMap((v) => type(v).shape);
     if (n.length === 0) return tuple(e, parts);
-    const fixed = n.every((x): x is number => typeof x === 'number');
-    if (!fixed && !n.every((x) => same([x], [n[0]])))
-      decline(e, 'lists of run-time lengths that are not one length');
-    const length =
-      typeof n[0] === 'number'
-        ? b.constant(fixed ? Math.min(...n) : n[0], 'integer')
-        : n[0].v;
+    const fixed = n.filter((x): x is number => typeof x === 'number');
+    const lengths = [
+      ...(fixed.length > 0 ? [b.constant(Math.min(...fixed), 'integer')] : []),
+      ...new Set(n.flatMap((x) => (typeof x === 'number' ? [] : [x.v]))),
+    ];
+    const length = lengths.reduce((m, x) => apply(e, row('Min'), [m, x]));
     const k = b.newValue(scalarType('integer'));
     const at = (v: V) =>
-      type(v).shape.length === 0
-        ? v
-        : b.op('elem', [v, k], scalarType(type(v).lane));
+      type(v).shape.length === 0 ? v : lists.listSource(v).at(k);
     return region(
       'build',
       [length],

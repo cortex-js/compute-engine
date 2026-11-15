@@ -131,6 +131,31 @@ export function scalarOf(node: Expression, t: Type, what: string): IRType {
   return { lane: ir.lane, shape: [] };
 }
 
+/** `t` settles no IR type: `unknown`, a `broadcastable` type, or a union
+ *  that is none (an inferred `collection<any> | number | tuple`); the body
+ *  or the argument decides. */
+const loose = (t: Type) =>
+  t === 'unknown' ||
+  (typeof t === 'object' &&
+    (t.kind === 'broadcastable' || (t.kind === 'union' && !inputType(t))));
+
+/** The number of elements of the tuple type `t` when each is loose or a
+ *  real or integer scalar (a point), or `undefined`. */
+function pointLength(t: Type): number | undefined {
+  t = present(t);
+  if (typeof t !== 'object' || t.kind !== 'tuple' || !t.elements.length)
+    return undefined;
+  const scalar = (x: Type) => {
+    const ir = inputType(x);
+    return (
+      ir?.shape.length === 0 && (ir.lane === 'real' || ir.lane === 'integer')
+    );
+  };
+  return t.elements.every((x) => loose(x.type) || scalar(x.type))
+    ? t.elements.length
+    : undefined;
+}
+
 /** The definition that the head of the call `e` resolves to, when it is a
  *  user function with a function literal, and the literal. */
 export function userBinding(e: Fn): { key: object; literal: Fn } | undefined {
@@ -162,18 +187,22 @@ function signatureTypes(e: Fn, literal: Fn) {
     return n;
   });
   // A list of reals or integers, of a stated or a run-time length (`'run-time'`,
-  // a hidden length parameter before it), or a tuple of them (`tuple`).
+  // a hidden length parameter before it), or a tuple of them (`tuple`). A
+  // parameter of no stated type, or of a type that is not a scalar, is a
+  // point when the argument of the first call is one (`point`, `define()`).
   const params = names.map((p, i) => {
     const t = signature?.args?.[i]?.type ?? 'unknown';
     const list = tupleOrInputType(t);
+    const s = inputType(t);
+    const scalar = s?.shape.length === 0;
     return list !== undefined &&
       list.shape.length === 1 &&
       (list.lane === 'real' || list.lane === 'integer')
       ? { ...list, tuple: typeof t === 'object' && t.kind === 'tuple' }
       : {
-          lane: scalarOf(literal, t, `the parameter ${p} of ${e.operator}`)
-            .lane,
+          lane: scalar ? s!.lane : 'real',
           shape: [],
+          point: t === 'unknown' || !scalar ? t : undefined,
         };
   });
   const r = signature?.result && present(signature.result);
@@ -183,18 +212,19 @@ function signatureTypes(e: Fn, literal: Fn) {
   const ir = r === undefined ? undefined : tupleOrInputType(r);
   const list = ir?.shape.length === 1 ? ir : undefined;
   const tuple = typeof r === 'object' && r.kind === 'tuple';
+  // No stated result, or a tuple of elements of no stated type
+  // (`tuple<unknown, unknown>`): the type of the body, a scalar or a point
+  // of that many numbers (`points`).
+  const open = r === undefined || r === 'number' || r === 'any' || loose(r);
+  const points = list === undefined && r ? pointLength(r) : undefined;
   // A colour result is on the colour lane; a colour parameter declines.
   const result: IRType | undefined =
-    r === undefined ||
-    r === 'unknown' ||
-    r === 'number' ||
-    r === 'any' ||
-    list !== undefined
+    open || list !== undefined || points !== undefined
       ? undefined
       : r === 'color'
         ? { lane: 'color', shape: [] }
         : scalarOf(literal, r, `the result of ${e.operator}`);
-  return { names, params, result, list, tuple, r };
+  return { names, params, result, list, tuple, r, open, points };
 }
 
 /** A user function: the IR function, its parameter types and its result
@@ -209,7 +239,8 @@ type UserFunction = {
     shape: readonly (number | 'run-time')[];
     tuple?: boolean;
     /** The name of a list parameter of a run-time length that took the
-     *  stated length of its first argument. */
+     *  stated length of its first argument, or of a parameter that took
+     *  the point of its first argument. */
     taken?: string;
   }[];
   /** The number of parameters of `ir` for `params` (with the lengths). */
@@ -241,12 +272,30 @@ export function functionLowering(cx: Lowering) {
     sig: ReturnType<typeof signatureTypes>,
     args?: V[]
   ): UserFunction => {
-    const { names, result, list, tuple, r } = sig;
+    const { names, result, list, tuple, r, open, points } = sig;
     const params = sig.params.map((p, i) => {
       const n = args?.[i] === undefined ? undefined : type(args[i]).shape[0];
-      return p.shape[0] === 'run-time' && typeof n === 'number'
-        ? { ...p, shape: [n], taken: names[i] }
-        : p;
+      if (p.shape[0] === 'run-time' && typeof n === 'number')
+        return { ...p, shape: [n], taken: names[i] };
+      if (!('point' in p) || p.point === undefined) return p;
+      // The argument of the first call: a point of real or integer numbers,
+      // or a scalar for a parameter of no stated type.
+      const v = args?.[i];
+      const t = v === undefined ? undefined : type(v);
+      if (
+        cx.tuples.get(v!) === 0 &&
+        t?.shape.length === 1 &&
+        typeof n === 'number' &&
+        (t.lane === 'real' || t.lane === 'integer')
+      )
+        return { lane: p.lane, shape: [n], tuple: true, taken: names[i] };
+      if (p.point !== 'unknown')
+        scalarOf(
+          literal,
+          p.point,
+          `the parameter ${names[i]} of ${e.operator}`
+        );
+      return p;
     });
     const ir: IRFunction = {
       name: `u${functions.size}_${e.operator.replace(/[^A-Za-z0-9]/g, '')}`,
@@ -278,7 +327,7 @@ export function functionLowering(cx: Lowering) {
       params,
       own: (ir.lifted = ir.body.params.length),
       result,
-      list: list !== undefined,
+      list: list !== undefined || points !== undefined,
       ir,
       inputs: [],
       called: false,
@@ -297,10 +346,24 @@ export function functionLowering(cx: Lowering) {
     cx.inFunction = e.operator;
     try {
       b.define(ir, () => {
-        const body = list
-          ? cx.value(literal.ops[0])!
-          : cx.scalar(literal.ops[0]);
+        const body =
+          list || open || points !== undefined
+            ? cx.value(literal.ops[0])!
+            : cx.scalar(literal.ops[0]);
         const t = type(body);
+        if (
+          (points !== undefined || (open && t.shape.length > 0)) &&
+          (cx.tuples.get(body) !== 0 ||
+            t.shape.length !== 1 ||
+            (t.lane !== 'real' && t.lane !== 'integer') ||
+            (points !== undefined && t.shape[0] !== points))
+        )
+          decline(
+            literal,
+            points === undefined
+              ? `a body of ${e.operator} that is not a scalar or a point of numbers (a result of no stated type)`
+              : `a body of ${e.operator} that is not ${engineTypeToString(r!)}`
+          );
         if (
           list !== undefined &&
           (cx.tuples.has(body) !== tuple ||
@@ -343,13 +406,17 @@ export function functionLowering(cx: Lowering) {
   const call = (e: Fn, binding?: { key: object; literal: Fn }): number => {
     let fn = binding ? functions.get(binding.key) : pending.get(e.operator)!;
     // Without run-time lengths, the arguments of the first call are lowered
-    // before the function, which takes their stated lengths.
+    // before the function, which takes their stated lengths; so are they
+    // for a parameter that can take the point of its argument.
     let early: V[] | undefined;
     if (fn === undefined) {
       const sig = signatureTypes(e, binding!.literal);
       if (
-        !cx.runtimeLengths &&
-        sig.params.some((p) => p.shape[0] === 'run-time')
+        sig.params.some(
+          (p) =>
+            (!cx.runtimeLengths && p.shape[0] === 'run-time') ||
+            ('point' in p && p.point !== undefined)
+        )
       )
         early = e.ops.map((op) => cx.value(op)!);
       // An argument can hold the first call of the same function.
@@ -363,6 +430,15 @@ export function functionLowering(cx: Lowering) {
       const p = fn.params[i];
       const v = cx.widen(early?.[i] ?? cx.value(op)!, p.lane);
       const t = type(v);
+      if (
+        p.tuple === true &&
+        p.taken !== undefined &&
+        (cx.tuples.get(v) !== 0 || t.shape[0] !== p.shape[0])
+      )
+        decline(
+          op,
+          `an argument of ${e.operator} of another shape than at its first call: the parameter ${p.taken} is a point of ${p.shape[0]} numbers (${typeToString(t)} here)`
+        );
       if (
         p.taken !== undefined &&
         t.shape.length > 0 &&

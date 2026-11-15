@@ -261,10 +261,10 @@ describe('the tuple-consumption rule', () => {
       ['Multiply', 3, ['List', ['Tuple', 'x', 1], ['Tuple', 2, 3]]],
       points
     );
+    // `Abs` of a point is its norm; of a list, the absolute values.
+    check(['Abs', ['Tuple', 'x', 1]], points);
   });
   test('any other operator declines a tuple', () => {
-    // `Abs` of a point is its norm; of a list, the absolute values.
-    expect(declined(['Abs', ['Tuple', 'x', 1]])).toMatch(/Abs of a tuple/);
     // `Equal(Tuple(1, 2), List(1, 2))` is False.
     expect(declined(['Equal', ['Tuple', 'x', 1], ['Tuple', 'x', 1]])).toMatch(
       /Equal of a tuple/
@@ -298,6 +298,7 @@ describe('the tuple-consumption rule', () => {
       ['At', 'Pt', 2],
       ['Sum', 'Qt'],
       ['Sin', 'Pt'],
+      ['Abs', 'Pt'],
     ])
       for (const [Pt, Qt] of [
         [
@@ -314,7 +315,6 @@ describe('the tuple-consumption rule', () => {
         );
         expect(agree(ir(json).run!({ Pt, Qt } as never), want)).toBe(true);
       }
-    expect(declined(['Abs', 'Pt'])).toMatch(/Abs of a tuple/);
     expect(declined(['Less', 'Pt', 3])).toMatch(/Less of a tuple/);
     expect(
       declined(['At', 'P2', 1], { inputs: { P2: 'tuple<real, boolean>' } })
@@ -458,11 +458,9 @@ describe('PointList and Comprehension', () => {
       points
     );
     check(['PointList', 'D', 'x'], points);
-    // Static lengths: as long as the shortest.
+    // As long as the shortest, also of a run-time length.
     check(['PointList', ['List', 1, 2, 3], ['List', 'x', 5]], points);
-    expect(declined(['PointList', 'D', ['List', 1, 2]])).toMatch(
-      /not one length/
-    );
+    check(['PointList', 'D', ['List', 1, 2]], points);
   });
   test('Comprehension over a Range and over a list, with and without a condition', () => {
     const points = [
@@ -891,7 +889,7 @@ describe('the causes of the third corpus run', () => {
     const glsl = compileSlice(box(json), { target: 'glsl' }).code;
     expect(glsl).toMatch(/vec2\(/);
   });
-  test('a Range of a real upper bound: its elements are integers', () => {
+  test('a Range of real operands: its elements are lo + k·step', () => {
     const points = [{ K: 3.5 }, { K: 4 }, { K: -2.5 }];
     const opts = { ...TYCHO, symbolic: ['K', 'x', 'y'] };
     check(['Sum', ['Range', 1, 'K']], points, opts);
@@ -905,9 +903,9 @@ describe('the causes of the third corpus run', () => {
       opts
     );
     check(['Length', ['Range', 2, 'K', 2]], points, opts);
-    // A real first element or step declines.
-    expect(declined(['Range', 'x', 5])).toMatch(/a Range of reals/);
-    expect(declined(['Range', 1, 5, 'x'])).toMatch(/a Range of reals/);
+    // A real first element or step: the elements are reals (batch G12).
+    check(['Range', 'x', 5], [{ x: 0.5 }, { x: -1.25 }], opts);
+    check(['Range', 1, 5, 'x'], [{ x: 1.5 }, { x: -1 }], opts);
   });
   test('lists of two run-time lengths: the length of the first', () => {
     // The witness (showcase/three-body-problem).
