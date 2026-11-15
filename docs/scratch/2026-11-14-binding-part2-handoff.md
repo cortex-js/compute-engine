@@ -44,8 +44,20 @@ Delete this file when parts 2 and 3 are done or have their own record.
      fixed with this decision.
 
   CE-1271 is closed with a known-limitations line in `docs/TYPE-SYSTEM.md`.
-- Nothing is running. No worktree of this session is left. `src/api.md`
-  still lists `TypeProvenanceEntry.epoch` and is regenerated at release.
+- Part 2, items 1 and 2 are committed (2026-11-14, session `ce-desk`),
+  after dual reviews, the full suite, the stale-answer check and Tycho's
+  gates (codegen audit, census, node tests, timing, CORE render audit):
+  - `e5b9907a75f53fccdec9a3f4c24163c98441d33c`, CE-1270: the body of a
+    function literal is boxed a second time when a parameter went from a
+    number reading to another one; source +259 −29.
+  - `08ef3106ecbce52e702f1f06451ebf3bb330c926`, rule 7 (breaking): a copy
+    into a local is not a use; an indexed parameter takes a list whole;
+    source +171 −251.
+  - `319f00e0f595994f267bc39d3df2d1d37eff6ab7`, CE-1280: a fold of `Power`
+    and `Divide` reads only the declared facts of a variable
+    (`staticFact()`); source +104 −19.
+- `src/api.md` still lists `TypeProvenanceEntry.epoch` and is regenerated at
+  release.
 
 ## Read first
 
@@ -62,30 +74,28 @@ Delete this file when parts 2 and 3 are done or have their own record.
 This is the order I recommended to the user on 2026-11-14; the user has
 not confirmed it item by item.
 
-1. **CE-1270 (P2).** Collect a parameter's uses before the body is boxed,
-   so that the whole-or-mapped choice and the matrix reading do not depend
-   on the order of the uses. Witness: `A·B − B·A` with untyped `A` and `B`
-   gives the zero matrix. The issue gives three options:
-   - (a) box the body a second time;
-   - (b) a product of `unknown` parameters is not reordered;
-   - (c) document the case.
-
-   The first witness needs (b) or (c). The two-pass mode was measured
-   before as mode `two` (`~/dev/compute-engine-recovery/fc-bit/report.md`).
-   What counts as a use is now decided: only a direct use (point 1), and
-   an indexed parameter is whole (point 2). Point 2 changes the value of
-   about 10 tests. When it is built, send a packed build to `tycho-desk`
-   for a CORE render audit through `scripts/repros/ce-alt-hook.mjs`. Tycho
-   found 41 such definitions in 23 documents of its extended Desmos
-   corpus, none in CORE, and does not rely on the mapping.
-2. **CE-1280 (P2).** A canonical rewrite reads a type or a sign inferred
-   from a variable's value. A declared type remedies only the
-   integer-exponent fold. Recommended fix: a canonical rewrite reads only
-   what an assignment cannot change. Its cost in tests is not measured.
-   Open with the user.
+1. **CE-1270: done** (state above). Left open as CE-1317
+   (`needs-decision`): a product of untyped names is ordered as a product
+   of numbers, so `A·B − B·A` with no other matrix use gives zero, and
+   `q·p` boxed before `p` and `q` are assigned matrices evaluates as `p·q`.
+   Kept as it was: with a second parameter (`h(a, t) = a[1] + a[2] + t`),
+   a list given to `t` is mapped on the assigned route and `Apply` binds
+   every argument whole.
+2. **CE-1280: done** (state above), in the narrow form: the arithmetic
+   folds. The shape, kind and validation readings still read a held value;
+   applied to every canonical read the rule changes 122 tests, 19 of them a
+   value (`~/dev/compute-engine-recovery/ce1280/report.md`).
 3. **The rollback frame** (about 900 lines, estimated). In this order:
    - the same store for block locals and binder variables that D18 gave
-     parameters (about the size of D18);
+     parameters (about the size of D18). MEASURED 2026-11-14, not built
+     (`~/dev/compute-engine-recovery/m3a-census/report.md`): a binder has no
+     frame (6,790 of the 7,186 direct writes of a boxing are binder
+     variables, 1,793 of them after the binder's scope is popped), and the
+     direct-write branch keeps its rollback record for the Epsil static
+     check (about 12,900 writes with a frame open). The step adds a binder
+     frame and removes no writer family whole. Open with the user: start
+     from the two USERS of the frame (the overload trials, the Epsil static
+     check) and not from its writers;
    - the three sites of `library/core.ts`;
    - operator-signature inference moved out of host definitions;
    - then the provisional registry (below).
@@ -129,7 +139,10 @@ Waiting for the user:
 
 Open:
 
-- CE-1270 (P2) and CE-1280 (P2): part 2 above.
+- CE-1317 (P2, `needs-decision`): a product of untyped names is ordered as
+  numbers (left by CE-1270).
+- CE-1318 (P4): a compiled `Apply` of an index-reading literal to a list of
+  points throws at run time. CE-1319 (P4): the type of a point plus a name.
 - CE-1303 (P2): an Epsil `while` with an undecided condition never
   returns.
 - CE-1210 (P2, `needs-design`): the `turing-patterns` run step is 8 to 9%
@@ -210,7 +223,8 @@ or write a known-limitations line, as `docs/ISSUE_TRACKING.md` says.
 
 ## Peers
 
-- `tycho-desk` runs Tycho's gates. It was told on 2026-11-14 to send
-  binding-workstream reports to `compute-engine-62`: tell it the name of
-  the new session.
+- `tycho-desk` runs Tycho's gates and reports to `ce-desk` since
+  2026-11-14: tell it the name of a new session. Give it a packed build of
+  the BASE commit too, in `~/dev/compute-engine-recovery/` (a base arm built
+  in another session's worktree was removed in the middle of a run).
 - `compute-engine-00` lands the contributor pull requests.
