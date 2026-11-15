@@ -1,3 +1,15 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`serializeEpsil` no longer regroups a nested product or sum.** A
+  same-head `Multiply` or `Add` operand whose first operand is an operator of
+  the same precedence (`Mod`, `Divide`, `Subtract`) printed flat, so
+  `['Multiply', 'a', ['Multiply', ['Mod', 'x', 2], 'b']]` came out as
+  `a * x % 2 * b`, which `parseEpsil` reads as `((a * x) % 2) * b`. It now
+  prints `a * (x % 2 * b)`; canonical flat products and sums are unchanged
+  (#596, contributed by [enumeratio](https://github.com/enumeratio)).
+
 ## 0.191.0 _2026-11-15_
 
 ### Breaking Changes

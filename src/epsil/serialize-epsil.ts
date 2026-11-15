@@ -467,6 +467,26 @@ export function serializeEpsil(
   const ASSOCIATIVE_HEADS = new Set(['Add', 'Multiply', 'And', 'Or']);
 
   /**
+   * Whether splicing the same-head operand `arg` bare into a chain of `op`
+   * regroups it: its leftmost operand then follows the outer `op`, so a
+   * different operator of the same precedence there is absorbed by it.
+   * `a * (x % 2 * b)` printed flat is `a * x % 2 * b`, which reads as
+   * `((a * x) % 2) * b`; likewise `a + (x - y + b)`.
+   */
+  function flatteningRegroups(arg: MathJsonExpression, op: OperatorInfo) {
+    const head = operator(arg);
+    let first: MathJsonExpression | null = operand(arg, 1);
+    while (first !== null) {
+      const firstHead = operator(first);
+      const firstOp = OPERATORS[firstHead];
+      if (!firstOp || firstOp.precedence !== op.precedence) return false;
+      if (firstHead !== head) return true;
+      first = operand(first, 1);
+    }
+    return false;
+  }
+
+  /**
    * Whether `arg`, the operand at `side` of the infix operator `op` (named
    * `opName`), must be parenthesized for the output to re-parse as the same
    * tree.
@@ -496,7 +516,8 @@ export function serializeEpsil(
     if (argOp) {
       if (argOp.precedence < op.precedence) return true;
       if (argOp.precedence === op.precedence) {
-        if (argHead === opName && ASSOCIATIVE_HEADS.has(opName)) return false;
+        if (argHead === opName && ASSOCIATIVE_HEADS.has(opName))
+          return side === 'right' && flatteningRegroups(arg, op);
         // A comparison operand of a comparison is parenthesized on either
         // side: without the parentheses, `a < b <= c` re-parses as the chain
         // `a < b && b <= c`, not as a comparison of the truth value of
