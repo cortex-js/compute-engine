@@ -28080,7 +28080,7 @@ function tabulateElement(
         ? { operator: generator.operatorDefinition }
         : undefined;
   const binding = named
-    ? callableBindingInContext(ce, generator.symbol, own)
+    ? callableBindingInContext(ce, generator.symbol, own, generator)
     : ce._libraryProvenance.get('Apply')?.binding;
   const name = named ? generator.symbol : 'Apply';
   if (!named && binding === undefined)

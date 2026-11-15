@@ -10,12 +10,15 @@
  * never below the final one.
  */
 
-import { isForwardCallReference } from '../../boxed-expression/forward-call-reference.js';
 import type { Type } from '../../../common/type/types.js';
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import type { Expression } from '../../global-types.js';
-import { isFunction } from '../../boxed-expression/type-guards.js';
+import {
+  freeBinding,
+  isFreeCallHead,
+  isFunction,
+} from '../../boxed-expression/type-guards.js';
 import {
   isSubLane,
   isSubType,
@@ -392,19 +395,18 @@ export function functionLowering(cx: Lowering) {
     capture,
     /** Whether `e`, which has no user binding of its own, is a recursive
      *  call of a function being lowered: its head is bound to the
-     *  definition of that function, or to the placeholder of a call made
-     *  before the definition (`isForwardCallReference()`) whose name
-     *  resolves to it. A call bound to the library is not one; a call of
-     *  that name with another binding declines. */
+     *  definition of that function, or it is a free call head
+     *  (`isFreeCallHead()`) whose name resolves to it. A call bound to the
+     *  library is not one; a call of that name with another binding
+     *  declines. */
     recursive: (e: Fn): boolean => {
       const fn = pending.get(e.operator);
       if (fn === undefined || cx.isLibrary(e)) return false;
       if (e.valueDefinition === fn.key || e.operatorDefinition === fn.key)
         return true;
-      const resolved = cx.ce.lookupDefinition(e.operator);
+      // A free call head (`isFreeCallHead()`) reads its home chain.
+      const resolved = isFreeCallHead(e) ? freeBinding(e) : undefined;
       if (
-        e.valueDefinition !== undefined &&
-        isForwardCallReference(e.valueDefinition) &&
         resolved !== undefined &&
         ('operator' in resolved
           ? resolved.operator === fn.key

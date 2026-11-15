@@ -2653,13 +2653,6 @@ export interface IComputeEngine {
    * enclosing context, which the parameter (or block local) shadows.
    * `undefined` when `name` is not an active shadowed parameter. @internal */
   _shadowedParameterBoundary(name: string): Scope | undefined;
-  /** The scope that the OUTERMOST function literal being canonicalized is
-   * written in, when the current scope is in the body of that literal:
-   * the boundary of the lowest function-literal frame of the
-   * shadowed-parameter stack that is on the current scope chain.
-   * `undefined` when no function literal is being canonicalized here.
-   * @internal */
-  _functionLiteralDefiningScope(): Scope | undefined;
   /** The binding already auto-declared for an active shadowed parameter during
    * the current body's canonicalization, if any. @internal */
   _shadowedParameterDef(name: string): BoxedDefinition | undefined;

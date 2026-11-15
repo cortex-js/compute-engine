@@ -157,12 +157,12 @@ Three known holes, each addressed below:
 3. **Dependency-order inference is unsound** — `f() := g()` defined before
    an impure `g` keeps a falsely-pure installed signature; only reassigning
    `f` itself re-runs inference. **Ruled in v5** (see "Inference"): an
-   *unresolved named head* infers `{any}` (sound; loses caching for
-   forward references), while *applied unannotated parameters* keep
-   optimism; an **explicit** annotation on a definition whose inference
-   saw an unresolved head is installed as a *trusted* contract (same
-   trust class as an opaque declaration), enabling mutual recursion with
-   stated effects.
+   *unresolved named head* infers `{any}` until the head is defined, and
+   the inferred set is derived again when it is, while *applied
+   unannotated parameters* keep optimism; an **explicit** annotation on a
+   definition whose inference saw an unresolved head is installed as a
+   *trusted* contract (same trust class as an opaque declaration),
+   enabling mutual recursion with stated effects.
 
 ## Randomness shapes — three shapes, two labels
 
@@ -1226,8 +1226,8 @@ constants; variance lives at applications.** Two cases:
   `f`'s then-current binding, when the literal's signature is built. It
   does not re-stamp when `f` is later reassigned — that staleness is
   exactly hole 3. The v5 dependency-order ruling closes its
-  forward-reference half (an *unresolved* `f` snapshots as `{any}`,
-  which later resolution can only improve on); reassignment of an
+  forward-reference half (an *unresolved* `f` snapshots as `{any}`, and
+  the literal is derived again when `f` is defined); reassignment of an
   already-resolved binding still leaves the installed signature stale —
   there, the runtime `effectsOf` channel, which does resolve through
   *current* bindings, keeps the accounting consumers honest.
@@ -1504,10 +1504,10 @@ surface):
   (`ce.declare('k', 'function')`), or by a statement run outside a block,
   is not marked, and with no value it keeps the optimistic reading of the
   next bullets. An unannotated parameter keeps ruling (c).
-  The binding that boxing makes for a call head with no definition (a
-  forward-call reference) is not a definition: the head is unresolved
-  (`{any}`, next bullets) until a definition of the name is made on the
-  chain, and that definition is then read. The runtime channel follows
+  A call head with no definition is a free head with a home scope: it is
+  unresolved (`{any}`, next bullets) until a definition of the name is
+  made on the chain of that scope, and that definition is then read. The
+  runtime channel follows
   the same rule: the definition of a symbol or a call head of a canonical
   node is the one that the scope the node was boxed in gives; a node that
   is not canonical (a held operand) is read by name in the current scope.
@@ -1519,17 +1519,21 @@ surface):
   opt-in via annotation. (Rejected: synthesizing a pure contract from
   usage — breaking; synthesizing `{any}` — forfeits the caching the
   optimistic ruling protects.)
-- **Dependency order — ruled (v5, review R3 finding 10).** The split is
-  adopted: an **unresolved named head** infers `{any}` — sound; the cost
-  is caching for forward references — while **applied unannotated
-  parameters** keep the optimistic ruling (c). One refinement keeps
-  mutual recursion workable: an **explicit** annotation on a definition
-  whose inference saw an unresolved head is installed as a **trusted
-  contract** — the head is effectively opaque at that moment, so this is
-  the same residual trust class as an opaque host declaration — and is
-  *not* revalidated when the head later resolves (no dependency
-  tracking). So `f() := g()` before `g` exists: unannotated → `{any}`
-  (honest); annotated → author-stated, trusted.
+- **Dependency order** *(v5, review R3 finding 10; user decision
+  2026-11-14)*. An **unresolved named head** infers `{any}` while the
+  head has no definition, and **applied unannotated parameters** keep
+  the optimistic ruling (c). When the head gets a definition, the
+  function is derived again: its **inferred** effects (and its result
+  type) become those that defining the head first gives, and they are
+  derived again at each later definition of the head. An **explicit**
+  annotation on a definition whose inference saw an unresolved head is
+  installed as a **trusted contract** — the head is opaque at that
+  moment, the same residual trust class as an opaque host declaration —
+  and the re-derivation does not check it. A contract installed while
+  the head has a definition is checked at installation and checked again
+  when that definition changes. So `f() := g()` before `g` exists:
+  unannotated → `{any}`, then the effects of `g` once `g` is defined;
+  annotated → author-stated, trusted, and kept.
 - **The declared-but-unassigned window stays optimistic** *(ruled
   2026-08-01)*. Between `ce.declare('fib', { type: '(number) -> number'
   })` and the first body assignment there is no body to walk, so the

@@ -39,10 +39,6 @@ import {
   equivalentChains,
   isActivatedDefinition,
 } from './ambient-chain.js';
-import {
-  forwardCallScope,
-  isForwardCallReference,
-} from './forward-call-reference.js';
 
 /**
  * # The runtime effect channel (`docs/EFFECTS-MODEL.md`, "Runtime counterpart")
@@ -156,10 +152,7 @@ function lookupByName(
  * the scope `home`: the first binding of `name` on the chain of `home`. The
  * current scope plays no part. The chain is the static one: the call frame
  * that an application of a function literal puts above the body scope of
- * the literal while it runs is not on it. A forward-call reference
- * (`isForwardCallReference()`), the binding that boxing makes for a call
- * head with no definition, is not a definition: the walk goes on above it,
- * so a definition made later in an ancestor of `home` is read.
+ * the literal while it runs is not on it.
  */
 export function homeDefinition(
   name: string,
@@ -181,11 +174,7 @@ export function homeBinding(
   let s: Scope | null | undefined = home;
   while (s != null) {
     const found = s.bindings.get(name);
-    if (
-      found !== undefined &&
-      !('value' in found && isForwardCallReference(found.value))
-    )
-      return { def: found, scope: s };
+    if (found !== undefined) return { def: found, scope: s };
     let next: Scope | null | undefined = s.parent;
     if (next != null && callFrameBodyOf(next) === s) next = next.parent;
     s = next;
@@ -207,9 +196,8 @@ const NO_HOME = Symbol('no-home');
  *   activation (a parameter, the variable of a binder, the local of a
  *   block), whose value is the value of the activation.
  * - A call bound to an operator definition, or to a value definition: that
- *   definition. A call bound to a forward-call reference, or a free call
- *   head: the definition that the chain of the scope the call was boxed in
- *   gives now (`homeDefinition()`).
+ *   definition. A free call head: the definition that the chain of the
+ *   scope the call was boxed in gives now (`homeDefinition()`).
  */
 function homeResolution(
   node: Expression,
@@ -232,10 +220,7 @@ function homeResolution(
   const operator = node.operatorDefinition;
   if (operator !== undefined) return { operator };
   const own = node.valueDefinition;
-  if (own !== undefined) {
-    const scope = forwardCallScope(own);
-    return scope === undefined ? { value: own } : homeDefinition(name, scope);
-  }
+  if (own !== undefined) return { value: own };
   const freeHead = (node as { _freeHeadScope?: Scope })._freeHeadScope;
   return freeHead === undefined ? NO_HOME : homeDefinition(name, freeHead);
 }

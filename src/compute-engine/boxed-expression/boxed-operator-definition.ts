@@ -682,6 +682,16 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * `_effects` and the signature's arrow stay in lockstep. */
   _deriveEffects: (() => EffectSet | undefined) | undefined = undefined;
 
+  /** True while `installRebuiltLiteral()` (`function-utils.ts`) re-derives
+   * this definition from its literal. @internal */
+  _rederiving = false;
+
+  /** True when the declared effects contract of this definition was
+   * installed over a head that had no definition (the walk saw an
+   * unresolved head): it is trusted, and a re-derivation keeps it so and
+   * does not check it. @internal */
+  _contractTrusted = false;
+
   /** Re-evaluate {@link _deriveEffects}, if any, and install its result.
    *
    * Called at the top of every getter whose answer depends on the effect set
@@ -1901,6 +1911,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       _effects: this._effects,
       _inferredDraws: this._inferredDraws,
       _deriveEffects: this._deriveEffects,
+      _contractTrusted: this._contractTrusted,
     };
   }
 
@@ -1925,6 +1936,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       _effects: EffectSet | undefined;
       _inferredDraws: boolean;
       _deriveEffects: (() => EffectSet | undefined) | undefined;
+      _contractTrusted: boolean;
     };
     // The lazy effect deriver round-trips with the rest: the `_update()` being
     // undone may have installed one (its body inference consulted a
@@ -1932,6 +1944,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // would keep re-deriving — or stop re-deriving — against the literal the
     // rollback just discarded.
     this._deriveEffects = s._deriveEffects;
+    this._contractTrusted = s._contractTrusted;
     this._setSignature(() => s.signature);
     this.inferredSignature = s.inferredSignature;
     this._isLambda = s._isLambda;
@@ -2656,8 +2669,14 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             : { stated: true, effects: this._effects }
           : undefined;
         if (declared !== undefined) {
+          // A re-derivation of a contract that was trusted at install
+          // (`_contractTrusted`) is not checked either.
+          const trusted = this._rederiving && this._contractTrusted;
+          if (!this._rederiving)
+            this._contractTrusted = inferred.unresolvedHead;
           if (
             !inferred.unresolvedHead &&
+            !trusted &&
             !isEffectSubset(inferred.effects, declared.effects)
           )
             throw new EffectContractError(

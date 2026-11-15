@@ -122,8 +122,30 @@
   `z: real`, `z^0` is `1`. A variable whose type was inferred gives no fact
   to a fold, also after its value is cleared, and so does a constant whose
   value reads a variable.
+- **A function that calls a function defined later gets the result type
+  and the inferred effects of that function once it is defined.** With
+  `honest := () ↦ later()` and then `later := () ↦ Random()`, `honest` is
+  typed `() random -> real` and its effects are `random`, where it stayed
+  `() any -> unknown` with the effects `any`; with a pure `later`, `honest`
+  is pure. `R := M ↦ G(M − [0, 0, Y])` before
+  `G := M ↦ [M[1], M[2], M[3]]` is typed
+  `(M: dictionary<any> | indexed_collection<any> | value) -> vector<3>`
+  once `G` is defined, where it was
+  `(M: unknown) any -> list<unknown^3>`: the same type as with `G` defined
+  first. A declared
+  effects contract over a function that is not defined yet stays trusted,
+  and is not checked again when the function is defined; a contract
+  installed while the function is defined is checked again when it is
+  redefined.
 
 ### Resolved Issues
+
+- **A function passed by name as a callback calls the function of the
+  scope it was written in.** `Map(h, [1, 2])` boxed before `h` is defined,
+  then `h(t) := t`, then a scope pushed later that declares
+  `h := t ↦ 100`: `ListFrom` of the `Map` gave `[100, 100]` in that scope,
+  and gives `[1, 2]`, as the call `h(1)` boxed with it does. A callback
+  whose name has no definition there stays unevaluated.
 
 - **A GLSL compilation refuses every reserved word of GLSL as an input
   name.** The list of reserved words lacked 53 words of GLSL ES 3.00

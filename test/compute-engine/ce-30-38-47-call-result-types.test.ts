@@ -117,8 +117,11 @@ describe('CE-38: AN UNDECLARED MUTUALLY RECURSIVE PAIR THAT BUILDS A LIST', () =
         G: ce.box(G as any),
       };
       for (const name of order) ce.assign(name, literals[name as 'F' | 'G']);
+      // Both orders give the same type. The recursive operand of `Join` is
+      // typed `any`, which can hold an absent element, so the joined set
+      // states its elements: `set<any>` (`joinResultTypeD`).
       expect(ce.box('G').type.toString()).toBe(
-        '(n: unknown, K: unknown) any -> set'
+        '(n: unknown, K: unknown) any -> set<any>'
       );
       expect(ce.box(['G', 0, 4]).evaluate().toString()).toBe('Set(0, 1, 2, 3)');
     }

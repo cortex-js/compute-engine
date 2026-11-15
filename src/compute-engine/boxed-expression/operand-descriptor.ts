@@ -1,5 +1,3 @@
-import { callableBindingInContext } from './binders.js';
-import { isForwardCallReference } from './forward-call-reference.js';
 import {
   deriveCalleeType,
   retainOperatorCallee,
@@ -120,33 +118,16 @@ export function describeCallee(
     return { ...describeType(type), structureOf: body.structureOf };
   };
   const ambient = op.engine.lookupDefinition(op.operator);
-  const originalValue = op.valueDefinition;
-  const resolved =
-    originalValue !== undefined && isForwardCallReference(originalValue)
-      ? callableBindingInContext(op.engine, op.operator, {
-          value: originalValue,
-        })
-      : undefined;
-  const value =
-    resolved !== undefined && 'value' in resolved
-      ? resolved.value
-      : resolved !== undefined
-        ? undefined
-        : originalValue;
+  const value = op.valueDefinition;
   if (value !== undefined) {
     if (ambient !== undefined && 'value' in ambient && ambient.value === value)
       return undefined;
     const held = value.value;
-    if (isForwardCallReference(value))
-      return ambient === undefined ? undefined : describeType('function');
     return held !== undefined && isFunction(held, 'Function')
       ? literal(held, value.type.type)
       : describeType(value.type.type);
   }
-  const own =
-    resolved !== undefined && 'operator' in resolved
-      ? resolved.operator
-      : op.operatorDefinition;
+  const own = op.operatorDefinition;
   if (own === undefined) return undefined;
   if (
     ambient !== undefined &&

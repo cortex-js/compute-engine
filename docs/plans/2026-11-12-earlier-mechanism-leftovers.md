@@ -122,6 +122,14 @@ and leftover 4 whole.
 
 ## 2. Declaration of a call head
 
+**Status: removed** (2026-11-14). A head that is not a parameter is a free
+head with a home scope, in a body as at the top. Option (a) below replaced
+the decision it waited for: a function whose body calls a free head is
+derived again (result type and inferred effects) when the head gets a
+definition, through the existing re-derivation (`noteProvisionalCall()`);
+a declared contract over the unresolved head stays trusted (user decision
+2026-11-14). The forward-call reference mechanism is deleted.
+
 **Source.** `makeCanonicalFunctionCore()`, `box.ts:3331-3381`. A call whose
 head has no applicable definition: when the head is not a parameter, has no
 definition at all and its home scope is persistent, nothing is declared and
@@ -580,7 +588,8 @@ had single files and a batch of 133 files, not a full run.
   compiled `g(1)` of `g := x ↦ x + y; y := "s"` gave `"1s"` where the
   interpreter gives an error (11 tests). It now records a free name of
   the body.
-- **Leftover 2 (the free head): NOT removed. It needs a decision.**
+- **Leftover 2 (the free head): NOT removed on 2026-11-12; removed on
+  2026-11-14 (see section 2).**
   Without the declaration, a function that calls a function defined later
   (`R := M ↦ R_xz(R_yz(…))` before `R_xz` exists) is inferred to have
   effects (`effects-inference.ts:3470`: an undeclared head has effects

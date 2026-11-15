@@ -1,8 +1,6 @@
 import { activationOnLinks, scopeActivationTemplate } from './ambient-chain.js';
 import {
   externalFactScope,
-  forwardCallScope,
-  isForwardCallReference,
   retiredBindingScope,
 } from './forward-call-reference.js';
 import type {
@@ -22,6 +20,7 @@ import {
   isNumber,
   isFreeName,
   isFreeCallHead,
+  freeBinding,
 } from './type-guards.js';
 import {
   functionLiteralParameterNames,
@@ -218,9 +217,12 @@ export function withCallableBinding<T>(expr: Expression, build: () => T): T {
         ? { operator: expr.operatorDefinition }
         : undefined;
   const ce = expr.engine;
-  const binding = callableBindingInContext(ce, expr.operator, own);
-  if (binding === undefined || ce.lookupDefinition(expr.operator) === binding)
-    return build();
+  const binding = callableBindingInContext(ce, expr.operator, own, expr);
+  if (binding === undefined) {
+    const home = unresolvedFreeHome(expr);
+    return home === undefined ? build() : ce._inScope(home, build);
+  }
+  if (ce.lookupDefinition(expr.operator) === binding) return build();
   return withBorrowedBinding(ce, expr.operator, binding, build);
 }
 
@@ -275,14 +277,43 @@ export function withBorrowedBinding<T>(
   }
 }
 
+/**
+ * The home scope of `occurrence`, a free name or a call with a free head,
+ * when its name resolves to no definition from that scope; `undefined`
+ * otherwise. A call that such an occurrence names is boxed in that scope
+ * (`ce._inScope()`), so that its head stays free, as the call written there
+ * does, whatever the current scope holds: with `Map(h, [1, 2])` and `h(1)`
+ * boxed where no `h` exists, a scope that declares `h` changes neither.
+ */
+export function unresolvedFreeHome(
+  occurrence: Expression | undefined
+): Scope | undefined {
+  if (!isFreeName(occurrence) && !isFreeCallHead(occurrence)) return undefined;
+  if (freeBinding(occurrence) !== undefined) return undefined;
+  const o = occurrence as { _homeScope?: Scope; _freeHeadScope?: Scope };
+  return isFreeName(occurrence) ? o._homeScope : o._freeHeadScope;
+}
+
 /** Callable positions use lexical identity. Runtime activations of that
- * identity supply parameters and block locals; an unrelated shadow cannot. */
+ * identity supply parameters and block locals; an unrelated shadow cannot.
+ *
+ * `occurrence` is the symbol or the call that names the callable, when the
+ * caller has it. With no definition of its own, a free name or a free call
+ * head (`occurrence`) reads the definition of the chain of the scope it was
+ * boxed in (`freeBinding()`), not the one of the current scope: the
+ * callback `g` of `Map(g, [1, 2])`, boxed before `g` was defined, calls the
+ * `g` of that chain under a scope that declares another `g`, as the call
+ * `g(1)` boxed there does. */
 export function callableBindingInContext(
   ce: ComputeEngine,
   name: string,
-  own: BoxedDefinition | undefined
+  own: BoxedDefinition | undefined,
+  occurrence?: Expression
 ): BoxedDefinition | undefined {
-  if (own === undefined) return ce.lookupDefinition(name);
+  if (own === undefined)
+    return isFreeName(occurrence) || isFreeCallHead(occurrence)
+      ? freeBinding(occurrence)
+      : ce.lookupDefinition(name);
   const half = 'value' in own ? own.value : own.operator;
   const home = callableHomes.get(half);
   const start = ce.context.lexicalScope;
@@ -295,29 +326,10 @@ export function callableBindingInContext(
     if (
       candidate === half ||
       (home !== undefined && scopeStandsFor(scope, home))
-    ) {
-      if (!('value' in found) || !isForwardCallReference(found.value))
-        return found;
-      break;
-    }
+    )
+      return found;
   }
-  // Forward calls wait for a definition in their original lexical chain.
-  // A type/evaluation read never binds them to an unrelated caller's scope:
-  // with `∫₀¹ g(x) dx` made before `g(t) := t`, a scope that declares
-  // `g := t ↦ 100` does not make the integral 100.
   if ('value' in own) {
-    for (
-      let scope = forwardCallScope(own.value);
-      scope;
-      scope = scope.parent ?? undefined
-    ) {
-      const found = scope.bindings.get(name);
-      if (
-        found !== undefined &&
-        !('value' in found && isForwardCallReference(found.value))
-      )
-        return found;
-    }
     // A fact that a `resolveSymbol` callback of `ce.parse()` gave (`f` of
     // type `(real) -> real`) states a type, and does not define the name.
     // Its scope belongs to the parsed expression, and is not on the chain
@@ -355,11 +367,7 @@ export function callableBindingInContext(
         scope = scope.parent
       ) {
         const found = scope.bindings.get(name);
-        if (
-          found !== undefined &&
-          !('value' in found && isForwardCallReference(found.value))
-        )
-          return found;
+        if (found !== undefined) return found;
       }
     }
   }

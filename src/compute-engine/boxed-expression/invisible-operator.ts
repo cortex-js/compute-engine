@@ -8,8 +8,6 @@ import type {
   Scope,
   SymbolInterface,
 } from '../global-types.js';
-import { markForwardCallReference } from './forward-call-reference.js';
-import { isFunctionLiteralParameter } from './function-literal.js';
 import {
   isFunction,
   isSymbol,
@@ -298,7 +296,6 @@ function canonicalJuxtaposition(
           }
 
           if (def.value.type.isUnknown) {
-            markBodyCopyAsForwardCall(ce, lhsCanon.symbol);
             lhsCanon._infer(() => 'function');
             return ce.expr([lhsCanon.symbol]);
           }
@@ -339,7 +336,6 @@ function canonicalJuxtaposition(
         // `function` reading of the head in the environment of the unit
         // (`makeCanonicalFunctionCore()`).
         if (def && !isOperatorDef(def) && def.value?.type?.isUnknown) {
-          markBodyCopyAsForwardCall(ce, lhsCanon.symbol);
           lhsCanon._infer(() => 'function');
         }
         return ce.function(lhsCanon.symbol, args);
@@ -1243,7 +1239,6 @@ function combineFunctionApplications(
           // `function` reading of the head in the environment of the unit
           // (`makeCanonicalFunctionCore()`).
           if (def && !isOperatorDef(def) && def.value?.type?.isUnknown) {
-            markBodyCopyAsForwardCall(ce, symName);
             op.canonical._infer(() => 'function');
           }
           result.push(ce.function(symName, args));
@@ -1489,8 +1484,8 @@ function applyUndeclaredHead(
   head: Expression & SymbolInterface,
   args: ReadonlyArray<Expression>
 ): Expression {
-  // An undeclared head is NOT declared here: `ce.function` declares it, as
-  // an inferred function, on the same route the MathJSON application
+  // An undeclared head is NOT declared here: `ce.function` makes it a free
+  // call head, on the same route the MathJSON application
   // `["f", "x"]` takes (`box.ts`), so the two spellings build the same
   // application with the same effects and the same argument narrowing. A
   // head that is declared, with an unknown type, is inferred to `function`
@@ -1499,71 +1494,17 @@ function applyUndeclaredHead(
   // the head symbol (`op.canonical` on the multi-operand route) auto-declares
   // an undeclared head with an unknown type, and a lookup made before that
   // step would answer "undeclared" for a head that now needs the inference.
-  if (ce.lookupDefinition(head.symbol) !== undefined) {
-    markBodyCopyAsForwardCall(ce, head.symbol);
+  if (ce.lookupDefinition(head.symbol) !== undefined)
     head._infer(() => 'function');
-  }
   const application = ce.function(head.symbol, args);
   // Definition order must not change semantics. The head has no definition
   // yet, so a `Function` literal canonicalized now is re-derived when the
   // head gains one (`provisional-application.ts`): the call then binds to
   // the real definition, and a head that instead gains a scalar value is
-  // re-read as a product. Noted unconditionally — with no definition, even a
-  // call with closed arguments binds to the placeholder `ce.function`
-  // declares, which a definition made later in an enclosing scope does not
-  // replace.
+  // re-read as a product. Noted unconditionally, also for a call with
+  // closed arguments.
   noteProvisionalCall(head.symbol);
   return application;
-}
-
-/**
- * Make the binding of an undeclared call head a forward call reference
- * (`markForwardCallReference()`), as the MathJSON application `["g", "x"]`
- * makes it (`box.ts`).
- *
- * On the LaTeX route, the head `g` of `g(x)` is canonicalized as a symbol
- * before the juxtaposition is read as a call. In the body of a function
- * literal (the integrand of `∫₀¹ g(x) dx`, whose `Block` has its own scope),
- * that declares `g` in the scope of the body, as a valueless symbol of
- * unknown type. The call then bound to that local: after `g(t) := t`, the
- * integral stayed unevaluated. A forward call reference reads the definition
- * that the enclosing scopes hold when the call is evaluated
- * (`callableBindingInContext()`, `binders.ts`).
- *
- * Only a binding of the body is marked: a binding that the scope of the
- * outermost literal, or a scope above it, holds is not a copy. A parameter,
- * a binder variable, a declared or assigned block local, a constant, and a
- * binding with a value or a type are not marked.
- */
-export function markBodyCopyAsForwardCall(
-  ce: ComputeEngine,
-  name: string
-): void {
-  if (ce._resolveOnlyDepth > 0 || ce._isShadowedParameter(name)) return;
-  const boundary = ce._functionLiteralDefiningScope();
-  if (boundary === undefined) return;
-  for (
-    let s: Scope | null | undefined = ce.context?.lexicalScope;
-    s && s !== boundary;
-    s = s.parent
-  ) {
-    const binding = s.bindings.get(name);
-    if (binding === undefined) continue;
-    if (!isValueDef(binding)) return;
-    const value = binding.value;
-    if (
-      value.isConstant ||
-      value.value !== undefined ||
-      !value.inferredType ||
-      !value.type.isUnknown ||
-      value._blockLocal ||
-      isFunctionLiteralParameter(value) ||
-      s.binderNames?.has(name) === true
-    )
-      return;
-    markForwardCallReference(binding, s);
-    return;
-  }
 }
 
 /** Whether a later definition could turn a juxtaposition on this symbol into a

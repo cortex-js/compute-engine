@@ -1,7 +1,6 @@
 import { provedAbsentDomainOf } from './proved-absent-domain.js';
 import { isIndexReadTuple } from './index-read-tuple.js';
 import { isCapturedValuelessSymbol } from './canonical-utils.js';
-import { isForwardCallReference } from './forward-call-reference.js';
 import {
   UnitEnvironment,
   isUnitReadToken,
@@ -17,6 +16,7 @@ import {
   sameBindingDef,
   withBorrowedBinding,
   withCallableBinding,
+  readsActivation,
 } from './binders.js';
 import { isScratchBinding } from '../scratch-scopes.js';
 import {
@@ -1420,10 +1420,9 @@ export class BoxedFunction
     return fresh;
   }
 
-  /** The memo of `_reboxedForForwardCallee()`: the definition half the name
-   * held and its change counter when the call was boxed again, and the new
-   * call. For a free call head (`_reboxedForFreeHead()`), the other keys
-   * that `_reboxedForFreeHead()` describes. */
+  /** The memo of `_reboxedForFreeHead()`: the definition half the name
+   * held and its change counter when the call was boxed again, the new
+   * call, and the other keys that `_reboxedForFreeHead()` describes. */
   private _forwardRebox:
     | {
         half: { _writeVersion: number };
@@ -1437,72 +1436,34 @@ export class BoxedFunction
       }
     | undefined = undefined;
 
-  /** The definition that the name of
-   * this call holds now (`callableBindingInContext`), when the call is bound
-   * to a forward-call reference (`isForwardCallReference`): a call in the
-   * body of a function literal boxed before its name had a definition. That
-   * reference is declared in a scope that the boxing made, so a later
-   * definition of the name does not replace it. `undefined` otherwise. Read
-   * it through `readBinding()` (`type-guards.ts`).
-   * @internal */
-  _forwardCalleeBinding(): BoxedDefinition | undefined {
-    const own = this._def;
-    if (!own || !isValueDef(own) || !isForwardCallReference(own.value))
-      return undefined;
-    const current = callableBindingInContext(this.engine, this._operator, own);
-    return current === own ? undefined : current;
-  }
-
   /** This call boxed again against the definition that its name holds now,
-   * when the call was boxed before the name had a value (a forward
-   * reference, `isForwardCallReference`) and the name now has a definition.
-   * `undefined` otherwise.
+   * when the call has a free head (`_freeHeadScope`, `binding-unit.ts`):
+   * it was boxed before the name had a definition
+   * (`_reboxedForFreeHead()`). `undefined` otherwise.
    *
    * The evaluation of such a call reads the definition that the name holds
-   * when the call is evaluated (`callableBindingInContext`). Its type must
-   * do the same. Example: with `G := (n, K) ↦ F(n, K)` boxed before
-   * `F := (n, K) ↦ n + K`, the call `F(n, K)` in the body of `G` was typed
-   * `unknown`, from the empty definition that the boxing made for `F`, so
-   * `G` was typed `-> unknown`, and a mutually recursive pair that builds a
-   * list was typed `-> collection<number>` (ROADMAP CE-38).
+   * when the call is evaluated. Its type must do the same. Example: with
+   * `G := (n, K) ↦ F(n, K)` boxed before `F := (n, K) ↦ n + K`, the call
+   * `F(n, K)` in the body of `G` was typed `unknown`, so `G` was typed
+   * `-> unknown`, and a mutually recursive pair that builds a list was
+   * typed `-> collection<number>` (ROADMAP CE-38).
    * @internal */
   _reboxedForForwardCallee(): Expression | undefined {
-    const own = this._def;
-    // A free call head (`_freeHeadScope`, `binding-unit.ts`) is a forward
-    // reference too: the call is boxed again against the definition that
-    // its name resolves to now (`_resolvedDefinition()`).
-    if (!own && this._freeHeadScope !== undefined)
-      return this._reboxedForFreeHead();
-    if (!own || !isValueDef(own) || !isForwardCallReference(own.value))
-      return undefined;
-    const current = callableBindingInContext(this.engine, this._operator, own);
-    if (current === undefined || current === own) return undefined;
-    if (isValueDef(current) && current.value === own.value) return undefined;
-    const half = calleeHalf(current);
-    if (half === undefined) return undefined;
-    const memo = this._forwardRebox;
+    if (this._def || this._freeHeadScope === undefined) return undefined;
+    // A definition that holds its value in a run (a local of a block, a
+    // parameter: `readsActivation()`) and whose type is inferred from that
+    // value does not type the call: the type would depend on the run in
+    // progress, and the call is typed from what is static. A declared type
+    // is static, and types the call. The evaluation still calls the
+    // definition (`_reboxedForFreeHead()`).
+    const def = homeDefinition(this._operator, this._freeHeadScope);
     if (
-      memo !== undefined &&
-      memo.half === half &&
-      memo.version === half._writeVersion
-    )
-      return memo.call;
-    const fresh = withCallableBinding(this, () =>
-      this.engine.function(this._operator, this._writtenOperands(this._ops))
-    );
-    // The new call must be bound to the current definition: a call that is
-    // still a forward reference gives no more information than this one.
-    if (
-      !(fresh instanceof BoxedFunction) ||
-      fresh === this ||
-      fresh._operator !== this._operator
+      def !== undefined &&
+      readsActivation(def) &&
+      ('value' in def ? def.value.inferredType : def.operator.inferredSignature)
     )
       return undefined;
-    const freshDef = fresh._def ?? undefined;
-    if (isValueDef(freshDef) && isForwardCallReference(freshDef.value))
-      return undefined;
-    this._forwardRebox = { half, version: half._writeVersion, call: fresh };
-    return fresh;
+    return this._reboxedForFreeHead();
   }
 
   /** The cached answer of `_holdsRefusedCall()`. The operands of a node do
@@ -16638,14 +16599,8 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       return 'unknown';
     // The knot of a name that is a free
     // name holds no binding (`library/core.ts`): a call of the name that
-    // resolves to nothing, with a free head or bound to a forward-call
-    // reference of the body, is the self-call.
-    if (
-      binding === undefined &&
-      (expr._freeHeadScope !== undefined ||
-        (expr.valueDefinition !== undefined &&
-          isForwardCallReference(expr.valueDefinition)))
-    )
+    // resolves to nothing, with a free head, is the self-call.
+    if (binding === undefined && expr._freeHeadScope !== undefined)
       return 'unknown';
   }
 
@@ -18179,7 +18134,7 @@ function operatorCallee(
       : value.operatorDefinition !== undefined
         ? { operator: value.operatorDefinition }
         : undefined;
-  const binding = callableBindingInContext(ce, name, own);
+  const binding = callableBindingInContext(ce, name, own, value);
   return binding !== undefined && isOperatorDef(binding)
     ? { name, binding }
     : undefined;
@@ -18540,10 +18495,7 @@ function applyFunctionLiteralWith(
     //
     // Evaluating the result again in the same top-level evaluation does not
     // resolve its head (`EVALUATED_UNRESOLVED_CALLS`).
-    if (
-      isForwardCallReference(def) ||
-      (opDef === undefined && expr._parseScope === undefined)
-    )
+    if (opDef === undefined && expr._parseScope === undefined)
       return evaluatedUnresolvedCall(expr, evaluated);
     // The rebuild keeps the binding that the call reads (`opDef`): it is
     // boxed in a scope that borrows that binding when the current scope

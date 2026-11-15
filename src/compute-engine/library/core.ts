@@ -174,10 +174,7 @@ import { typeToString } from '../../common/type/serialize.js';
 import { widenValueTypes } from '../../common/type/widen-value.js';
 
 import { randomExpression } from './random-expression.js';
-import {
-  canonicalInvisibleOperator,
-  markBodyCopyAsForwardCall,
-} from '../boxed-expression/invisible-operator.js';
+import { canonicalInvisibleOperator } from '../boxed-expression/invisible-operator.js';
 import {
   collectionElementType,
   functionResult,
@@ -7435,14 +7432,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               if (call !== undefined) return call;
             }
           }
-          // The callee was canonicalized as a symbol: when the name is not
-          // defined yet, that declared it in the scope of the body of a
-          // function literal, as a valueless local. The call reads the
-          // definition of the enclosing scope, as the call `f(x)` written
-          // directly does (`markBodyCopyAsForwardCall()`): with
-          // `∫₀¹ Apply(f, x) dx` made before `f(t) := t²`, the integral
-          // stayed unevaluated.
-          markBodyCopyAsForwardCall(ce, s);
           return ce.function(s, args.slice(1));
         }
         // A `Nothing` argument is bound like any other: `Apply(f, Nothing)`

@@ -1,6 +1,4 @@
-import { callableBindingInContext } from './binders.js';
 import { isIndexReadTuple } from './index-read-tuple.js';
-import { isForwardCallReference } from './forward-call-reference.js';
 import type {
   Expression,
   BoxedDefinition,
@@ -350,8 +348,6 @@ export function callResultType(
   ) => Type | undefined,
   binding?: BoxedDefinition
 ): Type | undefined {
-  if (binding && 'value' in binding && isForwardCallReference(binding.value))
-    binding = callableBindingInContext(engine, head, binding);
   binding ??= engine.lookupDefinition(head);
   const literal = userFunctionLiteral(binding);
   const inferred =

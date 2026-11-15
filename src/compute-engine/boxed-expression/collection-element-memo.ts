@@ -13,6 +13,8 @@ import {
   isObject,
   isSymbol,
   isFreeName,
+  isFreeCallHead,
+  freeBinding,
 } from './type-guards';
 import { isValueDef, isOperatorDef } from './definition-guards';
 import { bindingInContext } from './binders';
@@ -469,6 +471,27 @@ function snapshotDepsUnderChain(
    * `seenOperators` dedup above is about traversal cost only. */
   const seenOperatorNames = new Set<string>();
   const seenFreeNames = new Set<string>();
+  /** The names of the free call heads already recorded, by home scope: two
+   * calls of one name boxed in two scopes read two bindings. */
+  const seenFreeHeads = new Map<object, Set<string>>();
+  /** True the first time the dependency of `name` read through
+   * `occurrence` is met: by name, or by name and home scope for a free call
+   * head (`isFreeCallHead()`). */
+  const firstSeen = (
+    occurrence: Expression,
+    name: string,
+    byName: Set<string>
+  ): boolean => {
+    let seen = byName;
+    if (isFreeCallHead(occurrence)) {
+      const home = (occurrence as { _freeHeadScope?: object })._freeHeadScope!;
+      seen = seenFreeHeads.get(home) ?? new Set();
+      seenFreeHeads.set(home, seen);
+    }
+    if (seen.has(name)) return false;
+    seen.add(name);
+    return true;
+  };
   /** The `subscriptEvaluate` handlers whose registered reads were already
    * walked — terminates a sequence whose recurrence reads the sequence, or
    * two sequences that read each other. */
@@ -546,12 +569,13 @@ function snapshotDepsUnderChain(
     // `ElementMemoDep.operatorVersion`). A value memo records only the
     // operators with a lambda.
     if (lambda === undefined && !bindingSites) return;
-    if (recordDep && !seenOperatorNames.has(name)) {
-      seenOperatorNames.add(name);
+    if (recordDep && firstSeen(occurrence, name, seenOperatorNames)) {
       deps.push({
         occurrence,
         name,
-        resolved: resolveDepBinding(ce, depScope, name),
+        resolved: isFreeCallHead(occurrence)
+          ? freeBinding(occurrence)
+          : resolveDepBinding(ce, depScope, name),
         resolvedOperator: opDef,
         ...(bindingSites ? { operatorVersion: opDef._writeVersion } : {}),
       });
@@ -977,6 +1001,26 @@ function snapshotDepsUnderChain(
       // version of each applied operator's signature.
       const opDef = e.operatorDefinition;
       if (opDef !== undefined) visitLambdaBody(e, e.operator, opDef, true);
+      // A free call head (`isFreeCallHead()`): the binding that its name
+      // resolves to from its home scope (`freeBinding()`) is a dependency,
+      // and the body of the function it resolves to is walked. The current
+      // scope plays no part: a shadow there is not what the call reads.
+      if (headDef === undefined && opDef === undefined && isFreeCallHead(e)) {
+        const name = e.operator;
+        const resolved = freeBinding(e);
+        if (resolved === undefined) {
+          if (firstSeen(e, name, seenFreeNames)) {
+            deps.push({ occurrence: e, name, resolved: undefined });
+          }
+        } else if (isOperatorDef(resolved))
+          visitLambdaBody(e, name, resolved.operator, true);
+        else if (
+          isValueDef(resolved) &&
+          !excluded.has(resolved.value) &&
+          !seen.has(resolved.value)
+        )
+          visitValueDef(e, resolved.value, true);
+      }
       // A store-backed list (`ce.list()`) holds numbers only: no dependency
       // inside it, and reading its `ops` would box every element. Other
       // written-out data (a list of numbers and failed cells,
@@ -1123,16 +1167,18 @@ function memoDepsStillValidUnderChain(
     // A value dependency re-resolves through the occurrence's CURRENT binding
     // (the inner definition may have been swapped in place since the fill —
     // see above), exactly as the fill did through the one it had then.
-    const r = resolveDepBinding(
-      ce,
-      depScope,
-      d.name,
-      d.resolvedOperator === undefined &&
-        d.valueDef !== undefined &&
-        isSymbol(d.occurrence)
-        ? (d.occurrence.valueDefinition ?? d.valueDef)
-        : undefined
-    );
+    const r = isFreeCallHead(d.occurrence)
+      ? freeBinding(d.occurrence)
+      : resolveDepBinding(
+          ce,
+          depScope,
+          d.name,
+          d.resolvedOperator === undefined &&
+            d.valueDef !== undefined &&
+            isSymbol(d.occurrence)
+            ? (d.occurrence.valueDefinition ?? d.valueDef)
+            : undefined
+        );
     if (d.resolvedOperator !== undefined) {
       // An operator dependency (a walked user lambda, or a healed forward
       // reference) compares the INNER operator-definition identity: the

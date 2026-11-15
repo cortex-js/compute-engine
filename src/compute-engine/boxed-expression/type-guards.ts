@@ -117,19 +117,11 @@ export function resolvedValueDefinition(
  * The binding that the symbol or call `expr` reads: its own value or
  * operator definition, or, for a free name (`isFreeName()`) or a free call
  * head (`isFreeCallHead()`), the definition that its name resolves to from
- * its home scope (`freeBinding()`). A call bound to a forward-call
- * reference (a call in the
- * body of a function literal boxed before its name had a definition) reads
- * the definition that its name holds now (`_forwardCalleeBinding()`,
- * `boxed-function.ts`). `undefined` when there is none.
+ * its home scope (`freeBinding()`). `undefined` when there is none.
  */
 export function readBinding(expr: Expression): BoxedDefinition | undefined {
   if (expr.valueDefinition !== undefined)
-    return (
-      (
-        expr as { _forwardCalleeBinding?: () => BoxedDefinition | undefined }
-      )._forwardCalleeBinding?.() ?? { value: expr.valueDefinition }
-    );
+    return { value: expr.valueDefinition };
   if (expr.operatorDefinition !== undefined)
     return { operator: expr.operatorDefinition };
   return freeBinding(expr);

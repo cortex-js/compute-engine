@@ -94,7 +94,10 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
     // signature — the case the whole design exists for.
     ce.declare('opaqueDraw', ce.type('(real) random -> real'));
     ce.declare('opaquePure', ce.type('(real) -> real'));
-    ce.assign('applyAll', ce.box(['Function', ['Map', 'g', ['List', 1, 2]], 'g']));
+    ce.assign(
+      'applyAll',
+      ce.box(['Function', ['Map', 'g', ['List', 1, 2]], 'g'])
+    );
     return ce;
   }
 
@@ -122,7 +125,9 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
       expect(eff(ce.box(['Map', 'opaqueDraw', ['List', 1, 2]]))).toEqual([
         'random',
       ]);
-      expect(eff(ce.box(['Map', 'opaquePure', ['List', 1, 2]]))).toBe(undefined);
+      expect(eff(ce.box(['Map', 'opaquePure', ['List', 1, 2]]))).toBe(
+        undefined
+      );
     });
 
     it('`isPure` follows, on every flavor — the boolean view of the channel', () => {
@@ -137,7 +142,9 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
       const ce = engine();
       const routes = [
         ce.box(['Map', 'assignedDraw', ['List', 1, 2]]),
-        ce.parse('\\mathrm{Map}(\\mathrm{assignedDraw}, \\lbrack 1, 2 \\rbrack)'),
+        ce.parse(
+          '\\mathrm{Map}(\\mathrm{assignedDraw}, \\lbrack 1, 2 \\rbrack)'
+        ),
         ce.function('Map', [ce.symbol('assignedDraw'), ce.box(['List', 1, 2])]),
       ];
       for (const e of routes) {
@@ -270,7 +277,9 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
       // Ruling (c): no boundary check, no contribution — soundness is opt-in
       // via annotation, and the runtime channel keeps the call sites honest.
       expect(
-        outerArrowEffects(ce.box(['Function', ['Map', 'g', ['List', 1, 2]], 'g']))
+        outerArrowEffects(
+          ce.box(['Function', ['Map', 'g', ['List', 1, 2]], 'g'])
+        )
       ).toBe(undefined);
       expect(outerArrowEffects(ce.box(['Function', ['g'], 'g']))).toBe(
         undefined
@@ -385,16 +394,16 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
         'useGlobal2',
         ['Function', ['Map', 'globalDraw2', ['List', 1, 2]], 'xs'],
       ]).evaluate();
-      expect(
-        ce.lookupDefinition('useGlobal2')!['operator'].effects
-      ).toEqual(['random']);
+      expect(ce.lookupDefinition('useGlobal2')!['operator'].effects).toEqual([
+        'random',
+      ]);
 
       // The global becomes pure…
       ce.box(['Assign', 'globalDraw2', PURE_LAMBDA]).evaluate();
       // …the SNAPSHOT does not move (over-declaring, hence sound)…
-      expect(
-        ce.lookupDefinition('useGlobal2')!['operator'].effects
-      ).toEqual(['random']);
+      expect(ce.lookupDefinition('useGlobal2')!['operator'].effects).toEqual([
+        'random',
+      ]);
       // …while the runtime channel, asked about the operand position itself,
       // follows the new binding.
       expect(eff(ce.box(['Map', 'globalDraw2', ['List', 1, 2]]))).toBe(
@@ -558,7 +567,10 @@ describe('3 — an incomplete estimator keeps the frame with no label', () => {
     // Same shape, same purity — only the `readsRandomFrame` field differs.
     const ce = new ComputeEngine();
     expect(
-      ce.box(['WithRandomSeed', 42, ['Add', 'n', 1]]).evaluate().toString()
+      ce
+        .box(['WithRandomSeed', 42, ['Add', 'n', 1]])
+        .evaluate()
+        .toString()
     ).toBe('n + 1');
   });
 });
@@ -594,7 +606,12 @@ describe('4 — `Hold` is inert; `ReleaseHold` resurfaces', () => {
   it('`Hold(Random())` is ∅ and pure, on every route', () => {
     const ce = new ComputeEngine();
     for (const [route, e] of Object.entries(
-      routes(ce, 'Hold', '\\mathrm{Hold}(\\mathrm{Random}())', ce.box(['Random']))
+      routes(
+        ce,
+        'Hold',
+        '\\mathrm{Hold}(\\mathrm{Random}())',
+        ce.box(['Random'])
+      )
     )) {
       expect([route, eff(e)]).toEqual([route, undefined]);
       expect([route, e.isPure]).toEqual([route, true]);
@@ -653,7 +670,11 @@ describe('4 — `Hold` is inert; `ReleaseHold` resurfaces', () => {
     // The mirror of the previous case: the quote layer is stripped there, so
     // the draw is a real, framed draw and replays.
     const ce = new ComputeEngine();
-    const e = ce.box(['WithRandomSeed', 5, ['ReleaseHold', ['Hold', ['Random']]]]);
+    const e = ce.box([
+      'WithRandomSeed',
+      5,
+      ['ReleaseHold', ['Hold', ['Random']]],
+    ]);
     expect(eff(e)).toBe(undefined); // discharged by the frame
     expect(e.evaluate().isSame(e.evaluate())).toBe(true);
   });
@@ -831,10 +852,7 @@ describe('5 — `invokes: false` containers are pure to build', () => {
     // block through the `effectsOf` recursion, not the latent term.
     expect(
       eff(ce.box(['Block', ['Declare', 'x', "'unknown'", 1], ['Random']]))
-    ).toEqual([
-      'random',
-      'scope',
-    ]);
+    ).toEqual(['random', 'scope']);
     // …and the frame still absorbs the draws but not the scope write.
     expect(
       eff(
@@ -943,10 +961,7 @@ describe('5 — `invokes: false` containers are pure to build', () => {
         head === 'If'
           ? ['If', 'True', 'storedDraw', 'storedDraw']
           : [head, 'storedDraw'];
-      expect([head, survivor(ce, inline)]).toEqual([
-        head,
-        survivor(ce, named),
-      ]);
+      expect([head, survivor(ce, inline)]).toEqual([head, survivor(ce, named)]);
     }
   });
 
@@ -955,11 +970,7 @@ describe('5 — `invokes: false` containers are pure to build', () => {
     const ce = engine();
     expect(
       ce
-        .box([
-          'WithRandomSeed',
-          7,
-          ['ListFrom', ['Map', DRAWING_LAMBDA, 'u']],
-        ])
+        .box(['WithRandomSeed', 7, ['ListFrom', ['Map', DRAWING_LAMBDA, 'u']]])
         .evaluate().operator
     ).toBe('WithRandomSeed');
   });
@@ -1198,11 +1209,11 @@ describe('6 — discharge', () => {
       // the statement a `Block` returns.
       const ce = new ComputeEngine();
       for (const [label, body] of Object.entries({
-        List: ['List', DRAWING_VIEW, 1],
-        Tuple: ['Tuple', DRAWING_VIEW, 1],
-        Pair: ['Pair', DRAWING_VIEW, 1],
-        nested: ['List', ['List', DRAWING_VIEW]],
-        Block: ['Block', DRAWING_VIEW],
+        'List': ['List', DRAWING_VIEW, 1],
+        'Tuple': ['Tuple', DRAWING_VIEW, 1],
+        'Pair': ['Pair', DRAWING_VIEW, 1],
+        'nested': ['List', ['List', DRAWING_VIEW]],
+        'Block': ['Block', DRAWING_VIEW],
         // The earlier statements run UNDER the frame; the last one escapes.
         'Block after a framed draw': ['Block', ['Random'], DRAWING_VIEW],
       })) {
@@ -1219,7 +1230,7 @@ describe('6 — discharge', () => {
         // A view with nothing to escape.
         'pure view': ['List', ['Map', PURE_LAMBDA, ['Range', 1, 6]], 1],
         // Materialized in the frame before it is stored.
-        materialized: ['List', ['ListFrom', DRAWING_VIEW], 1],
+        'materialized': ['List', ['ListFrom', DRAWING_VIEW], 1],
         // The view is a STATEMENT, not the block's result: `Block` evaluates
         // it under the frame and returns the draw that follows.
         'view not returned': ['Block', DRAWING_VIEW, ['Random']],
@@ -1235,7 +1246,9 @@ describe('6 — discharge', () => {
       // A lazy view whose ELEMENT work is pure: discharging nothing is fine,
       // and the shape alone must not flip it.
       expect(
-        eff(ce.box(['WithRandomSeed', 42, ['Map', PURE_LAMBDA, ['Range', 1, 6]]]))
+        eff(
+          ce.box(['WithRandomSeed', 42, ['Map', PURE_LAMBDA, ['Range', 1, 6]]])
+        )
       ).toBe(undefined);
       // A view whose SOURCE draws: that draw happens when the view is BUILT,
       // inside the frame, so it is owed to the frame and stays discharged.
@@ -1489,21 +1502,18 @@ describe('9 — confined vs escaping vs conditional-declare', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// Spec item 10: "forward-reference `{any}` + trusted-annotation install".
+// Spec item 10: a function that calls a function defined later
+// (`docs/EFFECTS-MODEL.md`).
 //
-// > So `f() := g()` before `g` exists: unannotated → `{any}` (honest);
-// > annotated → author-stated, trusted.
-//
-// > an **explicit** annotation on a definition whose inference saw an
-// > unresolved head is installed as a **trusted contract** — the head is
-// > effectively opaque at that moment, so this is the same residual trust class
-// > as an opaque host declaration — and is *not* revalidated when the head
-// > later resolves (no dependency tracking).
-//
-// This is hole 3. The unannotated half is now sound (`{any}` ⊇ anything `g`
-// turns out to be); the annotated half is a deliberate, documented trust.
+// - `f() := g()` before `g` exists, unannotated: `{any}` while `g` has no
+//   definition. Its INFERRED effects are derived again when `g` is defined,
+//   and again at each redefinition of `g`.
+// - Annotated: an explicit annotation over a head with no definition is
+//   installed as a trusted contract, and is not checked again when the head
+//   is defined. A contract installed over a head that HAS a definition is
+//   checked, and is checked again when that definition changes.
 // ───────────────────────────────────────────────────────────────────────────
-describe('10 — forward reference: `{any}` honestly, or a trusted annotation', () => {
+describe('10 — forward reference: `{any}` until the head resolves, or a trusted annotation', () => {
   it('`f() := g()` with `g` undefined infers `{any}`', () => {
     const ce = new ComputeEngine();
     ce.box(['Assign', 'fwd10', ['Function', ['undefined10']]]).evaluate();
@@ -1515,23 +1525,33 @@ describe('10 — forward reference: `{any}` honestly, or a trusted annotation', 
     expect(eff(ce.box(['fwd10']))).toBe('any');
   });
 
-  it('the `{any}` stays honest once the head resolves as drawing', () => {
-    // The installed signature is a construction-time snapshot; `{any}` is the
-    // top, so it is a sound over-approximation of whatever `g` becomes — the
-    // reason the unresolved case infers it rather than staying optimistic.
+  it('the inferred effects are derived again when the head resolves as drawing', () => {
+    // `{any}` while the head has no definition: the caller is never told
+    // the expression is pure. When the head is defined, the effects are
+    // those of the head.
     const ce = new ComputeEngine();
     ce.box(['Assign', 'honest10', ['Function', ['later10']]]).evaluate();
     expect(ce.lookupDefinition('honest10')!['operator'].effects).toBe('any');
+    expect(ce.box(['honest10']).isPure).toBe(false);
 
     ce.box(['Assign', 'later10', ['Function', ['Random']]]).evaluate();
     expect(ce.lookupDefinition('later10')!['operator'].effects).toEqual([
       'random',
     ]);
-    // Still `{any}` — which CONTAINS `{random}`; the caller is not told the
-    // expression is pure.
-    expect(ce.lookupDefinition('honest10')!['operator'].effects).toBe('any');
-    expect(eff(ce.box(['honest10']))).toBe('any');
+    expect(ce.lookupDefinition('honest10')!['operator'].effects).toEqual([
+      'random',
+    ]);
+    expect(eff(ce.box(['honest10']))).toEqual(['random']);
     expect(ce.box(['honest10']).isPure).toBe(false);
+  });
+
+  it('with a pure head, the function is pure once the head is defined', () => {
+    const ce = new ComputeEngine();
+    ce.box(['Assign', 'pure10', ['Function', ['later10p']]]).evaluate();
+    expect(ce.lookupDefinition('pure10')!['operator'].effects).toBe('any');
+    ce.box(['Assign', 'later10p', ['Function', ['Add', 1, 1]]]).evaluate();
+    expect(ce.lookupDefinition('pure10')!['operator'].effects).toBeUndefined();
+    expect(ce.box(['pure10']).isPure).toBe(true);
   });
 
   it('a RESOLVED head is read from its definition, not treated as unknown', () => {
@@ -1635,9 +1655,32 @@ describe('10 — forward reference: `{any}` honestly, or a trusted annotation', 
     }
   });
 
-  it('the trusted contract is NOT revalidated when the head later resolves', () => {
-    // No dependency tracking: the residual trust is the same class as an
-    // opaque host declaration stating a wrong type. Documented, deliberate.
+  it('a contract installed over a RESOLVED head is checked again when the head changes', () => {
+    // The literal is boxed before `g10c` exists, and installed under the
+    // contract after `g10c` is defined: the check ran at install, and runs
+    // again when `g10c` is redefined to draw.
+    const ce = new ComputeEngine();
+    const literal = ce.box(['Function', ['g10c', 'x'], 'x']);
+    ce.box([
+      'Assign',
+      'g10c',
+      ['Function', ['Multiply', 2, 'x'], 'x'],
+    ]).evaluate();
+    ce.declare('checked10', {
+      signature: '(number) -> number',
+      effects: [],
+      evaluate: literal,
+    } as any);
+    const redefined = ce
+      .box(['Assign', 'g10c', ['Function', ['Add', 'x', ['Random']], 'x']])
+      .evaluate();
+    expect(redefined.operator).toBe('Error');
+    expect(ce.lookupDefinition('checked10')!['operator'].effects).toEqual([]);
+  });
+
+  it('the trusted contract is NOT checked again when the head later resolves', () => {
+    // The residual trust is the same class as an opaque host declaration
+    // stating a wrong type.
     const ce = new ComputeEngine();
     ce.declare('trusted10b', {
       signature: '() -> number',
@@ -1773,7 +1816,11 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
       const ce = new ComputeEngine();
       const f = ce.box([
         'Function',
-        ['Typed', ['Add', 'n', 1], { str: '(n: unknown) random scope -> integer' }],
+        [
+          'Typed',
+          ['Add', 'n', 1],
+          { str: '(n: unknown) random scope -> integer' },
+        ],
         'n',
       ]);
       expect(f.type.toString()).toBe('(n: unknown) random scope -> integer');
@@ -1938,7 +1985,9 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
       // inference-produced arrow is stripped instead).
       expect(def.effectsDeclared).toBe(true);
       expect(def.pure).toBe(false);
-      expect(ce.box('h3').type.toString()).toBe('(n: unknown) random -> integer');
+      expect(ce.box('h3').type.toString()).toBe(
+        '(n: unknown) random -> integer'
+      );
       expect(eff(ce.box(['h3', 5]))).toEqual(['random']);
       expect(ce.box(['h3', 5]).isPure).toBe(false);
     });
@@ -1974,7 +2023,10 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
       ce.box([
         'Assign',
         'tick3',
-        ['Function', ['Typed', ['Assign', 'ctr3', 1], { str: '() scope -> unknown' }]],
+        [
+          'Function',
+          ['Typed', ['Assign', 'ctr3', 1], { str: '() scope -> unknown' }],
+        ],
       ]).evaluate();
       const def = ce.lookupDefinition('tick3')!['operator'];
       expect(def.inferredSignature).toBe(false);
@@ -2135,7 +2187,9 @@ describe('effects memo re-entrancy (recursive definition bodies)', () => {
     ce.declare('Q_9', '(number) -> number');
     ce.assign(
       'Q_9',
-      ce.parse('(n)\\mapsto\\begin{cases}0&n=0\\\\Q_9(n-1)+\\operatorname{Random}()&\\text{otherwise}\\end{cases}')
+      ce.parse(
+        '(n)\\mapsto\\begin{cases}0&n=0\\\\Q_9(n-1)+\\operatorname{Random}()&\\text{otherwise}\\end{cases}'
+      )
     );
     const body = (ce.box('Q_9').value as Expression).op1;
     void body.op1.isPure;
@@ -2144,7 +2198,9 @@ describe('effects memo re-entrancy (recursive definition bodies)', () => {
     ce2.declare('Q_9', '(number) -> number');
     ce2.assign(
       'Q_9',
-      ce2.parse('(n)\\mapsto\\begin{cases}0&n=0\\\\Q_9(n-1)+\\operatorname{Random}()&\\text{otherwise}\\end{cases}')
+      ce2.parse(
+        '(n)\\mapsto\\begin{cases}0&n=0\\\\Q_9(n-1)+\\operatorname{Random}()&\\text{otherwise}\\end{cases}'
+      )
     );
     const body2 = (ce2.box('Q_9').value as Expression).op1;
     expect(body2.isPure).toBe(false);
@@ -2169,11 +2225,13 @@ describe('The default-`!scope` ceiling: escaping writes are opt-in', () => {
   it('a bare install of an escaping writer is refused on the Assign route', () => {
     const ce = new ComputeEngine();
     ce.box(['Assign', 'cl_ctr', 0]).evaluate();
-    const r = ce.box([
-      'Assign',
-      'cl_bump',
-      ['Function', ['Assign', 'cl_ctr', ['Add', 'cl_ctr', 1]]],
-    ]).evaluate();
+    const r = ce
+      .box([
+        'Assign',
+        'cl_bump',
+        ['Function', ['Assign', 'cl_ctr', ['Add', 'cl_ctr', 1]]],
+      ])
+      .evaluate();
     expect(r.operator).toBe('Error');
     expect(r.toString()).toContain('scope');
     // Not installed: the definition record stays usable and the counter
@@ -2232,28 +2290,28 @@ describe('The default-`!scope` ceiling: escaping writes are opt-in', () => {
     // makeCounter() { let c = 0; () ↦ { c := c + 1; c } } — the inner
     // literal's write goes on the inner ARROW (literals are inference
     // boundaries); the factory's own body only produces it.
-    const r = ce.box([
-      'Assign',
-      'cl_mk',
-      [
-        'Function',
+    const r = ce
+      .box([
+        'Assign',
+        'cl_mk',
         [
-          'Block',
-          ['Declare', 'c', { str: 'number' }, 0],
-          ['Function', ['Block', ['Assign', 'c', ['Add', 'c', 1]], 'c']],
+          'Function',
+          [
+            'Block',
+            ['Declare', 'c', { str: 'number' }, 0],
+            ['Function', ['Block', ['Assign', 'c', ['Add', 'c', 1]], 'c']],
+          ],
         ],
-      ],
-    ]).evaluate();
+      ])
+      .evaluate();
     expect(r.operator).not.toBe('Error');
   });
 
   it('a forward-referenced head stays optimistic: bare install allowed', () => {
     const ce = new ComputeEngine();
-    const r = ce.box([
-      'Assign',
-      'cl_fwd',
-      ['Function', ['cl_laterDefined', 'n'], 'n'],
-    ]).evaluate();
+    const r = ce
+      .box(['Assign', 'cl_fwd', ['Function', ['cl_laterDefined', 'n'], 'n']])
+      .evaluate();
     expect(r.operator).not.toBe('Error');
   });
 
@@ -2269,11 +2327,9 @@ describe('The default-`!scope` ceiling: escaping writes are opt-in', () => {
       ])
     );
     // Bare wrapper over a scope callee: refused…
-    const bare = ce.box([
-      'Assign',
-      'cl_wrap',
-      ['Function', ['cl_bump4']],
-    ]).evaluate();
+    const bare = ce
+      .box(['Assign', 'cl_wrap', ['Function', ['cl_bump4']]])
+      .evaluate();
     expect(bare.operator).toBe('Error');
     // …and the annotated wrapper installs.
     ce.declare('cl_wrap2', { signature: '() scope -> number' });
@@ -2291,22 +2347,26 @@ describe('The default-`!scope` ceiling: escaping writes are opt-in', () => {
     ce.box(['Assign', 'cl_ctr5', 0]).evaluate();
     // Clause 1: pure, installs through the single-clause `ce.assign` shortcut.
     expect(
-      ce.box([
-        'DefineFunction',
-        'cl_mbump',
-        ['Function', 0, ['Typed', 'z', { str: '0' }]],
-      ]).evaluate().operator
+      ce
+        .box([
+          'DefineFunction',
+          'cl_mbump',
+          ['Function', 0, ['Typed', 'z', { str: '0' }]],
+        ])
+        .evaluate().operator
     ).not.toBe('Error');
     // Clause 2: converts the symbol to clause storage, and writes outside.
-    const r = ce.box([
-      'DefineFunction',
-      'cl_mbump',
-      [
-        'Function',
-        ['Block', ['Assign', 'cl_ctr5', ['Add', 'cl_ctr5', 1]], 'n'],
-        ['Typed', 'n', { str: 'integer' }],
-      ],
-    ]).evaluate();
+    const r = ce
+      .box([
+        'DefineFunction',
+        'cl_mbump',
+        [
+          'Function',
+          ['Block', ['Assign', 'cl_ctr5', ['Add', 'cl_ctr5', 1]], 'n'],
+          ['Typed', 'n', { str: 'integer' }],
+        ],
+      ])
+      .evaluate();
     expect(r.operator).toBe('Error');
     expect(r.toString()).toContain('scope');
     // Not installed, and nothing ran: the counter never moved and the symbol
@@ -2320,27 +2380,31 @@ describe('The default-`!scope` ceiling: escaping writes are opt-in', () => {
     const ce = new ComputeEngine();
     ce.box(['Assign', 'cl_ctr6', 0]).evaluate();
     expect(
-      ce.box([
-        'DefineFunction',
-        'cl_mbump2',
-        ['Function', 0, ['Typed', 'z', { str: '0' }]],
-      ]).evaluate().operator
+      ce
+        .box([
+          'DefineFunction',
+          'cl_mbump2',
+          ['Function', 0, ['Typed', 'z', { str: '0' }]],
+        ])
+        .evaluate().operator
     ).not.toBe('Error');
     // The same escaping clause, with the effect row STATED on the literal's
     // full-signature return marker.
-    const r = ce.box([
-      'DefineFunction',
-      'cl_mbump2',
-      [
-        'Function',
+    const r = ce
+      .box([
+        'DefineFunction',
+        'cl_mbump2',
         [
-          'Typed',
-          ['Block', ['Assign', 'cl_ctr6', ['Add', 'cl_ctr6', 1]], 'cl_ctr6'],
-          { str: '(n: integer) scope -> integer' },
+          'Function',
+          [
+            'Typed',
+            ['Block', ['Assign', 'cl_ctr6', ['Add', 'cl_ctr6', 1]], 'cl_ctr6'],
+            { str: '(n: integer) scope -> integer' },
+          ],
+          'n',
         ],
-        'n',
-      ],
-    ]).evaluate();
+      ])
+      .evaluate();
     expect(r.operator).not.toBe('Error');
     // It dispatches, and the write reaches the outer variable.
     expect(ce.box(['cl_mbump2', 5]).evaluate().re).toBe(1);

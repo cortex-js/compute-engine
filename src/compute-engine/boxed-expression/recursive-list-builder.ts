@@ -59,9 +59,8 @@ export function listRecursionPlan(
   // applies (`_lambdaLiteral`). Both are read at application time, so a
   // later assignment of another function to the symbol is seen.
   // The binding is read with `readBinding()`: a self-call boxed before the
-  // assignment is bound to a
-  // forward-call reference, or is a free name, and reads the definition that
-  // the name holds now.
+  // assignment has a free head, or is a free name, and reads the definition
+  // that the name holds now.
   const isSelf = (expr: Expression): boolean => {
     if (!isFunction(expr) && !isSymbol(expr)) return false;
     const binding = readBinding(expr);

@@ -1,5 +1,4 @@
 import { cacheOff } from '../common/cache-switches.js';
-import { clearForwardCallReference } from './boxed-expression/forward-call-reference.js';
 import { MathJsonSymbol } from '../math-json.js';
 import {
   debugStatementHook,
@@ -10,6 +9,7 @@ import { cmp } from './boxed-expression/compare.js';
 import {
   bindingInContext,
   callableBindingInContext,
+  unresolvedFreeHome,
   evaluateInOwnBindings,
   isParameterActivation,
   markCallableFrame,
@@ -483,7 +483,18 @@ export function canonicalFunctionLiteral(
   //    shorthand, and a named wildcard is a pattern variable — neither is an
   //    identity function.
   //
-  if (isSymbol(expr) && !isSymbol(expr, '_')) return expr;
+  //    A raw symbol with no definition is a free name: its canonical form
+  //    records the scope it is boxed in, from which a callback reads its
+  //    definition when it is applied (`callableBindingInContext()`). Boxing
+  //    declares no name, so the canonical form writes nothing.
+  if (isSymbol(expr) && !isSymbol(expr, '_')) {
+    const symbol: Expression = expr;
+    return !symbol.isCanonical &&
+      symbol.engine._resolveOnlyDepth === 0 &&
+      symbol.engine.lookupDefinition(sym(symbol)!) === undefined
+      ? symbol.canonical
+      : symbol;
+  }
 
   //
   // 3/ `BuiltinFunction`, e.g. ["BuiltinFunction", "Sin"]
@@ -1437,10 +1448,8 @@ export function canonicalFunctionLiteralArguments(
       // the annotated branch of the shadowed-parameter resolution in
       // `engine-expression-entrypoints.ts`).
       const shared = shadowedDefs.get(name);
-      if (shared !== undefined) {
-        clearForwardCallReference(shared);
-        blockScope.bindings.set(name, shared);
-      } else if (t !== undefined)
+      if (shared !== undefined) blockScope.bindings.set(name, shared);
+      else if (t !== undefined)
         ce.declare(name, { inferred: false, type: t }, blockScope);
       else
         ce.declare(
@@ -1721,12 +1730,20 @@ function installRebuiltLiteral(
         undo: () => def._restoreRederivationSnapshot(snapshot),
       });
     }
-    // A re-derivation keeps the mark of a local (`_bindsLocal`).
-    def._update(
-      (def as { _bindsLocal?: boolean })._bindsLocal === true
-        ? markLocalBinding({ evaluate: rebuilt })
-        : { evaluate: rebuilt }
-    );
+    // A re-derivation keeps the mark of a local (`_bindsLocal`). A declared
+    // contract that was trusted at install stays trusted
+    // (`_contractTrusted`).
+    const op = def as { _rederiving?: boolean };
+    op._rederiving = true;
+    try {
+      def._update(
+        (def as { _bindsLocal?: boolean })._bindsLocal === true
+          ? markLocalBinding({ evaluate: rebuilt })
+          : { evaluate: rebuilt }
+      );
+    } finally {
+      op._rederiving = false;
+    }
     recordEffectsTransition(
       ce,
       def,
@@ -3303,7 +3320,8 @@ export function composedApplication(
         ce,
         name,
         [...value],
-        callableBindingInContext(ce, name, ownCallableBinding(step))
+        callableBindingInContext(ce, name, ownCallableBinding(step), step),
+        step
       );
     } else result = ce.function('Apply', [step, ...value]);
     value = [result];
@@ -3338,7 +3356,7 @@ export function compositionStepsResolveHere(fn: Expression): boolean {
     const name = sym(step);
     if (name === undefined) return true;
     return (
-      callableBindingInContext(ce, name, ownCallableBinding(step)) ===
+      callableBindingInContext(ce, name, ownCallableBinding(step), step) ===
       ce.lookupDefinition(name)
     );
   });
@@ -4356,7 +4374,8 @@ export function snapshotRunVariables(
               ? { value: e.valueDefinition }
               : e.operatorDefinition !== undefined
                 ? { operator: e.operatorDefinition }
-                : undefined
+                : undefined,
+            e
           )
         );
     const result =
@@ -7781,14 +7800,14 @@ function makeLambda(
           : expr.operatorDefinition !== undefined
             ? { operator: expr.operatorDefinition }
             : undefined;
-      const binding = callableBindingInContext(ce, sym, own);
+      const binding = callableBindingInContext(ce, sym, own, expr);
       // On the asynchronous route (`awaitStatements`), `applyNamedLiteral`
       // declines, and the call is awaited (`awaitedApplication`): an
       // operator that has only an `evaluateAsync` handler is evaluated, so
       // `1 |> f` is `f(1)` under `evaluateAsync()`.
       const answer = applyNamedLiteral(ce, sym, args, options, binding);
       if (answer !== undefined) return answer;
-      const call = callableApplication(ce, sym, args, binding);
+      const call = callableApplication(ce, sym, args, binding, expr);
       if (options?.awaitStatements) return awaitedApplication(call, options);
       return call.evaluate(options);
     };
@@ -9800,10 +9819,18 @@ export function callableApplication(
   ce: ComputeEngine,
   name: string,
   args: ReadonlyArray<Expression>,
-  binding: BoxedDefinition | undefined
+  binding: BoxedDefinition | undefined,
+  occurrence?: Expression
 ): Expression {
-  if (binding === undefined || ce.lookupDefinition(name) === binding)
-    return ce.function(name, args);
+  if (binding === undefined) {
+    // A free name that resolves to nothing from its home scope: the call is
+    // boxed there (`unresolvedFreeHome()`).
+    const home = unresolvedFreeHome(occurrence);
+    return home === undefined
+      ? ce.function(name, args)
+      : ce._inScope(home, () => ce.function(name, args));
+  }
+  if (ce.lookupDefinition(name) === binding) return ce.function(name, args);
   const bindings = new Map([[name, binding]]);
   ce.pushScope({ parent: ce.context.lexicalScope, bindings });
   try {

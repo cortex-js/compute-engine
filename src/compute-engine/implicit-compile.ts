@@ -13,7 +13,6 @@ import {
   boundVariableNames,
   callableBindingInContext,
 } from './boxed-expression/binders.js';
-import { isForwardCallReference } from './boxed-expression/forward-call-reference.js';
 import {
   compileDiagnosticOf,
   isCompileDeclineError,
@@ -259,20 +258,7 @@ function withCapturedCallBindings<T>(
       : isFunction(node)
         ? node.operator
         : undefined;
-    // A call made before its function was defined, in the body of a node
-    // that owns a local scope (the `Block` of an integrand), is bound to a
-    // placeholder declared in that scope (`markForwardCallReference()`). The
-    // scope lists the name as one it binds, but the placeholder holds no
-    // function: the call reads the definition of the enclosing scope, and is
-    // resolved here as an unbound call. A symbol bound to the same
-    // placeholder (the callback `g` of `h(g, 2)` beside the call `g(2)`) is
-    // not a local either: it is recorded as a name read as a value, so a
-    // scope that would change the function it reads declines the
-    // compilation (`dataNames` below).
-    const forwardPlaceholder =
-      node.valueDefinition !== undefined &&
-      isForwardCallReference(node.valueDefinition);
-    if (name !== undefined && (!bound.has(name) || forwardPlaceholder)) {
+    if (name !== undefined && !bound.has(name)) {
       // A free name or a free call head (`binding-unit.ts`) has no
       // definition of its own: it reads the definition that its name
       // resolves to now (`freeBinding()`).

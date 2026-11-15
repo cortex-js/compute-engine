@@ -1,4 +1,3 @@
-import { markForwardCallReference } from './forward-call-reference.js';
 import { Complex } from 'complex.js';
 import { isLibraryOperator, shadowsLibraryName } from '../library-shadowing.js';
 import { canonicalBranch } from '../statement-position.js';
@@ -3888,54 +3887,39 @@ function makeCanonicalFunctionCore(
     def = lookupApplicable(name, scope ?? ce.context.lexicalScope, ce);
   }
   if (!def) {
-    // No def. This is for example `["f", 2]` where "f" is not declared.
+    // No applicable definition (`["f", 2]` with `f` not declared). A head
+    // that is a parameter of the function literal being canonicalized is
+    // declared, as the parameter's definition, in the first scope that is
+    // not marked `noAutoDeclare`; the literal adopts that binding
+    // (`_setShadowedParameterDef`). Every other head is a free head with a
+    // home scope (`binding-unit.ts`), resolved when the call is evaluated.
     // Inside a resolve-only region (`ce._resolveOnly()`: partial forms,
-    // serialization) a read must not write to the caller's scope: skip the
-    // auto-declaration and construct the application with an unbound
-    // operator, per the structural symbol contract. Note this gates only
-    // the AUTO-declare of an undeclared head — binding-site declarations
-    // (a Sum index into its local scope) are deliberate and unaffected.
-    //
-    // The name is declared where an undeclared SYMBOL of the same name would
-    // be (`createSymbolExpression`, `engine-expression-entrypoints.ts`): in
-    // the first scope that is not marked `noAutoDeclare`. A binder (`Sum`,
-    // `Comprehension`) marks its own scope so, and a call in its body
-    // declared the name in that scope: `Σ_{k=1}^{3} h(k)` then kept calling
-    // that local `h` after `h := k ↦ k²` was assigned, and gave
-    // `h(1) + h(2) + h(3)`. When the name is a parameter of a function
-    // literal whose body is being canonicalized, the binding is also the one
-    // the later references of the parameter use, and the one the literal
-    // adopts as its parameter (`_setShadowedParameterDef`). Without it,
-    // `(g) ↦ Σ_{x ∈ [1, 2]} g(x)` called a binding of the `Sum` scope, not
-    // the parameter, and applied to `a ↦ a + 1` gave `g(1) + g(2)`.
+    // serialization) nothing is declared or recorded.
     let freeHead: Scope | undefined = undefined;
     if (ce._resolveOnlyDepth === 0) {
       let autoScope = ce.context.lexicalScope;
       while (autoScope.noAutoDeclare && autoScope.parent)
         autoScope = autoScope.parent;
-      // Boxing declares no name: the
-      // `function` reading of the head is a requirement on the free name
-      // in the environment of the unit (`binding-unit.ts`), and the head
-      // is resolved when the call is evaluated. A scope that the boxing
-      // created (the body of a function literal), and a parameter of a
-      // literal, still get the declaration below. The home scope of the
-      // free head skips the scope of a binder also when the call is boxed
+      // The `function` reading of a free head is a requirement on the free
+      // name in the environment of the unit. In a scope that the boxing
+      // created (the body of a function literal), the home scope of the
+      // head is the one a free name of the body gets (`ce.symbol()`). The
+      // home scope skips the scope of a binder also when the call is boxed
       // outside the canonicalization of the binder (`freeNameHomeScope()`).
       const homeScope = freeNameHomeScope(autoScope);
-      if (
-        !ce._isShadowedParameter(name) &&
-        ce.lookupDefinition(name) === undefined &&
-        ce._boxingState.isPersistentScope(homeScope) !== false
-      ) {
-        ce.symbol(name)._infer(() => 'function');
-        freeHead = homeScope;
+      if (!ce._isShadowedParameter(name)) {
+        if (ce.lookupDefinition(name) === undefined) {
+          const head = ce.symbol(name);
+          head._infer(() => 'function');
+          freeHead =
+            ce._boxingState.isPersistentScope(homeScope) === false
+              ? ((head as { _homeScope?: Scope })._homeScope ?? homeScope)
+              : homeScope;
+        } else freeHead = homeScope;
       } else {
         ce.declare(name, { type: 'function', inferred: true }, autoScope);
         const declared = autoScope.bindings.get(name);
-        if (declared !== undefined && !ce._isShadowedParameter(name))
-          markForwardCallReference(declared, autoScope);
-        if (declared !== undefined && ce._isShadowedParameter(name))
-          ce._setShadowedParameterDef(name, declared);
+        if (declared !== undefined) ce._setShadowedParameterDef(name, declared);
       }
     }
     // An argument of a function with no declared signature is a value: a
@@ -3944,9 +3928,15 @@ function makeCanonicalFunctionCore(
     // Definition order must not change semantics. `name` has no definition
     // yet, so the collection evidence its parameters would have narrowed onto
     // an unknown symbol argument (`narrowArgsFromInferredSignature`) does not
-    // exist: note the call so the enclosing `Function` literal is re-derived
-    // once `name` is defined (`provisional-application.ts`).
-    if (isProvisionalCaptureOpen() && hasNarrowableArg(boxedOps))
+    // exist, and the call has no result type: note the call so the
+    // enclosing `Function` literal is re-derived once `name` is defined
+    // (`provisional-application.ts`). Also a call with closed arguments: the
+    // result type of the literal reads the result type of the call
+    // (`R := M ↦ G(M − [0, 0, Y])` before `G := M ↦ [M[1], M[2], M[3]]` is
+    // typed `-> vector<3>`, as with `G` defined first). `Return` is a
+    // statement that its `Block` reads, with no definition, not a call that
+    // waits for one.
+    if (isProvisionalCaptureOpen() && name !== 'Return')
       noteProvisionalCall(name);
     return new BoxedFunction(ce, name, boxedOps, {
       metadata,
@@ -4806,9 +4796,9 @@ function isCollectionOnlyType(t: Type): boolean {
  * True when at least one operand is a symbol `narrowArgsFromInferredSignature`
  * could still write evidence onto: its type is INFERRED and still `unknown`.
  * That is the only case a re-derivation of the enclosing `Function` literal
- * could learn something from, so it gates the forward-reference noting
- * (`noteProvisionalCall`) — a call with closed or already-typed arguments
- * waits on nothing.
+ * could learn something from, so it gates the noting of a call through a
+ * variable that holds an inferred function (`noteProvisionalCall`): such a
+ * call with closed or already-typed arguments waits on nothing.
  */
 function hasNarrowableArg(args: ReadonlyArray<Expression>): boolean {
   return args.some(

@@ -281,6 +281,30 @@ expression in it. Adopting that declaration as a parameter makes it a
 lexical parameter binding instead. Type inference and evaluation use the same
 resolution rule, without assigning a target as a side effect of reading a type.
 
+A call head with no definition in the body of a function literal is a free
+head too: boxing declares nothing, and the home scope of the head is the
+scope that a free name of the body gets, the scope the literal is written in
+(`makeCanonicalFunctionCore()`, `box.ts`). Only a head that is a parameter of
+the literal is declared, as the definition of the parameter. The head is
+resolved when the call is evaluated, from that home scope. A callback that is
+a free name (`h` in `Map(h, [1, 2])`, boxed before `h` is defined) is
+resolved the same way: with `M = Map(h, [1, 2])` boxed at the top, then
+`h(t) := t`, then a pushed scope that declares `h := t ↦ 100`,
+`ListFrom(M)` is `[1, 2]` in the pushed scope. A free head or callback whose
+home chain has no definition stays unevaluated, whatever the current scope
+holds: with `Map(hh, [1, 2])` and `hh(1)` boxed where no `hh` exists, a
+pushed scope that declares `hh` leaves `[hh(1), hh(2)]` and `hh(1)`
+(`callableBindingInContext()`, `unresolvedFreeHome()`, `binders.ts`).
+
+When a name that the body of a function calls gets a definition, the
+function is derived again from its literal (`provisional-application.ts`):
+its result type and its inferred effects are those that defining the callee
+first gives. `R := M ↦ G(M − [0, 0, Y])` before
+`G := M ↦ [M[1], M[2], M[3]]` is typed `(M: dictionary<any> | indexed_collection<any> | value) -> vector<3>`, as with `G`
+defined first; `honest := () ↦ later()` has the effects `any` until
+`later := () ↦ Random()` is defined, and `random` after
+(`docs/EFFECTS-MODEL.md`, "Dependency order").
+
 The result of evaluating a call whose head has no value stays symbolic for the
 rest of the top-level evaluation that produced it. Evaluating that result again
 in the same top-level evaluation evaluates its operands but does not resolve

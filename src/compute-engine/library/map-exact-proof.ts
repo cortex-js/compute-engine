@@ -659,7 +659,10 @@ export function namedCallbackLiteral(
       : callee.operatorDefinition !== undefined
         ? { operator: callee.operatorDefinition }
         : undefined;
-  if (callableBindingInContext(ce, name, own) !== ce.lookupDefinition(name))
+  if (
+    callableBindingInContext(ce, name, own, callee) !==
+    ce.lookupDefinition(name)
+  )
     return undefined;
   const literal = userFnLiteral(ce, name);
   if (
@@ -712,10 +715,13 @@ export function calleesResolveLexically(
       );
     return isFunction(own.value.value, 'Function');
   };
-  const check = (name: string, own: Own): boolean => {
+  const check = (name: string, own: Own, occurrence: Expression): boolean => {
     if (seen.has(name)) return true;
     if (!isUserFn(own) && userFnLiteral(ce, name) === undefined) return true;
-    if (callableBindingInContext(ce, name, own) !== ce.lookupDefinition(name))
+    if (
+      callableBindingInContext(ce, name, own, occurrence) !==
+      ce.lookupDefinition(name)
+    )
       return false;
     seen.add(name);
     const called = userFnLiteral(ce, name);
@@ -731,11 +737,14 @@ export function calleesResolveLexically(
           ? { value: e.valueDefinition }
           : e.operatorDefinition !== undefined
             ? { operator: e.operatorDefinition }
-            : undefined
+            : undefined,
+        e
       );
     if (!isFunction(e)) return true;
     const def = e.operatorDefinition;
-    if (!check(e.operator, def !== undefined ? { operator: def } : undefined))
+    if (
+      !check(e.operator, def !== undefined ? { operator: def } : undefined, e)
+    )
       return false;
     return e.ops.every(visit);
   };

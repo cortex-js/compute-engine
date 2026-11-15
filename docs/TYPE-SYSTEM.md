@@ -981,6 +981,14 @@ base case. A call of a function that is not defined yet is not left out: with
 `q: real`, `If(q < 2, g(1), 0)` is `unknown`, because `g := x ↦ x / 2` can
 later make its value `1/2` (CE-836).
 
+A call head with no definition is a free head with a home scope
+(`docs/SCOPING-MODEL.md`, "Callable resolution"). When the name gets a
+definition, a function whose body calls it is derived again
+(`provisional-application.ts`), and its result type is the one that defining
+the callee first gives: `R := M ↦ G(M − [0, 0, Y])` before
+`G := M ↦ [M[1], M[2], M[3]]` is typed `(M: dictionary<any> | indexed_collection<any> | value) -> vector<3>` once `G` is
+defined, where it was `(M: unknown) any -> list<unknown^3>`.
+
 This rule is simple and sound, and it loses precision in a mutual recursion
 where the call of the branch reaches the function in computation only through
 another function. With `F` and `G` declared `function`,
@@ -1697,6 +1705,13 @@ invalidates no cached type: the type version (`typeVersion`,
   constant: `const h = (k) => k + 1` in a block holds a value of one run of
   the block, so `Map(h, [1, 2])` is typed `list<unknown^2>` inside the run
   and after it.
+- The type of a call whose free head resolves to such a definition, one
+  whose value an activation holds, is not derived from that value: the call
+  is typed from what is static (`_reboxedForForwardCallee()`,
+  `boxed-function.ts`). In
+  `let f = (n) => do { let out = [n]; if n < 2 { out = Join(out, f(n + 1)) }; out }`
+  the self-call `f(n + 1)` is typed `unknown`, inside a run and after it. A
+  declared type of the definition is static, and types the call.
 - The pop of a scope changes no type, and it moves the type version only
   when it reverts an assumption. A scope that a host pushes keeps its
   definitions after the pop (`popScope()`, `engine-scope.ts`), and a node
