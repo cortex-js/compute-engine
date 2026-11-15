@@ -1806,17 +1806,22 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         ([n, x], { engine: ce, numericApproximation }) => {
           const k = toBigint(n);
           if (k === null || k < 0n) return undefined;
-          // A rational or float literal `x` gives a value, an exact real
+          // A rational or float literal `x` gives a value, as does a complex
+          // literal (its parts read as decimals, exactly); an exact real
           // literal that is not rational (`√2`) and anything but a number a
-          // polynomial in `x`; a complex or infinite literal declines.
+          // polynomial in `x`; an infinite literal declines.
           let point: [bigint, bigint] | undefined;
+          let gaussian: GaussianRational | undefined;
           if (x !== undefined && isNumber(x)) {
             point = realLiteralAsRational(x);
-            if (
-              point === undefined &&
-              !(x.isExact && x.im === 0 && x.isFinite === true)
-            )
-              return undefined;
+            if (point === undefined) {
+              gaussian = complexLiteralAsRational(x);
+              if (
+                gaussian === undefined &&
+                !(x.isExact && x.im === 0 && x.isFinite === true)
+              )
+                return undefined;
+            }
           }
           if (x === undefined && k % 2n === 1n) return ce.number(0);
           // O(n²) bigint steps on integers of about log₁₀(n!) digits: past
@@ -1830,6 +1835,17 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           else if (point !== undefined) {
             const [num, den] = eulerPolynomialAtRational(E, N, point);
             result = ce.number([num, den]);
+          } else if (gaussian !== undefined) {
+            const [re, im] = eulerPolynomialAtGaussianRational(E, N, gaussian);
+            result = ce.number(re).add(ce.number(im).mul(ce.I));
+            // A complex literal that holds floats (or doubles that stand for
+            // a rational part) gives a float.
+            const integral =
+              isNumber(x!) &&
+              x.isExact &&
+              Number.isSafeInteger(x.re) &&
+              Number.isSafeInteger(x.im);
+            if (!integral) result = result.N();
           } else {
             const coeffs = eulerPolynomialCoefficients(E, N, ce._deadline);
             const terms = coeffs.flatMap(([num, den], j) =>
@@ -3628,6 +3644,41 @@ function eulerPolynomialAtRational(
 }
 
 /**
+ * Eₙ(x) at the Gaussian rational `x = (p₁/q₁) + (p₂/q₂)i`, as the reduced
+ * rationals `[re, im]`. With `u = 2x − 1 = (A + Bi)/D` over the common
+ * denominator `D`, `Eₙ(x) = 2⁻ⁿ Σ_k C(n,k)·E_k·u^{n−k}` (DLMF 24.2.8) has the
+ * Gaussian-integer numerator `Σ_k C(n,k)·E_k·(A + Bi)^{n−k}·Dᵏ` over `(2D)ⁿ`.
+ */
+function eulerPolynomialAtGaussianRational(
+  E: readonly bigint[],
+  n: number,
+  [[p1, q1], [p2, q2]]: GaussianRational
+): [[bigint, bigint], [bigint, bigint]] {
+  const D = (q1 * q2) / gcd(q1, q2);
+  const A = (2n * p1 - q1) * (D / q1);
+  const B = 2n * p2 * (D / q2);
+  // (A + Bi)^m for m = 0…n
+  const powers: [bigint, bigint][] = [[1n, 0n]];
+  for (let m = 1; m <= n; m++) {
+    const [a, b] = powers[m - 1];
+    powers.push([a * A - b * B, a * B + b * A]);
+  }
+  let re = 0n;
+  let im = 0n;
+  let c = 1n; // C(n, k)
+  for (let k = 0; k <= n; k++) {
+    if (E[k] !== 0n) {
+      const w = c * E[k] * D ** BigInt(k);
+      re += w * powers[n - k][0];
+      im += w * powers[n - k][1];
+    }
+    c = (c * BigInt(n - k)) / BigInt(k + 1);
+  }
+  const den = (2n * D) ** BigInt(n);
+  return [reduceRat(re, den), reduceRat(im, den)];
+}
+
+/**
  * The coefficients `[c₀, …, c_n]` of Eₙ(x) as reduced rationals. Euler
  * polynomials are an Appell sequence, `Eₙ(x) = Σ_j C(n,j)·E_{n-j}(0)·x^j`, and
  * `2^m·E_m(0) = Σ_k (-1)^{m-k} C(m,k)·E_k` (DLMF 24.2.8 at x = 0).
@@ -3675,9 +3726,27 @@ function realLiteralAsRational(x: Expression): [bigint, bigint] | undefined {
   const r = asRational(x);
   if (r !== undefined) return [BigInt(r[0]), BigInt(r[1])];
   if (!isNumber(x) || x.isExact || x.im !== 0) return undefined;
-  const m = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(
-    String(x.bignumRe ?? x.re)
-  );
+  return decimalAsRational(String(x.bignumRe ?? x.re));
+}
+
+type GaussianRational = [[bigint, bigint], [bigint, bigint]];
+
+/**
+ * A finite complex literal as the exact rationals of its real and imaginary
+ * parts, each read as the decimal it prints as; `undefined` for a real or
+ * non-finite value. The parts of a complex literal are floats, so this is the
+ * value the literal stores, not a rounding of it.
+ */
+function complexLiteralAsRational(x: Expression): GaussianRational | undefined {
+  if (!isNumber(x) || x.im === 0 || x.isFinite !== true) return undefined;
+  const re = decimalAsRational(String(x.bignumRe ?? x.re));
+  const im = decimalAsRational(String(x.bignumIm ?? x.im));
+  return re === undefined || im === undefined ? undefined : [re, im];
+}
+
+/** The decimal `text` (`-1.5e-3`) as a reduced rational. */
+function decimalAsRational(text: string): [bigint, bigint] | undefined {
+  const m = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(text);
   if (m === null) return undefined;
   const exp = Number(m[4] ?? 0) - (m[3]?.length ?? 0);
   if (Math.abs(exp) > 1000) return undefined;

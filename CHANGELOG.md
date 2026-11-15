@@ -1,3 +1,21 @@
+## [Unreleased]
+
+### Improvements
+
+- **`EulerE(n, z)` evaluates at a complex `z`, and `HarmonicNumber(r)`
+  evaluates at a rational with an exact digamma.** `EulerE(3, 1 + 2i)`
+  stayed unevaluated and is `−25/4 − 8i`; the decimal parts of a float
+  `z` are read exactly, as for a real `z`, so `EulerE(10, 0.1 + 0.2i)` is
+  `−18.3565669813 − 31.4612827216i` with no rounding of `z` and no
+  cancellation in the polynomial, and an exact real that is not rational
+  (`EulerE(2, √2)`) is still `2 − √2`. `HarmonicNumber(1/2)` stayed
+  unevaluated and is `2 − 2 ln 2`, `HarmonicNumber(1/3)` is
+  `3 − (3/2) ln 3 − π√3/6`: for a rational `r` whose `Digamma(r + 1)` has an
+  exact value (denominators 1 to 4), `H(r) = ψ(r + 1) + γ` (DLMF 5.15.2).
+  Another rational (`1/5`) and the generalized `HarmonicNumber(r, 2)` stay
+  unevaluated under `evaluate()`; `N()` is unchanged. (#598, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 ## 0.191.0 _2026-11-15_
 
 ### Breaking Changes

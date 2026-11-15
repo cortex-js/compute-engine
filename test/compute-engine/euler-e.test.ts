@@ -171,9 +171,9 @@ describe('EulerE(n, x)', () => {
     expect(ce.box(['EulerE', 4, 'x']).type.toString()).toBe('number');
   });
 
-  test('a complex or infinite x stays unevaluated', () => {
-    expect(ev(['EulerE', 3, ['Complex', 1, 1]])).toMatch(/^EulerE\(3/);
+  test('an infinite x stays unevaluated', () => {
     expect(ev(['EulerE', 3, 'PositiveInfinity'])).toMatch(/^EulerE\(3/);
+    expect(ev(['EulerE', 3, 'ComplexInfinity'])).toMatch(/^EulerE\(3/);
   });
 
   test('threads over lists', () => {

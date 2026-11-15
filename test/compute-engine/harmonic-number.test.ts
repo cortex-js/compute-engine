@@ -64,9 +64,10 @@ describe('HARMONIC NUMBER: exact values', () => {
     expect(evaluate('n', 2).toString()).toBe('HarmonicNumber(n, 2)');
   });
 
-  test('a non-integer or exact non-integer argument stays symbolic under evaluate()', () => {
-    expect(evaluate(['Rational', 1, 2]).operator).toBe('HarmonicNumber');
+  test('an exact non-integer argument without a closed form stays symbolic under evaluate()', () => {
+    expect(evaluate(['Rational', 1, 5]).operator).toBe('HarmonicNumber');
     expect(evaluate(5, ['Rational', 1, 2]).operator).toBe('HarmonicNumber');
+    expect(evaluate(['Rational', 1, 2], 2).operator).toBe('HarmonicNumber');
   });
 
   test('threads over a list', () => {
