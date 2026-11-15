@@ -76,7 +76,8 @@ export type Source = { length: V; at: (k: V) => V; value: () => V };
  *  elements, by how they read a tuple operand: `each`, element by element
  *  with scalars (`2^Tuple(1, 2)`); `all`, every operand a tuple (`Add`);
  *  `scale`, one tuple and scalars (`Multiply`), the tuple first for
- *  `Divide` (`2/Tuple(1, 2)` is an error). A difference of tuples is an
+ *  `Divide` (`2/Tuple(1, 2)` is an error), or a list of tuples and a list
+ *  of numbers of its length, read tuple by tuple. A difference of tuples is an
  *  `Add` of a negated tuple in the canonical form. `norm`: the Euclidean norm
  *  of a tuple of numbers (`Abs(Tuple(3, 4))` is 5). A threading row of one
  *  operand other than `Abs` is `each`. A list of tuples with a tuple (`all`),

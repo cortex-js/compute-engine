@@ -198,6 +198,10 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Negate',       1,          arith('neg', 1, true),         { fold: (a: number) => -a }),
   row('Multiply',     'variadic', arith('mul', 1, true),         { fold: (a: number, b: number) => a * b }),
   row('Divide',       2,          rc('div', 2),                  { fold: (a: number, b: number) => a / b }),
+  // The division by the denominator of a rational factor, which the
+  // lowering makes: exact where the quotient is an integer or a half of
+  // one (a GLSL division need not be correctly rounded).
+  row(undefined,      2,          [[[R, R], R, 'div.q']],        { fold: (a: number, b: number) => a / b }),
   row('Power',        2,          [...rc('pow', 2), [[I, I], I, 'pow.int']], { fold: realPow, constantOperand: { index: 0, value: Math.E, head: 'Exp' }, leaves: { nonnegative: 0, integer: 1 } }),
   row('Sqrt',         1,          rc('sqrt', 1),                 { fold: Math.sqrt, ...cut }),
   row('Abs',          1,          [...arith('abs', 1), [[C], R, 'cabs']], { fold: Math.abs }),

@@ -43,7 +43,9 @@ import { ScalarFragmentJavaScriptTarget } from './javascript-fragment-target.js'
 import { compileWithIrProfile, type IR_OPTIONS } from './ir/adapter.js';
 import { compileWithIrProfileGlsl } from './ir/adapter-glsl.js';
 import {
+  jsProfilePublicDefault,
   jsProfileShadowConsumer,
+  recordJsProfileAttempt,
   recordJsProfileShadow,
 } from '../js-profile-switch.js';
 
@@ -188,6 +190,25 @@ export function compile<
   options?: CompileExpressionOptions<T>
 ): CompilationResult<T, R> {
   const ce = expr.engine;
+  if (
+    jsProfilePublicDefault() &&
+    publicDepth === 0 &&
+    !ce._opensOperation(false)
+  ) {
+    const consumer = shadowConsumerOf(options, true);
+    if (consumer === 'public' || consumer === 'glsl:public') {
+      // A compilation that this one starts is not a public call.
+      publicDepth += 1;
+      try {
+        return (
+          compileWithPublicSwitch<T, R>(expr, options, consumer) ??
+          compileExpression<T, R>(expr, options)
+        );
+      } finally {
+        publicDepth -= 1;
+      }
+    }
+  }
   if (ce._jsProfileShadow && shadowDepth === 0 && !ce._opensOperation(false)) {
     const consumer = shadowConsumerOf(options, ce._jsProfileShadow === 'ir');
     if (consumer !== undefined)
@@ -201,6 +222,10 @@ export function compile<
  * progress: a compilation that one of them starts is not measured.
  */
 let shadowDepth = 0;
+
+/** The number of compilations of the public switch in progress
+ * (`jsProfilePublicDefault()`). */
+let publicDepth = 0;
 
 /**
  * The consumer under which the shadow measure counts a compilation with
@@ -322,6 +347,53 @@ function measureProfile(
     );
   } finally {
     shadowDepth -= 1;
+  }
+}
+
+/**
+ * The compilation of `expr` with the profile `ir` for the public switch
+ * (`jsProfilePublicDefault()`), counted under `consumer`, or `undefined`
+ * when the profile declines: the caller then compiles as if the switch were
+ * off. The attempt has `fallback: false` and fresh sets in place of
+ * `symbolDeps` and `varsObjectRefs`, copied to the caller's sets when it
+ * compiles. A cancellation is thrown.
+ */
+function compileWithPublicSwitch<T extends string, R>(
+  expr: Expression,
+  options: CompileExpressionOptions<T> | undefined,
+  consumer: string
+): CompilationResult<T, R> | undefined {
+  const ce = expr.engine;
+  const symbolDeps =
+    options?.symbolDeps === undefined ? undefined : new Set<string>();
+  const varsObjectRefs =
+    options?.varsObjectRefs === undefined ? undefined : new Set<string>();
+  try {
+    const result = compileExpression<T, R>(expr, {
+      ...options,
+      ...(symbolDeps === undefined ? {} : { symbolDeps }),
+      ...(varsObjectRefs === undefined ? {} : { varsObjectRefs }),
+      profile: 'ir',
+      fallback: false,
+    });
+    if (result.success !== true) {
+      recordJsProfileAttempt(ce, consumer, 'failed', result.error);
+      return undefined;
+    }
+    recordJsProfileAttempt(ce, consumer, 'admitted');
+    for (const name of symbolDeps ?? []) options?.symbolDeps?.add(name);
+    for (const name of varsObjectRefs ?? []) options?.varsObjectRefs?.add(name);
+    return result;
+  } catch (e) {
+    if (isCancellationError(e) || !isCompileDeclineError(e)) throw e;
+    const diagnostic = compileDiagnosticOf(e);
+    recordJsProfileAttempt(
+      ce,
+      consumer,
+      diagnostic.code === 'outside-profile' ? 'declined' : 'failed',
+      profileMessage(diagnostic.code, diagnostic.message)
+    );
+    return undefined;
   }
 }
 

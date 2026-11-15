@@ -6609,6 +6609,8 @@ export type SysHelpers = typeof SYS_HELPERS &
   ReturnType<typeof makeLoopPassCounter> & {
     /** The functions of the profile `ir` (`IR_FUNCTIONS`). */
     ir: typeof IR_FUNCTIONS;
+    /** The integral of the profile `ir` (`integrateFinite()`). */
+    irIntegrate: (fn: (x: number) => number, a: number, b: number) => number;
     tick: () => void;
   };
 
@@ -7171,7 +7173,7 @@ export const COMPLEX_FUNCTIONS = Object.freeze({
  * meets a member of `SYS_HELPERS` of another meaning (`pow`, `fract`, `cmul`
  * and others are both). The other members that the profile calls are those
  * of the existing compiler: `drawNextRandomNumber`, `withRandomSeed`,
- * `integrate`, `rangeCount`, `countLoopPass`, `resetLoopPasses`, `tick`.
+ * `rangeCount`, `countLoopPass`, `resetLoopPasses`, `tick`.
  */
 export const IR_FUNCTIONS = Object.freeze({
   ...REAL_FUNCTIONS,
@@ -7179,6 +7181,45 @@ export const IR_FUNCTIONS = Object.freeze({
   pow: realPow,
   mod: floorMod,
 });
+
+/**
+ * The integral of the profile `ir` (`_SYS.irIntegrate`): the quadrature of
+ * `SYS_HELPERS.integrate`, with its Monte-Carlo fallback over the live
+ * `draw`, except that an integrand that has given a value that is not
+ * finite, at a node of the quadrature or at a sample, gives NaN once the
+ * fallback samples (at the first draw, or at that value). `∫₀^∞ x^100·e^−x
+ * dx`, whose integrand is NaN past about x = 1,200 and whose samples are
+ * finite, gave the mean of 10^7 samples, a wrong number that changed at
+ * each run; `∫₀^1000 Mod(t, 1) dt`, finite everywhere, keeps its estimate.
+ */
+function integrateFinite(
+  fn: (x: number) => number,
+  a: number,
+  b: number,
+  draw: () => number
+): number {
+  const stop = Symbol('not finite');
+  let notFinite = false;
+  let sampling = false;
+  const f = (x: number): number => {
+    const y = fn(x);
+    if (!Number.isFinite(y)) {
+      if (sampling) throw stop;
+      notFinite = true;
+    }
+    return y;
+  };
+  try {
+    return SYS_HELPERS.integrate(f, a, b, undefined, () => {
+      sampling = true;
+      if (notFinite) throw stop;
+      return draw();
+    });
+  } catch (e) {
+    if (e === stop) return NaN;
+    throw e;
+  }
+}
 
 /**
  * Build the `_SYS` bundle for ONE compiled function.
@@ -7220,6 +7261,7 @@ export function makeSysHelpers(source: RuntimeSource): SysHelpers {
     },
     integrate: (fn, a, b, initialPanels) =>
       SYS_HELPERS.integrate(fn, a, b, initialPanels, draw),
+    irIntegrate: (fn, a, b) => integrateFinite(fn, a, b, draw),
     integrateMC: (fn, a, b) => SYS_HELPERS.integrateMC(fn, a, b, draw),
     atNumeric: ownAtNumeric(),
     atChecked: ownAtChecked(),

@@ -120,6 +120,7 @@ export const GLSL: Syntax = Object.freeze({
     'neg': '(-$0)',
     'mul': '($0 * $1)',
     'div': '($0 / $1)',
+    'div.q': { text: '_gpu_ir_quot($0, $1)', helpers: ['_gpu_ir_quot'] },
     'pow': { text: '_gpu_ir_pow($0, $1)', helpers: ['_gpu_ir_pow'] },
     'sqrt': 'sqrt($0)',
     'abs': 'abs($0)',
@@ -306,6 +307,18 @@ export const GLSL: Syntax = Object.freeze({
       `  if (n == 0.0) return ${NAN};`,
       '  if (x >= 0.0) return pow(x, 1.0 / n);',
       `  return n == floor(n) && mod(n, 2.0) == 1.0 ? -pow(-x, 1.0 / n) : ${NAN};`,
+      '}',
+    ].join('\n'),
+    // `a / q` by the denominator `q` of a rational factor. A GLSL division
+    // need not be correctly rounded (SwiftShader gives `(29.0 * -14.0) /
+    // 7.0` just below -58): a quotient that is an integer or a half of one
+    // is that value, as the correctly rounded division gives it, for a
+    // dividend below 2^23, where `m * q` is exact.
+    _gpu_ir_quot: [
+      'float _gpu_ir_quot(float a, float q) {',
+      '  float r = a / q;',
+      '  float m = floor(2.0 * r + 0.5);',
+      '  return abs(a) < 8388608.0 && m * q == 2.0 * a ? 0.5 * m : r;',
       '}',
     ].join('\n'),
     // `n!` of an integer: +∞ for a negative operand (a pole) and over 34

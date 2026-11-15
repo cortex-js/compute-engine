@@ -25,6 +25,14 @@
  * are separate from those of the switch (`_jsProfileShadowStats()`), and
  * the file of `CE_JS_PROFILE_STATS` holds them under `shadow`.
  *
+ * The public switch (`CE_JS_PROFILE_PUBLIC=ir`, a test-only setting read
+ * once per instance of this module, `jsProfilePublicDefault()`) makes each
+ * public compilation for the `javascript` or `glsl` target that asks for no
+ * profile and no direct target try the profile `ir` first: its result is
+ * returned when it compiles; on a decline the compilation runs as if the
+ * switch were off. Its attempts are counted as those of the switch, under
+ * the consumers `public` and `glsl:public` (`recordJsProfileAttempt()`).
+ *
  * A browser has no `process` object: the switch is then off and nothing is
  * written. This module imports nothing, so that the engine can import it with
  * no dependency cycle.
@@ -112,6 +120,14 @@ export function jsProfileSwitchDefault(): JsProfileSwitch | undefined {
 export function jsProfileShadowDefault(): boolean | 'ir' {
   const value = currentProcess()?.env?.CE_JS_PROFILE_SHADOW;
   return value === 'ir' ? 'ir' : value === '1';
+}
+
+let publicSwitch: boolean | undefined;
+
+/** Whether the public switch is on: `CE_JS_PROFILE_PUBLIC` is `ir`. */
+export function jsProfilePublicDefault(): boolean {
+  publicSwitch ??= currentProcess()?.env?.CE_JS_PROFILE_PUBLIC === 'ir';
+  return publicSwitch;
 }
 
 /** The options objects that `implicitCompile()` passes to `ce._compile()`,

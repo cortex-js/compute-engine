@@ -315,13 +315,13 @@ const POOL_BRAND = Symbol.for('@cortex-js/compute-engine/kernel-pool');
 /**
  * The helpers of the compiled-code runtime that read the engine's random
  * stream or entropy handler: the `_SYS` members that `makeRandomHelpers`
- * (`compilation/javascript-runtime.ts`) builds over the live source, the two
+ * (`compilation/javascript-runtime.ts`) builds over the live source, the
  * integrals that sample live, and the interval library's seeded choice. Code
  * that names one of them is not shippable: a worker has its own stream, so
  * its draws would not be the engine's.
  */
 const RANDOM_HELPERS =
-  /\b_SYS\.(drawNextRandomNumber|withRandomSeed|domainInterval|domainRange|domainList|randomPick|randomChoice|randomSample|shuffle|integrate|integrateMC)\b|\b_IA\.seededChoice\b/;
+  /\b_SYS\.(drawNextRandomNumber|withRandomSeed|domainInterval|domainRange|domainList|randomPick|randomChoice|randomSample|shuffle|integrate|integrateMC|irIntegrate)\b|\b_IA\.seededChoice\b/;
 
 /** Whether the text of a compiled result can run on a worker. */
 export function isShippableCode(text: string): boolean {

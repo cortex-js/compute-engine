@@ -1,3 +1,43 @@
+## [Unreleased]
+
+### Bug Fixes
+
+- **In the experimental profile `'ir'`, `Floor(x/49)` at `x = 49` gave 0.**
+  A product by a rational constant was compiled as a product by the double
+  of the constant (`0.0204… · x`), so a `Floor`, `Ceil`, `Round`, `Mod` or a
+  comparison of a quotient that is an integer could be off by one. A rational
+  factor whose denominator is not a power of two is now a division
+  (`x / 49`), also when a name holds the rational, on JavaScript and on GLSL
+  (where a helper gives the exact quotient when it is an integer or a half,
+  for a dividend below 2^23).
+- **In the experimental profile `'ir'`, a product of two matrices, of a
+  matrix and a list, and a power of a matrix were computed element by
+  element.** They now decline: the interpreter's value is the matrix product
+  or power.
+- **In the experimental profile `'ir'`, an improper integral whose integrand
+  overflows gave a wrong number that changed at each run**
+  (`∫₀^∞ x^100·e^−x dx`). It is now `NaN`. An integral that the quadrature
+  cannot settle and whose integrand is finite keeps its estimate, as with
+  the default compiler.
+- **In the experimental profile `'ir'`, an assignment in a bound of a `Sum`
+  or a `Product` took effect.** Such a sum now declines.
+- **In the experimental profile `'ir'`, `broadcast()` with
+  `entryChecks: false` refused a list input** that every cell shares.
+
+### Improvements
+
+- **The experimental profile `'ir'` compiles an input that is a list of
+  points on JavaScript.** An input of type `list<tuple<real, real>>` (or of
+  three or more numbers per tuple, with a stated or a run-time length) is
+  given as an array of arrays: with `P: list<tuple<real, real>>`,
+  `Sum(Abs(P))` at `P = [[3, 4], [6, 8]]` is 15, and `P − T` subtracts the
+  point `T` from each point. `At` with a constant index, `PointX`, `Length`,
+  `Map`, `Filter`, `Comprehension`, `Distance`, and a product or a quotient
+  by a list of numbers of the same length apply to it; a user function can
+  take such a list and return one. GLSL declines a list of points. The rows
+  are not checked at the entry: a row of another length gives an unspecified
+  result.
+
 ## 0.191.0 _2026-11-15_
 
 ### Breaking Changes

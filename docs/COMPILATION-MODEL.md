@@ -187,6 +187,13 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `|Re(z)|` about 44.4 and `Tan(z)` from `|Im(z)|` about 44.4 (`cosh` of
   twice the part overflows a single float), where the value is close to
   `±1` and `±i`.
+- `plausible?` — `javascript` and `glsl`, profile `ir`, `x: real`,
+  `y: real`: `Floor(x/5 + y/10)` at `x = 24`, `y = -98` gives `-6`: each
+  quotient is rounded, and their sum falls just under `-5`. The interpreter
+  gives `-5`. A single quotient is exact (`Floor(x/49)`); a sum of two is
+  wrong at about one integer point in 10,000, and
+  `Floor(j/3 + n + 1/3)` at about one in 20 (`j = -46`, `n = -16` gives
+  `-32`, the interpreter `-31`).
 - `javascript` and `glsl`, profile `ir` (crafted), `x: real`:
   `Sum(1, Limits(k, 1, Sqrt(x)^2))` at `x = 3` gives `2`: the bound is
   floored, and doubles compute `Sqrt(3)^2` just under 3. The interpreter
@@ -2637,6 +2644,20 @@ has the fields of stored code (`runtimeVersion`, `preambleOnce`,
 `entryPlan`): `createJavaScriptRuntime().load()` and a worker of the kernel
 pool load it, and `run()` is built by the same loader. `shippable` follows
 the rule of the default route: `false` for code that draws or integrates.
+An integral calls the quadrature of the default route and its Monte-Carlo
+fallback, except that when the fallback samples an integrand that has given
+a value that is not finite, the value is `NaN`, at each run:
+`∫₀^∞ x^100·e^−x dx` (its integrand is `NaN` past about x = 1,200) is
+`NaN`, where the fallback gave a wrong number that changed at each run;
+`∫₀^1000 Mod(t, 1) dt`, finite everywhere, keeps the fallback's estimate
+(about 500, changing between runs as in the interpreter). A product with a
+rational constant `p/q` whose denominator is not a power of two is
+`(p · factors) / q`, so a quotient that is an integer in exact arithmetic is
+that integer (`Floor(x/49)` at 49 is 1); on GLSL the division is a helper
+that gives an integer or a half-integer quotient exactly for a dividend
+below 2^23. A product of a matrix (a list of rank 2 or more) with another
+list, and a power of a matrix, decline: the interpreter's value is the
+matrix product or power, or element by element for some operands.
 The result of an expression has `broadcast()`, `broadcastAsync()`,
 `willUsePool()`, `runAsync()` and `willParallelize()`, with or without
 `broadcast: true`, built by the functions of the default route: each cell of

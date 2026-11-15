@@ -1989,6 +1989,70 @@ and G12; session `tycho-desk`, 2026-11-15):
   function 10, the pass bound 6, a name with a value that is not a number 5,
   `Break` 3. Batch G14 takes the lists of tuples as inputs.
 
+Batches G13 and G14, 2026-11-15, made side by side, merged by hand (one
+hunk of `apply()` in `lower.ts`) and landed together after the release
+0.192.0.
+
+G13, the wrong values of the census. D1: a `Multiply` with an operand of
+rank 2 or more and another list, and a `Power` of such a base, decline (the
+interpreter gives the matrix product or power); a list of points is not a
+matrix. D2: a product with a rational factor `p/q` whose `q` is not a power
+of two is `(p · factors) / q`, in one place (`product()` in `lower.ts`), also
+when a name holds the rational: `Floor(x/49)` is `Math.floor(_.x / 49)`. On
+GLSL the division is the helper `_gpu_ir_quot`, which gives the exact
+quotient when it is an integer or a half, for a dividend below 2^23: a
+reviewer measured that a plain division by a literal is wrong on the
+machine's GPU at the same samples as in the software renderer (322 of
+23,439; both multiply by the float of the reciprocal). D3: the wrong number
+that changed at each run was the Monte-Carlo fallback of the quadrature
+(10^7 live draws); the profile's integral (`_SYS.irIntegrate`) keeps that
+fallback and gives NaN when it starts to sample an integrand that has given
+a value that is not finite, so `∫₀^∞ x^100·e^−x dx` is NaN at every run and
+`∫₀^1000 Mod(t, 1) dt` keeps its estimate. D6: a `Sum` or `Product` whose
+`Limits` assigns a name outside it declines. D4 was fixed by G12. The switch
+`CE_JS_PROFILE_PUBLIC=ir` of the census is landed (test-only). Reviews
+(Codex: the exactness test of the GLSL helper rounds from 2^23; a 32-bit
+power-of-two test. Claude: 2,297,022 JavaScript values with no mismatch in
+the forms of one product; a point times `p/q` on GLSL; a rational held by a
+name; a rational times a list twice as slow, half recovered; the first form
+of D3 gave NaN to integrals that only fail to converge), fixed. Known
+limitation recorded: `Floor` of a sum of two or three quotients that is an
+integer only in exact arithmetic. With the switch on, the census tests of D1,
+D4 and D6 pass; 39 of the 46 of D2 still fail, on the crafted constants of
+those tests ((25! − 1)/24!, a constant near 1/3) and on pinned text; the 4
+of D3 expect 100! from a log-space form that is not carried over.
+
+G14, a list of points as an input (JavaScript). An input of type
+`list<tuple<…>>` of real or integer numbers is the list of points of G11
+(rank 2 with the tuple mark on the inner axis); a union of tuples of one
+length is a tuple of reals where the members differ. Also a product or a
+quotient of a list of points by a list of numbers of its length, a parameter
+that is or takes a list of points, a declared result that is one. The entry
+check does not read the rows (the rule of `checkEntry()`: its cost does not
+grow with a list). Still declined: Tycho's `generations` (20 calls), which
+appends to a list local in a loop: a list local of a changing length is a
+new mechanism. Reviews (Codex: nothing. Claude: no wrong value in about
+2,000 programs, the corpus records compile with their own MathJSON; an
+internal error for a scalar argument after a list of points; an order
+dependence on JavaScript from a missing guard of G11; `broadcast()` with
+`entryChecks: false` refused every shared list input, an older defect),
+fixed. Filed: CE-1329 (the difference of two arrays of rank 3 is not
+computed), CE-1331 (a sum nested three levels over a list of points gives
+`incompatible-type` in the interpreter).
+
+Measured in the main tree at `e5c3026fe9c49951993a8984d3a37c1a02ddc680`
+(0.192.0) plus the two patches; 7,482 lines in `ir/`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,839 of 11,157 (97.1%) |
+| Every JavaScript compile | 25,332 of 39,252 (64.5%) |
+| Public JavaScript `compile()` calls | 14,485 of 28,086 (51.6%) |
+| GLSL `compile()` calls | 1,156 of 2,392 (48.3%); 1,077 of the 1,595 that the existing target compiles (67.5%) |
+
+No test fails in the shadow run and no internal error is counted; with the
+switch on, the one test of CE-1267.
+
 Tycho's run of the build of `511a446b8c4dc43b50c9fac75c6735861b6be580` (G5
 and G6; session `tycho-desk`, 2026-11-14), the profile on both seams:
 

@@ -97,6 +97,7 @@ import { listLowering, parameterName } from './lower-lists.js';
 import {
   functionLowering,
   inputType,
+  tupleAxis,
   tupleOrInputType,
   userBinding,
 } from './lower-functions.js';
@@ -409,6 +410,21 @@ export function lower(
     const n = args.length;
     if (typeof r.arity === 'number' ? n !== r.arity : n < 2)
       decline(node, `${r.head} with ${n} operands`);
+    // A product of a list of rank 2 or more with another list, and a power
+    // of such a list, are the matrix product and power of the interpreter
+    // (`M·N`, `M·L`, `M^s` at an integer `s`), not element by element.
+    // A list of points is not a matrix: its product is point by point.
+    const rank = (v: V) => type(v).shape.length;
+    if (
+      (r.head === 'Multiply' &&
+        args.some((v) => rank(v) > 1 && tuples.get(v) !== 1) &&
+        args.filter((v) => rank(v) > 0).length > 1) ||
+      (r.head === 'Power' && rank(args[0]) > 1)
+    )
+      decline(
+        node,
+        `${r.head} of a matrix (a list of rank 2 or more) with a list or as a base: the interpreter's value is the matrix product or power, or element by element for some operands`
+      );
     const c = r.constantOperand;
     if (c !== undefined && b.constants.get(args[c.index]) === c.value)
       return apply(
@@ -422,15 +438,19 @@ export function lower(
       // the list of the same elements (`TUPLE_RULES`).
       const tuple = given.find((v) => tuples.has(v));
       if (tuple !== undefined) {
+        // `div.q`, the division by the denominator of a rational factor,
+        // reads a tuple dividend as `Divide` does.
         const rule =
-          TUPLE_RULES[r.head!] ??
-          (r.arity === 1 && r.threads ? 'each' : undefined);
-        // A list of points with a point (`all`), or under `norm`: point by
-        // point.
+          TUPLE_RULES[
+            r.signatures[0][2] === 'div.q' ? 'Divide' : (r.head ?? '')
+          ] ?? (r.arity === 1 && r.threads ? 'each' : undefined);
+        // A list of points with a point (`all`), scaled by a list of
+        // numbers (`scale`), or under `norm`: point by point.
         if (
           given.some((v) => tuples.get(v) === 1) &&
           (rule === 'norm' ||
-            (rule === 'all' && given.some((v) => tuples.get(v) === 0)))
+            (rule === 'all' && given.some((v) => tuples.get(v) === 0)) ||
+            (rule === 'scale' && given.some((v) => numbers(v))))
         )
           return eachPoint(node, r.head!, given, operation);
         if (rule === 'norm') return norm(node, tuple);
@@ -503,9 +523,13 @@ export function lower(
     return apply(node, row('Sqrt'), [sum]);
   };
 
+  /** `v` is a list of numbers (not a tuple). */
+  const numbers = (v: V) => !tuples.has(v) && type(v).shape.length === 1;
+
   /** `f` of `given` point by point: a build over the lists of points among
-   *  them (of one shape), which reads their element at each index; a point
-   *  and a scalar are read as they are. */
+   *  them (of one shape), which reads their element at each index, and so
+   *  under `Multiply` and `Divide` the element of a list of numbers of their
+   *  length; a point and a scalar are read as they are. */
   const eachPoint = (
     node: Expression,
     head: string,
@@ -519,7 +543,12 @@ export function lower(
       if (
         t.shape.length > 0 &&
         !(tuples.get(v) === 0 && t.shape.length === 1) &&
-        !(tuples.get(v) === 1 && same(t.shape, shape))
+        !(tuples.get(v) === 1 && same(t.shape, shape)) &&
+        !(
+          TUPLE_RULES[head] === 'scale' &&
+          numbers(v) &&
+          same(t.shape, shape.slice(0, 1))
+        )
       )
         decline(
           node,
@@ -532,7 +561,9 @@ export function lower(
       'build',
       [lists.listSource(first).length],
       [k],
-      () => [f(given.map((v) => (tuples.get(v) === 1 ? at(v) : v)))],
+      () => [
+        f(given.map((v) => (tuples.get(v) === 1 || numbers(v) ? at(v) : v))),
+      ],
       node
     )[0];
   };
@@ -705,6 +736,8 @@ export function lower(
         const d = apply(e, row('Add'), [p, apply(e, row('Negate'), [q])]);
         return apply(e, row('Abs'), [d]);
       }
+      case 'Multiply':
+        return product(e);
       case 'Log': {
         // `Log(x, 10)` is `log10`, a real `Log(x, 2)` is `log2` (exact at a
         // power of the base, as the interpreter: `Floor(Log(1000, 10))` is
@@ -814,6 +847,16 @@ export function lower(
     const r = rowOfHead(rows, reduction?.row ?? e.operator);
     if (r === undefined)
       decline(e, `the operator ${e.operator} is not in the slice`);
+    // The interpreter does not evaluate a `Sum` or a `Product` over a bound
+    // with an effect, and does not change `p` for `Limits(i, 1, (p := 4;
+    // 2))` (rule R3 of docs/COMPILATION-MODEL.md).
+    if (
+      reduction?.indexed === true &&
+      e.ops
+        .slice(1)
+        .some((l) => isFunction(l, 'Limits') && facts(l).writes.size > 0)
+    )
+      decline(e, `a bound of ${e.operator} that assigns a name outside it`);
     if (reduction !== undefined) return lists.reduction(e, r);
     if (e.operator === 'And' || e.operator === 'Or') {
       const boolean = (i: number) => {
@@ -842,6 +885,72 @@ export function lower(
       r,
       e.ops.map((op) => value(op)!)
     );
+  };
+
+  /** A product. With a rational constant `p/q` whose denominator is not a
+   *  power of two, it is `(p · factors) / q`: a multiplication by the
+   *  integer `p` (a negation for -1), then a division by the integer `q`.
+   *  IEEE division is correctly rounded, so the value is exact wherever
+   *  `p · factors` is an exact multiple of `q`: `Floor(x/49)` at 49 is 1,
+   *  where the product by the double of `1/49` gives 0. `p` and the sign
+   *  multiply the scalar factors first, so a list is passed over once for
+   *  the product and once for the division. The constant can be a free
+   *  name that holds it (a capture, as `captured()` lowers it). A power of
+   *  two as the denominator keeps the product by the double `p/q`, which is
+   *  exact; so do a complex factor (no rounding reads a complex value) and
+   *  the `bigint` mode (a rational declines there). */
+  const product = (e: Fn): V => {
+    // The number of `x`: a literal, or the value a free name holds.
+    const numberOf = (x: Expression): Expression | undefined => {
+      if (isNumber(x)) return x;
+      if (!isSymbol(x) || lookup(x.symbol) !== undefined) return undefined;
+      if (options.vars?.includes(x.symbol) || CONSTANTS.has(x.symbol)) return;
+      const def = ce.lookupDefinition(x.symbol);
+      const v = held(x.symbol)?.value;
+      return v !== undefined &&
+        isNumber(v) &&
+        (cx.inFunction === undefined ||
+          (def !== undefined &&
+            'value' in def &&
+            def.value === resolvedValueDefinition(x)))
+        ? v
+        : undefined;
+    };
+    const ratio = (x: Expression) => {
+      const n = numberOf(x);
+      const pq = n !== undefined ? n.toRational() : null;
+      return pq !== null &&
+        pq.every(Number.isSafeInteger) &&
+        (BigInt(pq[1]) & (BigInt(pq[1]) - 1n)) !== 0n
+        ? pq
+        : undefined;
+    };
+    const k = bigint ? -1 : e.ops.findIndex((x) => ratio(x) !== undefined);
+    const values = e.ops.map((x, i) => (i === k ? undefined : value(x)!));
+    const rest = values.filter((v): v is V => v !== undefined);
+    if (k < 0 || rest.some((v) => type(v).lane === 'complex'))
+      return apply(
+        e,
+        row('Multiply'),
+        values.map((v, i) => v ?? value(e.ops[i])!)
+      );
+    const c = e.ops[k];
+    if (isSymbol(c) && !held(c.symbol)!.library) b.captures.add(c.symbol);
+    const [p, q] = ratio(c)!;
+    const mul = (xs: V[]) =>
+      xs.length === 1 ? xs[0] : apply(e, row('Multiply'), xs);
+    const scalars = rest.filter((v) => type(v).shape.length === 0);
+    const lists = rest.filter((v) => type(v).shape.length > 0);
+    let factors = lists;
+    if (scalars.length > 0) {
+      let s = mul(
+        p === 1 || p === -1 ? scalars : [b.constant(p, 'integer'), ...scalars]
+      );
+      if (p === -1) s = apply(e, row('Negate'), [s]);
+      factors = [s, ...lists];
+    } else if (p !== 1) factors = [b.constant(p, 'integer'), ...lists];
+    const v = mul(factors);
+    return apply(e, rowOfOp(rows, 'div.q')!.row, [v, b.constant(q, 'integer')]);
   };
 
   /** The booleans `first`, `next(1)`, … `next(n - 1)` joined by `And`
@@ -1139,7 +1248,8 @@ export function lower(
       return { v: length };
     });
     const v = b.param(name, { lane: ir.lane, shape });
-    if (typeof t === 'object' && t.kind === 'tuple') tuples.set(v, 0);
+    const axis = tupleAxis(t);
+    if (axis !== undefined) tuples.set(v, axis);
     if (positional) b.positional += 1;
     frames[0].names.set(name, { v, role: positional ? 'index' : 'input' });
     return v;

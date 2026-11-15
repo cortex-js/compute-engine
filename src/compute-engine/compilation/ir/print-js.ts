@@ -16,10 +16,12 @@
  *
  * A power, a `Mod` and the functions of `REAL_FUNCTIONS` and
  * `COMPLEX_FUNCTIONS` (a complex value is a `{ re, im }` object) call
- * `_SYS.ir`, the functions that the folds compute. A draw, a random frame,
- * an integral and the length of a `Range` call the members of the existing
- * compiler (`drawNextRandomNumber`, `withRandomSeed`, `integrate`,
- * `rangeCount`), so these are the interpreter's by construction; code that
+ * `_SYS.ir`, the functions that the folds compute. A draw, a random frame
+ * and the length of a `Range` call the members of the existing compiler
+ * (`drawNextRandomNumber`, `withRandomSeed`, `rangeCount`), so these are the
+ * interpreter's by construction. An integral calls `_SYS.irIntegrate`, the
+ * existing quadrature and its Monte-Carlo fallback, NaN when that fallback
+ * samples an integrand that gave a value that is not finite. Code that
  * draws or integrates is not shippable (`isShippableCode()`). Each loop and
  * build checks the deadline every 1024 iterations (`_SYS.tick()`); with an
  * `iterationBudget`, each pass of a `Loop` also counts one pass of the call
@@ -160,7 +162,7 @@ export const JS: Syntax = Object.freeze({
   regions: {
     ...builds('0', (out) => `${out}.length`),
     integrate: ({ outs: [out], args: [a, b], params: [t] }) => ({
-      open: [`const ${out} = _SYS.integrate((${t}) => {`],
+      open: [`const ${out} = _SYS.irIntegrate((${t}) => {`],
       close: ([y]) => [`  return ${y};`, `}, ${a}, ${b});`],
     }),
     seeded: ({ outs, args: [seed] }) => ({

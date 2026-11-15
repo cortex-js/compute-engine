@@ -243,9 +243,19 @@ export function elementType(t: IRType): IRType {
   return { lane: t.lane, shape: t.shape.slice(1) };
 }
 
-export function typeToString(t: IRType): string {
+export function typeToString(
+  t: IRType,
+  /** For a message to the user: the axis of the tuple mark of the value
+   *  (`tuple<real, real>`), and a run-time length without its value. */
+  axis: number | undefined | false = false
+): string {
+  // The tuple mark's axis is the number of list axes outside the tuple.
+  const k = axis === false || axis === undefined ? -1 : axis;
   return t.shape.reduceRight<string>(
-    (s, n) => `list<${s}^${typeof n === 'number' ? n : `v${n.v}`}>`,
+    (s, n, i) =>
+      i === k && typeof n === 'number'
+        ? `tuple<${Array(n).fill(s).join(', ')}>`
+        : `list<${s}${typeof n === 'number' ? `^${n}` : axis === false ? `^v${n.v}` : ''}>`,
     t.lane
   );
 }

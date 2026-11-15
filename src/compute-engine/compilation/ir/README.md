@@ -131,6 +131,29 @@ gives 6, the remainder of the double (the existing compiler throws a
 `RangeError` there). The remedy for the host is the `bigint` mode. On GLSL
 `mod()` of a value beyond 2^24 is the remainder of the float, unspecified.
 
+A product with a rational constant `p/q` whose denominator is not a power of two
+(the canonical form of `x/49`, `29k/50`) is `(p · factors) / q`: a
+multiplication by the integer `p` (a negation for `-1`), then the operation
+`div.q` by the integer `q`, so a quotient that is an integer in exact arithmetic
+is that integer under `Floor`, `Ceil`, `Round`, `Truncate`, `Mod` or a
+comparison (`Floor(x/49)` at 49 is 1; the product by the double of `1/49` gave
+0). `p` and the sign multiply the scalar factors first, so a list is passed over
+once for the product and once for the division. The constant can be a free name
+that holds it (`r49 = 1/49`), lowered and captured as any name that holds a
+number. On JavaScript `div.q` is the division, which IEEE rounds correctly; on
+GLSL, whose division need not be (SwiftShader and ANGLE on Metal compute a
+division by a literal as the product by the float of its reciprocal), it is the
+helper `_gpu_ir_quot`, which gives a quotient that is an integer or a half of
+one exactly for a dividend below 2^23 in magnitude, where the test `m·q = 2a` is
+exact. A tuple dividend takes the rule of `Divide` (`TUPLE_RULES`). A power of
+two as the denominator (an exact test over the safe integers) keeps the product
+by the double `p/q`, which is exact, and so do a complex factor and the `bigint`
+mode (a rational declines there). The rule is the spelling of one product, with
+no analysis of where the value is used: a sum of fractions that is an integer
+only in exact arithmetic (`Floor(j/3 + n + 1/3)` at j = -46, n = -16) and a
+comparison at a zero of a transcendental function (`0 < Sin(2π·s/P)` at s = 2, P
+= -2) can still give another value than the interpreter.
+
 The real functions (`Erf`, `Gamma`, `Root`, the inverse trigonometric and
 hyperbolic functions, ...) are rows whose operation the JavaScript code calls by
 name from `REAL_FUNCTIONS` (`_SYS.ir`), which the fold of the row calls too.
@@ -435,13 +458,19 @@ lengths, `D + E` is an error of the interpreter that the static type
 (`list<real>`) does not show, and the compiled value is a list as long as `D`,
 NaN where `E` has no element; `Range(1, 2) + List(1, 2, 3)` gives `[2, 4]`.
 Lists of rank 2 or more whose lengths are not one length value decline (`Q + R`
-of two inputs of type `list<list<real^2>>`). The operands of a `Range` are reals
-or integers: its elements are `lo + k·step` for `k` from 0, of the count of
-`rangeCount`, the interpreter's (`Range(1, N)` at `N = 3.5` is `[1, 2, 3]`,
-`Range(-h, h)` at `h = 2.5` is `[-2.5, -1.5, …, 2.5]`), integers when the first
-element and the step are. GLSL has no spelling of a run-time count. Whether a
-list result can hold an input is read from the rows (`alias`): such a result is
-returned as a copy.
+of two inputs of type `list<list<real^2>>`). A `Multiply` of a list of rank 2 or
+more (a matrix) with another list, and a `Power` of such a base, decline: the
+interpreter's value is the matrix product or power (`M·N`, `M·L`, `M^s` at an
+integer `s`), measured for every pair of a scalar, a list, a matrix, a vector
+and a point; `M^N` and `M^0.5`, element by element in the interpreter, decline
+too (the simple rule). A matrix times scalars, and the other operations of two
+matrices of one shape, are element by element, as in the interpreter. The
+operands of a `Range` are reals or integers: its elements are `lo + k·step` for
+`k` from 0, of the count of `rangeCount`, the interpreter's (`Range(1, N)` at
+`N = 3.5` is `[1, 2, 3]`, `Range(-h, h)` at `h = 2.5` is
+`[-2.5, -1.5, …, 2.5]`), integers when the first element and the step are. GLSL
+has no spelling of a run-time count. Whether a list result can hold an input is
+read from the rows (`alias`): such a result is returned as a copy.
 
 `Comprehension(body, Element(i, L))` is a build of `body` over the source of `L`
 (a list, a `Range`); with a condition, `Element(i, L, cond)`, it is a `filter`
@@ -490,28 +519,45 @@ build over it (JavaScript; GLSL has no list of points): under `Abs` and
 of the list (`P + List(Tuple(1, 2), Tuple(3, 4))`), so `Distance(P, L)` of a
 list `L` of points is the list of the distances, and `Distance(L, M)` of two
 lists of points the list of the distances pair by pair (lists of two lengths
-decline). `PointX`, `PointY` and `PointZ` of a tuple of scalars are `At` of
-index 1, 2 and 3 (`PointZ` of a point of 2 coordinates is an
-`incompatible-dimensions` error of the canonical form, and declines); of a list
-of points, the list of those coordinates; of a list of numbers, they decline.
-Any other reader declines a tuple operand: `Equal(Tuple(1, 2), List(1, 2))` is
-`False`, a comparison of a tuple stays unevaluated, `Map`, `Filter`, `Reduce`,
-`Loop` and `Comprehension` over a tuple, and the arms of a conditional of which
-one is a tuple and the other a list. The positions that hold a value (the root,
-an element of a `List` or a `Tuple`, the result of a `Block`, an arm of `If` or
-`Which`, a build body, a random frame) keep it. The missing arm of an `If` whose
-arm is a tuple of numbers is the tuple of NaN of its length, as the interpreter
-gives (`If(t ≤ W, Tuple(Cos(t), Sin(t)))` at `t > W` is `(NaN, NaN)`); a list
-arm, a boolean tuple and a `Which` with no `True` clause decline, as the
-interpreter gives `Missing` there. A tuple result of the root has
-`broadcastOutputs` of its type (`broadcastStrideOfType()`), so a batch with
-`outputs` gives its elements per cell. An input of a tuple type of scalars of
-one lane (`tuple<real, real>`; an integer among reals is a real) is the list of
-its elements, marked a tuple, so the rule above reads it: on JavaScript its
-value is the array of its elements (`P: [1, 2]`), on GLSL a `vecN`; so is a
-parameter of a user function declared such a tuple (see "User functions"). A
-tuple of booleans and numbers, and an input of a type with a tuple inside
-(`list<tuple<real, real>>`), decline.
+decline); and under `Multiply` and `Divide` with a list of numbers of its length
+(one length value), whose element scales the point of the same index
+(`(M − P) / D`, as the interpreter gives it). `PointX`, `PointY` and `PointZ` of
+a tuple of scalars are `At` of index 1, 2 and 3 (`PointZ` of a point of 2
+coordinates is an `incompatible-dimensions` error of the canonical form, and
+declines); of a list of points, the list of those coordinates; of a list of
+numbers, they decline. Any other reader declines a tuple operand:
+`Equal(Tuple(1, 2), List(1, 2))` is `False`, a comparison of a tuple stays
+unevaluated, `Map`, `Filter`, `Reduce`, `Loop` and `Comprehension` over a tuple,
+and the arms of a conditional of which one is a tuple and the other a list. The
+positions that hold a value (the root, an element of a `List` or a `Tuple`, the
+result of a `Block`, an arm of `If` or `Which`, a build body, a random frame)
+keep it. The missing arm of an `If` whose arm is a tuple of numbers is the tuple
+of NaN of its length, as the interpreter gives
+(`If(t ≤ W, Tuple(Cos(t), Sin(t)))` at `t > W` is `(NaN, NaN)`); a list arm, a
+boolean tuple and a `Which` with no `True` clause decline, as the interpreter
+gives `Missing` there. A tuple result of the root has `broadcastOutputs` of its
+type (`broadcastStrideOfType()`), so a batch with `outputs` gives its elements
+per cell. An input of a tuple type of scalars of one lane (`tuple<real, real>`;
+an integer among reals is a real) is the list of its elements, marked a tuple,
+so the rule above reads it: on JavaScript its value is the array of its elements
+(`P: [1, 2]`), on GLSL a `vecN`; so is a parameter of a user function declared
+such a tuple (see "User functions"). A union of tuples of one length is the
+tuple of the lanes at each position
+(`tuple<integer, real> | tuple<real, integer>` is a point of two reals, a `vec2`
+on GLSL). A tuple of booleans and numbers declines.
+
+An input that is a list of such tuples of real or integer numbers (a list of
+points: `list<tuple<real, real>>`, `list<tuple<integer, real, real>^6>`,
+extended-real elements `nan | real | signed_infinity` as for a scalar) is a list
+of rank 2 marked a tuple on its inner axis, the value that `PointList` of lists
+makes, of a stated or a run-time length: on JavaScript an array of arrays
+(`P: [[1, 2], [3, 4]]`); GLSL declines it (a list of rank 2). The entry check
+reads the outer value only, as for any list input: a string and a typed array
+throw; a row of another length, or a value that is not an array, gives an
+unspecified result. `At` of it with a constant index in range of a stated length
+is a point; another index declines (the interpreter gives a tuple of NaN out of
+range). A list of tuples of other elements, or of tuples of two lengths,
+declines.
 
 ## Effects
 
@@ -547,8 +593,9 @@ On JavaScript the code reads the runtime `_SYS` of the existing compiler
 its member `ir` (`IR_FUNCTIONS`: `REAL_FUNCTIONS`, `COMPLEX_FUNCTIONS`, `pow`,
 `mod`), under one name so that no IR name meets a member of another meaning; a
 draw, a random frame, an integral and the length of a `Range` are its members
-`drawNextRandomNumber`, `withRandomSeed`, `integrate` and `rangeCount`. Each
-pass of a loop or a build begins with `_SYS.tick()`, which checks the deadline
+`drawNextRandomNumber`, `withRandomSeed`, `irIntegrate` (which reads the
+engine's live draw, as `integrate` does) and `rangeCount`. Each pass of a loop
+or a build begins with `_SYS.tick()`, which checks the deadline
 (`ce.withTimeLimit()`, or the `deadline` of a runtime without an engine) every
 1024 passes. The `iterationBudget` option follows the rule of `compile()`
 (`CompilationOptions.iterationBudget`): a pass of a `Loop` (a `loop` instruction
@@ -562,14 +609,17 @@ passes"). A bound of a `Sum` or a `Product` with `Limits` of a real type is its
 empty (the identity); a complex bound declines, and in the `bigint` mode a real
 one, and so does a bound that is a constant infinity or NaN (the interpreter
 sums a window of an infinite range: `Sum(x^k/k!, Limits(k, 0, +∞))`). An operand
-of a `Range` that is such a constant declines too. The count is in the runtime;
-the entry starts with `_SYS.resetLoopPasses()` when the code counts passes. A
-`Sum` or a `Product` with `Limits` whose count of passes is more than the budget
-is NaN (`hi - lo < budget` is false), each loop by its own count: the lowering
-writes that test as an `if`. A `Loop` in an integrand counts its passes once per
-sample of the quadrature, whose number of samples is unspecified. A build, a
-`Filter` and a reduction of a list count no pass. GLSL has no deadline and
-counts no `Loop` pass at run time: its budget is the option or 10,000 (the
+of a `Range` that is such a constant declines too. A bound that assigns a name
+declared outside it (`Limits(i, 1, Block(p := 4, 2))`) declines: the interpreter
+does not evaluate a `Sum` or a `Product` over a bound with an effect, and `p`
+keeps its value (rule R3 of `docs/COMPILATION-MODEL.md`). The count is in the
+runtime; the entry starts with `_SYS.resetLoopPasses()` when the code counts
+passes. A `Sum` or a `Product` with `Limits` whose count of passes is more than
+the budget is NaN (`hi - lo < budget` is false), each loop by its own count: the
+lowering writes that test as an `if`. A `Loop` in an integrand counts its passes
+once per sample of the quadrature, whose number of samples is unspecified. A
+build, a `Filter` and a reduction of a list count no pass. GLSL has no deadline
+and counts no `Loop` pass at run time: its budget is the option or 10,000 (the
 existing GLSL target's default), a `Sum` or a `Product` over it is NaN as above,
 and the adapter bounds the passes of every loop (`Loop`, `Sum`, `Product`, a
 reduction) at compile time (`loopPasses()`): a constant count is itself, a
@@ -591,13 +641,21 @@ regions have no early exit.
 `Integrate(f, Limits(t, a, b))` and `NIntegrate(f, a, b)` of real bounds
 (infinite ones too) and a real integrand (a function literal of one parameter,
 or a body in the name of the `Limits`) are the region `integrate`: the integrand
-is an arrow function that the runtime passes to the existing compiler's
+is an arrow function that `_SYS.irIntegrate` passes to the existing compiler's
 quadrature (`SYS_HELPERS.integrate`: adaptive Gauss-Kronrod, stated tolerance
 1e-10 relative and 1e-12 absolute, with a Monte-Carlo fallback that draws from
-the engine). As for any pure operation, the number of evaluations of an integral
-is unspecified (an unused one is removed), and the fallback's draws are not the
-program's. An integrand with an effectful operation declines (the routine
-chooses its samples), as do two variables and the option
+the engine). When the fallback samples (at its first draw) an integrand that has
+given a value that is not finite, at a node of the quadrature or at a sample,
+the value is NaN, at each run: `∫₀^∞ x^100·e^−x dx`, whose integrand is NaN past
+about x = 1,200 while its samples are finite, gave the mean of 10^7 samples, a
+wrong number that changed at each run. A finite integrand keeps the estimate of
+the fallback, which changes between runs as in the interpreter
+(`∫₀^1000 Mod(t, 1) dt` is about 500), and an integral that converges is the
+quadrature's (x^10·e^−x, which overflows at one node). Code with an integral is
+not shippable (it may draw). As for any pure operation, the number of
+evaluations of an integral is unspecified (an unused one is removed), and the
+fallback's draws are not the program's. An integrand with an effectful operation
+declines (the routine chooses its samples), as do two variables and the option
 `quadrature: 'monte-carlo'`. GLSL has no spelling.
 
 ## User functions
@@ -667,30 +725,41 @@ it that each call passes (the length of the argument), as the root function
 literal does: `f(D) + f([1, 2])` calls one function with lengths `D.length`
 and 2. A parameter declared a tuple of reals or integers
 (`(tuple<real, real>) -> real`) is the list of its elements, marked a tuple, and
-takes a tuple argument only (`pf(P)`, `pf(Tuple(x, Sin(x)))`). A tuple argument
-for a list parameter, a list of lists, of booleans or of complex numbers
-decline. On GLSL a parameter of stated length is a vector of 2 to 4 elements
-(`vec3 B`) or an array parameter (`float B[5]`), or a `sampler2D` when its
-argument is a list in storage. For a function with a list parameter of no stated
-length, on a target without run-time lengths (`runtimeLengths: false`, GLSL),
-the arguments of the first call are lowered before the function (any other
-function is defined before its arguments are lowered): the parameter takes the
-stated length of its argument there (`c(H_1, x)` with `H_1: list<integer^90001>`
-defines `c` with `H` of 90001 elements), and a later call whose argument has
-another length declines, naming the function and the parameter (one function per
-binding, not one per length). An argument of a run-time length leaves the
-parameter of a run-time length, which declines with the target's rule. A
-recursive call uses the parameter types of the function being defined. This is
-the one property of the target that the lowering reads (`LowerOptions`): for
-such a function the IR out of the lowering differs between the targets.
+takes a tuple argument only (`pf(P)`, `pf(Tuple(x, Sin(x)))`). A parameter
+declared a list of such tuples (`(list<tuple<real, real>>) -> real`) is a list
+of points, of a stated or a run-time length as above, and takes a list of points
+only; a parameter of no declared type, or of a type that is not a scalar, whose
+argument at the first call is a list of points is one, of a run-time length on
+JavaScript (`g(L) := Sum(PointX(L))`). A tuple argument for a list parameter, a
+list of lists, of booleans or of complex numbers decline, and so does an input
+of the compilation that is a list of points read in a body (lambda lifting takes
+a list of rank 1 only). On GLSL a parameter of stated length is a vector of 2 to
+4 elements (`vec3 B`) or an array parameter (`float B[5]`), or a `sampler2D`
+when its argument is a list in storage. For a function with a list parameter of
+no stated length, on a target without run-time lengths (`runtimeLengths: false`,
+GLSL), the arguments of the first call are lowered before the function (any
+other function is defined before its arguments are lowered): the parameter takes
+the stated length of its argument there (`c(H_1, x)` with
+`H_1: list<integer^90001>` defines `c` with `H` of 90001 elements), and a later
+call whose argument has another length declines, naming the function and the
+parameter (one function per binding, not one per length). An argument of a
+run-time length leaves the parameter of a run-time length, which declines with
+the target's rule. A recursive call uses the parameter types of the function
+being defined. This is the one property of the target that the lowering reads
+(`LowerOptions`): for such a function the IR out of the lowering differs between
+the targets.
 
 A result declared a list of reals, integers or booleans (`list<integer>`,
 `list<real^3>`) has the type of the body, a list of rank 1 of a sub-lane of the
 declared one, and is not a tuple; a result declared a tuple of reals, integers
 or booleans (`(real) -> tuple<real, real>`, a point) has a tuple body of a
-sub-lane, and the result of a call is a tuple. A body of another lane
-(`tuple<integer, integer>` of a real body), a tuple body for a list result or
-the reverse, and complex elements (`tuple<complex, complex>`) decline. A
+sub-lane, and the result of a call is a tuple; a result declared a list of such
+tuples (`(…) -> list<tuple<real, real>>`) has a body that is a list of points of
+that tuple length, and the result of a call is a list of points (JavaScript). A
+local declared a list of tuples (`Declare(out, 'list<tuple<…>>', [])`, which a
+`Loop` grows) declines, as does any write to a list local. A body of another
+lane (`tuple<integer, integer>` of a real body), a tuple body for a list result
+or the reverse, and complex elements (`tuple<complex, complex>`) decline. A
 run-time length of the result is a value of the body: the call has two results,
 the length and then the list, and the JavaScript code reads the length of the
 returned array (`.length`); the function returns one value, as any other. The
@@ -833,10 +902,11 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it next to the
   (`broadcastNumbers()`, `broadcastNumbersSlice()`, `makeBroadcastAsync()`,
   `makeWillUsePool()`, `makeRunAsync()`, `makeWillParallelize()`) over the raw
   call of the code, its entry plan and the result as stored code, which a worker
-  loads. Each cell is the value of `run()` at that cell. There is no batch body
-  (CE-410) and no asynchronous copy (`parallelCode`): `runAsync()` runs `run()`,
-  and `willParallelize()` is false. In the `bigint` mode a batch is refused with
-  the error of the existing compiler.
+  loads. Each cell is the value of `run()` at that cell; a list input is shared
+  by the cells, also with `entryChecks: false`. There is no batch body (CE-410)
+  and no asynchronous copy (`parallelCode`): `runAsync()` runs `run()`, and
+  `willParallelize()` is false. In the `bigint` mode a batch is refused with the
+  error of the existing compiler.
 - **The measures.** `CE_JS_PROFILE=ir` makes the engine's own compilations
   (`implicitCompile()`) try the profile first and fall back to the existing
   compiler; `CE_JS_PROFILE_SHADOW=ir` also compiles every JavaScript `compile()`

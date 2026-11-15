@@ -10,7 +10,7 @@
  * never below the final one.
  */
 
-import type { Type } from '../../../common/type/types.js';
+import type { ListType, TupleType, Type } from '../../../common/type/types.js';
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import type { Expression } from '../../global-types.js';
@@ -79,16 +79,57 @@ export function inputType(
   return l === undefined ? undefined : { lane: l, shape };
 }
 
+/** The tuple types of `t`: a tuple, or a union of tuples. */
+const tupleMembers = (t: Type): TupleType[] | undefined =>
+  typeof t !== 'object'
+    ? undefined
+    : t.kind === 'tuple'
+      ? [t]
+      : t.kind === 'union' &&
+          t.types.every((u) => typeof u === 'object' && u.kind === 'tuple')
+        ? (t.types as TupleType[])
+        : undefined;
+
+/** The axis of the tuple mark of a value of the type `t`: 0 for a tuple (or
+ *  a union of tuples), 1 for a list of them, or `undefined`. */
+export function tupleAxis(t: Type): 0 | 1 | undefined {
+  if (tupleMembers(t)) return 0;
+  return typeof t === 'object' && t.kind === 'list' && tupleMembers(t.elements)
+    ? 1
+    : undefined;
+}
+
 /** `inputType()`, and a tuple of scalars of one lane (an integer among
- *  reals is a real) as the list of its elements (`shape: [n]`). */
-export function tupleOrInputType(t: Type, wide: 'real' | 'complex' = 'real') {
-  if (typeof t !== 'object' || t.kind !== 'tuple') return inputType(t, wide);
+ *  reals is a real) as the list of its elements (`shape: [n]`): a union of
+ *  tuples of one length is the tuple of the lanes at each position. A list
+ *  of tuples of real or integer numbers (a list of points) is a list of
+ *  rank 2 of such a tuple; `tupleAxis()` gives the mark. */
+export function tupleOrInputType(
+  t: Type,
+  wide: 'real' | 'complex' = 'real'
+): ReturnType<typeof inputType> {
+  if (tupleAxis(t) === 1) {
+    const list = t as ListType;
+    const point = tupleOrInputType(list.elements, wide);
+    const outer = inputType({ ...list, elements: 'real' }, wide)?.shape;
+    return point === undefined ||
+      point.lane === 'boolean' ||
+      outer?.length !== 1
+      ? undefined
+      : { lane: point.lane, shape: [...outer, ...point.shape] };
+  }
+  const members = tupleMembers(t);
+  if (members === undefined) return inputType(t, wide);
+  const n = members[0].elements.length;
+  if (members.some((m) => m.elements.length !== n)) return undefined;
   const lanes = new Set(
-    t.elements.map((x) => {
-      // An element of type `unknown` declines, as in a list.
-      const ir = x.type === 'unknown' ? undefined : inputType(x.type, wide);
-      return ir?.shape.length === 0 ? ir.lane : 'none';
-    })
+    members.flatMap((m) =>
+      m.elements.map((x) => {
+        // An element of type `unknown` declines, as in a list.
+        const ir = x.type === 'unknown' ? undefined : inputType(x.type, wide);
+        return ir?.shape.length === 0 ? ir.lane : 'none';
+      })
+    )
   );
   const lane =
     lanes.size === 1
@@ -98,7 +139,7 @@ export function tupleOrInputType(t: Type, wide: 'real' | 'complex' = 'real') {
         : 'none';
   return lane === 'none' || lane === 'complex'
     ? undefined
-    : { lane, shape: [t.elements.length] };
+    : { lane, shape: [n] };
 }
 
 /** A union of one type and `nan` or `missing` members is that type
@@ -187,7 +228,8 @@ function signatureTypes(e: Fn, literal: Fn) {
     return n;
   });
   // A list of reals or integers, of a stated or a run-time length (`'run-time'`,
-  // a hidden length parameter before it), or a tuple of them (`tuple`). A
+  // a hidden length parameter before it), a tuple of them, or a list of such
+  // tuples (`tuple`, the axis of the mark). A
   // parameter of no stated type, or of a type that is not a scalar, is a
   // point when the argument of the first call is one (`point`, `define()`).
   const params = names.map((p, i) => {
@@ -196,9 +238,9 @@ function signatureTypes(e: Fn, literal: Fn) {
     const s = inputType(t);
     const scalar = s?.shape.length === 0;
     return list !== undefined &&
-      list.shape.length === 1 &&
+      (list.shape.length === 1 || tupleAxis(t) === 1) &&
       (list.lane === 'real' || list.lane === 'integer')
-      ? { ...list, tuple: typeof t === 'object' && t.kind === 'tuple' }
+      ? { ...list, tuple: tupleAxis(t) }
       : {
           lane: scalar ? s!.lane : 'real',
           shape: [],
@@ -208,10 +250,10 @@ function signatureTypes(e: Fn, literal: Fn) {
   const r = signature?.result && present(signature.result);
   // A list of reals, integers or booleans: the type of the body, whose
   // length can be a value of the body; or a tuple of them (a point), whose
-  // body is a tuple.
+  // body is a tuple; or a list of points (`tuple` is the axis of the mark).
   const ir = r === undefined ? undefined : tupleOrInputType(r);
-  const list = ir?.shape.length === 1 ? ir : undefined;
-  const tuple = typeof r === 'object' && r.kind === 'tuple';
+  const tuple = r === undefined ? undefined : tupleAxis(r);
+  const list = ir?.shape.length === 1 || tuple === 1 ? ir : undefined;
   // No stated result, or a tuple of elements of no stated type
   // (`tuple<unknown, unknown>`): the type of the body, a scalar or a point
   // of that many numbers (`points`).
@@ -237,7 +279,8 @@ type UserFunction = {
   params: {
     lane: Lane;
     shape: readonly (number | 'run-time')[];
-    tuple?: boolean;
+    /** The axis of the tuple mark: a point (0) or a list of points (1). */
+    tuple?: 0 | 1;
     /** The name of a list parameter of a run-time length that took the
      *  stated length of its first argument, or of a parameter that took
      *  the point of its first argument. */
@@ -275,8 +318,12 @@ export function functionLowering(cx: Lowering) {
     const { names, result, list, tuple, r, open, points } = sig;
     const params = sig.params.map((p, i) => {
       const n = args?.[i] === undefined ? undefined : type(args[i]).shape[0];
-      if (p.shape[0] === 'run-time' && typeof n === 'number')
-        return { ...p, shape: [n], taken: names[i] };
+      if (
+        !cx.runtimeLengths &&
+        p.shape[0] === 'run-time' &&
+        typeof n === 'number'
+      )
+        return { ...p, shape: [n, ...p.shape.slice(1)], taken: names[i] };
       if (!('point' in p) || p.point === undefined) return p;
       // The argument of the first call: a point of real or integer numbers,
       // or a scalar for a parameter of no stated type.
@@ -288,7 +335,24 @@ export function functionLowering(cx: Lowering) {
         typeof n === 'number' &&
         (t.lane === 'real' || t.lane === 'integer')
       )
-        return { lane: p.lane, shape: [n], tuple: true, taken: names[i] };
+        return { lane: p.lane, shape: [n], tuple: 0 as const, taken: names[i] };
+      // A list of points, of a run-time length where the target has them.
+      if (
+        cx.tuples.get(v!) === 1 &&
+        t?.shape.length === 2 &&
+        (t.lane === 'real' || t.lane === 'integer')
+      )
+        return {
+          lane: p.lane,
+          shape: [
+            cx.runtimeLengths || typeof t.shape[0] !== 'number'
+              ? 'run-time'
+              : t.shape[0],
+            t.shape[1],
+          ],
+          tuple: 1 as const,
+          taken: names[i],
+        } as UserFunction['params'][number];
       if (p.point !== 'unknown')
         scalarOf(
           literal,
@@ -319,7 +383,7 @@ export function functionLowering(cx: Lowering) {
           : n
       );
       const v = param(names[i], { lane: t.lane, shape });
-      if ('tuple' in t && t.tuple) cx.tuples.set(v, 0);
+      if ('tuple' in t && t.tuple !== undefined) cx.tuples.set(v, t.tuple);
       return v;
     });
     const fn: UserFunction = {
@@ -364,13 +428,18 @@ export function functionLowering(cx: Lowering) {
               ? `a body of ${e.operator} that is not a scalar or a point of numbers (a result of no stated type)`
               : `a body of ${e.operator} that is not ${engineTypeToString(r!)}`
           );
+        // The shape of the body, past a run-time length.
+        const fixed = list?.shape[0] === 'run-time' ? 1 : 0;
         if (
           list !== undefined &&
-          (cx.tuples.has(body) !== tuple ||
-            t.shape.length !== 1 ||
+          (cx.tuples.get(body) !== tuple ||
+            t.shape.length !== list.shape.length ||
             !isSubLane(t.lane, list.lane) ||
-            (list.shape[0] !== 'run-time' &&
-              !sameShape(t.shape, list.shape as number[], cx.constant)))
+            !sameShape(
+              t.shape.slice(fixed),
+              list.shape.slice(fixed) as number[],
+              cx.constant
+            ))
         )
           decline(
             literal,
@@ -431,16 +500,28 @@ export function functionLowering(cx: Lowering) {
       const v = cx.widen(early?.[i] ?? cx.value(op)!, p.lane);
       const t = type(v);
       if (
-        p.tuple === true &&
+        p.tuple === 0 &&
         p.taken !== undefined &&
         (cx.tuples.get(v) !== 0 || t.shape[0] !== p.shape[0])
       )
         decline(
           op,
-          `an argument of ${e.operator} of another shape than at its first call: the parameter ${p.taken} is a point of ${p.shape[0]} numbers (${typeToString(t)} here)`
+          `an argument of ${e.operator} of another shape than at its first call: the parameter ${p.taken} is a point of ${p.shape[0]} numbers (${typeToString(t, cx.tuples.get(v))} here)`
+        );
+      if (
+        p.tuple === 1 &&
+        p.taken !== undefined &&
+        (cx.tuples.get(v) !== 1 ||
+          t.shape.length !== 2 ||
+          t.shape[1] !== p.shape[1])
+      )
+        decline(
+          op,
+          `an argument of ${e.operator} of another shape than at its first call: the parameter ${p.taken} is a list of points of ${p.shape[1]} numbers (${typeToString(t, cx.tuples.get(v))} here)`
         );
       if (
         p.taken !== undefined &&
+        typeof p.shape[0] === 'number' &&
         t.shape.length > 0 &&
         t.shape[0] !== p.shape[0]
       )
@@ -464,13 +545,10 @@ export function functionLowering(cx: Lowering) {
           `a list argument of ${e.operator} (the interpreter maps the function over the list)`
         );
       // A tuple argument for a tuple parameter only.
-      if (
-        cx.tuples.has(v) !== (p.tuple === true) ||
-        !isSubType(t, declared, cx.constant)
-      )
+      if (cx.tuples.get(v) !== p.tuple || !isSubType(t, declared, cx.constant))
         decline(
           op,
-          `an argument of ${e.operator} that is not ${typeToString(declared)}`
+          `an argument of ${e.operator} that is not ${typeToString(declared, p.tuple)}`
         );
       return [...length, v];
     });
@@ -510,7 +588,10 @@ export function functionLowering(cx: Lowering) {
       typeof n === 'object' ? [b.newValue({ lane: 'integer', shape: [] })] : [];
     const out = b.newValue(
       outs.length > 0
-        ? { lane: fn.result.lane, shape: [{ v: outs[0] }] }
+        ? {
+            lane: fn.result.lane,
+            shape: [{ v: outs[0] }, ...fn.result.shape.slice(1)],
+          }
         : fn.result
     );
     b.emit({
@@ -519,7 +600,8 @@ export function functionLowering(cx: Lowering) {
       fn: fn.ir.name,
       args: [...args, ...inputs],
     });
-    if (cx.tuples.has(fn.ir.body.yields[0])) cx.tuples.set(out, 0);
+    const axis = cx.tuples.get(fn.ir.body.yields[0]);
+    if (axis !== undefined) cx.tuples.set(out, axis);
     return out;
   };
 
@@ -547,7 +629,7 @@ export function functionLowering(cx: Lowering) {
         `the function ${fn.ir.source} reads the input ${name} of type ${engineTypeToString(t)}, which is not a scalar or a list of numbers of a stated length`
       );
     const v = b.newValue(ir as IRType);
-    if (typeof t === 'object' && t.kind === 'tuple') cx.tuples.set(v, 0);
+    if (tupleAxis(t) === 0) cx.tuples.set(v, 0);
     fn.ir.body.params.push(v);
     fn.ir.paramNames.push(name);
     fn.ir.lengthOf.push(false);

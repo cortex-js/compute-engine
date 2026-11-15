@@ -289,12 +289,16 @@ export function compileWithIrProfile(
   };
   const bigint = mode === 'bigint';
   const checks = options?.entryChecks !== false;
+  // The list inputs that a batch shares between its cells, also with the
+  // checks off (`plan.lists` is what the check reads).
+  const shared: Key[] = [];
   entry.paramNames.forEach((name, k) => {
     const t = p.types[entry.body.params[k]];
     const i = argumentIndex(entry, k);
     const key = literal ? i : name;
     if (entry.lengthOf[k]) return;
     if (t.shape.length > 0) {
+      shared.push(key);
       if (!checks) return;
       plan.lists.push(key);
       plan.strings.set(key, literal ? `argument ${i + 1}` : `"${name}"`);
@@ -308,6 +312,7 @@ export function compileWithIrProfile(
     }
   });
   const entryPlan = plan as EntryPlan;
+  const batchPlan = { ...plan, lists: shared } as EntryPlan;
   const f = slice.run as (...args: unknown[]) => unknown;
   // The construction of `load()`: the entry plan, then the result
   // convention of every stored kernel (`normalizeRunResult()`). A call
@@ -388,13 +393,13 @@ export function compileWithIrProfile(
   };
   result.broadcast = (inputs, opts) =>
     inFrame(() =>
-      broadcastNumbers(f, entryPlan, inputs, opts, result.broadcastOutputs)
+      broadcastNumbers(f, batchPlan, inputs, opts, result.broadcastOutputs)
     );
   const engine = expr.engine;
   const asyncSpec: BroadcastAsyncSpec = {
     kind: 'javascript',
     stored: result,
-    lists: plan.lists as string[],
+    lists: shared as string[],
     booleans: plan.booleans as string[],
     shippable,
     iterationLimit: () => engine.iterationLimit,
@@ -402,7 +407,7 @@ export function compileWithIrProfile(
       inFrame(() =>
         broadcastNumbersSlice(
           f,
-          entryPlan,
+          batchPlan,
           inputs,
           opts,
           out,
