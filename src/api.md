@@ -315,6 +315,24 @@ contextStack: readonly EvalContext[];
 
 <MemberCard>
 
+##### ComputeEngine.macroNames {#macronames-1}
+
+```ts
+readonly macroNames: ReadonlySet<string>;
+```
+
+The names that were declared as a macro on this engine
+(`ce.declare(name, { macro })`), in any scope. The set never shrinks: a
+name stays in it after the scope of its declaration is popped, and after
+a later declaration of the name that is not a macro. So a name that is
+not in the set is not a macro in any scope, and a name that is in the set
+may be one: `ce.lookupDefinition(name)` gives the definition that the
+current scope reads. The set of an engine with no macro is empty.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ComputeEngine.timeRemaining {#timeremaining-1}
 
 ```ts
@@ -6383,7 +6401,6 @@ type TypeProvenanceEntry = {
   kind: "declared" | "auto-declared" | "inferred" | "value-derived";
   axis: "type" | "effects";
   cause: Expression;
-  epoch: number;
   span: {
      start: number;
      end: number;
@@ -12686,6 +12703,7 @@ per canonicalization would not be).
 type ParameterRequirement = {
   type: BoxedType;
   cause: InferenceCauseContext;
+  numeric: boolean;
 };
 ```
 
@@ -13086,6 +13104,24 @@ readonly context: EvalContext;
 ```ts
 contextStack: readonly EvalContext[];
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.macroNames {#macronames}
+
+```ts
+readonly macroNames: ReadonlySet<string>;
+```
+
+The names that were declared as a macro on this engine
+(`ce.declare(name, { macro })`), in any scope. The set never shrinks: a
+name stays in it after the scope of its declaration is popped, and after
+a later declaration of the name that is not a macro. So a name that is
+not in the set is not a macro in any scope, and a name that is in the set
+may be one: `ce.lookupDefinition(name)` gives the definition that the
+current scope reads. The set of an engine with no macro is empty.
 
 </MemberCard>
 
@@ -18001,8 +18037,13 @@ body — tuple, string and fixed-shape branches enumerate too), or
 readonly staticShape: StaticShape | undefined;
 ```
 
-The collection shape that this expression promises, read without
-evaluating it, or `undefined` when it promises no collection.
+The collection shape that this expression promises, or `undefined` when
+it promises no collection.
+
+It does not evaluate an application or a symbol. For a collection value
+it reads the collection facets, and the `count` of a lazy view over an
+eager source (`Join(f(1), [4])`, a `Filter`) evaluates that source: it
+calls `f`, or runs the filter's function once per element.
 
 `staticShape` answers the SHAPE question: "what does this expression
 promise to be?". `isCollection` answers the CAPABILITY question: "is a
