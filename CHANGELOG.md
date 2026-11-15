@@ -1,3 +1,21 @@
+## [Unreleased]
+
+### Improvements
+
+- **`Hypergeometric2F1` has a derivative in `z`, and `Series` of it
+  expands.** `D(₂F₁(a, b; c; z), z)` is `(ab/c)·₂F₁(a + 1, b + 1; c + 1; z)`
+  (DLMF 15.5.1; the parameters keep the inert partial), so the chain rule
+  works through the argument, and `Series(₂F₁(1, 1; 3; x), x, 0, 3)` was
+  unevaluated and is `1 + x/3 + x²/6 + x³/10 + O(x⁴)`, the coefficients
+  `(a)ₖ(b)ₖ/((c)ₖ k!)`. A terminating `₂F₁` (`a` or `b` a non-positive
+  integer) is its polynomial and expands exactly about any point:
+  `Series(₂F₁(−2, 3; 4; x), x, 0, 5)` is `1 − 3x/2 + 3x²/5` with no `O(·)`
+  term, and about 1 it is `1/10 − 3(x − 1)/10 + 3(x − 1)²/5`. The expansion
+  still declines where it is not a Taylor series: at an argument that is a
+  real number `≥ 1` (the branch point and the cut), at ±∞, and when `c` is a
+  non-positive integer. (#597, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 ## 0.191.0 _2026-11-15_
 
 ### Breaking Changes
