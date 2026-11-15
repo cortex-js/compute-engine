@@ -252,6 +252,9 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // `Max` of a list is its largest element: a reduction, not threaded.
   row('Max',          'variadic', arith('max', 1),               { fold: Math.max, ...list }),
   row('Min',          'variadic', arith('min', 1),               { fold: Math.min, ...list }),
+  // The element-wise `max` and `min`: they thread over lists.
+  row('ElementMax',   'variadic', arith('emax', 1),              { fold: Math.max }),
+  row('ElementMin',   'variadic', arith('emin', 1),              { fold: Math.min }),
   row('Less',         'chain',    [[[R], B, 'lt']],              { fold: (a: number, b: number) => a < b }),
   row('LessEqual',    'chain',    [[[R], B, 'le']],              { fold: (a: number, b: number) => a <= b }),
   row('Greater',      'chain',    [[[R], B, 'gt']],              { fold: (a: number, b: number) => a > b }),
@@ -269,10 +272,11 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      2,          [[['list', I], 'element', 'elem']], part),
   // A draw of the active `WithRandomSeed` frame, or a live draw outside one.
   row('Random',       0,          [[[], R, 'draw']],             { ...list, effect: 'effectful' }),
-  // The number of elements of `Range(a, b, step)`: the engine's `rangeCount`.
-  row(undefined,      3,          [[[I, I, I], I, 'rangecount']], { ...list, fold: rangeCount }),
+  // The number of elements of `Range(a, b, step)`: the engine's `rangeCount`
+  // (`b` can be a real: `Range(1, 3.5)` is `[1, 2, 3]`).
+  row(undefined,      3,          [[[I, R, I], I, 'rangecount']], { ...list, fold: rangeCount }),
   // The step of `Range(a, b)`: 1, or -1 when `b < a`.
-  row(undefined,      2,          [[[I, I], I, 'rangestep']],    { ...list, fold: (a: number, b: number) => (b >= a ? 1 : -1) }),
+  row(undefined,      2,          [[[I, R], I, 'rangestep']],    { ...list, fold: (a: number, b: number) => (b >= a ? 1 : -1) }),
 ].map((r) => deepFreeze(r)));
 
 /**
@@ -452,7 +456,15 @@ export function resultType(
   if (result === 'element') return elementType(types[args.indexOf('list')]);
   const lists = types.filter((t) => t.shape.length > 0);
   const shape = lists[0]?.shape ?? [];
-  if (!lists.every((t) => sameShape(t.shape, shape))) return undefined;
+  // Rank 1: a run-time length fits any length, and the result has the
+  // shape of the first list (two lengths are an error of the interpreter
+  // that the static type does not show).
+  const fits = ([n, ...rest]: readonly Length[]) =>
+    rest.length === 0 &&
+    shape.length === 1 &&
+    (typeof n !== 'number' || typeof shape[0] !== 'number' || n === shape[0]);
+  if (!lists.every((t) => sameShape(t.shape, shape) || fits(t.shape)))
+    return undefined;
   return { lane: result, shape };
 }
 

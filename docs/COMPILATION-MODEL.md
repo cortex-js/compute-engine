@@ -181,6 +181,10 @@ interpreter's value. A line is removed when the case declines or is fixed.
   the length of its first element: at `D = [1, 2, 3]` it gives `[[1, 2, 3], 3]`
   where a tuple of two elements has length 2. `ce.box()` of JSON never shares
   nodes.
+- `javascript`, profile `ir` (crafted): `Add(Range(1, 2), List(1, 2, 3))`
+  gives `[2, 4]`; the interpreter gives the error `incompatible-dimensions`.
+  The length of a `Range` is a value for the compiler, and it does not
+  compare a length value with a stated length.
 - `javascript`: a list whose length is random, then another draw:
   `Function(Block(Declare(A, 'list<integer>', Comprehension(j, Element(j, Range(1, 2 + Random(Range(1, 3)))))), Declare(r, 'real', Random()), 1000·r + Length(A)), u)`
   applied to `0.5` under the seed 1 gives `211.47662186831073`. The interpreter gives

@@ -34,7 +34,7 @@ export type Expected =
 /** An engine with the inputs of the tests declared: `x`, `y` real; `n`,
  *  `m` integer; `L`, `M` lists of three reals; `I` a list of three
  *  integers; `D`, `E` lists of reals and `J` a list of integers, of
- *  run-time lengths; `Q` a list of pairs of reals, of run-time length;
+ *  run-time lengths (`E` as long as `D` at every point); `Q` a list of pairs of reals, of run-time length;
  *  `p` a boolean. `h` has a value (2.5) and `a` the type
  *  `any`: both decline. The user functions: `f(a, b) = ab + 1` declared
  *  `(real, real) -> real`; `g(a) = 2a` not declared; `fact` (declared
@@ -337,7 +337,7 @@ export const POINTS: Point[] = [
     M: [0.25, 4, -0.75],
     I: [3, -4, 7],
     D: [1.5, -2, 3, 0.25],
-    E: [2, 0.5],
+    E: [2, 0.5, -1, 4],
     J: [4, -5, 6],
     p: true,
   },
@@ -363,7 +363,7 @@ export const POINTS: Point[] = [
     M: [2, -2, 0.5],
     I: [10, 2, -9],
     D: [-0.5],
-    E: [3, -1, 0.75],
+    E: [3],
     J: [7],
     p: true,
   },
@@ -376,7 +376,7 @@ export const POINTS: Point[] = [
     M: [-1, 0, 3],
     I: [-5, 5, 0],
     D: [7, -7, 0, 2.5, -3.25, 1],
-    E: [0],
+    E: [0, 1, -2, 0.5, 6, -0.75],
     J: [-5, 5, 0, 12, 3],
     p: false,
   },
@@ -389,7 +389,7 @@ export const POINTS: Point[] = [
     M: [3, 2, 1],
     I: [1, 1, 1],
     D: [0.3, 0.6],
-    E: [0.3, 0.6],
+    E: [0.6, -0.3],
     J: [1, 1],
     p: true,
   },
@@ -407,7 +407,7 @@ export const EDGE_POINTS: Point[] = [
     M: [0, -0, 2],
     I: [0, -1, 9007199254740991],
     D: [NaN, -0, 1],
-    E: [-0],
+    E: [-0, 2, NaN],
     J: [0, -1, 9007199254740991],
     p: true,
   },
@@ -420,7 +420,7 @@ export const EDGE_POINTS: Point[] = [
     M: [3, 2, 1],
     I: [9007199254740991, -9007199254740991, 2],
     D: [1e300, -1e300, 5e-324],
-    E: [1e300],
+    E: [1e300, 1, -5e-324],
     J: [9007199254740991, -9007199254740991, 2],
     p: false,
   },
@@ -616,7 +616,6 @@ export const DECLINES: Record<string, Json> = {
   'Less of complex': ['If', ['Less', 'Z', 1], 1, 2],
   'bound that is not an integer': ['Sum', 'k', ['Limits', 'k', 1, 'x']],
   'different lengths': ['Add', 'L', ['List', 1, 2]],
-  'one length by construction': ['Add', 'D', 'E'],
   'a capture': ['cap', 1],
   'declared result type': ['rec2', 'n'],
   'list argument': ['g', 'D'],
@@ -749,9 +748,11 @@ export function generator(
         pick(['Sin', 'Exp', 'Negate', 'Abs', 'Floor']),
         dlist(d - 1, names),
       ];
-    // Two lists of one length by construction.
+    // Two lists of one length by construction (`J`), or two input lists of
+    // run-time lengths, equal at every point (`D + Map(f, E)`).
     const base = pick(['D', 'J']);
-    return ['Add', base, ['Map', fn((ns) => real(d - 1, ns), names), base]];
+    const f = fn((ns) => real(d - 1, ns), names);
+    return ['Add', base, ['Map', f, base === 'D' ? 'E' : base]];
   };
 
   const real = (d: number, names: string[] = []): Json => {

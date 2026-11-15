@@ -1,6 +1,11 @@
 # The structured JavaScript route: a new contract and a plan to make it smaller
 
-Status: DRAFT for the user's approval. No code has been changed for it.
+Status: section 2, the contract, is APPROVED by the user (2026-11-14), with
+the bound of 1e-12, rule 8 as written, and seeded sequences stable across
+versions of the engine. Sections 3 to 5 describe the plan to shrink the
+structured route; the user chose a rebuild instead, the pipeline of
+`src/compute-engine/compilation/ir/`, whose state is in
+`docs/plans/2026-11-09-js-compiler-status-and-plan.md`.
 
 ## 1. Why
 
@@ -127,9 +132,11 @@ is pure, has no getter on its inputs object, compares compiled and interpreted
 values with a relative tolerance of 1e-12, and depends on evaluation order
 only through seeded draws.
 
-Open point for the user: Tycho suggests that the seeded sequence also stays
-the same across versions of the engine, so that a stored document keeps its
-picture. Recommended: yes.
+**Seeded sequences are stable across versions of the engine** (user decision,
+2026-11-14; Tycho's request): a frame that rule 4 guarantees gives the same
+draws for the same seed in a later version, so that a stored document keeps
+its picture. A change of the generator or of the draw of a site is a
+breaking change.
 
 ## 3. What the audit found
 
@@ -226,8 +233,9 @@ documents comparing values, and its seeded-random tests.
 
 ## 6. Decisions for the user
 
-1. Approve the contract of section 2, including the 1e-12 bound.
-2. Seeded sequences stable across versions (recommended: yes).
+1. (Decided 2026-11-14: the contract of section 2 is approved, with the
+   1e-12 bound.)
+2. (Decided 2026-11-14: seeded sequences are stable across versions.)
 3. (Decided 2026-11-12: rule 8. Operations that are not pure keep the
    program's order; pure ones have no order.)
 4. The order of the plan, in particular the table of step 3 before more

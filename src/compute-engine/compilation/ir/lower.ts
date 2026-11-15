@@ -446,13 +446,7 @@ export function lower(
         return a === 'list' ? v : widen(v, a);
       });
       const t = resultType(signature, operands.map(type), same);
-      if (t === undefined)
-        decline(
-          node,
-          types.some((t) => lengthValues(t).length > 0)
-            ? 'lists of run-time lengths that are not one length by construction (the same list, or a Map of it)'
-            : 'lists of different lengths'
-        );
+      if (t === undefined) decline(node, 'lists of different lengths or ranks');
       const out = b.op(signature[2], operands, t);
       return tuple === undefined
         ? out
@@ -1062,16 +1056,30 @@ export function lower(
 
   /** `If` and `Which`: a chain of conditionals whose last arm is
    *  `otherwise` (absent: NaN, the value of a selection that takes no
-   *  arm). */
+   *  arm; for an `If` whose arm is a tuple of numbers, the tuple of NaN:
+   *  a `Which` gives `Missing`). */
   const conditional = (
     node: Expression,
     clauses: [Expression, Expression][],
     otherwise: Expression | undefined,
-    want: boolean
+    want: boolean,
+    first?: V
   ): V | undefined => {
     if (clauses.length === 0) {
       if (otherwise !== undefined) return value(otherwise, want);
-      return want ? b.constant(NaN, 'real') : undefined;
+      if (!want) return undefined;
+      const t = first === undefined ? undefined : type(first);
+      if (
+        node.operator !== 'If' ||
+        t?.shape.length !== 1 ||
+        tuples.get(first!) !== 0 ||
+        t.lane === 'complex'
+      )
+        return b.constant(NaN, 'real');
+      const nan = Array.from({ length: t.shape[0] as number }, () =>
+        b.constant(NaN, 'real')
+      );
+      return keep(first!, b.list(nan, { lane: 'real', shape: t.shape }));
     }
     const [[test, then], ...rest] = clauses;
     const cond = scalar(test);
@@ -1080,8 +1088,8 @@ export function lower(
     return branch(
       node,
       cond,
-      () => value(then, want),
-      () => conditional(node, rest, otherwise, want),
+      () => (first = value(then, want)),
+      () => conditional(node, rest, otherwise, want, first),
       want
     );
   };

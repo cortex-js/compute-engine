@@ -1414,10 +1414,79 @@ input (18), an element-wise sum of lists of two run-time lengths (15),
 `ElementMax` and `ElementMin` of scalars (14), an `If` with a tuple arm and
 no else (10), `Break` (5), a `Range` of reals (5).
 
-Open with the user: how a host changes the lowering of an operator when the
-existing compiler is deleted (a definition's `compile` handler returns text
-for it); whether a loop whose result is not read may be removed, counting no
-pass of `iterationBudget`.
+Eleventh batch, 2026-11-14 (small causes of Tycho's third run). Rows
+`ElementMax` and `ElementMin`, which thread over lists. An `If` with no else
+arm whose arm is a tuple of numbers gives the tuple of NaN when the condition
+is false, as the interpreter does. The upper bound of a `Range` may be a
+real (`Range(1, 3.5)` is `[1, 2, 3]`). An element-wise operation on lists of
+rank 1 of two run-time lengths compiles, the result having the length of the
+first list: the interpreter gives an error that the static type does not show
+when the lengths differ, so the compiled value is unspecified then. A length
+that is a value is not compared with a stated length (a known limitation,
+crafted: `Range(1, 2) + [1, 2, 3]`); the version that declined such programs
+needed a prediction of the `fold` pass and a weaker verifier, and was not
+kept. Measured in a worktree at `3ab43b3e2c3b8c075a0865f364a155dbefa2a66c`
+plus the patch; 5,868 lines in `ir/`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,485 of 10,860 (96.5%) |
+| Every JavaScript compile | 23,899 of 38,930 (61.4%) |
+| Public `compile()` calls | 13,414 of 28,069 (47.8%) |
+
+No test fails in the shadow run; with the switch on, the one test of CE-1267
+fails as before.
+
+Colours (`AsOklab`, `Oklch`, `Rgb`; 54 declines of Tycho's audit), sized and
+not built: an opaque lane as the complex one (the runtime's colour object on
+JavaScript), about ten rows calling the existing `_SYS` helpers, an estimated
+40 to 60 lines, declined on GLSL at first. Tycho's witness selects with
+`Which`, which declines in a Tycho engine until its handler is gone, and its
+colour expressions also pass one pure host function through the `functions`
+option; both come first.
+
+Tycho's requests for library operators after the decision below (CE-1320 a
+masked read, CE-1321 a comparison of two lists by position, CE-1322 a `Which`
+with the Desmos list broadcast) are closed with no operator: a `Map` or a
+`Filter` over `Range(1, Min of the lengths)` gives the Desmos tables on the
+interpreter and on both JavaScript compilers, Tycho's instrument passes with
+those forms, and no row of its corpus (779 documents) has a mask that is a
+list variable or a branch whose length only a value gives. Tycho rewrites
+every Desmos row before it is evaluated or compiled, and removes its
+`evaluate` and `compile` handlers of `At` and `Which` together: 207 index
+sites need the floor rewrite, 659 have an integer index.
+
+User decisions of 2026-11-14:
+
+- **How a host changes the lowering of an operator.** No hook in the new
+  compiler. A host rewrites the MathJSON tree before it compiles (Tycho: the
+  Desmos index rule becomes `At(L, Max(Floor(i + …), 0))` at compile time),
+  and where today's operators cannot say a rule, the engine gets a library
+  operator with that meaning (Tycho: a masked read that keeps the positions
+  where the condition is defined and true, and a comparison of two lists by
+  position up to the shorter one). The interpreter, JavaScript and GLSL then
+  read one tree. A definition with a host `compile` handler or
+  `compileHelpers` keeps declining on the profile until the host removes it.
+- **The other extension mechanisms** (`OperatorDefinition.compile` and
+  `compileHelpers`, the `compile()` options `functions`, `operators`,
+  `imports`, `preamble`): the new compiler starts without them. What breaks
+  is looked at then, and a mechanism comes back only if it is needed.
+  What Tycho uses of them (read by `tycho-desk` at Tycho `d064b9f4d`): the
+  in-place `compile` handler and `compileHelpers` on `At` and `Which`, and
+  nothing else on a definition; the option `functions` in two places, both
+  for the colormap of a colour expression (`style-expressions.ts`): one pure
+  host function given as source text, `{ source: "((h, v) =>
+  globalThis.__tychoColormap(h, v))", pure: true }` for JavaScript and a GLSL
+  function text for GLSL. It passes no `operators`, `imports` or `preamble`.
+  So the first thing that breaks is the colormap of a colour expression.
+- **A loop whose result is not read is removed** and counts no pass of
+  `iterationBudget`. Tycho changed the two tests that used such a loop
+  (Tycho `d064b9f4d`).
+- **The contract** (`docs/plans/2026-11-12-js-route-course-correction.md`,
+  section 2) is approved, with rule 8 as written and seeded sequences stable
+  across versions of the engine.
+- **A timeout inside a cell of a batch stops the batch** (the change of the
+  sixth batch to `broadcast.ts`, for both compilers): confirmed.
 
 Order of the coverage from this list: (6) `broadcast: true` and the batch and
 asynchronous members of the result; (7) the extended-real input types,

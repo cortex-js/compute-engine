@@ -74,6 +74,8 @@ export const GLSL: Syntax = Object.freeze({
     'mod.int': { text: '_imod($0, $1)', helpers: ['_imod'] },
     'max': 'max($0, $1)',
     'min': 'min($0, $1)',
+    'emax': 'max($0, $1)',
+    'emin': 'min($0, $1)',
     'lt': '($0 < $1)',
     'le': '($0 <= $1)',
     'gt': '($0 > $1)',

@@ -309,7 +309,20 @@ nested list that can be out of range declines. `build` and `filter` are region
 rows. A `Length`, a reduction, a `Map` or a `Filter` of a `Range` reads its
 count and the arithmetic of its elements, so `Length(Range(1, n))` makes no
 list. `Max` and `Min` fold from -∞ and +∞ over all their operands, and give NaN
-when the total count of elements and scalars is 0. Whether a list result can
+when the total count of elements and scalars is 0; `ElementMax` and `ElementMin`
+are rows that thread (`ElementMax(D, 0.3)` is a list). An element-wise
+operation of lists of rank 1 has the length of its first list and reads the
+others at the same index. Lengths that are numbers and differ decline
+(`List(1, 2, 3)·D + List(4, 5)`); a length that is a value fits any length,
+also one that happens to be a constant (the count of `Range(1, 2)`). When the
+lengths differ, the result is unspecified: with `D` and `E` of two lengths,
+`D + E` is an error of the interpreter that the static type (`list<real>`) does
+not show, and the compiled value is a list as long as `D`, NaN where `E` has
+no element; `Range(1, 2) + List(1, 2, 3)` gives `[2, 4]`. Lists of rank 2 or
+more whose lengths are not one length value decline (`Q + R` of two inputs of
+type `list<list<real^2>>`). A `Range` can have a real upper bound, its elements are integers
+(`Range(1, N)` at `N = 3.5` is `[1, 2, 3]`, the count of `rangeCount`); a real
+first element or step declines. Whether a list result can
 hold an input is read from the rows (`alias`): such a result is returned as a
 copy.
 
@@ -351,7 +364,11 @@ operand: `Abs(Tuple(3, 4))` is the norm 5, `Equal(Tuple(1, 2), List(1, 2))` is
 `Loop` and `Comprehension` over a tuple, and the arms of a conditional of which
 one is a tuple and the other a list. The positions that hold a value (the root,
 an element of a `List` or a `Tuple`, the result of a `Block`, an arm of `If` or
-`Which`, a build body, a random frame) keep it. A tuple result of the root has
+`Which`, a build body, a random frame) keep it. The missing arm of an `If` whose
+arm is a tuple of numbers is the tuple of NaN of its length, as the interpreter
+gives (`If(t ≤ W, Tuple(Cos(t), Sin(t)))` at `t > W` is `(NaN, NaN)`); a list
+arm, a boolean tuple and a `Which` with no `True` clause decline, as the
+interpreter gives `Missing` there. A tuple result of the root has
 `broadcastOutputs` of its type (`broadcastStrideOfType()`), so a batch with
 `outputs` gives its elements per cell. An input of a type with a tuple
 (`list<tuple<real, real>>`) declines.
@@ -498,7 +515,7 @@ type is the body's), a list of lists, and a list result on GLSL.
   its `int` bounds to ±2^30. GLSL has no run-time length, region, draw, frame or
   recursion.
 - A list of lists of run-time length (other than an input's outer list), a
-  `Range` of reals, a string seed, a list of run-time length made in a random
+  `Range` of a real first element or step, a string seed, a list of run-time length made in a random
   frame, and `Random` of a domain decline.
 - A copied list result is a `structuredClone`: two rows that are the same list
   in the result (`[L, L]`) stay one object in the copy.

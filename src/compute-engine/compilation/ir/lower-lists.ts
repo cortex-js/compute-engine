@@ -76,12 +76,13 @@ export function listLowering(cx: Lowering) {
       decline(e, 'a scalar where a list is required');
     }
     if (e.nops < 2 || e.nops > 3) decline(e, `a Range of ${e.nops} operands`);
-    const [lo, hi, given] = e.ops.map((x) => {
+    // An upper bound can be a real; the elements are integers.
+    const [lo, hi, given] = e.ops.map((x, i) => {
       const v = cx.scalar(x);
-      if (type(v).lane !== 'integer')
+      if (type(v).lane !== 'integer' && (i !== 1 || type(v).lane !== 'real'))
         decline(
           x,
-          'a Range of reals (a bound or a step that is not an integer)'
+          'a Range of reals (a first element or a step that is not an integer)'
         );
       return v;
     });

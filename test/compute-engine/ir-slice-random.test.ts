@@ -314,6 +314,7 @@ describe('IR slice: random programs against the interpreter', () => {
       '"D"',
       '"J"',
       '"Q"',
+      '"E"',
     ];
     const reached = new Map(CONSTRUCTS.map((c) => [c, 0]));
     for (let i = 0; i < COUNT; i++) {

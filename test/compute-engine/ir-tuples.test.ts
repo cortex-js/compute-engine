@@ -730,3 +730,155 @@ describe('list results of user functions', () => {
     ).toThrow(/the list result of three/);
   });
 });
+
+describe('the causes of the third corpus run', () => {
+  ce.declare('A', 'list<real>');
+  ce.declare('U', 'list<real>');
+  ce.declare('Xs', 'list<real>');
+  ce.declare('Ls', 'list<real^3>');
+  ce.declare('Qr', 'list<list<real^2>>');
+  ce.declare('Rr', 'list<list<real^2>>');
+  test('ElementMax and ElementMin: scalars, a list and a scalar', () => {
+    const uv = { ...TYCHO, inputs: { u: 'real', v: 'real' } };
+    const points = [
+      { u: 0.2, v: 0.1 },
+      { u: 1.5, v: 0.5 },
+      { u: -2, v: 0.9 },
+    ];
+    // The witness (art/n7uhaaoq1q), its first component.
+    const twist = [
+      'Multiply',
+      0.25,
+      ['Cos', ['Multiply', 3, 'u']],
+      ['ElementMin', 'v', 0.8],
+    ];
+    check(
+      ['Tuple', ['Add', ['Negate', ['ElementMax', 'v', 0.3]], 2], twist],
+      points,
+      uv
+    );
+    check(['ElementMin', 'v', 0.8, 'u'], points, uv);
+    check(['ElementMax', 'n', 3], [{ n: 7 }, { n: -1 }], {
+      inputs: { n: 'integer' },
+    });
+    check(['ElementMax', 'D', 0.3], [{ D: [0.1, 0.5, 0.9] }]);
+    check(['ElementMin', 'x', 'D'], [{ D: [0.1, 0.5, 0.9], x: 0.4 }]);
+    // galton-board: a nested clamp of a fractional part.
+    check(
+      [
+        'ElementMin',
+        ['ElementMax', ['Add', ['Multiply', 2, ['Fract', 'x']], -0.5], 0],
+        1,
+      ],
+      [{ x: 0.1 }, { x: 3.4 }, { x: 0.9 }]
+    );
+    const glsl = compileSlice(box(['ElementMax', 'x', 0.3]), {
+      target: 'glsl',
+    });
+    expect(glsl.code).toMatch(/max\(in0_x, 0\.3/);
+  });
+  test('If of a tuple with no else: the tuple of NaN', () => {
+    // The witness (showcase/spiral-galaxy).
+    const grow = ['Power', 'ExponentialE', ['Multiply', 0.1, 't']];
+    const json = [
+      'If',
+      ['LessEqual', 't', 'W'],
+      [
+        'Tuple',
+        ['Multiply', ['Cos', 't'], grow],
+        ['Multiply', ['Sin', 't'], grow],
+      ],
+    ];
+    const opts = { ...TYCHO, inputs: { t: 'real', W: 'real<-10..10>' } };
+    const r = check(
+      json,
+      [
+        { t: 0.5, W: 1 },
+        { t: -3, W: 2 },
+      ],
+      opts
+    );
+    const off = { t: 2, W: 1 };
+    expect(r.run!(off as never)).toEqual([NaN, NaN]);
+    expect(interpret(json, off)).toEqual([NaN, NaN]);
+    // An integer tuple; the scalar arm stays NaN.
+    const ints = ['If', ['Less', 'x', 0], ['Tuple', 1, 2]];
+    expect(ir(ints).run!({ x: 1 } as never)).toEqual(interpret(ints, { x: 1 }));
+    const one = ['If', ['Less', 'x', 0], 'x'];
+    expect(ir(one).run!({ x: 1 } as never)).toEqual(NaN);
+    // A list arm, a `Which` and a boolean tuple give `Missing` in the
+    // interpreter, not a tuple of NaN.
+    for (const then of [
+      ['List', 'x', 1],
+      ['Multiply', 2, 'D'],
+      ['Tuple', ['Less', 'x', 1], ['Less', 'x', 2]],
+    ])
+      expect(declined(['If', ['Less', 'x', 0], then])).toMatch(
+        /arms of two types/
+      );
+    expect(declined(['Which', ['Less', 'x', 0], ['Tuple', 'x', 1]])).toMatch(
+      /arms of two types/
+    );
+    const glsl = compileSlice(box(json), { target: 'glsl' }).code;
+    expect(glsl).toMatch(/float\[2\]\(/);
+  });
+  test('a Range of a real upper bound: its elements are integers', () => {
+    const points = [{ K: 3.5 }, { K: 4 }, { K: -2.5 }];
+    const opts = { ...TYCHO, symbolic: ['K', 'x', 'y'] };
+    check(['Sum', ['Range', 1, 'K']], points, opts);
+    check(
+      [
+        'Comprehension',
+        ['Multiply', 2, 'k'],
+        ['Element', 'k', ['Range', 1, 'K']],
+      ],
+      points,
+      opts
+    );
+    check(['Length', ['Range', 2, 'K', 2]], points, opts);
+    // A real first element or step declines.
+    expect(declined(['Range', 'x', 5])).toMatch(/a Range of reals/);
+    expect(declined(['Range', 1, 5, 'x'])).toMatch(/a Range of reals/);
+  });
+  test('lists of two run-time lengths: the length of the first', () => {
+    // The witness (showcase/three-body-problem).
+    const json = [
+      'Add',
+      ['Multiply', ['Rational', 1, 2], 'A', ['Power', 'h', 2]],
+      ['Multiply', 'U', 'h'],
+      'Xs',
+    ];
+    const opts = { ...TYCHO, inputs: { h: 'real' } };
+    const p = { A: [1, -2, 0.5], U: [3, 4, 2], Xs: [5, 6, -1], h: 0.25 };
+    const r = check(json, [p, { ...p, h: -3 }], opts);
+    // Two lengths: the interpreter's value is an error (the static type
+    // `list<real>` does not show it), so the value is unspecified.
+    expect(() => interpret(json, { ...p, Xs: [5, 6] })).toThrow(/no value/);
+    expect(r.run!({ ...p, Xs: [5, 6] } as never)).toHaveLength(3);
+    // Two stated lengths that differ still decline.
+    expect(declined(['Add', ['List', 1, 'x'], ['List', 1, 2, 3]])).toMatch(
+      /different lengths|static type error/
+    );
+  });
+  test('a run-time length and a stated one', () => {
+    // Two stated lengths that differ decline.
+    expect(
+      declined(['Add', ['Multiply', ['List', 1, 2, 3], 'D'], ['List', 4, 5]])
+    ).toMatch(/different lengths/);
+    // A run-time length and a known one, at equal lengths.
+    const p = { D: [0.5, -1, 2], A: [3, 1, -4], Ls: [1, 2, 7], x: 0.3 };
+    for (const json of [
+      ['Add', 'D', 'A'],
+      ['Add', 'D', 'Ls'],
+      ['Add', 'Ls', 'D'],
+      ['Multiply', 'Ls', ['Add', 'D', 'x']],
+    ])
+      check(json, [p]);
+  });
+  test('lists of rank 2 of two run-time lengths decline', () => {
+    expect(declined(['Add', 'Qr', 'Rr'])).toMatch(/different lengths/);
+    expect(
+      declined(['Add', ['PointList', 'D', 'D'], ['PointList', 'A', 'A']])
+    ).toMatch(/different lengths/);
+  });
+});
