@@ -77,6 +77,16 @@ export type Syntax = {
   assign(name: string, value: string): string;
   ifOpen(cond: string): string;
   readonly elseOpen: string;
+  /** An `if` whose condition is a verdict, each arm printed once (the
+   *  interval mode): the test that runs the first arm, the test that runs
+   *  the second, both of the name of the condition, and the value of a
+   *  result from the values of the two arms. Absent: `ifOpen` and
+   *  `elseOpen`. */
+  readonly verdictIf?: {
+    first(cond: string): string;
+    second(cond: string): string;
+    join(cond: string, a: string, b: string): string;
+  };
   /** The lines that open a counted loop of the index `k` from `lo` to `hi`,
    *  each bound evaluated once. `passes`: a pass of a `Loop`, which the
    *  iteration budget counts. */
@@ -345,7 +355,33 @@ export function printProgram(
           args: i.args,
           outs: outsOf(i),
         });
-      if (i.k === 'if') {
+      if (i.k === 'if' && syntax.verdictIf !== undefined) {
+        // The condition is read three times: a value written at its use is
+        // bound to a name first (a constant is its text).
+        const v = syntax.verdictIf;
+        let c = use(i.cond);
+        if (inlined.has(i.cond) && index.def.get(i.cond)?.k !== 'const') {
+          line(syntax.declare(type(i.cond), name(i.cond), c));
+          c = name(i.cond);
+        }
+        const arm = (k: string) => i.outs.map((o) => `${name(o)}_${k}`);
+        i.outs.forEach((o) =>
+          ['a', 'b'].forEach((k) =>
+            line(syntax.declare(type(o), `${name(o)}_${k}`, undefined, true))
+          )
+        );
+        line(v.first(c));
+        nested(i.then, arm('a'), false);
+        line(syntax.close);
+        line(v.second(c));
+        nested(i.else, arm('b'), false);
+        line(syntax.close);
+        i.outs.forEach((o, j) =>
+          line(
+            syntax.declare(type(o), name(o), v.join(c, arm('a')[j], arm('b')[j]))
+          )
+        );
+      } else if (i.k === 'if') {
         i.outs.forEach((v) =>
           line(syntax.declare(type(v), name(v), undefined, true))
         );

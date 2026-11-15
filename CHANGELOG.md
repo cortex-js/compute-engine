@@ -81,12 +81,22 @@
   result.
 - **The experimental profile `'ir'` compiles for `interval-js`.**
   `compile(expr, { to: 'interval-js', profile: 'ir' })` compiles scalar
-  arithmetic, the elementary functions, powers, comparisons and calls of
-  user functions that are not recursive, with the result shapes of the
-  target (an `IntervalResult`, or the verdict `'true'`, `'false'` or
-  `'maybe'`). Any other program declines, and with `fallback` the existing
-  target then compiles it: a conditional, a `Sum`, a list. Without the
-  option `profile`, nothing changes.
+  arithmetic, the elementary functions, powers, comparisons, `If`, `Which`,
+  `And`, `Or`, `Not`, locals of a `Block`, `Sum` and `Product` with `Limits`,
+  `Random()` (the interval `[0, 1]`) and calls of user functions that are
+  not recursive, with the result shapes of the target (an `IntervalResult`,
+  or the verdict `'true'`, `'false'` or `'maybe'`). Where a condition is
+  undecided over the input box, both arms are evaluated and the result is
+  their hull; a local assigned in both arms has the hull of both values.
+  Any other program declines, and with `fallback` the existing target then
+  compiles it: a list, an integral, a `Loop`, a recursive function. Without
+  the option `profile`, nothing changes.
+- **The interval library has the kernels `atLeast(v, c)` and
+  `atMost(v, c)`** (the value `v` with its lower end raised to that of `c`,
+  or its upper end lowered to that of `c`), **`number(x)`** (the number of
+  a point that is an integer, an `UndecidedConditionError` otherwise) and
+  **`undecided(message)`**, which throws that error. They are members of
+  `IntervalArithmetic`.
 - **The interval library has a kernel `powReal(base, exponent)`**, also a
   member of `IntervalArithmetic`: the power for an exponent given as an
   interval, which encloses the real roots of a negative base when the

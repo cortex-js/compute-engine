@@ -7,8 +7,11 @@ by session `ce-interval` (2026-11-15):
 2026-11-15 with the decisions at its top. Step 2 is in progress: the
 measure of Tycho's core corpus is in section 12a of the note, a census of
 the suite's interval compilations runs in `/tmp/wt-ce-interval` (temporary
-instrumentation, not to land), and batch 1 is being written in
-`/tmp/wt-ce-interval-b1` (patch to `_TASKS/2026-11-15-interval-mode/`).
+instrumentation, not to land) and is recorded in section 12b. Batch 1 is
+committed, `926016f4ce9fcd4dc07e74541046e7d46a461020`. Batch 2 is written
+and reviewed (section 14 of the note; patches in
+`_TASKS/2026-11-15-interval-mode/`). Next: a packed build for Tycho's audit
+of the interval seam, then lists (`At`, list inputs) and integrals.
 
 ## Goal
 

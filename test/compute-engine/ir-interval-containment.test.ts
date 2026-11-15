@@ -1,7 +1,7 @@
 /**
  * The interval mode of the IR pipeline (`compile(expr, { to: 'interval-js',
- * profile: 'ir' })`), batch 1: containment and the comparison with the
- * existing interval target.
+ * profile: 'ir' })`), batches 1 and 2: containment and the comparison with
+ * the existing interval target.
  *
  * Containment: for each program, at seeded random boxes (points, narrow and
  * wide, across 0 and across the edges of domains), the interpreter's value
@@ -42,6 +42,15 @@ ce.assign(
     ['Multiply', ['Sin', 'a'], ['g', 'b']],
     'a',
     'b',
+  ] as never)
+);
+// A user function whose body is a conditional.
+ce.assign(
+  'q',
+  ce.box([
+    'Function',
+    ['If', ['Greater', 't', 0], ['Sqrt', 't'], ['Negate', 't']],
+    't',
   ] as never)
 );
 
@@ -109,6 +118,33 @@ const CASES: Case[] = [
   // A user function and a Block local
   C(['Add', ['g', x], ['g', ['Negate', x]]]), C(['h', x, y]),
   C(['Block', ['Declare', 't', "'real'", ['Multiply', x, y]], ['Add', ['Sin', 't'], 't']]),
+  // Batch 2: conditionals
+  C(['If', ['Greater', x, 0], ['Multiply', 2, x]], [0]),
+  C(['If', ['Greater', x, 0], ['Sqrt', x], ['Negate', x]], [0]),
+  C(['If', ['Greater', x, 0], ['Ln', x], 0], [0]),
+  C(['If', ['LessEqual', 1, x], ['Arcosh', x], x], [1]),
+  C(['If', ['Less', x, 0], ['If', ['Less', y, 0], ['Add', x, y], ['Subtract', x, y]], ['Multiply', x, y]], [0]),
+  C(['Which', ['Less', x, 0], -1, ['Less', x, 1], ['Power', x, 2], 'True', 2], [0, 1]),
+  C(['Which', ['Less', x, 0], ['Negate', x], ['Less', x, 1], ['Sqrt', x]], [0, 1]),
+  C(['Less', 0, x, 1], [0, 1]), C(['If', ['Less', 0, x, 1], ['Ln', x], 0], [0, 1]),
+  C(['And', ['Greater', x, 0], ['Greater', ['Divide', 1, x], 2]], [0, 0.5]),
+  C(['Or', ['Not', ['Less', x, 1]], ['Less', y, 0]], [1, 0]),
+  C(['If', ['And', ['Greater', x, 0], ['Less', y, 1]], ['Add', x, y], 0], [0, 1]),
+  C(['If', ['Or', ['Less', x, 0], ['Greater', ['Divide', 1, x], 2]], 1, -1], [0, 0.5]),
+  C(['If', ['Not', ['Less', x, 0]], ['Sqrt', x], 0], [0]),
+  C(['Block', ['Declare', 't', "'real'", 0], ['If', ['Greater', x, 0], ['Assign', 't', ['Multiply', 2, x]], ['Assign', 't', -1]], 't'], [0]),
+  C(['Add', ['q', x], ['q', y]], [0]),
+  C(['If', ['Greater', x, 0], ['Random'], 0], [0]),
+  C(['WithRandomSeed', 42, ['Multiply', ['Random'], x]]),
+  // Batch 2: loops and integers
+  C(['Sum', ['Sin', ['Multiply', 'k', x]], ['Limits', 'k', 1, 3]]),
+  C(['Product', ['Add', x, 'k'], ['Limits', 'k', 1, 4]]),
+  C(['Sum', ['Power', x, 'k'], ['Limits', 'k', 1, 'n']]),
+  C(['Sum', ['Divide', ['Sin', ['Multiply', x, ['Subtract', ['Multiply', 2, 'k'], 1]]], ['Subtract', ['Multiply', 2, 'k'], 1]], ['Limits', 'k', 1, ['Floor', y]]], [3, 5]),
+  C(['Sum', ['Sum', ['Multiply', 'j', 'k', x], ['Limits', 'k', 1, 'j']], ['Limits', 'j', 1, 3]]),
+  C(['If', ['Greater', x, 0], ['Sum', ['Power', x, 'k'], ['Limits', 'k', 1, 4]], ['Negate', x]], [0]),
+  C(['Sum', ['Multiply', ['Power', -1, 'k'], ['Divide', ['Power', x, 'k'], 'k']], ['Limits', 'k', 1, 6]]),
+  C(['Power', x, 7]), C(['Power', 'n', 3]), C(['Add', ['Floor', x], 1], [1]),
 ];
 
 /** The programs whose result differs from the existing target's at some
@@ -129,6 +165,17 @@ const EXCEPTIONS: string[] = [
   // The decimal base is not its double: the mode encloses it with one ulp
   // on each side, where the existing target reads the double as a point.
   JSON.stringify(['Power', 2.718281828459045, x]),
+  // A local assigned in both arms of an undecided `If`: the hull of both
+  // values. The existing target keeps the second arm's value ([-1, -1]
+  // over [-1.71, 0.29]), which excludes the value 2x at x > 0 (design
+  // note, section 10).
+  JSON.stringify(['Block', ['Declare', 't', "'real'", 0], ['If', ['Greater', x, 0], ['Assign', 't', ['Multiply', 2, x]], ['Assign', 't', -1]], 't']),
+  // A sum is a loop, which adds its terms in another order than the
+  // existing target's sum written out term by term: the ends differ in the
+  // last digits, by more than 4 ulps of an end near 0 (design note,
+  // section 9).
+  JSON.stringify(['Sum', ['Sin', ['Multiply', 'k', x]], ['Limits', 'k', 1, 3]]),
+  JSON.stringify(['Sum', ['Multiply', ['Power', -1, 'k'], ['Divide', ['Power', x, 'k'], 'k']], ['Limits', 'k', 1, 6]]),
 ];
 
 /** The programs whose containment fails by a kernel of the interval

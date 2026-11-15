@@ -1,7 +1,8 @@
 /**
  * The interval mode of the IR pipeline (`compile(expr, { to: 'interval-js',
- * profile: 'ir' })`), batch 1: the result contract, the declines of the
- * batch, and the time of the compilation of large programs.
+ * profile: 'ir' })`), batches 1 and 2: the result contract, the declines,
+ * the verdicts, the loops at run time, the representation of integers (the
+ * pass `plain`), and the time of the compilation of large programs.
  */
 
 import { ComputeEngine, INTERVAL_KIND } from '../../src/compute-engine';
@@ -14,6 +15,8 @@ const ce = new ComputeEngine();
 ce.declare('x', 'real');
 ce.declare('y', 'real');
 ce.declare('p', 'boolean');
+ce.declare('q', 'boolean');
+ce.declare('n', 'real');
 ce.declare('Z', 'complex');
 ce.declare('L', 'list<real^3>');
 ce.assign(
@@ -230,23 +233,16 @@ describe('the interval mode: the result contract', () => {
   });
 
   test('a decline: outside-profile with fallback false, the existing target with it', () => {
-    const e = declineOf(() => mode(['If', ['Greater', 'x', 0], 'x', 0]));
+    const integral = ['Integrate', ['Sin', 't'], ['Limits', 't', 0, 'x']];
+    const e = declineOf(() => mode(integral));
     expect(e.diagnostic.code).toBe('outside-profile');
-    expect(e.message).toMatch(
-      /a conditional: the interval mode does not compile it yet/
-    );
+    expect(e.message).toMatch(/the region integrate/);
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const r = compile(
-        ce.box(['If', ['Greater', 'x', 0], 'x', 0] as never),
-        IR as never
-      ) as unknown as Result;
+      const r = compile(ce.box(integral as never), IR as never) as unknown as Result;
       expect(r.success).toBe(true);
       expect(r.profile).toBeUndefined();
-      expect(r.run({ x: { lo: 1, hi: 2 } })).toEqual({
-        kind: 'interval',
-        value: { lo: 1, hi: 2 },
-      });
+      expect(r.run({ x: { lo: 1, hi: 2 } }).kind).toBe('interval');
     } finally {
       warn.mockRestore();
     }
@@ -298,27 +294,30 @@ describe('the interval mode: the result contract', () => {
   });
 });
 
-describe('the interval mode: the declines of batch 1', () => {
+describe('the interval mode: the declines', () => {
   test.each([
-    [
-      ['If', ['Greater', 'x', 0], 'x', 0],
-      /a conditional: the interval mode does not compile it yet/,
-    ],
-    [
-      ['Sum', ['Power', 'x', 'k'], ['Limits', 'k', 1, 3]],
-      /a loop: the interval mode does not compile it yet/,
-    ],
     [['Add', ['At', 'L', 1], 'x'], /a list|At/],
     [['List', 'x', 'y'], /a list of rank 1/],
     [['Add', 'Z', 'x'], /the lane complex/],
-    [['Add', ['Random'], 'x'], /Random/],
     [['fact', 3], /a recursive function \(.*fact.*\)/],
     [['Zeta', 'x'], /Zeta \(the operation zeta\)/],
+    [['Integrate', ['Sin', 't'], ['Limits', 't', 0, 'x']], /the region integrate/],
+    [['Map', ['Function', ['Multiply', 'k', 'x'], 'k'], 'L'], /the region build|rank 1/],
+    [
+      ['Block', ['Declare', 's', 'real', 0], ['Loop', ['Assign', 's', ['Add', 's', 'e']], ['Element', 'e', ['Range', 1, 3]]], ['Multiply', 's', 'x']],
+      /rangestep|a Loop/,
+    ],
   ])('%j', (json, cause) => {
     const e = declineOf(() => mode(json));
     expect(e.diagnostic.code).toBe('outside-profile');
     expect(e.message).toMatch(cause);
     expect(e.message).toMatch(/ on interval-js$/);
+  });
+
+  test('a string seed: the lowering has no string', () => {
+    const e = declineOf(() => mode(['WithRandomSeed', "'abc'", ['Random']]));
+    expect(e.diagnostic.code).toBe('outside-profile');
+    expect(e.message).toMatch(/"abc": not a number/);
   });
 
   test('a vars text that is not a read of the inputs object', () => {
@@ -379,5 +378,236 @@ describe('the interval mode: large programs', () => {
     expect(
       time(() => compile(e, { ...IR, fallback: false } as never))
     ).toBeLessThan(5000);
+  });
+});
+
+describe('the interval mode: verdicts', () => {
+  const V = ['true', 'false', 'maybe'] as const;
+  const and = (a: string, b: string) =>
+    a === 'false' || b === 'false'
+      ? 'false'
+      : a === 'true' && b === 'true'
+        ? 'true'
+        : 'maybe';
+  const or = (a: string, b: string) =>
+    a === 'true' || b === 'true'
+      ? 'true'
+      : a === 'false' && b === 'false'
+        ? 'false'
+        : 'maybe';
+  const not = (a: string) =>
+    a === 'maybe' ? 'maybe' : a === 'true' ? 'false' : 'true';
+  test('the truth tables of And, Or and Not of boolean inputs (Kleene)', () => {
+    const r = {
+      and: mode(['And', 'p', 'q']),
+      or: mode(['Or', 'p', 'q']),
+      not: mode(['Not', 'p']),
+      nand: mode(['Not', ['And', 'p', ['Not', 'q']]]),
+    };
+    for (const p of V) {
+      expect(r.not.run({ p })).toBe(not(p));
+      for (const q of V) {
+        expect(r.and.run({ p, q })).toBe(and(p, q));
+        expect(r.or.run({ p, q })).toBe(or(p, q));
+        expect(r.nand.run({ p, q })).toBe(not(and(p, not(q))));
+      }
+    }
+  });
+  test('a chain and comparisons over boxes that decide and that do not', () => {
+    const chain = mode(['Less', 0, 'x', 1]);
+    expect(chain.run({ x: { lo: 0.25, hi: 0.75 } })).toBe('true');
+    expect(chain.run({ x: { lo: 2, hi: 3 } })).toBe('false');
+    expect(chain.run({ x: { lo: -2, hi: -1 } })).toBe('false');
+    expect(chain.run({ x: { lo: 0.5, hi: 1.5 } })).toBe('maybe');
+    expect(chain.run({ x: { lo: -0.5, hi: 0.5 } })).toBe('maybe');
+    const both = mode(['And', ['Greater', 'x', 0], ['Greater', ['Divide', 1, 'x'], 2]]);
+    expect(both.run({ x: { lo: -2, hi: -1 } })).toBe('false');
+    expect(both.run({ x: { lo: 0.1, hi: 0.4 } })).toBe('true');
+    expect(both.run({ x: { lo: -1, hi: 1 } })).toBe('maybe');
+    const either = mode(['Or', ['Not', ['Less', 'x', 1]], ['Less', 'y', 0]]);
+    expect(either.run({ x: { lo: 0, hi: 0.5 }, y: { lo: 1, hi: 2 } })).toBe('false');
+    expect(either.run({ x: { lo: 0, hi: 0.5 }, y: { lo: -2, hi: -1 } })).toBe('true');
+    expect(either.run({ x: { lo: 0, hi: 2 }, y: { lo: 1, hi: 2 } })).toBe('maybe');
+  });
+  test('an If whose condition is a boolean input given maybe', () => {
+    const r = mode(['If', 'p', ['Add', 'x', 1], ['Negate', 'x']]);
+    const box = { x: { lo: 1, hi: 2 } };
+    expect(r.run({ ...box, p: true })).toEqual({ kind: 'interval', value: { lo: 2, hi: 3 } });
+    expect(r.run({ ...box, p: 'false' })).toEqual({ kind: 'interval', value: { lo: -2, hi: -1 } });
+    expect(r.run({ ...box, p: 'maybe' })).toEqual({ kind: 'interval', value: { lo: -2, hi: 3 } });
+    // A missing arm under `'maybe'` is a value over part of the box.
+    expect(mode(['If', 'p', 'x']).run({ ...box, p: 'maybe' }).kind).toBe('partial');
+    expect(mode(['If', 'p', 'x']).run({ ...box, p: false })).toEqual({ kind: 'empty' });
+  });
+  test('the hull of two verdicts, and of a value with empty', () => {
+    const r = mode(['If', ['Greater', 'x', 0], ['Less', 'y', 1], ['Less', 'y', 3]]);
+    expect(r.run({ x: { lo: -1, hi: 1 }, y: { lo: 2, hi: 2 } })).toBe('maybe');
+    expect(r.run({ x: { lo: -1, hi: 1 }, y: { lo: 0, hi: 0 } })).toBe('true');
+    expect(r.run({ x: { lo: -1, hi: 1 }, y: { lo: 5, hi: 5 } })).toBe('false');
+  });
+});
+
+describe('the interval mode: loops at run time', () => {
+  const sum = ['Sum', ['Power', 'x', 'k'], ['Limits', 'k', 1, 'n']];
+  test('a bound that is not a point is entire', () => {
+    const r = mode(sum);
+    expect(r.run({ x: 0.5, n: 3 })).toEqual({
+      kind: 'interval',
+      value: { lo: 0.875, hi: 0.875 },
+    });
+    expect(r.run({ x: 0.5, n: { lo: 2, hi: 4 } })).toEqual({ kind: 'entire' });
+    // `Floor(n)` jumps in the box: no one count of passes.
+    expect(r.run({ x: 0.5, n: { lo: 2.5, hi: 3.5 } })).toEqual({ kind: 'entire' });
+    expect(r.run({ x: 0.5, n: { lo: 3.25, hi: 3.5 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 0.875, hi: 0.875 },
+    });
+  });
+  test('a sum over the budget is entire and runs no pass', () => {
+    const big = mode(['Sum', ['Sin', ['Multiply', 'k', 'x']], ['Limits', 'k', 1, 1e9]], {
+      iterationBudget: 1000,
+    });
+    expect(big.code).not.toMatch(/NaN|isNaN/);
+    const start = Date.now();
+    expect(big.run({ x: 1 })).toEqual({ kind: 'entire' });
+    expect(Date.now() - start).toBeLessThan(200);
+    const r = mode(sum, { iterationBudget: 5 });
+    expect(r.run({ x: 0.5, n: 5 }).kind).toBe('interval');
+    expect(r.run({ x: 0.5, n: 6 })).toEqual({ kind: 'entire' });
+    // The existing target gives the same kinds.
+    const old = compile(ce.box(sum as never), {
+      to: 'interval-js',
+      iterationBudget: 5,
+    } as never) as unknown as Result;
+    expect(old.run({ x: 0.5, n: 6 })).toEqual({ kind: 'entire' });
+  });
+  test('broadcast() gives entire for such a cell, and counts no failure', () => {
+    const r = mode(sum, { iterationBudget: 5 });
+    const inputs = {
+      x: new Float64Array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5]),
+      n: new Float64Array([5, 5, 2, 4, 9, 9]),
+    };
+    const out = r.broadcast!(inputs);
+    expect(Array.from(out.subarray(0, 3))).toEqual([0.96875, 0.96875, INTERVAL_KIND.interval]);
+    expect(out[5]).toBe(INTERVAL_KIND.entire);
+    expect(out[8]).toBe(INTERVAL_KIND.entire);
+    const failures = { count: 0 };
+    const slice = createIntervalRuntime().loadBroadcastSlice(r as never);
+    const into = new Float64Array(9);
+    expect(slice(inputs as never, undefined, into, { from: 0, to: 3, failures })).toBe(3);
+    expect(failures.count).toBe(0);
+    expect(Array.from(into)).toEqual(Array.from(out));
+  });
+});
+
+describe('the interval mode: plain integers', () => {
+  test('an index and integer arithmetic on it are numbers', () => {
+    const r = mode([
+      'Sum',
+      ['Divide', ['Sin', ['Multiply', 'x', ['Subtract', ['Multiply', 2, 'k'], 1]]], ['Subtract', ['Multiply', 2, 'k'], 1]],
+      ['Limits', 'k', 1, ['Floor', 'n']],
+    ]);
+    // `2k − 1` with number arithmetic, made a point where a kernel reads it.
+    expect(r.code).toMatch(/const (v\d+) = \(\(2 \* (v\d+)\) \+ \(-1\)\);/);
+    expect(r.code).toMatch(/\{ lo: v\d+, hi: v\d+ \}/);
+    expect(r.code).toMatch(/_IA\.number\(_IA\.floor\(_\.n\)\)/);
+    expect(r.code).not.toMatch(/_IA\.(add|sub|mul)\(\{ lo: 2/);
+    expect(r.run({ x: 0.5, n: 3 }).kind).toBe('interval');
+  });
+  test('an integer exponent is the number of _IA.pow', () => {
+    expect(mode(['Power', 'x', 3]).code).toBe('_IA.pow(_.x, 3)');
+    expect(mode(['Power', 'x', -2]).code).toBe('_IA.pow(_.x, (-2))');
+    expect(mode(['Power', 'x', 2]).code).toBe('_IA.square(_.x)');
+    expect(mode(['Sum', ['Power', 'x', 'k'], ['Limits', 'k', 1, 3]]).code).toMatch(
+      /_IA\.pow\(_\.x, v\d+\)/
+    );
+  });
+  test('an integer that depends on an input stays on kernels', () => {
+    expect(mode(['Add', ['Floor', 'x'], 1]).code).toBe(
+      '_IA.add(_IA.floor(_.x), { lo: 1, hi: 1 })'
+    );
+  });
+  test('a product of indexes whose bound reaches 2^53 is not plain', () => {
+    const r = mode([
+      'Sum',
+      ['Sum', ['Multiply', 'j', 'k', 'x'], ['Limits', 'k', 1, 3]],
+      ['Limits', 'j', 1, 3],
+    ]);
+    // 2^32 · 2^32: each index is made a point, and the kernel multiplies.
+    expect(r.code).toMatch(/_IA\.mul\(\{ lo: v\d+, hi: v\d+ \}, \{ lo: v\d+, hi: v\d+ \}\)/);
+    expect(r.run({ x: 1 })).toEqual({ kind: 'interval', value: { lo: 36, hi: 36 } });
+  });
+  test('a product of an input integer by the constant 0 is not plain', () => {
+    // The bound of `0 · Floor(x)` is 0, and `Floor(x)` is not one number.
+    const r = mode(['Add', ['Multiply', ['Floor', 'x'], 0], 1]);
+    expect(r.code).not.toMatch(/_IA\.number/);
+    const value = r.run({ x: { lo: 0.5, hi: 1.5 } });
+    expect(value.kind).not.toBe('entire');
+    expect(value.value.lo <= 1 && 1 <= value.value.hi).toBe(true);
+  });
+});
+
+describe('the interval mode: narrowing in a nest', () => {
+  test('an inner conditional on the same value keeps the outer clamp', () => {
+    // `Sqrt(x)` after the inner `If` reads `x` clamped to `x ≥ 0`: the
+    // result has a value over the whole box.
+    const r = mode([
+      'If',
+      ['Greater', 'x', 0],
+      ['Add', ['If', ['Greater', 'x', 0], ['Sqrt', 'x'], 0], ['Sqrt', 'x']],
+      0,
+    ]);
+    expect(r.run({ x: { lo: -1, hi: 1 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 0, hi: 2 },
+    });
+  });
+});
+
+describe('the interval mode: the size of conditionals', () => {
+  // A nest of `If`s in the first arm, each arm reading the shared `s`: each
+  // arm is printed once (the existing target writes the first arm twice),
+  // so the text grows with the program.
+  const nest = (depth: number): unknown => {
+    let e: unknown = ['Sin', 's'];
+    for (let k = 0; k < depth; k++)
+      e = ['If', ['Greater', 's', k], ['Add', e, 's'], ['Multiply', 's', k + 2]];
+    return ['Block', ['Declare', 's', 'real', ['Exp', 'x']], e];
+  };
+  test('a nest of 12 Ifs has code linear in the program', () => {
+    const [a, b] = [6, 12].map((d) => mode(nest(d)).code.length);
+    expect(b / a).toBeLessThan(2.5);
+    const r = mode(nest(12));
+    expect(r.run({ x: { lo: -1, hi: 1 } }).kind).toBe('interval');
+  });
+  const time = (f: () => unknown): number => {
+    const start = Date.now();
+    try {
+      f();
+    } catch (e) {
+      if (!(e instanceof CompileDeclineError)) throw e;
+    }
+    return Date.now() - start;
+  };
+  test('a chain of 1,000 Ifs and a triple nested sum compile in under a second or decline', () => {
+    // A `Which` of 1,000 clauses is a nest of 1,000 `if` instructions (a
+    // nest of 1,000 `If` expressions exceeds the call stack of the
+    // canonical form, before the compiler).
+    const which: unknown[] = ['Which'];
+    for (let k = 0; k < 1000; k++)
+      which.push(['Less', 'x', k], ['Multiply', k, 'x']);
+    which.push('True', 'x');
+    expect(time(() => mode(which))).toBeLessThan(1000);
+    expect(mode(which).run({ x: { lo: 10.5, hi: 12.5 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 115.5, hi: 162.5 },
+    });
+    const triple = [
+      'Sum',
+      ['Sum', ['Sum', ['Sin', ['Multiply', 'i', 'j', 'k', 'x']], ['Limits', 'k', 1, 'j']], ['Limits', 'j', 1, 'i']],
+      ['Limits', 'i', 1, 'n'],
+    ];
+    expect(time(() => mode(triple))).toBeLessThan(1000);
+    expect(mode(triple).run({ x: 0, n: 3 })).toEqual({ kind: 'interval', value: { lo: 0, hi: 0 } });
   });
 });

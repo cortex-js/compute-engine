@@ -38,6 +38,8 @@ import {
   type IntervalPrinted,
 } from './print-interval.js';
 import { spellingOf, type Spelling, type Syntax } from './print.js';
+import { narrow } from './narrow.js';
+import { plain } from './plain.js';
 import { effects, effectTrace } from './effects.js';
 import {
   deepFreeze,
@@ -478,7 +480,10 @@ export function sliceProgram(
   const p = lower(expr, rows, {
     fold: options.constantFold,
     mode: options.mode,
-    iterationBudget: options.iterationBudget,
+    // The interval mode writes no NaN test of the budget (NaN reads as
+    // `empty`, no value): a loop of more passes refuses to start
+    // (`printInterval()`).
+    iterationBudget: interval ? undefined : options.iterationBudget,
     runtimeLengths: profile.runtimeLengths,
     vars: Object.keys(options.vars ?? {}),
     objectVars: Object.keys(options.vars ?? {}).filter((n) =>
@@ -486,8 +491,12 @@ export function sliceProgram(
     ),
   });
   verify(p, rows);
-  // The interval mode has no draws or frames.
+  // The interval mode draws nothing: a frame has no warning.
   const warnings = interval ? [] : seededWarnings(p, rows);
+  if (interval) {
+    narrow(p);
+    verify(p, rows);
+  }
   const passes = options.passes === false ? {} : (options.passes ?? ALL_PASSES);
   // The bigint mode: a helper throws at a pole (`Mod`, `At`, `Factorial`,
   // `Power`, `Binomial`, a call), so no operation is evaluated before it is
@@ -505,6 +514,10 @@ export function sliceProgram(
     },
     rows
   );
+  if (interval) {
+    plain(p);
+    verify(p, rows);
+  }
   const lanes: Lane[] = bigint
     ? ['integer', 'boolean']
     : interval
@@ -520,9 +533,7 @@ export function sliceProgram(
       ...profile,
       lanes,
       syntax,
-      ...(interval
-        ? { rank: 0, draws: false, frames: false, recursion: false }
-        : {}),
+      ...(interval ? { rank: 0, recursion: false } : {}),
     },
     rows
   );
@@ -566,7 +577,7 @@ export function compileSlice(
   const { rows, syntax } = tables(options);
   const printed =
     options.mode === 'interval'
-      ? printInterval(p, rows, syntax)
+      ? printInterval(p, rows, syntax, options.iterationBudget)
       : options.target === 'javascript'
         ? printJavaScript(
             p,

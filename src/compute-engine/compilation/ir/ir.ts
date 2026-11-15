@@ -49,10 +49,15 @@ export type IRType = {
 /** A typed literal. An integer beyond the safe integers is a `bigint`
  *  (`mode: 'bigint'` only); a safe one is always a number. `inexact`
  *  (`mode: 'interval'` only): the value is not the double, which is within
- *  that many ulps of it. */
+ *  that many ulps of it. `plain` (`mode: 'interval'` only, after the pass
+ *  `plain`): the integer is a number of the target, not an interval. */
 export type Literal =
   | { readonly lane: 'real'; readonly value: number; readonly inexact?: number }
-  | { readonly lane: 'integer'; readonly value: number | bigint }
+  | {
+      readonly lane: 'integer';
+      readonly value: number | bigint;
+      readonly plain?: boolean;
+    }
   | { readonly lane: 'boolean'; readonly value: boolean }
   | { readonly lane: 'complex'; readonly value: Cx };
 

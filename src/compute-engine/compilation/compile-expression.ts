@@ -188,7 +188,11 @@ export function compile<
     !ce._opensOperation(false)
   ) {
     const consumer = shadowConsumerOf(options);
-    if (consumer === 'public' || consumer === 'glsl:public') {
+    if (
+      consumer === 'public' ||
+      consumer === 'glsl:public' ||
+      consumer === 'interval:public'
+    ) {
       // A compilation that this one starts is not a public call.
       publicDepth += 1;
       try {
@@ -223,8 +227,9 @@ let publicDepth = 0;
  * The consumer under which the shadow measure counts a compilation with
  * `options` (`jsProfileShadowConsumer()`), or `undefined` when it is not
  * measured: a target other than `javascript` (and `glsl`, counted as
- * `glsl:public`), a direct target, a profile asked for, or a compilation
- * of `implicitCompile()` that follows an attempt of its switch.
+ * `glsl:public`, and `interval-js`, counted as `interval:public`), a direct
+ * target, a profile asked for, or a compilation of `implicitCompile()` that
+ * follows an attempt of its switch.
  */
 function shadowConsumerOf(
   options: CompileExpressionOptions | undefined
@@ -233,6 +238,7 @@ function shadowConsumerOf(
     return undefined;
   const to = options?.to ?? 'javascript';
   if (to === 'glsl') return 'glsl:public';
+  if (to === 'interval-js') return 'interval:public';
   if (to !== 'javascript') return undefined;
   return jsProfileShadowConsumer(options);
 }

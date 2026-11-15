@@ -445,10 +445,11 @@ the kernel of its row, with the operands in the order of the row's `fold`
 (`atan2(y, x)`). Every kernel takes and gives the kinds `empty`, `entire`,
 `singular` and `partial`, so the code never reads the kind of a value: the
 marks of a jump and of a clipped domain travel through every operation. The
-lanes are `real`, `integer` and `boolean`, the rank is 0, and there are no
-draws, frames or recursion. The passes `fold` (a double is not an
-enclosure) and `strength` (`x·x` is wider than `x^2` over an interval) are
-off.
+lanes are `real`, `integer` and `boolean`, the rank is 0, and a recursive
+function declines (with an undecided guard both arms run, and the recursion
+does not end). The passes `fold` (a double is not an enclosure) and
+`strength` (`x·x` is wider than `x^2` over an interval) are off; two passes
+of the mode run, `narrow` first and `plain` last.
 
 Spelled: the arithmetic (`div.q` is `_IA.div`), `Power` (`pow`, also of
 integers, is `_IA.powReal`; a power by the exact constant 2 is
@@ -458,15 +459,70 @@ and their inverses (also the reciprocal ones), `Arctan2`, `Hypot`,
 `Degrees` (the product by an enclosure of π, then the quotient by 180),
 `Floor`, `Ceil`, `Round`, `Truncate`, `Fract`, `Sign`, `Mod`, `Max`, `Min`,
 `Erf`, `Erfc`, `Gamma`, `GammaLn`, `Factorial`, `Factorial2`, `Binomial`,
-`GCD`, `LCM`, the comparisons, `And`, `Or`, `Not`, a `Block` with locals,
-user functions that are not recursive, and a root function literal.
+`GCD`, `LCM`, the comparisons, `And`, `Or`, `Not` (Kleene logic on
+verdicts), `If`, `Which`, a `Block` with locals, user functions that are
+not recursive, `Sum` and `Product` with `Limits`, `Random()` and
+`WithRandomSeed` of a number seed, and a root function literal.
 `Haversine`, `Zeta`, the complex and colour operations, `At` and the
-elements of lists, `Random` and the counts of a `Range` have no spelling
-and decline. In this batch a program with an `if`, a `loop` or a `region`
-instruction after the passes declines with the cause "the interval mode
-does not compile it yet" (`intervalRefusal()`; a cause of the mode ends
-with "on interval-js"): `If`, `Which`, `Sum`,
-`Product`, `Loop`, a lazy `And` whose arm reads a `vars` text.
+elements of lists, the counts of a `Range`, and the regions `build`,
+`filter` and `integrate` (`Map`, `Filter`, `Integrate`) have no spelling
+and decline; a `Loop` declines with the cause "the interval mode does not
+compile it yet" (`intervalRefusal()`; a cause of the mode ends with "on
+interval-js"). A string seed and `Random` of a domain decline in the
+lowering.
+
+Conditionals. An `if` is printed with each arm once (`Syntax.verdictIf`):
+the condition is bound to a name, the first arm runs unless it is
+`'false'`, the second unless it is `'true'`, and each result is the first
+arm's value for `'true'`, the second's for `'false'`, and
+`_IA.hull(a, b)` for `'maybe'`. The text is linear in the program. The
+missing arm of `If(c, a)` or of a `Which` with no `True` clause is the NaN
+constant, `empty`, so the join for `'maybe'` is `partial`. A local
+assigned in both arms of an undecided `If` holds the hull of both values.
+The pass `narrow` (`narrow.ts`): for an `if` whose condition is one `lt`,
+`le`, `gt` or `ge` of a value `v` and a constant `c`, the arm where
+`v ≥ c` holds reads `_IA.atLeast(v, c)` in place of `v`, the arm where
+`v ≤ c` holds `_IA.atMost(v, c)` (a strict comparison takes the closed
+bound); `If(x > 0, Sqrt(x), -x)` over `[-1, 1]` is `[0, 1]`. The two
+kernels (`interval/comparison.ts`, the operations `atleast` and `atmost`
+of the mode) are clamps: `atLeast` raises the lower end of `v` to the
+lower end of `c`, `atMost` lowers the upper end to the upper end of `c`,
+with no outward step (a clamp computes no new real number), keeping the
+kind and the marks of `v` (`partial` and its clip, a jump's `at` and
+`continuity`). They return `v` itself, with no allocation, when nothing
+changes (every decided condition), and also for a value with no ends to
+clamp (`empty`, `entire`, a pole, a NaN bound), for a `c` without finite
+ends, and when the clamp would leave no point (the arm cannot be taken):
+not narrowing is always sound. `Random()` is
+the constant `{ lo: 0, hi: 1 }`, the support of a draw, and a random frame
+is its body: the mode draws nothing and gives no `seeded-draw-order`
+warning, so two evaluated arms are sound.
+
+Integers and loops. The pass `plain` (`plain.ts`) makes a plain integer a
+JavaScript number: an integer constant, the index of a loop, or
+`add.int`, `sub.int`, `neg.int`, `mul.int` of plain integers whose static
+bound of magnitude (the constant, 2^32 or the bound of a loop for an index,
+the sum or the product of the bounds) is below 2^53. Its operations are
+spelled as in JavaScript (`add.num`, `($0 + $1)`); a plain constant is a
+twin literal marked `plain` (`Literal.plain`). Where an interval operation,
+an `if` result or a function result reads a plain integer, the pass adds
+`point` (`{ lo: n, hi: n }`); where a loop reads an interval as a bound, it
+adds `number` (`_IA.number(x)`: the number of a point that is an integer of
+magnitude at most 2^32, else a throw of the error of `_IA.decided()`, which
+`run()` and `broadcast()` answer with `entire`, and which `broadcast()`
+does not count as a failure). A `pow` whose exponent is plain is
+`_IA.pow($0, n)` with a number exponent (`x^3` is `_IA.pow(_.x, 3)`); a
+power by the constant 2 stays `_IA.square`. Every other integer is an
+interval: `Floor(x) + 1` is `_IA.add(_IA.floor(_.x), { lo: 1, hi: 1 })`.
+So the bounds and the index of every loop are numbers, and no code tests a
+representation. A bound that is an interval (a slider `n` given as
+`[2, 4]`, a `Floor(n)` that jumps in the box) gives `entire` at run time.
+A loop writes no deadline check, and the lowering writes no NaN test of the
+`iterationBudget` (NaN reads as `empty`): a loop of more passes than the
+budget (2^32 without one) throws the error of `_IA.decided()` before its
+first pass (`_IA.undecided()`), so the result is `entire`. A sum is a loop,
+which adds its terms in another order than the existing target's sum
+written out term by term: the ends can differ in the last digits.
 
 Constants. An integer and a real literal whose double is its value are a
 point `{ lo: c, hi: c }`; NaN is `{ kind: 'empty' }`; a boolean is `'true'`
@@ -529,7 +585,8 @@ a text that reads the inputs object (`readsVarsObject()`: `_.c`, read at
 each use), another text declines; a `mode` other than `'strict'`,
 `functions`, `operators`, `imports`, `preamble` and `strictTypes: true`
 decline by name; `entryChecks`, `storage`, `broadcast` and `quadrature`
-have no effect; `iterationBudget` is accepted.
+have no effect; `iterationBudget` limits the passes of each `Sum` and
+`Product` (above).
 
 ## Lists
 

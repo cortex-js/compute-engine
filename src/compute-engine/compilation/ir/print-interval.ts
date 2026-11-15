@@ -15,6 +15,14 @@
  * function that `createIntervalRuntime().load()` builds from it, so `run()`
  * and stored code loaded elsewhere agree by construction.
  *
+ * An `if` is printed with each arm once (`verdictIf`): the first arm unless
+ * the condition is `'false'`, the second unless it is `'true'`, and each
+ * result the hull of both for `'maybe'`. A counted loop runs over numbers
+ * (the pass `plain`), and refuses to start, by the error of an undecided
+ * condition (`run()` answers `entire`), when it has more passes than the
+ * `iterationBudget`. `Random()` is the support `[0, 1]` of a draw, and a
+ * random frame is its body.
+ *
  * A rule of the mode is here: `intervalRefusal()`, the constructs that the
  * mode does not compile yet.
  */
@@ -30,9 +38,12 @@ import { printProgram, type Printed, type Syntax } from './print.js';
 import {
   argumentIndex,
   entryOf,
+  regionsOf,
   type Program,
+  type Region,
 } from './ir.js';
 import { deepFreeze, OPERATORS, type OperatorRow } from './operators.js';
+import { PLAIN_ROWS, PLAIN_SPELLINGS } from './plain.js';
 
 const ia = (kernel: string, arity = 1) =>
   `_IA.${kernel}(${arity === 2 ? '$0, $1' : '$0'})`;
@@ -61,6 +72,16 @@ const enclosure = (x: number, ulps: number): string => {
   return `{ lo: ${text(lo)}, hi: ${text(hi)} }`;
 };
 
+/** The lines that open a counted loop of at most `limit` passes, over the
+ *  number bounds `lo` and `hi`; more passes throw before the first. */
+const loopOpen =
+  (limit: number): Syntax['loopOpen'] =>
+  (k, lo, hi) => [
+    `const ${k}_lo = ${lo}, ${k}_hi = ${hi};`,
+    `if (!(${k}_hi - ${k}_lo < ${limit})) _IA.undecided('A loop of more than ${limit} passes');`,
+    `for (let ${k} = ${k}_lo; ${k} <= ${k}_hi; ${k}++) {`,
+  ];
+
 /**
  * The syntax of the mode: the statement forms of `JS`, and a spelling for
  * each operation that a kernel computes, with the operands in the order of
@@ -68,7 +89,8 @@ const enclosure = (x: number, ulps: number): string => {
  * `_IA.nthRootInterval`; `div.q` is `div`; `deg` the product by an
  * enclosure of π and the quotient by 180. A constant is a point, or for a
  * literal marked `inexact` the enclosure of that many ulps on each side;
- * NaN is `empty`; a boolean a verdict.
+ * NaN is `empty`; a boolean a verdict; a plain integer (`plain.ts`) a
+ * number.
  */
 export const JS_INTERVAL: Syntax = Object.freeze({
   ...JS,
@@ -81,13 +103,29 @@ export const JS_INTERVAL: Syntax = Object.freeze({
     pow: '_IA.powReal($0, $1)',
     root: '_IA.nthRootInterval($0, $1)',
     deg: `_IA.div(_IA.mul($0, ${enclosure(Math.PI, 1)}), { lo: 180, hi: 180 })`,
+    draw: '{ lo: 0, hi: 1 }',
+    atleast: '_IA.atLeast($0, $1)',
+    atmost: '_IA.atMost($0, $1)',
+    ...PLAIN_SPELLINGS,
   },
-  regions: {},
+  regions: {
+    seeded: ({ outs }) => ({
+      open: [...outs.map((o) => `let ${o};`), '{'],
+      close: (ys) => [...ys.map((y, j) => `  ${outs[j]} = ${y};`), '}'],
+    }),
+  },
   helpers: {},
+  verdictIf: {
+    first: (c) => `if (${c} !== 'false') {`,
+    second: (c) => `if (${c} !== 'true') {`,
+    join: (c, a, b) =>
+      `${c} === 'true' ? ${a} : ${c} === 'false' ? ${b} : _IA.hull(${a}, ${b})`,
+  },
+  loopOpen: loopOpen(2 ** 32),
   constant: (l) =>
     l.lane === 'boolean'
       ? `'${l.value}'`
-      : l.lane === 'complex'
+      : l.lane === 'complex' || (l.lane === 'integer' && l.plain === true)
         ? JS.constant(l)
         : Number.isNaN(Number(l.value))
           ? "{ kind: 'empty' }"
@@ -103,8 +141,9 @@ export const JS_INTERVAL: Syntax = Object.freeze({
   Object.freeze(t)
 );
 
-/** The rows of the mode: `OPERATORS`, and `square`, which the lowering
- *  makes of a power by the constant 2. */
+/** The rows of the mode: `OPERATORS`, `square`, which the lowering makes
+ *  of a power by the constant 2, the clamps `atleast` and `atmost`, which
+ *  the pass `narrow` makes, and the rows of the pass `plain`. */
 export const INTERVAL_ROWS: readonly OperatorRow[] = Object.freeze([
   ...OPERATORS,
   deepFreeze({
@@ -116,16 +155,31 @@ export const INTERVAL_ROWS: readonly OperatorRow[] = Object.freeze([
     threads: true,
     effect: 'pure',
   } as OperatorRow),
+  ...['atleast', 'atmost'].map((op) =>
+    deepFreeze({
+      arity: 2,
+      signatures: [
+        [['integer', 'integer'], 'integer', `${op}.int`],
+        [['real', 'real'], 'real', op],
+      ],
+      threads: false,
+      effect: 'pure',
+    } as OperatorRow)
+  ),
+  ...PLAIN_ROWS,
 ]);
 
-/** The construct of `p` that the mode does not compile yet (an `if`, a
- *  loop or a region instruction, after the passes), or `undefined`. */
+/** The construct of `p` that the mode does not compile yet (a `Loop`,
+ *  whose passes the budget counts), or `undefined`. A region other than a
+ *  random frame has no spelling (`admits()`). */
 export function intervalRefusal(p: Program): string | undefined {
-  for (const f of p.functions)
-    for (const i of f.body.body)
-      if (i.k === 'if' || i.k === 'loop' || i.k === 'region')
-        return `${i.k === 'if' ? 'a conditional' : i.k === 'loop' ? 'a loop' : `the region ${i.op}`}: the interval mode does not compile it yet`;
-  return undefined;
+  const loop = (r: Region): boolean =>
+    r.body.some(
+      (i) => (i.k === 'loop' && i.passes === true) || regionsOf(i).some(loop)
+    );
+  return p.functions.some((f) => loop(f.body))
+    ? 'a Loop: the interval mode does not compile it yet'
+    : undefined;
 }
 
 export type IntervalPrinted = StoredIntervalJavaScript & {
@@ -137,12 +191,20 @@ export type IntervalPrinted = StoredIntervalJavaScript & {
   readonly printed: Printed;
 };
 
+/** `iterationBudget`: a loop of more passes than it throws before its
+ *  first pass. */
 export function printInterval(
   p: Program,
   rows: readonly OperatorRow[],
-  syntax: Syntax = JS_INTERVAL
+  syntax: Syntax = JS_INTERVAL,
+  iterationBudget?: number
 ): IntervalPrinted {
-  const printed = printProgram(p, syntax, rows);
+  const limit = Math.min(Math.floor(iterationBudget ?? Infinity), 2 ** 32);
+  const printed = printProgram(
+    p,
+    limit < 2 ** 32 ? { ...syntax, loopOpen: loopOpen(limit) } : syntax,
+    rows
+  );
   const entry = entryOf(p);
   const literal = entry.literal === true;
   const n = argumentIndex(entry, entry.positional ?? 0);

@@ -17,20 +17,22 @@
  *
  * The shadow measure (`ce._jsProfileShadow`, `CE_JS_PROFILE_SHADOW=ir`) is
  * a second internal setting, also off by default: each compilation for the
- * `javascript` target that asks for no profile also compiles the expression
- * with the profile `ir`, discards that result, and counts its outcome
- * (`recordJsProfileShadow()`), per consumer: `implicit:<name>` for a
- * compilation of `implicitCompile()`, `public` for any other. Its counters
+ * `javascript`, `glsl` or `interval-js` target that asks for no profile also
+ * compiles the expression with the profile `ir`, discards that result, and
+ * counts its outcome (`recordJsProfileShadow()`), per consumer:
+ * `implicit:<name>` for a compilation of `implicitCompile()`, `public` for
+ * any other on `javascript`, `glsl:public` and `interval:public`. Its counters
  * are separate from those of the switch (`_jsProfileShadowStats()`), and
  * the file of `CE_JS_PROFILE_STATS` holds them under `shadow`.
  *
  * The public switch (`CE_JS_PROFILE_PUBLIC=ir`, a test-only setting read
  * once per instance of this module, `jsProfilePublicDefault()`) makes each
- * public compilation for the `javascript` or `glsl` target that asks for no
- * profile and no direct target try the profile `ir` first: its result is
- * returned when it compiles; on a decline the compilation runs as if the
- * switch were off. Its attempts are counted as those of the switch, under
- * the consumers `public` and `glsl:public` (`recordJsProfileAttempt()`).
+ * public compilation for the `javascript`, `glsl` or `interval-js` target
+ * that asks for no profile and no direct target try the profile `ir` first:
+ * its result is returned when it compiles; on a decline the compilation runs
+ * as if the switch were off. Its attempts are counted as those of the
+ * switch, under the consumers `public`, `glsl:public` and `interval:public`
+ * (`recordJsProfileAttempt()`).
  *
  * A browser has no `process` object: the switch is then off and nothing is
  * written. This module imports nothing, so that the engine can import it with

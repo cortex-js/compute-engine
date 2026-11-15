@@ -317,9 +317,93 @@ export function not(a: BoolInterval): BoolInterval {
 export function decided(cond: BoolInterval): boolean {
   if (cond === 'true') return true;
   if (cond === 'false') return false;
-  const error = new Error(
+  return undecided(
     'The condition of an `if` statement is true at some points of the input intervals and false at others'
   );
+}
+
+/**
+ * The number of `x`, for a bound of a counted loop of the code of the
+ * interval mode of the IR pipeline: `x` is a point that is an integer of
+ * magnitude at most 2^32. Any other value (an interval that is not a point,
+ * a jump, a pole, `empty`, `entire`) has no one count of passes, and throws
+ * the error of `undecided()`, which `run()` and `broadcast()` answer with
+ * `{ kind: 'entire' }`.
+ */
+export function number(x: Interval | IntervalResult): number {
+  const v = 'kind' in x ? (x.kind === 'interval' ? x.value : undefined) : x;
+  if (
+    v !== undefined &&
+    v.lo === v.hi &&
+    Number.isInteger(v.lo) &&
+    Math.abs(v.lo) <= 2 ** 32
+  )
+    return v.lo;
+  return undecided(
+    'A bound of a loop is not one integer at every point of the input intervals'
+  );
+}
+
+/**
+ * `v` with its lower end raised to the lower end of `c` when that is
+ * higher: the value of an arm that holds only where `v ≥ c` (the pass
+ * `narrow` of the interval mode of the IR pipeline). A clamp computes no
+ * new real number, so it takes no outward step, and an unchanged `v` is
+ * returned itself. The kind and the marks of `v` are kept (`partial` and
+ * its clip, a jump's `at` and `continuity`). Not narrowing is always
+ * sound, so `v` is returned unchanged when it has no value to clamp
+ * (`empty`, `entire`, a pole, a NaN bound), when `c` has no finite ends,
+ * or when the clamp would leave no point (the arm cannot be taken).
+ */
+export function atLeast(
+  v: Interval | IntervalResult,
+  c: Interval | IntervalResult
+): Interval | IntervalResult {
+  const [x, b] = [clampable(v), clampable(c, true)];
+  if (x === undefined || b === undefined) return v;
+  if (!(x.lo < b.lo && b.lo <= x.hi)) return v;
+  const value = { lo: b.lo, hi: x.hi };
+  return 'kind' in v ? ({ ...v, value } as IntervalResult) : value;
+}
+
+/** `v` with its upper end lowered to the upper end of `c` when that is
+ *  lower: the value of an arm that holds only where `v ≤ c`. The rules of
+ *  `atLeast()`. */
+export function atMost(
+  v: Interval | IntervalResult,
+  c: Interval | IntervalResult
+): Interval | IntervalResult {
+  const [x, b] = [clampable(v), clampable(c, true)];
+  if (x === undefined || b === undefined) return v;
+  if (!(b.hi < x.hi && x.lo <= b.hi)) return v;
+  const value = { lo: x.lo, hi: b.hi };
+  return 'kind' in v ? ({ ...v, value } as IntervalResult) : value;
+}
+
+/** The ends of `x` that a clamp reads: of a bare `{ lo, hi }`, an
+ *  `interval`, a `partial` or a jump; with `finite`, when both are finite.
+ *  (A NaN end of the clamped value fails the comparisons of the clamp.) */
+function clampable(
+  x: Interval | IntervalResult,
+  finite = false
+): Interval | undefined {
+  const b =
+    'kind' in x
+      ? x.kind === 'interval' || x.kind === 'partial' || x.kind === 'singular'
+        ? x.value
+        : undefined
+      : x;
+  return b !== undefined &&
+    (!finite || (Number.isFinite(b.lo) && Number.isFinite(b.hi)))
+    ? b
+    : undefined;
+}
+
+/** Throw the error that `decided()` throws for an undecided verdict, with
+ *  `message`: no bound is known for the value (a loop of more passes than
+ *  the `iterationBudget`, in the interval mode of the IR pipeline). */
+export function undecided(message: string): never {
+  const error = new Error(message);
   error.name = UNDECIDED_CONDITION;
   throw error;
 }

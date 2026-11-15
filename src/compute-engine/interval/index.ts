@@ -127,6 +127,10 @@ import {
   or as _or,
   not as _not,
   decided as _decided,
+  number as _number,
+  atLeast as _atLeast,
+  atMost as _atMost,
+  undecided as _undecided,
   piecewise as _piecewise,
   hull as _hull,
   elseArm as _elseArm,
@@ -272,6 +276,10 @@ export {
   or,
   not,
   decided,
+  number,
+  atLeast,
+  atMost,
+  undecided,
   piecewise,
   hull,
   elseArm,
@@ -461,6 +469,13 @@ export const IntervalArithmetic = {
   // The JavaScript boolean of a decided verdict, for the condition of an
   // `if` statement; an undecided verdict throws.
   decided: _decided,
+  // The number of a point, for a bound of a loop of the interval mode of
+  // the IR pipeline; `undecided` throws the error of `decided()`.
+  number: _number,
+  // The clamps of an arm whose condition bounds a value (`narrow`).
+  atLeast: _atLeast,
+  atMost: _atMost,
+  undecided: _undecided,
   piecewise: _piecewise,
   hull: _hull,
   // The second arm, or the hull of both arms, of a conditional whose

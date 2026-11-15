@@ -718,5 +718,33 @@ the target is deleted"), and most of it is outside what Tycho compiles.
    the interval calls is not in it: it goes on top of `ce-compiler`'s
    removal of the `numeric-kernel` profile, which rewrites the same lines.
 3. Batch 2: conditions, `narrow`, `Block` locals, user functions, `Sum` and
-   `Product` with the pass `plain`, `Random`.
+   `Product` with the pass `plain`, `Random`. WRITTEN and reviewed on
+   2026-11-15, with the census consumer `interval:public` of the shadow
+   measure and of the public switch. What it settled beyond this note:
+   - `narrow` clamps with two kernels made for it, `_IA.atLeast(v, c)` and
+     `_IA.atMost(v, c)`, which return `v` itself when nothing changes (every
+     decided condition). With the full `max` and `min` kernels the median
+     time ratio was 1.02 to 1.03; with the clamps it is 0.99 and 0.98 over
+     seven programs. `And(x > 0, 1/x > 2)` measured 1.08 and 1.11 under
+     load, and 420 ns against 407 ns in isolation: one clamp that the
+     existing target does not make.
+   - A loop over the budget, or of more than 2^32 passes, throws through
+     `_IA.undecided(message)`; the lowering gets no budget in the mode.
+   - Any plain exponent, a loop index included, is `_IA.pow(x, n)`.
+   - A plain constant is a second literal marked `plain`, printed as a
+     number; a product of two indexes is not plain (2^32 · 2^32).
+   - 19,279 containment checks (2 within the slack, both of batch 1). New
+     pinned exceptions against the existing target: the local assigned in
+     both arms (section 10), and two sums whose bounds differ by more than
+     4 ulps near 0 because the loop adds in another order
+     (`Sum(Sin(k·x), k = 1..3)`, `Sum((-1)^k·x^k/k, k = 1..6)`).
+   - Size: 404 lines added under `ir/` (`plain.ts` 168, `narrow.ts` 98);
+     the mode is about 1,000 lines.
+   - The census of CE's suite with the mode itself (the shadow measure on
+     the full suite at `b33abda07` plus the batch, no test failure): 2,435
+     interval compilations, of which the existing target compiles 1,923;
+     the mode admits 928 of those (48.3%), declines 995 and fails on none,
+     and admits 18 that the existing target declines. The most frequent
+     declines: a list (247), the step of a `Range` (59), the `Enclosure`
+     kind (53), `Break` (20).
 4. Then what the measure ranks first.

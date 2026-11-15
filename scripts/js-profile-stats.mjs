@@ -19,8 +19,8 @@
 // then the declines and failures of all its consumers, grouped by the
 // normalized message, with one example of each, and the declines of the
 // existing compiler that the profile admitted, by message. The GLSL
-// compilations (the consumer `glsl:public`) have a total and messages of
-// their own.
+// compilations (the consumer `glsl:public`) and the interval compilations
+// (`interval:public`) each have a total and messages of their own.
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -36,6 +36,14 @@ const totals = new Map();
 const shadow = new Map();
 const shadowMessages = new Map();
 const admittedOverBaseline = new Map();
+/** The target of a consumer that has a total of its own: `glsl` for
+ *  `glsl:public`, `interval` for `interval:public`. */
+const sideOf = (name) =>
+  name.startsWith('glsl:')
+    ? 'glsl'
+    : name.startsWith('interval:')
+      ? 'interval'
+      : undefined;
 for (const file of files) {
   const data = JSON.parse(readFileSync(join(dir, file), 'utf8'));
   for (const [name, s] of Object.entries(data.shadow ?? {})) {
@@ -54,7 +62,8 @@ for (const file of files) {
         })
       );
     for (const k of Object.keys(t)) t[k] += s[k] ?? 0;
-    const prefix = name.startsWith('glsl:') ? 'glsl ' : '';
+    const side = sideOf(name);
+    const prefix = side === undefined ? '' : `${side} `;
     for (const [message, n] of Object.entries(
       s.baselineDeclinedAdmittedMessages ?? {}
     ))
@@ -166,15 +175,17 @@ if (shadow.size > 0) {
   console.log(
     `${'consumer'.padEnd(w)} ${num('compiled')} ${num('baseline')} ${num('admitted')} ${'%'.padStart(7)} ${num('declined')} ${num('failed')} ${num('base-decl')} ${num('b-d-adm')}`
   );
-  const glsl = Object.fromEntries(Object.keys(sum).map((k) => [k, 0]));
+  const zero = () => Object.fromEntries(Object.keys(sum).map((k) => [k, 0]));
+  const apart = { glsl: zero(), interval: zero() };
   for (const [name, t] of shadowRows) {
-    const into = name.startsWith('glsl:') ? glsl : sum;
+    const into = apart[sideOf(name)] ?? sum;
     for (const k of Object.keys(sum)) into[k] += t[k];
     console.log(row(name, t));
   }
   console.log(row('total', sum));
-  if (shadowRows.some(([name]) => name.startsWith('glsl:')))
-    console.log(row('glsl total', glsl));
+  for (const side of Object.keys(apart))
+    if (shadowRows.some(([name]) => sideOf(name) === side))
+      console.log(row(`${side} total`, apart[side]));
   console.log(
     `\n'baseline': compilations that the existing compiler compiled; 'admitted', 'declined', 'failed': the profile on these. 'base-decl': compilations that the existing compiler declined; 'b-d-adm': of those, admitted by the profile.`
   );
@@ -194,7 +205,10 @@ if (shadow.size > 0) {
     if (`${kind}${example}` !== key)
       console.log(`          e.g. ${oneLine(example)}`);
   }
-  const notKept = sum.otherMessages + glsl.otherMessages;
+  const notKept =
+    sum.otherMessages +
+    apart.glsl.otherMessages +
+    apart.interval.otherMessages;
   if (notKept > 0)
     console.log(`  ${String(notKept).padStart(6)}  (messages not kept)`);
 }

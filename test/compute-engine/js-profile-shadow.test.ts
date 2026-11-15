@@ -204,8 +204,7 @@ describe('the counters', () => {
       expect(() =>
         compile(ce.box(['Foo', 'x']), { fallback: false })
       ).toThrow();
-      // Not measured: another target, a profile asked for.
-      compile(ce.parse('x^2 + 1'), { to: 'interval-js' });
+      // Not measured: a profile asked for.
       compile(ce.parse('x^2 + 1'), { profile: 'ir' });
     } finally {
       warn.mockRestore();
@@ -238,6 +237,24 @@ describe('the counters', () => {
       "Could not compile with the profile 'ir': the option `operators` is not supported by the profile 'ir'",
     ]);
     expect(stats.examples[keys[0]]).toBe(keys[0]);
+  });
+
+  test('a compilation for interval-js is counted as interval:public', () => {
+    const ce = engine(true);
+    const admitted = compile(ce.parse('x^2 + 1'), { to: 'interval-js' });
+    // `Sinc` has no row: the profile declines, the existing target compiles.
+    compile(ce.box(['Sinc', 'x']), { to: 'interval-js' });
+    // The result is the existing target's.
+    expect(admitted.success).toBe(true);
+    expect(admitted.profile).toBeUndefined();
+    const stats = _jsProfileShadowStats(ce);
+    expect(stats['interval:public']).toMatchObject({
+      attempts: 2,
+      admitted: 1,
+      declined: 1,
+      failed: 0,
+    });
+    expect(stats.public).toBeUndefined();
   });
 
   test('an expression with many paths is compiled with the profile', () => {
