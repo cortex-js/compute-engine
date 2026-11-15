@@ -55,7 +55,7 @@ const IR_GLSL_OPTIONS = {
   cse: 'mapped',
   constantFold: 'mapped',
   mode: 'declined',
-  storage: 'declined',
+  storage: 'mapped',
   quadrature: 'no-op',
   functions: 'declined',
   vars: 'mapped',
@@ -138,11 +138,9 @@ export function compileWithIrProfileGlsl(
   options: IrOptions | undefined
 ): CompilationResult<'glsl'> {
   try {
-    const refused =
-      (options as { callerLocals?: unknown } | undefined)?.callerLocals !==
-      undefined
-        ? 'the option `callerLocals`'
-        : optionDecline(options, IR_GLSL_OPTIONS);
+    // `callerLocals` has no effect: a user function takes every input that
+    // its body reads as a parameter, which each call passes (`capture()`).
+    const refused = optionDecline(options, IR_GLSL_OPTIONS);
     if (refused !== undefined)
       throw decline(`${refused} is not supported by the profile 'ir' on glsl`);
     // `vars`: an input spelled as the host's text, a name or a member or
@@ -171,6 +169,14 @@ export function compileWithIrProfileGlsl(
         throw decline(`the vars entry of ${name} on glsl`, { binding: name });
       vars[name] = text;
     }
+    // `storage`: a list input in a `sampler2D` (the one kind, which
+    // `compile()` has checked, as it has checked that each name is free).
+    const storage = Object.keys(options?.storage ?? {});
+    const both = storage.find((name) => Object.hasOwn(vars, name));
+    if (both !== undefined)
+      throw decline(`the vars entry of ${both} in storage on glsl`, {
+        binding: both,
+      });
     // The existing target's cap (`GLSL_DEFAULT_PASS_BUDGET`, which is not
     // imported: a cycle of modules): a `Sum` or a `Product` of more passes
     // is NaN (the lowering's test), and a program whose loops can run more
@@ -179,6 +185,7 @@ export function compileWithIrProfileGlsl(
     const s = compileSlice(expr, {
       target: 'glsl',
       bareInputs: vars,
+      storage,
       passes: {
         ...ALL_PASSES,
         ...(options?.cse === false ? { cse: false } : {}),
@@ -192,6 +199,17 @@ export function compileWithIrProfileGlsl(
     const entry = entryOf(p);
     if (entry.literal === true)
       throw decline('a Function literal on glsl', { operator: 'Function' });
+    // A function takes an input that its body reads as a parameter: GLSL
+    // copies an array argument at each call, so only a point (`vecN`) or a
+    // sampler is lifted.
+    for (const f of p.functions)
+      f.body.params.slice(f.lifted ?? Infinity).forEach((v, k) => {
+        const n = p.types[v].shape[0];
+        if (p.types[v].storage === undefined && typeof n === 'number' && n > 4)
+          throw decline(
+            `the function ${f.source} reads the input ${f.paramNames[f.lifted! + k]}, a list of ${n} elements, which glsl would copy at each call`
+          );
+      });
     if (!(loopPasses(p, budget) <= budget))
       throw decline(
         `loops that can run more passes than the iterationBudget (${budget}) on glsl`
@@ -221,7 +239,8 @@ export function compileWithIrProfileGlsl(
         new RegExp(`\\b${id}\\s*\\(`).test(`${code}\n${preamble}`)
       )
         throw decline(`the input name \`${id}\` on glsl`, { binding: name });
-      lowered[name] = typeName(p.types[v]);
+      // A list in storage: the type of the existing target (`float[5]`).
+      lowered[name] = typeName({ ...p.types[v], storage: undefined });
     });
     addSymbolDeps(p, options?.symbolDeps);
     // The engine type and the provenance as the existing target reports

@@ -17,7 +17,12 @@ import type { Expression } from '../../global-types.js';
 import { Decline, hostVarOp, lower } from './lower.js';
 import { readsVarsObject } from '../vars-inputs.js';
 import { SliceInternalError, verify } from './verify.js';
-import { ALL_PASSES, runPasses, type PassOptions } from './passes.js';
+import {
+  ALL_PASSES,
+  runPasses,
+  SCALARIZE_LIMIT,
+  type PassOptions,
+} from './passes.js';
 import {
   JS,
   JS_BIGINT,
@@ -34,6 +39,7 @@ import {
   type OperatorRow,
 } from './operators.js';
 import {
+  argsOf,
   entryOf,
   lengthValues,
   outsOf,
@@ -44,6 +50,7 @@ import {
   type Lane,
   type Program,
   type Region,
+  type V,
 } from './ir.js';
 
 export { Decline } from './lower.js';
@@ -140,6 +147,17 @@ export function admits(
       if (i.op === 'draw' && !profile.draws)
         return { head: 'Random', cause: 'Random' };
       const head = rowOfOp(rows, i.op)?.row.head;
+      // `scalarize` leaves an operation over a longer list element-wise.
+      if (
+        !profile.elementwise &&
+        p.types[i.out].shape.length > 0 &&
+        lengthValues(p.types[i.out]).length === 0 &&
+        rowOfOp(rows, i.op)?.row.threads === true
+      )
+        return {
+          head,
+          cause: `an element-wise ${head ?? i.op} over a list of more than ${SCALARIZE_LIMIT} elements`,
+        };
       if (spellingOf(profile.syntax, i.op) === undefined)
         return { head, cause: `${head ?? i.op} (the operation ${i.op})` };
     }
@@ -183,9 +201,10 @@ export function admits(
   }
   if (entry.tuple === true && profile.syntax.retTuple === undefined)
     return { head: 'Tuple', cause: 'a Tuple of elements of several shapes' };
-  // A function returns no list where lengths are stated only (GLSL).
+  // A function returns no list of a run-time length where lengths are
+  // stated only (GLSL).
   const listResult = p.functions.find(
-    (f) => f !== entry && f.results[0].shape.length > 0
+    (f) => f !== entry && lengthValues(f.results[0]).length > 0
   );
   if (listResult !== undefined && !profile.runtimeLengths)
     return { cause: `the list result of ${listResult.source}` };
@@ -290,7 +309,64 @@ export type SliceOptions = {
    *  (`compile()`'s profile), or by its text in the map (`compile()`'s
    *  `vars` on GLSL); default `in<k>_<name>`. */
   readonly bareInputs?: boolean | Readonly<Record<string, string>>;
+  /** GLSL: the list inputs that the host holds in a `sampler2D`
+   *  (`compile()`'s `storage`; `holdStorage()`). */
+  readonly storage?: readonly string[];
 };
+
+/**
+ * Mark the inputs `names` and the parameters of the functions they are
+ * passed to (to a fixed point) as lists in a `sampler2D`, which have no
+ * value of the target: each read must be the list operand of `elem` or
+ * `at`, or an argument of a call whose parameter is such a list in every
+ * call. Returns the refusal, or `undefined`.
+ */
+function holdStorage(p: Program, names: readonly string[]): string | undefined {
+  const entry = entryOf(p);
+  const fns = new Map(p.functions.map((f) => [f.name, f]));
+  const held = new Set<V>();
+  const hold = (v: V): void => {
+    held.add(v);
+    p.types[v] = { ...p.types[v], storage: 'sampler2D' };
+  };
+  for (const name of names) {
+    // An input that the program does not read has no parameter.
+    const v = entry.body.params[entry.paramNames.indexOf(name)];
+    if (v === undefined) continue;
+    if (p.types[v].lane === 'boolean' || p.types[v].shape.length !== 1)
+      return `the storage of ${name}, which is not a list of numbers`;
+    hold(v);
+  }
+  let refusal: string | undefined;
+  /** Marks the parameters that a held argument reaches; `last`: checks
+   *  that no call passes a value that is not held for a held one. */
+  const walk = (r: Region, last: boolean): boolean => {
+    let changed = false;
+    if (r.yields.some((y) => held.has(y)))
+      refusal ??= 'a list in storage as a value';
+    for (const i of r.body) {
+      argsOf(i).forEach((a, k) => {
+        if (i.k === 'call') {
+          const param = fns.get(i.fn)!.body.params[k];
+          if (held.has(a) && !held.has(param)) (changed = true), hold(param);
+          if (last && held.has(param) && !held.has(a))
+            refusal ??= `a call of ${i.fn} with a list in storage and one not`;
+        } else if (
+          held.has(a) &&
+          (i.k !== 'op' || (i.op !== 'elem' && i.op !== 'at') || k > 0)
+        ) {
+          const what = i.k === 'op' ? rowOfOp(OPERATORS, i.op)?.row.head : i.k;
+          refusal ??= `a read of a list in storage by ${what ?? i.k} (only At reads it)`;
+        }
+      });
+      for (const x of regionsOf(i)) changed = walk(x, last) || changed;
+    }
+    return changed;
+  };
+  while (p.functions.map((f) => walk(f.body, false)).some((c) => c));
+  p.functions.forEach((f) => walk(f.body, true));
+  return refusal;
+}
 
 /** The rows and the syntax of one compilation: those of `extend`, and a
  *  row per name of `vars`, of one operation per lane. */
@@ -397,6 +473,8 @@ export function compileSlice(
   options: SliceOptions
 ): (JavaScriptResult | GlslResult) & { warnings: Warning[]; program: Program } {
   const p = sliceProgram(expr, options);
+  const held = options.storage && holdStorage(p, options.storage);
+  if (held) throw new Decline('program', `${held} on ${options.target}`);
   const { rows, syntax } = tables(options);
   const printed =
     options.target === 'javascript'

@@ -472,7 +472,10 @@ result from the signature or the body. A recursive one needs a result type
 (declared, or inferred by the engine). An input of the compilation that the body
 reads (a free name with no value, or a name of `symbolic` or `inputs`) is a
 parameter after the function's own, in the order of its first read in the body
-(lambda lifting): each call passes the caller's value of the name, an input of
+(lambda lifting; a scalar, a list of reals or integers of a stated length, or a
+tuple of them, which stays a tuple; on GLSL, which copies an array argument at
+each call, a list of more than 4 elements that is not in storage declines,
+`IRFunction.lifted`): each call passes the caller's value of the name, an input of
 the entry or, in another function, a parameter of the same kind, so the input is
 in `freeSymbols` and a chain of calls passes it down. At the entry the input has
 the type that the scope of the compilation gives the name, whichever occurrence
@@ -484,7 +487,8 @@ input's declines. A `vars` name whose text reads the inputs object
 entry reads the text. Declined: a recursive call of a function that reads an
 input, also through a cycle of calls (`P(j) = If(j > 0, Q(j - 1), n)` and
 `Q(j) = If(j > 0, P(j - 1), 1)`); a call where the name is a local or a
-parameter, or has a value; an input of a list type; a name with a value read in
+parameter, or has a value; an input of a list of a run-time length or of
+booleans; a name with a value read in
 the body; another `vars` name. A recursive function that reads no input
 compiles. A function value other than the literal of a `Map` or `Filter` or the
 root, and a list argument for a scalar parameter (the interpreter maps the
@@ -506,7 +510,11 @@ length declines with the target's rule.
 
 A result declared a list of reals, integers or booleans (`list<integer>`,
 `list<real^3>`) has the type of the body, a list of rank 1 of a sub-lane of the
-declared one; a tuple body or result, and a list of complex numbers, decline. A
+declared one, and is not a tuple; a result declared a tuple of reals, integers
+or booleans (`(real) -> tuple<real, real>`, a point) has a tuple body of a
+sub-lane, and the result of a call is a tuple. A body of another lane
+(`tuple<integer, integer>` of a real body), a tuple body for a list result or
+the reverse, and complex elements (`tuple<complex, complex>`) decline. A
 run-time length of the result is a value of the body: the call has two results,
 the length and then the list, and the
 JavaScript code reads the length of the returned array (`.length`); the
@@ -514,7 +522,9 @@ function returns one value, as any other. The verifier checks that the type of
 the list result names the length result of the same call. A result that can be
 a parameter (`same(L) := L`) is returned as a copy, so the result of a call is
 a new list. Declined: a recursive call of a function with a list result (its
-type is the body's), a list of lists, and a list result on GLSL.
+type is the body's), a list of lists, and on GLSL a result of a run-time
+length; one of a stated length is a `vecN` or a `float[n]`
+(`vec2 _fn_ir_u0_pt(float v0)`).
 
 ## How to add
 
@@ -543,6 +553,11 @@ type is the body's), a list of lists, and a list result on GLSL.
   recursion, and `Max` of 1,000 operands is a chain of 1,000 `max`. A
   program on which a walk of the pipeline still exceeds the call stack (a
   tree of depth 20,000) declines: "an expression too deep to compile".
+- On GLSL `scalarize` writes an element-wise operation as one expression per
+  element for a list of at most 64 elements (`SCALARIZE_LIMIT`); over a
+  longer list, an array or a list in storage, the operation declines
+  (`2·E` for `E: list<real^65>`), as the text would grow with the length.
+  A reduction or an `At` of such a list is a loop or a read and compiles.
 - A loop or a build of 2^32 iterations or more throws on JavaScript; GLSL clamps
   its `int` bounds to ±2^30. GLSL has no run-time length, region, draw, frame or
   recursion.
@@ -684,10 +699,28 @@ one (`u_x`, `u.P`, `u[0]`), which calls nothing and is spliced at each read;
 a read in a user function is passed as any input (see "User functions").
 Another text, a text with a name that is a GLSL word or holds `__` or a
 `gl_` prefix (`u.sample`, `u.gl_x`), a text whose first name could not be an
-input name (below), and a name that has a value in the engine decline. Declined with
-`'outside-profile'`: a list or tuple result of a user function, a root `Function` literal,
-the options `functions`, `operators`, `imports`, `preamble`, `storage`,
-`callerLocals`, `strictTypes: true`, `broadcast: true`, a `mode` other than
+input name (below), and a name that has a value in the engine decline.
+`storage: { S: 'sampler2D' }`: the list input `S` (of numbers, of a stated
+length) is held by the host in a texture, the contract of the existing
+target (a single-channel float texture, one element per texel, row-major
+from texel (0, 0), of any width, read at level 0 with no filtering; the host
+declares `uniform sampler2D S;` and `precision highp sampler2D;`). After the
+passes, `holdStorage()` (`index.ts`) marks `S` and, to a fixed point, the
+parameters of the functions it is passed to (`IRType.storage`): each read
+must be the list operand of `elem` or `at`, which the printer spells
+`elem.sampler2D` and `at.sampler2D` (one helper `_gpu_ir_texel(v, k)` for
+every length; `at` keeps the rule of `At`, NaN outside), or an argument of a
+call whose parameter is then a `sampler2D`. So `At(S, k)`, a reduction, an
+element-wise operation (scalarized to reads) and a user function that reads
+`S` or takes it as a list argument compile; `S` as a value (a result, an
+arm, a yield), a function called with `S` and with another list, and a
+`vars` text for `S` decline. `freeSymbolTypes.S.lowered` is the existing
+target's (`float[7]`, `vec3`). `callerLocals` has no effect: a function
+always takes the inputs that its body reads as parameters ("User
+functions"); a call under a binder of the input's name declines. Declined with
+`'outside-profile'`: a list result of a user function of a run-time length, a root `Function` literal,
+the options `functions`, `operators`, `imports`, `preamble`,
+`strictTypes: true`, `broadcast: true`, a `mode` other than
 `'strict'`, loops whose passes can exceed the budget ("Loops and the
 runtime"), and an input name that is not a plain GLSL
 identifier, is a reserved word (`gpu-reserved.ts`), can be a name of the printer

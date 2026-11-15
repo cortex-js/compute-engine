@@ -37,6 +37,10 @@ export type GlslEvaluation = {
   name: string;
   source: string;
   uniforms: Record<string, number | number[]>;
+  /** The `sampler2D` uniforms: each is a single-channel float texture
+   *  (`R32F`) of `width` texels per row, holding `values` row-major from
+   *  texel (0, 0), the last row padded with 0, read with no filtering. */
+  textures?: Record<string, { width: number; values: number[] }>;
 };
 
 /** The value that a fragment shader wrote, or the step that failed. */
@@ -136,7 +140,7 @@ window.glslCheck = (() => {
       );
       const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
       gl.viewport(0, 0, 1, 1);
-      const results = items.map(({ name, source, uniforms }) => {
+      const results = items.map(({ name, source, uniforms, textures = {} }) => {
         if (status !== gl.FRAMEBUFFER_COMPLETE)
           return { name, ok: false, log: 'framebuffer status ' + status };
         const shader = make('fragment', source);
@@ -163,7 +167,9 @@ window.glslCheck = (() => {
         const count = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
         for (let i = 0; i < count; i++)
           active.push(gl.getActiveUniform(program, i).name.replace(/\\[0\\]$/, ''));
-        const missing = active.filter((u) => !Object.hasOwn(uniforms, u));
+        const missing = active.filter(
+          (u) => !Object.hasOwn(uniforms, u) && !Object.hasOwn(textures, u)
+        );
         const inactive = Object.keys(uniforms).filter((u) => !active.includes(u));
         if (missing.length > 0) {
           gl.deleteProgram(program);
@@ -182,8 +188,25 @@ window.glslCheck = (() => {
           if (Array.isArray(v)) gl.uniform1fv(at, v.map(decode));
           else gl.uniform1f(at, decode(v));
         }
+        // Each texture on a unit from 1 (unit 0 holds the framebuffer's).
+        const made = Object.entries(textures).map(([u, t], k) => {
+          const tex = gl.createTexture();
+          gl.activeTexture(gl.TEXTURE1 + k);
+          gl.bindTexture(gl.TEXTURE_2D, tex);
+          const height = Math.ceil(t.values.length / t.width);
+          const data = new Float32Array(t.width * height);
+          t.values.forEach((v, i) => (data[i] = decode(v)));
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, t.width, height, 0, gl.RED, gl.FLOAT, data);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+          if (active.includes(u))
+            gl.uniform1i(gl.getUniformLocation(program, u), 1 + k);
+          return tex;
+        });
+        gl.activeTexture(gl.TEXTURE0);
         const uniformError = gl.getError();
         if (uniformError !== gl.NO_ERROR) {
+          made.forEach((tex) => gl.deleteTexture(tex));
           gl.deleteProgram(program);
           gl.deleteShader(shader);
           return {
@@ -198,6 +221,7 @@ window.glslCheck = (() => {
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, pixel);
         const error = gl.getError();
+        made.forEach((tex) => gl.deleteTexture(tex));
         gl.deleteProgram(program);
         gl.deleteShader(shader);
         if (error !== gl.NO_ERROR)
@@ -321,6 +345,12 @@ export class GlslDriver {
           Object.entries(item.uniforms).map(([u, v]) => [
             u,
             Array.isArray(v) ? v.map(encodeNumber) : encodeNumber(v),
+          ])
+        ),
+        textures: Object.fromEntries(
+          Object.entries(item.textures ?? {}).map(([u, t]) => [
+            u,
+            { width: t.width, values: t.values.map(encodeNumber) },
           ])
         ),
       })),

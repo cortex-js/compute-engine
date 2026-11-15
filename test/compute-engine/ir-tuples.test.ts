@@ -746,11 +746,12 @@ describe('list results of user functions', () => {
     const D = [1, 2];
     expect(r.run!({ D } as never)).not.toBe(D);
   });
-  test('a fixed-length list result; a tuple or complex list result declines', () => {
+  test('a fixed-length list or tuple result; a complex list result declines', () => {
     const points = [{ x: 0.5 }, { x: -2 }];
     check(['three', 'x'], points);
     check(['Add', ['three', 'x'], ['List', 1, 2, 3]], points);
-    expect(declined(['pt', 'x'])).toMatch(/the result of pt is not a scalar/);
+    check(['pt', 'x'], points);
+    check(['Add', ['Multiply', 2, ['pt', 'x']], ['Tuple', 1, 'x']], points);
     // A declared complex element: a real body would take the real lane
     // (`Sqrt(At(pairz(x), 1))` at x = -4 is 2i in the interpreter).
     expect(declined(['Sqrt', ['At', ['pairz', 'x'], 1]])).toMatch(
@@ -785,10 +786,17 @@ describe('list results of user functions', () => {
       BigInt(interpret(['Length', legal], { J: B }) as number)
     );
   });
-  test('GLSL declines a list result', () => {
+  test('GLSL admits a list result of a stated length and declines one of a run-time length', () => {
+    expect(
+      compileSlice(box(['Sum', ['three', 'x']]), { target: 'glsl' }).code
+    ).toMatch(/^vec3 _fn_\w+_three\(float/m);
     expect(() =>
-      compileSlice(box(['Sum', ['three', 'x']]), { target: 'glsl' })
-    ).toThrow(/the list result of three/);
+      compileSlice(box(['Sum', ['legal', ['List', 1, 0, 1], 1]]), {
+        target: 'glsl',
+      })
+    ).toThrow(
+      /the list made by the program \(a Range or a Filter\) has a run-time length/
+    );
   });
 });
 

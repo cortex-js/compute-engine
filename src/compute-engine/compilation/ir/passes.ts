@@ -242,6 +242,9 @@ function perElement(
   return i.out;
 }
 
+/** The most elements of a list that `scalarize` writes one by one. */
+export const SCALARIZE_LIMIT = 64;
+
 const scalarize: Pass = (p, rows) => {
   const constants = new Map<V, Constant>();
   return rewrite(p, (i) => {
@@ -252,6 +255,10 @@ const scalarize: Pass = (p, rows) => {
     const t = p.types[i.out];
     if (t.shape.length === 0 || !threads(rows, i.op)) return undefined;
     if (!t.shape.every((n) => typeof n === 'number')) return undefined;
+    // A longer list stays element-wise: one expression per element would
+    // make text without bound, and the target's check (`admits()`) refuses it.
+    const count = (t.shape as number[]).reduce((m, n) => m * n, 1);
+    if (count > SCALARIZE_LIMIT) return undefined;
     const out: Instr[] = [];
     perElement(p, rows, i, out);
     return out;

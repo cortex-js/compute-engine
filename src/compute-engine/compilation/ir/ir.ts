@@ -34,7 +34,14 @@ export type V = number;
 /** A static length, or the integer value that holds a run-time length. */
 export type Length = number | { readonly v: V };
 
-export type IRType = { readonly lane: Lane; readonly shape: readonly Length[] };
+/** `storage`: a list that the host holds in a storage of that kind (the
+ *  option `storage` of `compile()`), set after the passes; it is read only
+ *  by `elem` and `at` and passed to calls (`holdStorage()` of `index.ts`). */
+export type IRType = {
+  readonly lane: Lane;
+  readonly shape: readonly Length[];
+  readonly storage?: 'sampler2D';
+};
 // Room for an aggregate of fields (design only, no lowering): a tuple type
 // `{ kind: 'tuple'; elements: IRType[] }` in a union with the type above,
 // read by `elem` with a literal index and printed as an array or a struct.
@@ -109,6 +116,9 @@ export type IRFunction = {
   readonly positional?: number;
   /** The entry is a root function literal (also one of no parameter). */
   readonly literal?: boolean;
+  /** A user function: its parameters from this index are the inputs that
+   *  its body reads (`capture()`). */
+  lifted?: number;
   /** The entry returns the array of its results: a root `Tuple` whose
    *  elements are not of one shape, which is no value of the program. */
   readonly tuple?: boolean;

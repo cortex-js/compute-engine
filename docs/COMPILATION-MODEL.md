@@ -2632,6 +2632,15 @@ count as the cap, multiplied down the nesting), declines. It has no
 NaN-safe helpers and no exact sine hash (no `float32Bounds`): an operand
 of `Mod` or `Fract` that the existing target flags has the warning
 `float32-unsafe-argument`, also where that target emits an exact form.
+A user function can return a point or a list of a stated length, and read
+an input that is a point, a list in storage or a list of at most 4
+elements; an element-wise operation over a list of more than 64 elements
+declines. With `storage: { S: 'sampler2D' }` the list input `S`
+is read from the host's texture with the addressing of the existing target
+(`_gpu_ir_texel`), by `At`, by a reduction or an element-wise operation, and
+in a user function, which takes a `sampler2D` parameter; `S` as a value
+declines. `callerLocals` changes nothing: a user function takes every input
+that its body reads as a parameter.
 Anything else, and the options it does
 not map (the README lists them), decline with `outside-profile`; with
 `fallback`, the existing GLSL target then compiles the expression.

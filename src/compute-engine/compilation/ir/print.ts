@@ -149,17 +149,24 @@ export function inlinedValues(
     );
   };
   const walk = (r: Region) => {
+    // The first instruction that reads each value, and the count of the
+    // instructions that are not crossable before each position: one pass.
+    const firstUse = new Map<V, number>();
+    const blocked = [0];
+    r.body.forEach((u, j) => {
+      for (const a of argsOf(u)) if (!firstUse.has(a)) firstUse.set(a, j);
+      blocked.push(blocked[j] + (fx.crossable(u) ? 0 : 1));
+    });
     r.body.forEach((i, at) => {
       regionsOf(i).forEach(walk);
       if (i.k === 'const') return void inlined.add(i.out);
       if ((i.k !== 'op' && i.k !== 'list') || !fx.speculatable(i)) return;
       if (index.uses.get(i.out) !== 1) return;
-      const later = r.body.slice(at + 1);
-      const user = later.findIndex((u) => argsOf(u).includes(i.out));
+      const user = firstUse.get(i.out) ?? -1;
       if (user < 0 && !r.yields.includes(i.out)) return;
-      const between = user < 0 ? later : later.slice(0, user);
-      if (!between.every((u) => fx.crossable(u))) return;
-      if (user >= 0 && !readsOnce(later[user], i.out)) return;
+      const end = user < 0 ? r.body.length : user;
+      if (blocked[end] !== blocked[at + 1]) return;
+      if (user >= 0 && !readsOnce(r.body[user], i.out)) return;
       const d = 1 + Math.max(0, ...argsOf(i).map((a) => depth.get(a) ?? 0));
       if (d > INLINE_DEPTH) return;
       depth.set(i.out, d);
@@ -274,11 +281,16 @@ export function printProgram(
         return syntax.call(i.fn, i.args.map(use));
       case 'op': {
         const shape = type(i.out);
-        if (!threads(rows, p, i)) return spell(i.op, (k) => use(i.args[k]), i);
+        // A read of a list in storage is spelled `<op>.<storage kind>`.
+        const held = i.args.length > 0 ? type(i.args[0]).storage : undefined;
+        const op = held === undefined ? i.op : `${i.op}.${held}`;
+        if (!threads(rows, p, i)) return spell(op, (k) => use(i.args[k]), i);
         if (syntax.map === undefined)
           throw new Error(
             `slice printer: an element-wise ${i.op} on a target without them`
           );
+        // A plain `elem`: a list in storage is on GLSL only, which has no
+        // `map` (no target reaches this with one).
         const lengths = shape.shape.map((n) =>
           typeof n === 'number' ? String(n) : use(n.v)
         );

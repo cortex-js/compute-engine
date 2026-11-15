@@ -19,8 +19,10 @@ import { printProgram, type Printed, type Syntax } from './print.js';
 const NAN = 'uintBitsToFloat(0x7fc00000u)';
 
 /** `float`, `bool`; a list of 2 to 4 elements is a vector (`vec2`,
- *  `bvec3`: a point of the host), another list an array (`float[5]`). */
+ *  `bvec3`: a point of the host), another list an array (`float[5]`); a
+ *  list in storage the kind of the storage (`sampler2D`). */
 export function typeName(t: IRType): string {
+  if (t.storage !== undefined) return t.storage;
   const scalar = t.lane === 'boolean' ? 'bool' : 'float';
   const n = t.shape[0];
   if (t.shape.length > 1 || typeof n === 'object')
@@ -55,6 +57,11 @@ function float(x: number): string {
 export function glslParameterName(name: string, index: number): string {
   return `in${index}_${name.replace(/[^A-Za-z0-9]/g, '')}`;
 }
+
+/** `At`: the element read by `read` of its index from 0 in range, NaN
+ *  outside. */
+const at = (read: (k: string) => string) =>
+  `($1 == floor($1) && $1 != 0.0 && abs($1) <= float($#0) ? ${read('$1 > 0.0 ? int($1) - 1 : $#0 + int($1)')} : ${NAN})`;
 
 export const GLSL: Syntax = Object.freeze({
   ops: {
@@ -98,7 +105,17 @@ export const GLSL: Syntax = Object.freeze({
     // is clamped too: a compiler folds a constant index and rejects one out
     // of range, also in an arm that is not taken (`At(L, 7)` of a
     // `float[6]`).
-    'at': `($1 == floor($1) && $1 != 0.0 && abs($1) <= float($#0) ? $0[clamp($1 > 0.0 ? int($1) - 1 : $#0 + int($1), 0, $#0 - 1)] : ${NAN})`,
+    'at': at((k) => `$0[clamp(${k}, 0, $#0 - 1)]`),
+    // A list in a sampler (`storage`): the texel of the element, read as
+    // `elem` and `at` read an array (`_gpu_ir_texel`).
+    'elem.sampler2D': {
+      text: '_gpu_ir_texel($0, int($1))',
+      helpers: ['_gpu_ir_texel'],
+    },
+    'at.sampler2D': {
+      text: at((k) => `_gpu_ir_texel($0, ${k})`),
+      helpers: ['_gpu_ir_texel'],
+    },
     'rangestep': '($1 >= $0 ? 1.0 : -1.0)',
     // Only the builtins defined on every real: `asin`, `acos`, `acosh`,
     // `atanh` and `atan(y, x)` are undefined at some reals in GLSL ES 3.00,
@@ -144,6 +161,13 @@ export const GLSL: Syntax = Object.freeze({
       '  int r = ia - ib * (ia / ib);',
       '  if (r != 0 && (r < 0) != (ib < 0)) r += ib;',
       '  return float(r);',
+      '}',
+    ].join('\n'),
+    // The element `k` (from 0) of a list in a sampler (README, `storage`).
+    _gpu_ir_texel: [
+      'float _gpu_ir_texel(sampler2D v, int k) {',
+      '  int w = textureSize(v, 0).x;',
+      '  return texelFetch(v, ivec2(k % w, k / w), 0).r;',
       '}',
     ].join('\n'),
   },

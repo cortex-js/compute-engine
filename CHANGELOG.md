@@ -44,7 +44,20 @@
   range. A `Sum` or a `Product` of more passes than `iterationBudget`
   (10,000 by default, as on the existing GLSL target) is NaN; a program
   whose loops, nested ones included, can run more passes in all declines. A parameter of a user function declared
-  `tuple<real, real>` is a `vec2` (an array on JavaScript). A `Mod` or
+  `tuple<real, real>` is a `vec2` (an array on JavaScript), and so is a
+  result declared `tuple<real, real>`; a result declared `list<real^3>` is a
+  `vec3`. A user function can read an input that is a point, a list in
+  storage, or a list of at most 4 elements (GLSL would copy a longer array
+  at each call). An element-wise operation over a list of more than 64
+  elements declines. With `storage: { S: 'sampler2D' }`, the list input `S`
+  is read from a texture that the host uploads as for the existing GLSL
+  target (one value per texel of a single-channel float texture, row-major
+  from texel (0, 0), of any width): `At(S, k)`, a `Sum`, `Max` or
+  element-wise operation over `S`, and a user function that reads `S` or
+  takes it as a list argument read its texels; `S` as a value (the result,
+  an arm of an `If`, the result of a function) declines. `callerLocals` is
+  accepted and changes nothing: a user function always takes the inputs
+  that its body reads as parameters. A `Mod` or
   `Fract` of a trigonometric value amplified by a constant of magnitude 1000
   or more (a sine hash) has the warning `float32-unsafe-argument` in
   `warnings`, also where the existing target compiles an exact form. `code`
@@ -54,13 +67,15 @@
   inputs. With `vars`, a name is read as the host's text, which must be a
   name, or a member or an element of one (`u_x`, `u.P`, `u[0]`), and the
   name stays in `freeSymbols`. Declined: a list input of a run-time length,
-  a list or tuple result of a user function, a `Function` literal, a `vars`
+  a list result of a user function of a run-time length, a result declared
+  with complex elements, a `Function` literal, a `vars`
   text of another form or a `vars` name that has a value, and the options
-  `functions`, `operators`, `imports`, `preamble`, `storage`, `strictTypes`,
+  `functions`, `operators`, `imports`, `preamble`, `strictTypes`,
   `broadcast` and a mode other than `'strict'`; with `fallback`, the existing
   GLSL target then compiles the expression. On JavaScript the profile now
   compiles an input of a tuple type such as `tuple<real, real>`, given as an
-  array (`run({ P: [1, 2] })`).
+  array (`run({ P: [1, 2] })`), a user function that returns a point or a
+  list of a stated length, and one that reads a list or point input.
 - **The code of the experimental profile `'ir'` can be stored, loaded and
   sent to a worker.** A result of `compile(expr, { profile: 'ir' })` now has
   `runtimeVersion`, `preambleOnce` and `entryPlan`, as a result of the

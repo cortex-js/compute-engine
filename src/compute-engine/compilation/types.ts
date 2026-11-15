@@ -2458,6 +2458,10 @@ export interface CompilationOptions<Expr = unknown> {
    * have one), or when its `vars` source is not a read of a variable. A name
    * that is not in this list (a uniform, a sampler) is read by its name, as
    * without the option. Absent or empty, the option changes nothing.
+   *
+   * With `profile: 'ir'` the option has no effect: a shader function takes
+   * every input that its body reads as a parameter, whether or not it is in
+   * this list, and a call under a binder of the same name declines.
    */
   callerLocals?: readonly MathJsonSymbol[];
 
@@ -2666,6 +2670,12 @@ export interface CompilationOptions<Expr = unknown> {
    * // code: `_gpu_texat1600(S, k)`; the preamble declares the helper.
    * // The host declares `uniform sampler2D S;` and uploads the texture.
    * ```
+   *
+   * The host also declares `precision highp sampler2D;` before the
+   * preamble: the default precision of a sampler in a fragment shader is
+   * `lowp`, and a `lowp` fetch from a float texture can lose precision.
+   * With `profile: 'ir'` the helper is `_gpu_ir_texel`, with the same
+   * addressing.
    *
    * The default, with no hint, is the uniform-array lowering
    * (`_gpu_at1600(S, k)` over `uniform float S[1600];`). Both forms share one

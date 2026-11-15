@@ -178,9 +178,11 @@ function signatureTypes(e: Fn, literal: Fn) {
   });
   const r = signature?.result && present(signature.result);
   // A list of reals, integers or booleans: the type of the body, whose
-  // length can be a value of the body.
-  const ir = r === undefined ? undefined : inputType(r);
+  // length can be a value of the body; or a tuple of them (a point), whose
+  // body is a tuple.
+  const ir = r === undefined ? undefined : tupleOrInputType(r);
   const list = ir?.shape.length === 1 ? ir : undefined;
+  const tuple = typeof r === 'object' && r.kind === 'tuple';
   const result =
     r === undefined ||
     r === 'unknown' ||
@@ -189,7 +191,7 @@ function signatureTypes(e: Fn, literal: Fn) {
     list !== undefined
       ? undefined
       : scalarOf(literal, r, `the result of ${e.operator}`);
-  return { names, params, result, list, r };
+  return { names, params, result, list, tuple, r };
 }
 
 /** A user function: the IR function, its parameter types and its result
@@ -207,6 +209,8 @@ type UserFunction = {
   /** The number of parameters of `ir` for `params` (with the lengths). */
   own: number;
   result?: IRType;
+  /** The result is declared a list or a tuple: its type is the body's. */
+  list: boolean;
   ir: IRFunction;
   inputs: Type[];
   called: boolean;
@@ -223,7 +227,10 @@ export function functionLowering(cx: Lowering) {
 
   /** The IR function of the user function of `key`, lowered once. */
   const define = (e: Fn, key: object, literal: Fn): UserFunction => {
-    const { names, params, result, list, r } = signatureTypes(e, literal);
+    const { names, params, result, list, tuple, r } = signatureTypes(
+      e,
+      literal
+    );
     const ir: IRFunction = {
       name: `u${functions.size}_${e.operator.replace(/[^A-Za-z0-9]/g, '')}`,
       source: e.operator,
@@ -252,8 +259,9 @@ export function functionLowering(cx: Lowering) {
     const fn: UserFunction = {
       key,
       params,
-      own: ir.body.params.length,
+      own: (ir.lifted = ir.body.params.length),
       result,
+      list: list !== undefined,
       ir,
       inputs: [],
       called: false,
@@ -278,7 +286,7 @@ export function functionLowering(cx: Lowering) {
         const t = type(body);
         if (
           list !== undefined &&
-          (cx.tuples.has(body) ||
+          (cx.tuples.has(body) !== tuple ||
             t.shape.length !== 1 ||
             !isSubLane(t.lane, list.lane) ||
             (list.shape[0] !== 'run-time' &&
@@ -354,7 +362,9 @@ export function functionLowering(cx: Lowering) {
     if (fn.result === undefined)
       decline(
         e,
-        `a recursive call of ${e.operator}, which has no declared result type (declare it, as (real) -> real)`
+        fn.list
+          ? `a recursive call of ${e.operator}, a function with a list or tuple result`
+          : `a recursive call of ${e.operator}, which has no declared result type (declare it, as (real) -> real)`
       );
     // A call of a function being lowered (recursive) passes no input: it
     // declines when the function reads one (`capture()`).
@@ -394,6 +404,7 @@ export function functionLowering(cx: Lowering) {
       fn: fn.ir.name,
       args: [...args, ...inputs],
     });
+    if (cx.tuples.has(fn.ir.body.yields[0])) cx.tuples.set(out, 0);
     return out;
   };
 
@@ -407,13 +418,21 @@ export function functionLowering(cx: Lowering) {
         e,
         `a recursive call of ${fn.ir.source}, which reads the input ${name} (a function on a cycle of calls reads no input)`
       );
-    const ir = inputType(t, cx.wide);
-    if (ir === undefined || ir.shape.length > 0)
+    // A scalar, or a list or a tuple (a point) of reals or integers of a
+    // stated length.
+    const ir = tupleOrInputType(t, cx.wide);
+    if (
+      ir === undefined ||
+      ir.shape.length > 1 ||
+      (ir.shape.length === 1 &&
+        (ir.shape[0] === 'run-time' || ir.lane === 'boolean'))
+    )
       decline(
         e,
-        `the function ${fn.ir.source} reads the input ${name} of type ${engineTypeToString(t)}, which is not a scalar`
+        `the function ${fn.ir.source} reads the input ${name} of type ${engineTypeToString(t)}, which is not a scalar or a list of numbers of a stated length`
       );
-    const v = b.newValue({ lane: ir.lane, shape: [] });
+    const v = b.newValue(ir as IRType);
+    if (typeof t === 'object' && t.kind === 'tuple') cx.tuples.set(v, 0);
     fn.ir.body.params.push(v);
     fn.ir.paramNames.push(name);
     fn.ir.lengthOf.push(false);

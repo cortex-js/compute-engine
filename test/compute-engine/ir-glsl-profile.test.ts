@@ -1,5 +1,6 @@
 /**
- * The profile `ir` of `compile()` on the `glsl` target (batches G1 to G3,
+ * The profile `ir` of `compile()` on the `glsl` target (batches G1 to G3 and
+ * G5: `storage`, point and list results of user functions, `callerLocals`;
  * `src/compute-engine/compilation/ir/adapter-glsl.ts`): a scalar or list
  * result of scalar inputs and of inputs that are tuples or lists of a
  * stated length (a `vecN` or a `float[n]`), `At` with a run-time index, the
@@ -60,6 +61,59 @@ ce.assign(
 // Batch G3: an array input and a run-time index.
 ce.declare('L6', 'list<real^6>');
 ce.declare('ix', 'real');
+// Batch G5: a list in a sampler (`storage`), and the functions that read
+// it; point and list results of user functions.
+ce.declare('S', 'list<real^7>');
+ce.declare('S7', 'list<real^7>');
+ce.assign('gs', ce.box(['Function', ['At', 'S', 'a'], 'a']));
+ce.declare('gq', '(list<real^7>) -> real');
+ce.assign(
+  'gq',
+  ce.box(['Function', ['Add', ['At', 'q', 2], ['At', 'q', -1]], 'q'])
+);
+ce.declare('same', '(list<real^7>) -> list<real^7>');
+ce.assign('same', ce.box(['Function', 'q', 'q']));
+ce.declare('pt', '(real) -> tuple<real, real>');
+ce.assign(
+  'pt',
+  ce.box(['Function', ['Tuple', ['Cos', 'a'], ['Sin', 'a']], 'a'])
+);
+ce.declare('pl', '(real) -> list<real^3>');
+ce.assign(
+  'pl',
+  ce.box(['Function', ['List', 'a', ['Multiply', 2, 'a'], 3], 'a'])
+);
+ce.declare('pc', '(real) -> tuple<complex, complex>');
+ce.assign(
+  'pc',
+  ce.box(['Function', ['Tuple', ['Cos', 'a'], ['Sin', 'a']], 'a'])
+);
+ce.declare('pi2', '(real) -> tuple<integer, integer>');
+ce.assign(
+  'pi2',
+  ce.box(['Function', ['Tuple', ['Cos', 'a'], ['Sin', 'a']], 'a'])
+);
+ce.declare('E64', 'list<real^64>');
+ce.declare('E65', 'list<real^65>');
+// A function that reads a list input of 6 elements (lifted).
+ce.assign('gL', ce.box(['Function', ['At', 'L6', 'a'], 'a']));
+ce.declare('rt', '(real) -> tuple<real, real>');
+ce.assign(
+  'rt',
+  ce.box([
+    'Function',
+    ['If', ['Less', 'a', 0], ['rt', ['Add', 'a', 1]], ['Tuple', 'a', 'a']],
+    'a',
+  ])
+);
+// `callerLocals`: functions that read an input of the compilation.
+ce.assign('gx', ce.box(['Function', ['Add', 'u', 'x'], 'u']));
+ce.assign('gy', ce.box(['Function', ['Multiply', 2, ['gx', 'u']], 'u']));
+ce.assign(
+  'gp',
+  ce.box(['Function', ['Add', 'u', ['At', 'P', 1], ['At', 'P', 2]], 'u'])
+);
+ce.assign('gpm', ce.box(['Function', ['Multiply', 'u', 'P'], 'u']));
 // A sine hash in the body of a user function.
 ce.assign(
   'fh',
@@ -308,7 +362,7 @@ function interpretPoint(json: Json, point: PointValue): unknown {
       k,
       Array.isArray(v)
         ? ce.function(
-            /^(L|L6|V4|BL2)$/.test(k) ? 'List' : 'Tuple',
+            /^(L|L6|V4|BL2|S)$/.test(k) ? 'List' : 'Tuple',
             v.map((n) =>
               /^B/.test(k) ? (n ? ce.True : ce.False) : ce.number(n)
             )
@@ -748,6 +802,436 @@ describe('IR profile on GLSL: the float32-unsafe warning', () => {
 });
 
 //
+// Batch G5: `storage` (a list in a sampler), point and list results of user
+// functions
+//
+
+const SV = [1.5, -2, 3.25, 4, 5.5, -6, 7.75];
+const STORAGE = { storage: { S: 'sampler2D' } } as const;
+// prettier-ignore
+const STORED: [label: string, json: Json, points: PointValue[]][] = [
+  ['At(S, ix)', ['At', 'S', 'ix'], [1, 7, -1, -7, 0, 8, -8, 2.5].map((ix) => ({ ix }))],
+  ['At(S, 3) + At(S, -2)', ['Add', ['At', 'S', 3], ['At', 'S', -2]], [{}]],
+  ['a Sum of At over Limits', ['Sum', ['Multiply', ['At', 'S', 'j'], 'x'], ['Limits', 'j', 1, 7]], [{ x: 0.5 }]],
+  ['a function that reads S', ['gs', 'ix'], [{ ix: 2 }, { ix: -1 }, { ix: 9 }]],
+  ['S passed to a list parameter', ['gq', 'S'], [{}]],
+  ['Sum(S)', ['Sum', 'S'], [{}]],
+  ['Max(S)', ['Max', 'S'], [{}]],
+  ['2·S + x', ['Add', ['Multiply', 2, 'S'], 'x'], [{ x: 0.5 }]],
+  ['Length(S) + x', ['Add', ['Length', 'S'], 'x'], [{ x: 0.5 }]],
+];
+/** `head` of `n` reads `At(S, Mod(ix + i, 7) + 1)`, each in range at an
+ *  integer `ix`: the element `(ix + i) mod 7` from 0. */
+const chain = (head: string, n = 1_000) =>
+  ce.function(
+    head,
+    Array.from({ length: n }, (_, i) =>
+      ce.box([
+        'At',
+        'S',
+        ['Add', ['Mod', ['Add', 'ix', i], 7], 1],
+      ] as never)
+    )
+  );
+/** The value of the `Add` chain. */
+const chainValue = (ix: number, n = 1_000) =>
+  Array.from({ length: n }, (_, i) => SV[(ix + i) % 7]).reduce(
+    (a, b) => a + b,
+    0
+  );
+/** The programs that the existing target declines (it reads a list in a
+ *  sampler only with `At`). */
+const STORED_DECLINED = /^(Sum|Max)\(S\)$|2·S/;
+
+/** The shaders of a host for a result read from `S`: `uniform sampler2D
+ *  S;` and `precision highp sampler2D;` (a lowp fetch quantizes), the other
+ *  inputs `float` uniforms; one shader per component of the result. */
+function storageShaders(
+  r: ReturnType<typeof glsl>,
+  expected: unknown,
+  sampler = 'S'
+) {
+  const scalars = r.freeSymbols!.filter((n) => n !== sampler);
+  const count = Array.isArray(expected) ? expected.length : undefined;
+  const result =
+    count === undefined ? 'float' : count <= 4 ? `vec${count}` : `float[${count}]`;
+  const body = r.code.includes(';') ? r.code : `return ${r.code};`;
+  return Array.from({ length: count ?? 1 }, (_, k) =>
+    [
+      '#version 300 es',
+      'precision highp float;',
+      'precision highp int;',
+      'precision highp sampler2D;',
+      `uniform sampler2D ${sampler};`,
+      ...scalars.map((n) => `uniform float u_${n};`),
+      'out vec4 fragColor;',
+      r.preamble ?? '',
+      `${result} userFn(${scalars.map((n) => `float ${n}`).join(', ')}) {`,
+      body,
+      '}',
+      'void main() {',
+      `  fragColor = vec4(float(userFn(${scalars.map((n) => `u_${n}`).join(', ')})${count === undefined ? '' : `[${k}]`}), 0.0, 0.0, 0.0);`,
+      '}',
+    ].join('\n')
+  );
+}
+
+describe('IR profile on GLSL: storage', () => {
+  test.each(STORED.map(([label, json]) => [label, json]))(
+    '%s: the fields of the existing target',
+    (label, json) => {
+      const r = glsl(json, STORAGE);
+      expect(r.profile).toBe('ir');
+      // A list in a sampler is read through the helper only.
+      expect(r.code).not.toMatch(/\bS\[/);
+      if (label !== 'Length(S) + x')
+        expect(`${r.code}\n${r.preamble}`).toMatch(/_gpu_ir_texel\(/);
+      const existing = () =>
+        compile(ce.box(json as never), {
+          to: 'glsl',
+          fallback: false,
+          ...STORAGE,
+        });
+      if (STORED_DECLINED.test(label as string))
+        return void expect(existing).toThrow();
+      expect(r.freeSymbolTypes).toEqual(existing().freeSymbolTypes);
+      expect(r.freeSymbolTypes!.S.lowered).toBe('float[7]');
+    }
+  );
+
+  test('the helper: one for every length; a function parameter is a sampler2D', () => {
+    const r = glsl(['Add', ['At', 'S', 'ix'], ['gs', 'x']], STORAGE);
+    expect(r.preamble!.match(/float _gpu_ir_texel\(/g)).toHaveLength(1);
+    expect(r.preamble).toMatch(/^float _fn_ir_\w+_gs\(float \w+, sampler2D \w+\)/m);
+    expect(glsl(['gq', 'S'], STORAGE).preamble).toMatch(
+      /^float _fn_ir_\w+_gq\(sampler2D \w+\)/m
+    );
+  });
+
+  // prettier-ignore
+  test.each([
+    ['S as a value', 'S', STORAGE, /a list in storage as a value/],
+    ['S in an arm of an If', ['If', ['Less', 'x', 0], 'S', ['Multiply', 2, 'S']], STORAGE, /a list in storage as a value/],
+    ['a function that returns S', ['At', ['same', 'S'], 1], STORAGE, /a list in storage as a value/],
+    ['one function called with S and with a uniform array', ['Add', ['gq', 'S'], ['gq', 'S7']], STORAGE, /a call of \w+ with a list in storage and one not/],
+    ['a boolean list in storage', ['If', ['At', 'BL2', 1], 'x', 'y'], { storage: { BL2: 'sampler2D' } }, /the storage of BL2, which is not a list of numbers/],
+    ['a name in vars and in storage', ['At', 'S', 1], { ...STORAGE, vars: { S: 'u_s' } }, /the vars entry of S in storage/],
+  ])('declined: %s', (_, json, options, message) => {
+    const d = declined(json, options);
+    expect(d?.code).toBe('outside-profile');
+    expect(d?.message).toMatch(message);
+  });
+
+  test('the option has no effect on JavaScript', () => {
+    const r = compile(ce.box(['Add', ['At', 'S', 'ix'], ['gs', 2]]), {
+      profile: 'ir',
+      fallback: false,
+      ...STORAGE,
+    });
+    expect(r.profile).toBe('ir');
+    expect(r.run!({ S: SV, ix: -1 } as never)).toBe(7.75 - 2);
+  });
+
+  test('a shared graph of depth 20 with a read of S compiles in bounded text', () => {
+    let e = ce.function('Add', [
+      ce.function('At', [ce.symbol('S'), ce.symbol('ix')]),
+      ce.symbol('x'),
+    ]);
+    for (let i = 0; i < 20; i++)
+      e = ce.function('Add', [e, ce.function('Sin', [e])]);
+    const r = compile(e, { ...IR, ...STORAGE });
+    expect(r.success).toBe(true);
+    expect(r.code.length + (r.preamble ?? '').length).toBeLessThan(10_000);
+  });
+
+  test('a chain of 1,000 reads of S (Add, Max) compiles', () => {
+    for (const head of ['Add', 'Max'])
+      expect(compile(chain(head), { ...IR, ...STORAGE }).success).toBe(true);
+  });
+
+  test('an element-wise operation over a list of more than 64 elements declines; of 64, compiles', () => {
+    const sum = (E: string) => ['Sum', ['Add', ['Multiply', 2, E], 'x']];
+    expect(glsl(sum('E64'), { storage: { E64: 'sampler2D' } }).success).toBe(
+      true
+    );
+    for (const options of [{ storage: { E65: 'sampler2D' } }, {}]) {
+      const d = declined(sum('E65'), options);
+      expect(d?.code).toBe('outside-profile');
+      expect(d?.message).toMatch(
+        /an element-wise Multiply over a list of more than 64 elements/
+      );
+    }
+    // A reduction and At are a loop and a read.
+    expect(glsl(['Sum', 'E65'], { storage: { E65: 'sampler2D' } }).success).toBe(
+      true
+    );
+  });
+
+  test('a function that reads a list input of 6 elements declines on GLSL and compiles on JavaScript', () => {
+    expect(declined(['gL', 'ix'])?.message).toMatch(
+      /the function gL reads the input L6, a list of 6 elements, which glsl would copy at each call/
+    );
+    const r = compile(ce.box(['gL', 'ix']), { profile: 'ir', fallback: false });
+    expect(r.run!({ L6, ix: -1 } as never)).toBe(6.5);
+  });
+
+  test('a recursive function with a tuple result: the cause', () => {
+    expect(declined(['rt', 'x'])?.message).toMatch(
+      /a recursive call of rt, a function with a list or tuple result/
+    );
+  });
+
+  test('a loop over S in a Sum: within the pass bound, or declined', () => {
+    const nested = (hi: Json) => [
+      'Sum',
+      ['Multiply', ['Sum', 'S'], 'j'],
+      ['Limits', 'j', 1, hi],
+    ];
+    // 10 passes of 1 + 7 passes.
+    expect(glsl(nested(10), STORAGE).success).toBe(true);
+    expect(declined(nested('n'), STORAGE)?.message).toMatch(
+      /more passes than the iterationBudget \(10000\)/
+    );
+    expect(
+      glsl(
+        ['Sum', ['Sum', ['Multiply', ['At', 'S', 'i'], ['At', 'S', 'j']], ['Limits', 'j', 1, 7]], ['Limits', 'i', 1, 7]],
+        STORAGE
+      ).success
+    ).toBe(true);
+  });
+});
+
+// prettier-ignore
+const RESULTS: [label: string, json: Json, points: PointValue[]][] = [
+  ['a point result', ['pt', 'x'], [{ x: 0.5 }, { x: -2 }]],
+  ['2·pt(x) + (1, x)', ['Add', ['Multiply', 2, ['pt', 'x']], ['Tuple', 1, 'x']], [{ x: 0.5 }]],
+  ['At(pt(x), 2)', ['At', ['pt', 'x'], 2], [{ x: 0.5 }, { x: 3 }]],
+  ['a list<real^3> result', ['pl', 'x'], [{ x: 0.5 }, { x: -1.25 }]],
+  ['Sum(pl(x))', ['Sum', ['pl', 'x']], [{ x: 0.5 }]],
+];
+
+describe('IR profile: a point or list result of a user function', () => {
+  test.each(RESULTS.map(([label, json, points]) => [label, json, points]))(
+    '%s on JavaScript',
+    (_, json, points) => {
+      const r = compile(ce.box(json as never), { profile: 'ir', fallback: false });
+      expect(r.profile).toBe('ir');
+      for (const p of points as PointValue[]) {
+        const value = [r.run!(p as never)].flat() as number[];
+        const expected = [interpretPoint(json, p)].flat() as number[];
+        expect(value).toHaveLength(expected.length);
+        value.forEach((v, k) => expect(v).toBeCloseTo(expected[k], 12));
+      }
+    }
+  );
+
+  test('the GLSL function returns a vec2 or a vec3', () => {
+    expect(glsl(['pt', 'x']).preamble).toMatch(/^vec2 _fn_ir_\w+_pt\(float/m);
+    expect(glsl(['pl', 'x']).preamble).toMatch(/^vec3 _fn_ir_\w+_pl\(float/m);
+  });
+});
+
+(chromiumAvailable() ? describe : describe.skip)(
+  'IR profile on GLSL: storage and function results in WebGL2',
+  () => {
+    let driver: GlslDriver;
+    beforeAll(async () => {
+      driver = await GlslDriver.start();
+    }, 60_000);
+    afterAll(async () => driver?.stop());
+
+    /** NaN where the interpreter is NaN, else within `tolerance`. */
+    const failuresOf = (
+      values: { ok: boolean; value?: number; log?: string }[],
+      items: { name: string; expected: unknown }[],
+      tolerance: number
+    ) => {
+      const failures: string[] = [];
+      values.forEach((v, k) => {
+        const { name, expected } = items[k];
+        if (!v.ok) return failures.push(`${name}: ${v.log}`);
+        if (typeof expected !== 'number')
+          return failures.push(`${name}: interpreter ${String(expected)}`);
+        if (Number.isNaN(expected) !== Number.isNaN(v.value!))
+          return failures.push(`${name}: ${v.value} vs ${expected}`);
+        if (
+          !Number.isNaN(expected) &&
+          !(Math.abs(v.value! - expected) <= tolerance * Math.max(1, Math.abs(expected)))
+        )
+          failures.push(`${name}: ${v.value} vs ${expected}`);
+      });
+      return failures;
+    };
+
+    test('a list in a texture of width 1, 3, 7 or 10 gives the interpreter values; the existing target reads the same values from the same texture', async () => {
+      const items: (Parameters<GlslDriver['evaluate']>[0][number] & {
+        expected: unknown;
+      })[] = [];
+      for (const [label, json, points] of STORED) {
+        const r = glsl(json, STORAGE);
+        const existing = STORED_DECLINED.test(label)
+          ? undefined
+          : compile(ce.box(json as never), { to: 'glsl', fallback: false, ...STORAGE });
+        const first = interpretPoint(json, { ...points[0], S: SV });
+        for (const p of points)
+          for (const width of [1, 3, 7, 10]) {
+            const expected = [interpretPoint(json, { ...p, S: SV })].flat();
+            const uniforms = Object.fromEntries(
+              Object.entries(p).map(([n, v]) => [`u_${n}`, v as number])
+            );
+            const textures = { S: { width, values: SV } };
+            const at = `${label} at ${JSON.stringify(p)}, width ${width}`;
+            storageShaders(r, first).forEach((source, k) =>
+              items.push({ name: `${at} [${k}]`, source, uniforms, textures, expected: expected[k] })
+            );
+            // The same host shader with the existing target's text.
+            if (existing !== undefined)
+              items.push({
+                name: `${at}, existing target`,
+                source: storageShaders(existing, first)[0],
+                uniforms,
+                textures,
+                expected: expected[0],
+              });
+          }
+      }
+      const values = await driver.evaluate(items);
+      expect(failuresOf(values, items, 1e-5)).toEqual([]);
+      expect(items.length).toBeGreaterThanOrEqual(100);
+    }, 120_000);
+
+    test('Sum(2·E64 + x) and a chain of 100 reads give their values', async () => {
+      const E = Array.from({ length: 64 }, (_, i) => Math.sin(i) * 3);
+      const sum = compile(
+        ce.box(['Sum', ['Add', ['Multiply', 2, 'E64'], 'x']] as never),
+        { ...IR, storage: { E64: 'sampler2D' } }
+      );
+      const items = [
+        {
+          name: 'Sum(2·E64 + x)',
+          source: storageShaders(sum, 0, 'E64')[0],
+          uniforms: { u_x: 0.5 },
+          textures: { E64: { width: 10, values: E } },
+          expected: E.reduce((a, e) => a + 2 * e + 0.5, 0),
+        },
+        // A chain of 100 reads: SwiftShader takes about 50 s to compile one
+        // of 1,000, which the test above compiles without running.
+        {
+          name: 'Add of 100 reads at ix = 3',
+          source: storageShaders(compile(chain('Add', 100), { ...IR, ...STORAGE }), 0)[0],
+          uniforms: { u_ix: 3 },
+          textures: { S: { width: 3, values: SV } },
+          expected: chainValue(3, 100),
+        },
+      ];
+      const values = await driver.evaluate(items);
+      expect(failuresOf(values, items, 1e-5)).toEqual([]);
+    }, 120_000);
+
+    test('a point or list result of a user function gives the interpreter values', async () => {
+      const items = RESULTS.flatMap(([label, json, points]) => {
+        const r = glsl(json);
+        const sources = pointShaders(r, {}, interpretPoint(json, points[0]));
+        return points.flatMap((p) => {
+          const expected = [interpretPoint(json, p)].flat();
+          return sources.map((source, k) => ({
+            name: `${label} [${k}] at ${JSON.stringify(p)}`,
+            source,
+            uniforms: Object.fromEntries(
+              Object.entries(p).map(([n, v]) => [`u_${n}_0`, v as number])
+            ),
+            expected: expected[k],
+          }));
+        });
+      });
+      const values = await driver.evaluate(items);
+      expect(failuresOf(values, items, 1e-3)).toEqual([]);
+      expect(items.length).toBeGreaterThanOrEqual(15);
+    }, 120_000);
+  }
+);
+
+//
+// `callerLocals`: no effect on the profile, whose functions take each input
+// that their bodies read as a parameter
+//
+
+// prettier-ignore
+const CALLER: [label: string, json: Json, options: object, points: PointValue[]][] = [
+  ['g(u) := u + x', ['gx', 1], { callerLocals: ['x'] }, [{ x: 0.5 }, { x: -2 }]],
+  ['x read through a function that calls g', ['Add', ['gy', 'y'], 'x'], { callerLocals: ['x', 'y'] }, [{ x: 0.5, y: 2 }]],
+  ['a callerLocals name with a vars text', ['gx', 'y'], { callerLocals: ['x'], vars: { x: 'g_x' } }, [{ x: 0.5, y: 2 }]],
+  ['a point callerLocals name', ['gp', 'y'], { callerLocals: ['P'] }, [{ y: 2, P: [3, -4] }]],
+  ['a point callerLocals name in a point result', ['gpm', 'y'], { callerLocals: ['P'] }, [{ y: 2, P: [3, -4] }]],
+];
+
+describe('IR profile on GLSL: callerLocals', () => {
+  test('a function that reads x takes it as a parameter, and the call passes it', () => {
+    const r = glsl(['gx', 1], { callerLocals: ['x'] });
+    expect(r.code).toMatch(/_fn_ir_\w+_gx\(1\.0, x\)/);
+    expect(r.preamble).toMatch(/^float _fn_ir_\w+_gx\(float \w+, float \w+\)/m);
+    expect(glsl(['gx', 'y'], CALLER[2][2]).code).toMatch(/_gx\(y, g_x\)/);
+    expect(glsl(['gp', 'y'], { callerLocals: ['P'] }).preamble).toMatch(
+      /^float _fn_ir_\w+_gp\(float \w+, vec2 \w+\)/m
+    );
+  });
+
+  test('declined: the name under a binder of the same name', () => {
+    const d = declined(
+      ['Sum', ['Add', 'x', ['gx', 'x']], ['Limits', 'x', 1, 3]],
+      { callerLocals: ['x'] }
+    );
+    expect(d?.code).toBe('outside-profile');
+    expect(d?.message).toMatch(
+      /a call of gx, which reads the input x, where x is a local or a parameter/
+    );
+  });
+});
+
+(chromiumAvailable() ? describe : describe.skip)(
+  'IR profile on GLSL: callerLocals in WebGL2',
+  () => {
+    let driver: GlslDriver;
+    beforeAll(async () => {
+      driver = await GlslDriver.start();
+    }, 60_000);
+    afterAll(async () => driver?.stop());
+
+    test('the inputs as parameters of the host function give the interpreter values', async () => {
+      const items = CALLER.flatMap(([label, json, options, points]) => {
+        const vars = (options as { vars?: Record<string, string> }).vars ?? {};
+        const r = glsl(json, options);
+        const sources = pointShaders(r, vars, interpretPoint(json, points[0]));
+        return points.flatMap((p) => {
+          const expected = [interpretPoint(json, p)].flat();
+          const uniforms = Object.fromEntries(
+            r.freeSymbols!.flatMap((n) =>
+              [p[n]].flat().map((x, j) => [`u_${n}_${j}`, x])
+            )
+          );
+          return sources.map((source, k) => ({
+            name: `${label} [${k}] at ${JSON.stringify(p)}`,
+            source,
+            uniforms,
+            expected: expected[k] as number,
+          }));
+        });
+      });
+      const values = await driver.evaluate(items);
+      const failures: string[] = [];
+      values.forEach((v, k) => {
+        const { name, expected } = items[k];
+        if (!v.ok) return failures.push(`${name}: ${v.log}`);
+        if (!(Math.abs(v.value - expected) <= 1e-5 * Math.max(1, Math.abs(expected))))
+          failures.push(`${name}: ${v.value} vs ${expected}`);
+      });
+      expect(failures).toEqual([]);
+      expect(items.length).toBeGreaterThanOrEqual(7);
+    }, 120_000);
+  }
+);
+
+//
 // Declines, fallback, canCompile()
 //
 
@@ -766,7 +1250,8 @@ describe('IR profile on GLSL: declines', () => {
   test.each([
     ['a tuple of several shapes', ['Tuple', 'x', 'L'], {}, /a Tuple of elements of several shapes/],
     ['a list input of run-time length', ['Sum', 'D'], {}, /the list D has a run-time length/],
-    ['a tuple result of a user function', ['At', ['pr', 'x'], 1], {}, /the result of pr is not a scalar/],
+    ['a tuple<complex, complex> result of a user function', ['At', ['pc', 'x'], 1], {}, /the result of pc is not a scalar/],
+    ['a tuple<integer, integer> result of a real body', ['At', ['pi2', 'x'], 1], {}, /a body of pi2 that is not tuple<integer, integer>/],
     ['a vars text that is an expression', ['Add', 'x', 1], { vars: { x: '(u_x + 1.0)' } }, /the vars entry of x/],
     ['a vars text that calls', ['Add', 'x', 1], { vars: { x: 'f(u)' } }, /the vars entry of x/],
     ['a vars name with a value', ['Add', 'h', 'x'], { vars: { h: 'u_h' } }, /the vars entry of h/],
@@ -779,8 +1264,6 @@ describe('IR profile on GLSL: declines', () => {
     ['operators', ['Add', 'x', 1], { operators: { Add: ['+', 11] } }, /`operators`/],
     ['imports', ['Add', 'x', 1], { imports: ['a'] }, /`imports`/],
     ['preamble', ['Add', 'x', 1], { preamble: 'float q;' }, /`preamble`/],
-    ['storage', ['At', 'L', 'n'], { storage: { L: 'sampler2D' } }, /`storage`/],
-    ['callerLocals', ['Add', 'x', 1], { callerLocals: ['x'] }, /`callerLocals`/],
     ['strictTypes', ['Add', 'x', 1], { strictTypes: true }, /`strictTypes`/],
     ['broadcast', ['Add', 'x', 1], { broadcast: true }, /`broadcast`/],
     ['mode', ['Add', 'x', 1], { mode: 'complex' }, /`mode` with the value 'complex'/],

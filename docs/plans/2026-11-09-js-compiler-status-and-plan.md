@@ -1586,6 +1586,78 @@ No test fails in the shadow run and no internal error is counted; with the
 switch on, the one test of CE-1267. The largest cause of a GLSL decline is
 the complex lane (169).
 
+Batch G5, 2026-11-14. The `storage` option on GLSL: a list input stored in
+a `sampler2D` is marked after the passes (`holdStorage()`), also the
+parameters of the functions it is passed to, and each read is a fetch by one
+helper, `_gpu_ir_texel`, with the addressing of the existing target (a
+single-channel float texture, row-major, any width); it admits `At`,
+`Length`, a reduction and an element-wise operation, and declines the list
+as a value. A user function may return a tuple or a list of a stated length,
+on both targets; a declared element lane other than the body's declines.
+`callerLocals` is admitted with no effect. A user function may read a point
+input, and on JavaScript a list input of a stated length; on GLSL a list of
+more than 4 elements read in a function declines (it would be copied at each
+call). An element-wise operation over more than 64 elements declines on GLSL
+(the scalarized text had no bound), and `inlinedValues()` of the printer is
+linear (it was quadratic: 3.9 s for 2,000 elements, now 0.46 s; the emitted
+text is the same). Measured in a worktree at
+`613d42af80582b5dff622714410fff969cccb6f2` plus the patch; 6,423 lines in
+`ir/`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,484 of 10,859 (96.5%) |
+| Every JavaScript compile | 23,946 of 38,928 (61.5%) |
+| Public JavaScript `compile()` calls | 13,455 of 28,061 (48.0%) |
+| GLSL `compile()` calls | 810 of 2,371 (34.2%); 757 of the 1,574 that the existing target compiles (48.1%) |
+
+No test fails in the shadow run and no internal error is counted; with the
+switch on, the one test of CE-1267.
+
+Batch G4, 2026-11-14: Tycho's run with the profile on both seams (session
+`tycho-desk`; build of `613d42af80582b5dff622714410fff969cccb6f2`).
+
+- JavaScript seam, CORE audit: 628 of 997 compilations admitted (63%), no
+  internal error, 2,988 runs compared with no difference. Seeded tests 694 of
+  696 (the two budget tests, changed on Tycho's main since).
+- GLSL seam, CORE audit: 114 of 275 compilations admitted, no internal
+  error. All 114 admitted results compile in WebGL 2 as Tycho assembles a
+  shader (preamble, then `T userFn(float x, float y)`, the other inputs as
+  uniforms of their `lowered` type); the existing target's 114 texts are the
+  control. Over every Desmos state: 3,466 of 4,384 GLSL compilations
+  admitted, and 3,466 of 3,466 shaders valid.
+- Render audit, CORE, WebGL on, the profile on both seams against the same
+  build without it: 21 states rendered and the same 3 did not paint on both
+  arms, no shader compile failure in the page, the same number of distinct
+  shaders per state; 9 states draw at least one shader made from a profile
+  result. One state (`neyret/oeupgr064p`, animated) differs by 2% of the
+  pixels, within its own run-to-run variation measured on four renders. So
+  no picture changes without the NaN-safe helpers and the finite proof: no
+  helper is added.
+- The float32 warning, every Desmos state: the profile warns on 129 calls,
+  the existing target on 80; 49 warn on the profile only, in 7 documents. 41
+  of them have a CONSTANT operand (`Mod(10000·Sin(100000), 1)`, a fixed
+  pseudo-random number per curve), which the fold computes in doubles: the
+  warning must not fire for a closed operand when the fold is on. 8 calls in
+  5 documents are the exact sine hash of the existing target
+  (`float32Bounds`): those rows lose their GPU lane.
+- Tycho tests that pin the existing target's text (function names
+  `_fn_<name>`, its branch-helper names, the text of a masked row, a sampler
+  expression, an elided `Abs`): about 20, Tycho's work at the switch. Tycho
+  renames helpers by prefix only, so the profile's names need no stable
+  scheme beyond the same text for the same input.
+- Largest causes of a GLSL decline over every Desmos state: Tycho's `Which`
+  handler 259 and `At` handler 69; `Arctan2` 245; `AsOklab` 63; `Log` 42;
+  `Factorial` 32; `Arcsin` 29; `PointX` 23 and `PointY` 17; a symbol with a
+  value that is not a number 24; `Root` 18; `Block` 12 (a function that
+  returns a list, admitted since G5). In the CORE audit also: a function
+  that reads a document value that is not in `symbolic` (27 on GLSL, 7 on
+  JavaScript: a valued name read in a function body declines, where the
+  entry bakes the value).
+- A condition of Tycho's switch (user, 2026-11-14): its ROADMAP row MG passes
+  `callerLocals` on GLSL; the profile admits the option with no effect since
+  G5, because every input a called function reads is passed as a parameter.
+
 User decisions of 2026-11-14 on GLSL:
 
 - **The existing GLSL target is to be deleted too** (about 25,500 lines of
