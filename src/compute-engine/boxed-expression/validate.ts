@@ -614,19 +614,23 @@ export function inferCollectionSourceArgs(
   // Most applications hold no candidate: test the operands before the
   // signature is grounded, which allocates.
   if (
-    !ops.some((x) => isSymbol(x) && x.value === undefined && x.type.isUnknown)
+    !ops.some(
+      (x) =>
+        isSymbol(x) && x.value === undefined && isUntypedAtCollectionSlot(x)
+    )
   )
     return;
   const grounded = readTypeVariablesAsBounds(signature);
   if (typeof grounded === 'string' || grounded.kind !== 'signature') return;
   ce._withoutFacts(() => {
     ops.forEach((x, i) => {
-      if (!isSymbol(x) || x.value !== undefined || !x.type.isUnknown) return;
+      if (!isSymbol(x) || x.value !== undefined) return;
       const slot = signatureSlotType(grounded, i);
       // A variable left after grounding is one the signature does not
       // declare: a malformed signature, which writes nothing.
       if (slot === undefined || freeTypeVariables(slot).size > 0) return;
       if (!isSubtype(slot, COLLECTION_SHAPE_TYPE)) return;
+      if (!isUntypedAtCollectionSlot(x, slot)) return;
       x._infer(() => slot);
     });
   });
@@ -687,6 +691,45 @@ export function collectionSourceSlot(
   return isSubtype(slot, INDEXED_COLLECTION_SHAPE_TYPE)
     ? 'indexed_collection'
     : 'collection';
+}
+
+/**
+ * True when `expr` is a parameter of a function literal being boxed whose
+ * type so far is a number type that only uses of operators that map over a
+ * collection gave it (`x + x`). A use that requires a collection
+ * (`Length(x)`) then gives it a collection type (`narrowInferredType()`,
+ * `boxed-symbol.ts`).
+ */
+export function isMappedNumberParameter(expr: Expression): boolean {
+  if (!isSymbol(expr)) return false;
+  const v = expr.valueDefinition;
+  if (v === undefined) return false;
+  const record = expr.engine._parameterRecord(v);
+  const t = expr.type.type;
+  return (
+    record !== undefined &&
+    t !== 'never' &&
+    isSubtype(t, 'number') &&
+    record.env.scalarUsesMap(v, expr.symbol) === true
+  );
+}
+
+/**
+ * True when `expr` has no type yet where a slot of type `slot` requires a
+ * collection: its type is `unknown`, or it is a mapped number parameter
+ * (`isMappedNumberParameter()`) and `slot` can hold numbers. The
+ * collection operators that narrow an untyped operand themselves use this
+ * test, and so does argument validation, before the matrix repair. The
+ * narrowing then gives `expr` the requirement of the slot
+ * (`narrowInferredType()`): the order of the uses does not decide whether
+ * the parameter is a collection (CE-1270).
+ */
+export function isUntypedAtCollectionSlot(
+  expr: Expression,
+  slot: Type = 'collection'
+): boolean {
+  if (expr.type.isUnknown) return true;
+  return typeCouldBeNumericCollection(slot) && isMappedNumberParameter(expr);
 }
 
 /**
@@ -932,7 +975,7 @@ export function isOptimumFunctionOperand(op: Expression): boolean {
  */
 export function inferOptimumDomain(domain: Expression): void {
   if (!isSymbol(domain) || isWildcard(domain)) return;
-  if (domain.value !== undefined || !domain.type.isUnknown) return;
+  if (domain.value !== undefined || !isUntypedAtCollectionSlot(domain)) return;
   domain.engine._withoutFacts(() => domain._infer(() => 'collection'));
 }
 
@@ -4386,6 +4429,7 @@ export function validateArguments(
       couldBeUnkeyedCollection: couldBeUnkeyedCollectionOperand,
       stripMissing,
       freshMatrixRepair: (op: Expression, param: Type) =>
+        (!op.type.isUnknown && isUntypedAtCollectionSlot(op, param)) ||
         couldRepairFreshMatrixInference(ce, op, param, freshlyInferred),
       // The provisional admission of a symbol with an inferred type at a
       // collection parameter, which full validation performs for a library
@@ -5091,6 +5135,13 @@ export function validateArguments(
         deferredIdx.add(result.length - 1);
         continue;
       }
+      // A parameter that only mapping uses typed as a number, at a
+      // collection slot: admitted, and narrowed by the final inference pass
+      // below (CE-1270).
+      if (!op.type.isUnknown && isUntypedAtCollectionSlot(op, param)) {
+        result.push(op);
+        continue;
+      }
       if (internals?.trial) {
         // TRIAL mode: the two construction-level repairs are admitted by
         // their write-free preconditions and NOT executed — a repair
@@ -5407,6 +5458,11 @@ export function validateArguments(
       // the same operands a required slot does: `Range(1, N)` puts the bare
       // builtin `N` in the optional upper bound, and `N` must become a
       // variable there as it does in `Range(N)` or `N + 1`.
+      if (!op.type.isUnknown && isUntypedAtCollectionSlot(op, param)) {
+        result.push(op);
+        i += 1;
+        continue;
+      }
       if (internals?.trial) {
         if (couldRepairFreshMatrixInference(ce, op, param, freshlyInferred)) {
           result.push(op);
@@ -5662,6 +5718,10 @@ export function validateArguments(
         // validation admits by the write-free precondition, a real validation
         // runs the repair. `Max(1, N)` puts the bare builtin `N` in the
         // variadic tail.
+        if (!op.type.isUnknown && isUntypedAtCollectionSlot(op, varParam)) {
+          result.push(op);
+          continue;
+        }
         if (internals?.trial) {
           if (
             couldRepairFreshMatrixInference(ce, op, varParam, freshlyInferred)
@@ -6358,6 +6418,8 @@ function repairFreshMatrixInference(
             ops: isFunction(op) ? op.ops : [],
             expr: op,
           },
+          // The repair replaces a numeric guess.
+          numeric: requirements.get(parameter)?.numeric,
         });
       }
       continue;

@@ -44,6 +44,7 @@ import {
   widenUnannotatedLiteralParams,
   absentMarkerIsNumeric,
   checkCollectionOperand,
+  isUntypedAtCollectionSlot,
   canonicalValueOperand,
   isOptimumFunctionOperand,
   inferOptimumDomain,
@@ -12283,13 +12284,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // The guard runs fact-blind with the write it gates: it reads the
       // target's EFFECTIVE type, so an assumption that gives the target a
       // tier would suppress a narrowing that outlives the assumption.
+      // A parameter that only mapping uses typed as a number (`x + x`)
+      // counts as untyped (`isUntypedAtCollectionSlot()`).
       const target = stripped[0];
       ce._withoutFacts(() => {
         if (
           target !== undefined &&
           isSymbol(target) &&
           hasInferredType(target) &&
-          target.type.type === 'unknown'
+          isUntypedAtCollectionSlot(target)
         )
           target._infer(() => 'collection', 'narrow');
       });
@@ -25016,6 +25019,8 @@ function wrapScalarJoinOperand(ce: ComputeEngine, op: Expression): Expression {
 function isProvablyScalarJoinOperand(op: Expression): boolean {
   if (!op.isValid) return false;
   if (isTupleOrTupleUnionShapedType(op.type.type)) return false;
+  // A mapped number parameter can be a collection (CE-1270).
+  if (isUntypedAtCollectionSlot(op)) return false;
   const atomic = (t: Type): boolean => {
     if (t === 'unknown' || t === 'any' || t === 'value') return false;
     if (typeof t !== 'string' && t.kind === 'union')

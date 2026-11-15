@@ -1613,6 +1613,44 @@ definition. A read of the environment of the literal is a dependency only
 of the caches computed during the boxing: a computation that started
 before boxes the literal again.
 
+A node of the body is built with the type that the parameter has when the
+node is boxed. When a use changed the type of a bare parameter from a number
+type to another type, and every use that required a number maps over a
+collection (`x + x`, not `Range(x)`), the boxing is discarded and the body is
+boxed once more from its raw form, the parameter starting at that type
+(CE-1270). In `(A, B) ↦ (A·B − B·A, Determinant(A), Determinant(B))` the
+products were otherwise built as products of numbers and cancelled; boxed
+again, the result is the commutator, as with the determinants first. The
+body is not boxed a third time. Until the outermost literal being boxed
+returns, the raw body keeps the starting types the discarded boxing found: a
+literal nested in it starts at those types in the second boxing of the
+enclosing literal (unless the caller gives starting types, as a fold
+does for its accumulator), so the body of a literal nested `n` deep is boxed at most
+`n + 1` times.
+
+The discard puts back the entries that the boxing wrote in the unit
+environments (`EngineBoxingState.undoJournalsTo()`), the requirements on the
+parameters of the enclosing literals (`ce._saveParameterRequirements()`), and
+the provisional captures, which do not reach the enclosing literal. It does
+not put back a narrowing written directly on a definition that the root
+construction made outside the literal (the index of an enclosing `Sum`, a
+local of an enclosing block), with its `SCALAR_USES_MAP` entry and its
+membership of `_freshlyInferred`, nor the undo records that an open rollback
+frame keeps for writes of the discarded boxing. No program is known where
+one of these changes a type or a value.
+
+A parameter of a literal being boxed whose number type came only from uses
+that map over a collection counts as untyped where a slot requires a
+collection that can hold numbers (`isUntypedAtCollectionSlot()`,
+`validate.ts`): argument validation (before the matrix repair and in the
+admission of an overloaded arm), the source slots of the lazy collection
+operators, `Length`, `Join` and a spread, the one-operand `Sum` and
+`Product`, the domain of `ArgMax`/`ArgMin` and the iterated operand of a
+loop. The use then gives the parameter the type of the slot
+(`narrowInferredType()`): `x ↦ (x + x, Length(x))` is typed
+`(x: collection) -> …` and `x ↦ (x + x, Sort(x))` is typed
+`(x: indexed_collection<any>) -> …`, as when the collection use comes first.
+
 An operation (`evaluate()`, `simplify()`, `subs()`, `compile()`, …) writes its
 requirements in an environment of its own, which reads the environments of
 its input. It does not change the types that the input reads. The

@@ -216,6 +216,18 @@ export class EngineBoxingState<Scope extends object> {
     this._journaled.push(env);
   }
 
+  /** The length of each open journal of the root construction in progress,
+   * for `undoJournalsTo()`. */
+  journalMarks(): Map<UnitEnvironment, number> {
+    return new Map(this._journaled.map((env) => [env, env.journalLength()]));
+  }
+
+  /** Remove the writes made in the journaled environments since `marks`
+   * (`journalMarks()`): every write of an environment journaled after it. */
+  undoJournalsTo(marks: ReadonlyMap<UnitEnvironment, number>): void {
+    for (const env of this._journaled) env.undoJournal(marks.get(env) ?? 0);
+  }
+
   /** For the active root construction: the persistent scope that holds the
    * definition `def` of `name`, or `undefined` when `def` is in no scope of
    * a lexical chain that existed when the construction began (or no root

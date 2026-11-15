@@ -1745,8 +1745,25 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         requirements.set(v, {
           type,
           cause: ce._inferenceCause ?? undefined,
+          numeric:
+            previous?.numeric ??
+            (type.type !== 'never' && isSubtype(type.type, 'number')
+              ? true
+              : undefined),
         });
     }
+    // A use that requires a number and does not map over a collection
+    // (`Range(n)`) proves a scalar: no later use makes the literal box its
+    // body again (`ParameterRequirement.numeric`).
+    const after = requirements.get(v);
+    if (
+      after !== undefined &&
+      !inTrial &&
+      t !== 'never' &&
+      isSubtype(t, 'number') &&
+      !inferenceCauseMaps(ce)
+    )
+      requirements.set(v, { ...after, numeric: false });
     return written;
   }
 

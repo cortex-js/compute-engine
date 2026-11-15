@@ -7,7 +7,10 @@ import {
   markCallableHome,
   sameBindingDef,
 } from '../boxed-expression/binders.js';
-import { canonicalValueOperand } from '../boxed-expression/validate.js';
+import {
+  canonicalValueOperand,
+  isUntypedAtCollectionSlot,
+} from '../boxed-expression/validate.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   applicable,
@@ -5503,7 +5506,7 @@ function canonicalLoopLike(
       if (
         isSymbol(collCanonical) &&
         hasInferredType(collCanonical) &&
-        collCanonical.type.type === 'unknown'
+        isUntypedAtCollectionSlot(collCanonical)
       )
         collCanonical._infer(() => 'collection', 'narrow');
     });

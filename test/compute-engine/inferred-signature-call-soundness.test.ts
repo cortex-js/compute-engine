@@ -33,11 +33,18 @@ describe('CE-503: a numeric use and an index read of one parameter', () => {
   test('the assigned function literal has a sound signature', () => {
     const ce = new ComputeEngine();
     ce.assign('c', ce.box(['Function', body, 'P', 't'] as any));
+    // The index read types `P` as a tuple of at least one number, in either
+    // order of the two uses (CE-1270): `(P, t) ↦ t·P/(P[1] − 1)` here and
+    // `(P, t) ↦ (P[1] − 1)^(-1)·t·P` both give the signature that the
+    // second had before CE-1270; the first gave
+    // `(P: indexed_collection<number>, t: unknown) -> list<number>`.
     expect(signature(ce, 'c')).toBe(
-      '(P: indexed_collection<number>, t: unknown) -> list<number>'
+      '(P: tuple<number>, t: unknown) -> tuple<number>'
     );
     const call = ce.box(['c', ['List', 3, 2], 2]);
-    expect(call.type.toString()).toBe('list<infinity | nan | real^2>');
+    expect(call.type.toString()).toBe(
+      'list<infinity | nan | real^2> | tuple<number>'
+    );
     expect(expectSound(call).toString()).toBe('[3,2]');
   });
 
@@ -45,7 +52,7 @@ describe('CE-503: a numeric use and an index read of one parameter', () => {
     const ce = new ComputeEngine();
     const fn = ce.box(['Function', body, 'P', 't'] as any);
     expect(fn.type.toString()).toBe(
-      '(P: indexed_collection<number>, t: unknown) -> list<number>'
+      '(P: tuple<number>, t: unknown) -> tuple<number>'
     );
   });
 

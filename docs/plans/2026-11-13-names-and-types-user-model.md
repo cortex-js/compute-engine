@@ -321,7 +321,7 @@ depth([[0, 0], 5])
 ```
 
 The choice does not depend on the order in which the body uses the
-parameter. **Not yet**: in 0.188.0 it does.
+parameter (since the next release, CE-1270; in 0.188.0 it did).
 
 ```epsil
 q(x) = (length(x), x + x)
@@ -329,7 +329,7 @@ q([1, 2, 3])
 // ➔ (3, [2, 4, 6])
 p(x) = (x + x, length(x))
 p([1, 2, 3])
-// model: ([2, 4, 6], 3)
+// ➔ ([2, 4, 6], 3)
 // 0.188.0: three tuples, each with an `incompatible-type` error
 ```
 
@@ -419,9 +419,11 @@ c2([[1, 2], [3, 4]], [[0, 1], [1, 0]])
 An untyped name is a number, and numbers commute. Write `A: matrix`. A body
 that uses the parameters as matrices says it too
 (`d(A, B) = determinant(A + B)` is typed `(A: matrix, B: matrix) -> number`).
-**Not yet**: in 0.188.0 this works only when the matrix use comes first:
-`(determinant(A), determinant(B), A * B - B * A)` gives the right matrix,
-and `(A * B - B * A, determinant(A), determinant(B))` gives zeros.
+The order of the uses does not matter (since the next release, CE-1270):
+`(A * B - B * A, determinant(A), determinant(B))` gives
+`([[-1, -3], [3, 1]], -2, -1)`, as
+`(determinant(A), determinant(B), A * B - B * A)` gives
+`(-2, -1, [[-1, -3], [3, 1]])`. In 0.188.0 the first gave zeros.
 
 **The same expression written directly and through a function can
 differ.** `max([1, 2, 3], 2)` is `3`; `low(x) = max(x, 2)` with the same
@@ -606,8 +608,8 @@ Differences between this document and 0.188.0:
 
 | Topic | This document | 0.188.0 | State |
 |---|---|---|---|
-| Rule 7 | The whole-or-element choice does not depend on the order of the uses | It does: `p(x) = (x + x, length(x))` gives errors | to be fixed by CE-1270 |
-| Rule 7 | A parameter used as a matrix after another use is still a matrix | Only when the matrix use comes first | to be fixed by CE-1270 (box the body after the uses are known) |
+| Rule 7 | The whole-or-element choice does not depend on the order of the uses | It does: `p(x) = (x + x, length(x))` gives errors | since the next release (CE-1270): `p([1, 2, 3])` gives `([2, 4, 6], 3)` |
+| Rule 7 | A parameter used as a matrix after another use is still a matrix | Only when the matrix use comes first | since the next release (CE-1270, the body is boxed again after the uses are known): `(A * B - B * A, determinant(A), determinant(B))` gives `([[-1, -3], [3, 1]], -2, -1)` |
 | Rule 7 | An indexed parameter with no type takes a list of points whole | One call for each point | decided (point 2 below); it changes results; not landed |
 | Rule 6 | A type follows the types of the names, never their values | The type of an expression is revised from the values its names hold | decided (D16); since 0.189.0 |
 | Compiling | `compile()` takes the types of its inputs | Declarations only | decided (C6); since 0.189.0 |

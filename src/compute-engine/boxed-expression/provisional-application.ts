@@ -88,11 +88,14 @@ export function beginProvisionalCapture(): void {
 /** Stop collecting and return what was collected, or `undefined`. The names
  * also flow up to the enclosing frame, if any: a nested literal's provisional
  * reading is part of the enclosing literal's body, and re-deriving the outer
- * literal re-derives the inner one. */
-export function endProvisionalCapture(): ProvisionalCapture | undefined {
+ * literal re-derives the inner one. With `merge` false (a boxing of a body
+ * that is discarded), they do not. */
+export function endProvisionalCapture(
+  merge = true
+): ProvisionalCapture | undefined {
   const frame = FRAMES.pop();
   const depth = FRAMES.length;
-  if (frame !== undefined && depth > 0) {
+  if (merge && frame !== undefined && depth > 0) {
     const parent = (FRAMES[depth - 1] ??= {});
     // A copy, never the sets of the frame: they are retained by the literal
     // being built and must not grow with the enclosing body.

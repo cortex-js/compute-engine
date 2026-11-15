@@ -3789,6 +3789,23 @@ export class ComputeEngine implements IComputeEngine {
     return undefined;
   }
 
+  /** See `IComputeEngine._saveParameterRequirements`. A boxing of a body
+   * that is discarded leaves no requirement on the parameters of an
+   * enclosing literal. @internal */
+  _saveParameterRequirements(): () => void {
+    const saved = this._shadowedParameterStack.flatMap((frame) =>
+      frame.record === undefined
+        ? []
+        : [[frame.record.requirements, new Map(frame.record.requirements)]]
+    ) as [Map<object, unknown>, Map<object, unknown>][];
+    return () => {
+      for (const [requirements, before] of saved) {
+        requirements.clear();
+        for (const [k, v] of before) requirements.set(k, v);
+      }
+    };
+  }
+
   /** See `IComputeEngine._currentParameterRecord`. @internal */
   _currentParameterRecord(): ParameterRecord | undefined {
     const stack = this._shadowedParameterStack;

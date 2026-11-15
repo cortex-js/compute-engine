@@ -51,8 +51,37 @@
   …`) now declines with `outside-profile`, since the profile does not call
   that handler: before, it compiled the operator's stock value.
 
+### Behavior Changes
+
+- **A function parameter that a collection operator reads is a collection,
+  also when an arithmetic use comes first.** `x ↦ (x + x, Length(x))` was
+  typed `(x: unknown) -> tuple<number, …>` and called once per element of a
+  list argument: on `[1, 2, 3]` it gave a list of three tuples with
+  `incompatible-type` errors. It is now typed `(x: collection) -> …`, binds
+  the list whole and gives `([2, 4, 6], 3)`. The same holds for `Sort`,
+  `Count`, `Contains`, `At`, `Filter`, `Join`, a spread `[...x, 0]`, `Sum`
+  and the other operators that read a collection; `Reverse`, `First`, `Last`,
+  `Take`, `Drop`, `Rest`, `Unique` and `IndexOf` after `x + x` type `x` as
+  `indexed_collection<any>` or `collection<any>`, where it was `matrix`. A
+  use that requires one number and does not map (`Range(n)`) still makes the
+  parameter a number.
+
 ### Resolved Issues
 
+- **The value of a function does not depend on the order in which its body
+  uses an untyped parameter.** `(A, B) ↦ (A·B − B·A, Determinant(A),
+  Determinant(B))` applied to `[[1, 2], [3, 4]]` and `[[0, 1], [1, 0]]` gave
+  the zero matrix as its first element: the products were built while `A`
+  and `B` were still numbers, and cancelled. It now gives
+  `([[-1, -3], [3, 1]], -2, -1)`, as the body with the determinants first
+  does. When a later use changes the type of a parameter from a number type
+  to another type, the body is boxed once more with the parameter starting at
+  that type. `x ↦ (x + x, Length(x))` on `[1, 2, 3]` called the function on
+  each element and gave three errors; `x` is now typed `collection`, and the
+  result is `([2, 4, 6], 3)`, as for `x ↦ (Length(x), x + x)`.
+  `x ↦ Sin(x) + Length(x)` on `[0, 0]` gives `[2, 2]`. A product of untyped
+  parameters with no other use is still a product of numbers:
+  `(A, B) ↦ A·B − B·A` gives the zero matrix (CE-1270).
 - **A timeout inside a cell of a batch stops the batch.** When the time limit
   of `ce.withTimeLimit()`, or the `deadline` of a task on a worker, expired
   inside a cell of `broadcast()` or `broadcastAsync()` (an integral, a long

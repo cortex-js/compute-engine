@@ -82,7 +82,10 @@ import {
   enumerationDeclinedAfterWalk,
 } from './collections.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
-import { canonicalValueOperand } from '../boxed-expression/validate.js';
+import {
+  canonicalValueOperand,
+  isUntypedAtCollectionSlot,
+} from '../boxed-expression/validate.js';
 import { enterFunctionBody, exitFunctionBody } from '../statement-position.js';
 import {
   broadcastingComponentKind,
@@ -4491,7 +4494,7 @@ export function canonicalBigop(
     indexes.length === 0 &&
     isSymbol(body) &&
     !body.isCollection &&
-    body.type.isUnknown
+    isUntypedAtCollectionSlot(body)
   )
     body._infer(() => 'collection');
 

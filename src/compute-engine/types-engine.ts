@@ -276,6 +276,13 @@ export type InferenceCauseContext = {
 export type ParameterRequirement = {
   type: BoxedType;
   cause?: InferenceCauseContext;
+  /** True when a type recorded for the parameter in this boxing was a
+   * number type and every use that required a number maps over a
+   * collection; false when one such use does not map (`Range(n)`). A final
+   * type that is not a number type after `true` makes the literal box its
+   * body once more (`canonicalFunctionLiteralArguments()`): a node built
+   * while the parameter read as a number kept that reading. */
+  numeric?: boolean;
 };
 
 /** The record of a function literal while it is boxed: the requirement of
@@ -2677,6 +2684,10 @@ export interface IComputeEngine {
   /** The record of the top shadowed-parameter frame, read just before it is
    * popped; `undefined` for the frame of a `Block`. @internal */
   _currentParameterRecord(): ParameterRecord | undefined;
+
+  /** Save the requirements of each function literal being boxed; the
+   * result puts them back. @internal */
+  _saveParameterRequirements(): () => void;
 
   /** Run `f`, a step of the boxing of a function literal after its
    * shadowed-parameter frame is popped (the rebinding of its body), with

@@ -577,6 +577,9 @@ its value in an activation and makes no definition. The type of a parameter
 of a function literal with no annotation is written on its definition once,
 when the boxing of the literal ends, from what its uses in the body
 required (`TYPE-SYSTEM.md`, "The type of a name with no explicit type").
+When a use changed such a type from a number type to another type, the body
+is boxed a second time, from its raw form, with the parameter starting at
+that type; the first boxing is discarded (CE-1270).
 
 ### Block locals
 

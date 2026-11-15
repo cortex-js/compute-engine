@@ -970,9 +970,33 @@ export function canonicalFunctionLiteralArguments(
      * stays the product `2x`, as it does for the index of a `Sum`
      * (`_isLiftedBodyParameter`). */
     liftedBody?: boolean;
+    /** True for the second boxing of a body (see `typesToBoxAgain()`): the
+     * body is not boxed a third time. */
+    secondBoxing?: boolean;
   }
 ): Expression | undefined {
   if (ops.length === 0) return undefined;
+  const rawOps = ops;
+  // The outermost literal being boxed holds `startingTypes` until it
+  // returns. A body whose first boxing was discarded in it starts at the
+  // types that boxing found and is boxed once, unless the caller gives types.
+  if (startingTypes === undefined)
+    try {
+      startingTypes = new WeakMap();
+      return canonicalFunctionLiteralArguments(ce, ops, options);
+    } finally {
+      startingTypes = undefined;
+    }
+  const known =
+    options?.secondBoxing === true || options?.inferredParamTypes
+      ? undefined
+      : startingTypes.get(ops[0]);
+  if (known !== undefined)
+    return canonicalFunctionLiteralArguments(ce, ops, {
+      ...options,
+      inferredParamTypes: known,
+      secondBoxing: true,
+    });
 
   // ── The E2 pre-pass (generic-literals design §2.3), ordered FIRST ──────────
   //
@@ -1275,6 +1299,17 @@ export function canonicalFunctionLiteralArguments(
     true,
     options?.liftedBody === true
   );
+  // What a first boxing of the body that is discarded must leave as it was
+  // (`typesToBoxAgain()`): the entries of the unit environments and the
+  // requirements on the parameters of the enclosing literals.
+  const firstBoxing =
+    options?.secondBoxing === true || bodyOp.isCanonical
+      ? undefined
+      : {
+          marks: ce._boxingState.journalMarks(),
+          restore: ce._saveParameterRequirements(),
+        };
+  let boxAgain: Map<string, Type> | undefined;
   // Collect the juxtapositions the body reads as multiplication only because
   // their leading symbol has no function definition yet — see
   // `boxed-expression/provisional-application.ts`.
@@ -1287,7 +1322,7 @@ export function canonicalFunctionLiteralArguments(
   // a `Declare` at the own level of the body declares a local of the body
   // (`enterFunctionBody()`, `statement-position.ts`).
   enterFunctionBody();
-  try {
+  const build = (): Expression => {
     if (returnTypeOp === undefined) {
       if (isFunction(bodyOp, 'Block')) {
         // The canonical form of the body depends on the parameter frame
@@ -1297,38 +1332,66 @@ export function canonicalFunctionLiteralArguments(
         // in the same read (the fold refinement canonicalizes the same raw
         // combiner once per step, with another inferred accumulator type)
         // got the canonical form of the first step.
-        block = withSeparateCanonicalReads(() => bodyOp.canonical);
+        let b = withSeparateCanonicalReads(() => bodyOp.canonical);
         // `get canonical` short-circuits on an invalid expression (a `Block`
         // containing an `Error` node) and returns it unbound — and therefore
         // unscoped. Rebuild it from its statements so `Block`
         // canonicalization runs and creates the scope the parameter
         // declarations below rely on. An EMPTY block is canonical and scoped
         // as it is (`canonicalBlock`), so it never reaches this rebuild.
-        if (!block.isScoped) block = ce.function('Block', [...bodyOp.ops]);
-      } else block = ce.function('Block', [bodyOp]);
-    } else {
-      // Wrap the body Block's last statement in the return-type ascription.
-      const statements: Expression[] = isFunction(bodyOp, 'Block')
-        ? [...bodyOp.ops]
-        : [bodyOp];
-      if (statements.length === 0) statements.push(ce.Nothing);
-      const lastIdx = statements.length - 1;
-      statements[lastIdx] = ce._fn(
-        'Typed',
-        [statements[lastIdx], returnTypeOp],
-        { canonical: false }
-      );
-      block = ce.function('Block', statements);
+        if (!b.isScoped) b = ce.function('Block', [...bodyOp.ops]);
+        return b;
+      }
+      return ce.function('Block', [bodyOp]);
     }
+    // Wrap the body Block's last statement in the return-type ascription.
+    const statements: Expression[] = isFunction(bodyOp, 'Block')
+      ? [...bodyOp.ops]
+      : [bodyOp];
+    if (statements.length === 0) statements.push(ce.Nothing);
+    const lastIdx = statements.length - 1;
+    statements[lastIdx] = ce._fn('Typed', [statements[lastIdx], returnTypeOp], {
+      canonical: false,
+    });
+    return ce.function('Block', statements);
+  };
+  try {
+    // A second boxing reads none of the canonical forms of the discarded
+    // one (`withSeparateCanonicalReads()`).
+    block =
+      options?.secondBoxing === true
+        ? withSeparateCanonicalReads(build)
+        : build();
     // Read the bindings the body's bare-parameter references auto-declared
     // (and shared) while the frame is still on the stack — the parameter
     // declarations below adopt them.
     shadowedDefs = ce._currentShadowedParameterDefs();
     record = ce._currentParameterRecord();
+    if (firstBoxing !== undefined)
+      boxAgain = typesToBoxAgain(params, shadowedDefs, record);
   } finally {
     exitFunctionBody();
-    captured = endProvisionalCapture();
+    captured = endProvisionalCapture(boxAgain === undefined);
     ce._popShadowedParameters();
+  }
+
+  // A use changed the type of a bare parameter from a number type to
+  // another type: the nodes built before that use read the parameter as a
+  // number (`A·B − B·A` cancels to `0`). This boxing is discarded, and the
+  // body is boxed once more from its raw operands, each such parameter
+  // starting at its final type.
+  if (boxAgain !== undefined) {
+    ce._boxingState.undoJournalsTo(firstBoxing!.marks);
+    firstBoxing!.restore();
+    startingTypes!.set(rawOps[0], boxAgain);
+    return canonicalFunctionLiteralArguments(ce, rawOps, {
+      ...options,
+      inferredParamTypes: new Map([
+        ...(options?.inferredParamTypes ?? []),
+        ...boxAgain,
+      ]),
+      secondBoxing: true,
+    });
   }
 
   // The body has no scope when the `canonical` handler of `Block` threw: the
@@ -1575,6 +1638,40 @@ export function canonicalFunctionLiteralArguments(
   }
 
   return literal;
+}
+
+/** While a literal is boxed (the outermost one makes it): for the raw body
+ * operand of a literal whose first boxing was discarded, the types its
+ * parameters start at in a second boxing (`typesToBoxAgain()`). */
+let startingTypes: WeakMap<object, ReadonlyMap<string, Type>> | undefined;
+
+/**
+ * The bare parameters of a literal (no annotation, not a rest or
+ * destructuring parameter) that the first boxing of its body must box again,
+ * with the type each starts at in the second boxing: a parameter whose
+ * recorded type was a number type at a use (`ParameterRequirement.numeric`)
+ * and is another type at the end. `undefined` when there is none.
+ */
+function typesToBoxAgain(
+  params: ReadonlyArray<Expression>,
+  defs: ReadonlyMap<string, BoxedDefinition>,
+  record: ParameterRecord | undefined
+): Map<string, Type> | undefined {
+  let result: Map<string, Type> | undefined;
+  for (const param of params) {
+    const target = optionalParameterTarget(param);
+    if (!isSymbol(target)) continue;
+    const def = defs.get(target.symbol);
+    if (def === undefined || !('value' in def)) continue;
+    const requirement = record?.requirements.get(def.value);
+    if (
+      requirement?.numeric !== true ||
+      isSubtype(requirement.type.type, 'number')
+    )
+      continue;
+    (result ??= new Map()).set(target.symbol, requirement.type.type);
+  }
+  return result;
 }
 
 /** Definitions currently being re-derived, so a repair that itself installs a
