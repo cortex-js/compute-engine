@@ -2,8 +2,9 @@
 
 An experiment: a table-driven compiler with an SSA representation and two thin
 printers, JavaScript and GLSL ES 3.00. `compile()` uses it only with the
-experimental option `profile: 'ir'` ("Selecting the pipeline" below). The entry
-is `compileSlice(expr, { target, passes, extend, iterationBudget })` in
+experimental option `profile: 'ir'`, on JavaScript and GLSL ("Selecting the
+pipeline" below). The entry is
+`compileSlice(expr, { target, passes, extend, iterationBudget })` in
 `index.ts`; it returns the code and its `warnings`. Anything out of scope throws
 a `Decline` with the fields `node`, `head` and `cause`, also for a refusal of
 the target profile. A failure of the verifier or of the effect-trace check is a
@@ -511,6 +512,10 @@ type is the body's), a list of lists, and a list result on GLSL.
 
 ## Limits
 
+- A program for which the walk lowers more than 50,000 nodes declines
+  (`NODE_LIMIT`, `lower.ts`). A shared node is lowered once per region, so the
+  two arms of an `If` that both read a shared graph lower it once each: a
+  chain of such `If`s (CE-584) would otherwise grow exponentially.
 - A loop or a build of 2^32 iterations or more throws on JavaScript; GLSL clamps
   its `int` bounds to ±2^30. GLSL has no run-time length, region, draw, frame or
   recursion.
@@ -618,3 +623,29 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it next to the
   still measures `numeric-kernel`). With `CE_JS_PROFILE_STATS=<dir>`,
   `node scripts/js-profile-stats.mjs <dir>` prints the counts
   (`docs/plans/2026-11-10-js-profile-first-consumer.md`).
+
+`compile(expr, { to: 'glsl', profile: 'ir' })` compiles with this pipeline too
+(`adapter-glsl.ts`, batch G1 of
+`docs/plans/2026-11-09-js-compiler-status-and-plan.md`), for a scalar result
+(real, integer or boolean) of scalar inputs, and gives the result of the
+existing GLSL target: no `run`; `code` is an expression, or statements that end
+in `return …;`, in which an input is its bare name (the option `bareInputs` of
+`compileSlice()`; the host declares the uniform or the parameter); `preamble`
+holds the helpers and the user functions, named `_gpu_ir_…` and `_fn_ir_…` in
+the GLSL syntax (a host that joins two compilations renames by `_gpu_` and
+`_fn_`; `ir_` keeps them apart from the names of the existing GLSL target);
+`freeSymbols` are the inputs; `freeSymbolTypes` has the `type` and `provenance`
+of the existing target (`freeSymbolTypes()` of `compile-references.ts`) and the
+`lowered` type that the code reads (`float`, `bool`); `unsupported` is empty,
+`mode` is `'strict'`, `profile` is `'ir'`. Declined with `'outside-profile'`: a
+list or tuple result or input, a root `Function` literal, the options
+`functions`, `operators`, `imports`, `preamble`, `storage`, `callerLocals`,
+`vars`, `strictTypes: true`, `broadcast: true`, a `mode` other than `'strict'`,
+an `iterationBudget` with a `Loop` (GLSL counts no `Loop` pass; a `Sum` or a
+`Product` over the budget is NaN), and an input name that is not a plain GLSL
+identifier, is a reserved word (`gpu-reserved.ts`), can be a name of the printer
+(`v<digits>…`, `_gpu_…`, `_fn_…`) or is the name of a function that the code
+calls. `fallback: true` then compiles with the existing GLSL target and logs a
+warning (the console). `CE_JS_PROFILE_SHADOW=ir` also measures every `compile()`
+to `glsl` that asks for no profile, under the consumer `glsl:public`, which the
+statistics script totals apart from JavaScript.

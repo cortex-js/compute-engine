@@ -29,6 +29,16 @@
 
 ### Improvements
 
+- **The experimental profile `'ir'` compiles to GLSL.**
+  `compile(expr, { to: 'glsl', profile: 'ir' })` compiles a scalar result
+  (real, integer or boolean) of scalar inputs with the new compiler and gives
+  a GLSL result: `code` is an expression, or statements that end in
+  `return`, in which an input is its name; `preamble` holds the helpers,
+  named `_gpu_ir_…`, and the user functions, named `_fn_ir_…`; `freeSymbols`
+  and `freeSymbolTypes` list the inputs. A list, a tuple, a `Function` literal and
+  the options `functions`, `operators`, `imports`, `preamble`, `storage`,
+  `vars`, `strictTypes`, `broadcast` and a mode other than `'strict'` decline;
+  with `fallback`, the existing GLSL target then compiles the expression.
 - **The code of the experimental profile `'ir'` can be stored, loaded and
   sent to a worker.** A result of `compile(expr, { profile: 'ir' })` now has
   `runtimeVersion`, `preambleOnce` and `entryPlan`, as a result of the
@@ -102,6 +112,15 @@
   value reads a variable.
 
 ### Resolved Issues
+
+- **A GLSL compilation refuses every reserved word of GLSL as an input
+  name.** The list of reserved words lacked 53 words of GLSL ES 3.00
+  (`active`, `common`, `resource`, `partition`, `sampler1D`, ...). With
+  `active` declared `real`, `compile(expr, { to: 'glsl' })` of `active + 1`
+  gave the code `active + 1.0`, which a WebGL compiler rejects ("Illegal use
+  of reserved word"). It now declines with "`active` is a reserved word of
+  GLSL, and the shader cannot name a variable so: rename it, or map it with
+  the `vars` option."
 
 - **An Epsil `while` whose condition is undecided stops.** In
   `let i = 1; while i <= n { i = i + 1 }` with `n` free, the condition

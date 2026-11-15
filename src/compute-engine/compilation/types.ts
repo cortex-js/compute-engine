@@ -2807,6 +2807,18 @@ export interface CompilationOptions<Expr = unknown> {
    * `broadcast()`, `broadcastAsync()`, `willUsePool()`, `runAsync()` and
    * `willParallelize()`, with or without `broadcast: true`; `runAsync()`
    * runs `run()`, and in the mode `'bigint'` a batch is refused.
+   *
+   * `'ir'` is also defined for the `glsl` target, for a scalar result
+   * (real, integer or boolean) of scalar inputs: the result has the fields
+   * of a GLSL result (`code`, an expression or statements that end in
+   * `return`, with each input by its name; `preamble`, with helpers named
+   * `_gpu_ir_…` and user functions `_fn_ir_…`; `freeSymbols`;
+   * `freeSymbolTypes`)
+   * and `profile: 'ir'`. It declines a list or tuple, a root `Function`
+   * literal, and the options `functions`, `operators`, `imports`,
+   * `preamble`, `storage`, `vars`, `strictTypes: true`, `broadcast: true`, a
+   * mode other than `'strict'`, and `iterationBudget` with a `Loop`; with
+   * `fallback`, the existing GLSL target then compiles the expression.
    */
   profile?: 'numeric-kernel' | 'ir';
 }

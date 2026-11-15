@@ -41,6 +41,7 @@ import { fragmentErrorDiagnostic } from './fragment.js';
 import type { CanCompileResult } from './fragment.js';
 import { ScalarFragmentJavaScriptTarget } from './javascript-fragment-target.js';
 import { compileWithIrProfile, type IR_OPTIONS } from './ir/adapter.js';
+import { compileWithIrProfileGlsl } from './ir/adapter-glsl.js';
 import {
   jsProfileShadowConsumer,
   recordJsProfileShadow,
@@ -113,23 +114,27 @@ void IR_OPTIONS_CLASSIFIED;
 
 /**
  * Throw when the `profile` option is given with a target other than
- * `javascript`, or with a direct target (`target`): the profile is defined
- * for the JavaScript target only. It is an error of the options, thrown
- * whatever `fallback` says, as for the other invalid options.
+ * `javascript` (or `glsl` for the profile `ir`), or with a direct target
+ * (`target`). It is an error of the options, thrown whatever `fallback`
+ * says, as for the other invalid options.
  */
 function assertProfileTarget(options: CompileExpressionOptions | undefined) {
   if (options?.profile === undefined) return;
+  const ir = options.profile === 'ir';
+  const targets = ir
+    ? 'the targets "javascript" and "glsl"'
+    : 'the target "javascript"';
   if (options.target !== undefined)
     throw new Error(
       `Invalid compilation option "profile": the profile "${options.profile}" is ` +
-        'defined for the target "javascript" only, not for a direct target ' +
+        `defined for ${targets} only, not for a direct target ` +
         '(the `target` option)'
     );
   const to = options.to ?? 'javascript';
-  if (to !== 'javascript')
+  if (to !== 'javascript' && !(to === 'glsl' && ir))
     throw new Error(
       `Invalid compilation option "profile": the profile "${options.profile}" is ` +
-        `defined for the target "javascript" only, not for "${to}"`
+        `defined for ${targets} only, not for "${to}"`
     );
 }
 
@@ -184,7 +189,7 @@ export function compile<
 ): CompilationResult<T, R> {
   const ce = expr.engine;
   if (ce._jsProfileShadow && shadowDepth === 0 && !ce._opensOperation(false)) {
-    const consumer = shadowConsumerOf(options);
+    const consumer = shadowConsumerOf(options, ce._jsProfileShadow === 'ir');
     if (consumer !== undefined)
       return compileWithShadow(expr, options, consumer);
   }
@@ -200,20 +205,20 @@ let shadowDepth = 0;
 /**
  * The consumer under which the shadow measure counts a compilation with
  * `options` (`jsProfileShadowConsumer()`), or `undefined` when it is not
- * measured: a target other than `javascript`, a direct target, a profile
+ * measured: a target other than `javascript` (and `glsl`, measured with
+ * the profile `ir` only, as `glsl:public`), a direct target, a profile
  * asked for, or a compilation of `implicitCompile()` that follows an
  * attempt of its switch.
  */
 function shadowConsumerOf(
-  options: CompileExpressionOptions | undefined
+  options: CompileExpressionOptions | undefined,
+  ir: boolean
 ): string | undefined {
-  if (
-    options !== undefined &&
-    (options.profile !== undefined ||
-      options.target !== undefined ||
-      (options.to ?? 'javascript') !== 'javascript')
-  )
+  if (options?.profile !== undefined || options?.target !== undefined)
     return undefined;
+  const to = options?.to ?? 'javascript';
+  if (to === 'glsl' && ir) return 'glsl:public';
+  if (to !== 'javascript') return undefined;
   return jsProfileShadowConsumer(options);
 }
 
@@ -365,8 +370,9 @@ function compileExpression<
       inCallerScope(expr, () =>
         compileInScope<T, R>(expr, { ...options, inputs: undefined }, decline)
       );
+    // Not `compile()`: the shadow measure counted this compilation once.
     const result = withCompileInputs(expr, options, (bound, rest) =>
-      compile<T, R>(bound, rest)
+      compileExpression<T, R>(bound, rest)
     );
     if (isCompileDeclineError(result)) return fallback(result);
     if (result.success !== false) return result;
@@ -754,7 +760,29 @@ function compileInScope<
     // JavaScript target (`ScalarFragmentJavaScriptTarget`), with the
     // assembly of the JavaScript target.
     // The profile `ir` (experimental) compiles with the IR compiler
-    // (`ir/adapter.ts`); a decline falls back in the catch below.
+    // (`ir/adapter.ts`); a decline falls back in the catch below. On
+    // `glsl` (`ir/adapter-glsl.ts`), a decline falls back to the GLSL target.
+    if (options?.profile === 'ir' && targetName === 'glsl')
+      try {
+        return compileWithIrProfileGlsl(
+          expr,
+          options
+        ) as unknown as CompilationResult<T, R>;
+      } catch (e) {
+        if (!isCompileDeclineError(e) || options.fallback === false) throw e;
+        console.warn(
+          `Compilation fallback for "${expr.operator}" (target: glsl, profile: ir): ${e.message}`
+        );
+        return strictTypesChecked(
+          expr,
+          languageTarget.compile(expr, targetOptions) as CompilationResult<
+            T,
+            R
+          >,
+          options,
+          languageTarget
+        );
+      }
     if (options?.profile === 'ir')
       return compileWithIrProfile(
         expr,

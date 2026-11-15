@@ -84,7 +84,7 @@ export type IrOptionName = keyof typeof IR_OPTIONS;
 /** The options of `compile()`, by the names of `IR_OPTIONS`
  *  (`compile-expression.ts` imports this file, so its type is not imported
  *  here). */
-type IrOptions = { readonly [K in IrOptionName]?: unknown } & {
+export type IrOptions = { readonly [K in IrOptionName]?: unknown } & {
   readonly cse?: boolean;
   readonly constantFold?: boolean;
   readonly entryChecks?: boolean;
@@ -112,6 +112,10 @@ export function _withIrProfileTestExtension<T>(x: Extension, f: () => T): T {
   }
 }
 
+/** The extension of `_withIrProfileTestExtension()` (both targets).
+ *  @internal */
+export const irTestExtension = (): Extension | undefined => testExtension;
+
 /** Whether `x` is an option given with content: an object with a key, an
  *  array with an element, a string that is not blank, a function. */
 function given(x: unknown): boolean {
@@ -127,30 +131,67 @@ function given(x: unknown): boolean {
 function refusal(name: IrOptionName, value: unknown): string | undefined {
   switch (name) {
     case 'strictTypes':
+    case 'broadcast':
       return value === true ? `the option \`${name}\`` : undefined;
+    case 'mode':
+      return value !== undefined && value !== 'strict'
+        ? `the option \`mode\` with the value '${String(value)}'`
+        : undefined;
     default:
       return given(value) ? `the option \`${name}\`` : undefined;
   }
 }
 
-/** The first option of `options` that the profile does not have, as the
- *  text of its decline, or `undefined`. */
-function optionDecline(options: IrOptions | undefined): string | undefined {
+/** The first option of `options` that the profile does not have, by the
+ *  classes of `table`, as the text of its decline, or `undefined`. */
+export function optionDecline(
+  options: IrOptions | undefined,
+  table: Readonly<Record<IrOptionName, string>> = IR_OPTIONS
+): string | undefined {
   if (options === undefined) return undefined;
-  for (const name of Object.keys(IR_OPTIONS) as IrOptionName[]) {
-    if (IR_OPTIONS[name] !== 'declined') continue;
+  for (const name of Object.keys(table) as IrOptionName[]) {
+    if (table[name] !== 'declined') continue;
     const text = refusal(name, options[name]);
     if (text !== undefined) return text;
   }
   return undefined;
 }
 
-function decline(message: string, extra: Partial<CompileDiagnostic> = {}) {
+export function decline(
+  message: string,
+  extra: Partial<CompileDiagnostic> = {}
+) {
   return new CompileDeclineError({
     code: 'outside-profile',
     kind: 'capability',
     message: `${PREFIX}: ${message}`,
     ...extra,
+  });
+}
+
+/** The user functions compiled in `p` and the names whose engine value the
+ *  code holds as a literal (`CompilationOptions.symbolDeps`). */
+export function addSymbolDeps(p: Program, deps: Set<string> | undefined) {
+  for (const f of p.functions) if (f.source !== undefined) deps?.add(f.source);
+  for (const name of p.captures ?? []) deps?.add(name);
+}
+
+/** The error of `compile()` for the error `e` of the slice or the adapter:
+ *  a cancellation or a decline of `compile()` as it is, a `Decline` as
+ *  `'outside-profile'`, any other error as `'compile-error'`. */
+export function sliceError(e: unknown): unknown {
+  if ((e as Error | undefined)?.name === 'CancellationError') return e;
+  if (e instanceof CompileDeclineError) return e;
+  if (e instanceof Decline)
+    return decline(e.message, {
+      ...(e.head === undefined ? {} : { operator: e.head }),
+      value: e.node,
+    });
+  const message = e instanceof Error ? e.message : String(e);
+  return new CompileDeclineError({
+    code: 'compile-error',
+    kind: 'capability',
+    message: `${PREFIX}: internal error: ${message}`,
   });
 }
 
@@ -199,18 +240,7 @@ export function compileWithIrProfile(
       extend: testExtension,
     });
   } catch (e) {
-    if ((e as Error | undefined)?.name === 'CancellationError') throw e;
-    if (e instanceof Decline)
-      throw decline(e.message, {
-        ...(e.head === undefined ? {} : { operator: e.head }),
-        value: e.node,
-      });
-    const message = e instanceof Error ? e.message : String(e);
-    throw new CompileDeclineError({
-      code: 'compile-error',
-      kind: 'capability',
-      message: `${PREFIX}: internal error: ${message}`,
-    });
+    throw sliceError(e);
   }
   const p = slice.program;
 
@@ -230,10 +260,7 @@ export function compileWithIrProfile(
       `a Function literal that reads the free name \`${inputs[0]}\`: its code is called with its arguments only`,
       { binding: inputs[0] }
     );
-  for (const f of p.functions)
-    if (f.source !== undefined) options?.symbolDeps?.add(f.source);
-  // A name whose engine value the code holds as a literal.
-  for (const name of p.captures ?? []) options?.symbolDeps?.add(name);
+  addSymbolDeps(p, options?.symbolDeps);
 
   // The entry plan of a loader of stored code (`checkEntry()` of
   // `javascript-runtime.ts`), which `run()` applies too: a number for a

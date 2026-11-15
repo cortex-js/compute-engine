@@ -164,6 +164,11 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `javascript`, profile `ir` (crafted), `x: real`: `Zeta(x)` at
   `x = -171.5` gives `Infinity` (the machine kernel overflows below about
   `-171`); the interpreter at the default precision gives `4.739e172`.
+- `glsl`, profile `ir` (crafted), `x: real`, `y: real`: `Power(x, y)` with a
+  negative `x` and a `y` that is not an integer gives `NaN` (`pow()` is
+  undefined there in GLSL ES 3.00), also where the interpreter has a real
+  value: at `x = -8`, `y = 2/3` the interpreter gives `4`. A single-float
+  exponent cannot be read as a rational of odd denominator.
 - `plausible?` — `javascript`, profile `ir`, `k: integer`:
   `Comprehension(2k, Element(k, Range(1, k)))`, whose index shadows a name
   that its own range reads, gives `[2, 4, 6]` at `k = 3`; the interpreter
@@ -2608,6 +2613,16 @@ helpers, the inputs, the results and the pole of "The `bigint` mode"; a
 program with a real or complex value anywhere (`n/2`, `Floor(n/3)`,
 `n < 7/2`, a real input), and the option `vars`, decline with
 `outside-profile`, not `bigint-lane`.
+
+With `to: 'glsl'`, `profile: 'ir'` (experimental too) compiles a scalar
+result of scalar real, integer or boolean inputs to the result of the GLSL
+target: `code` is an expression, or statements that end in `return`, in
+which an input is its bare name; `preamble` holds the helpers (`_gpu_ir_…`)
+and the user functions (`_fn_ir_…`); `freeSymbolTypes[name].lowered` is
+`float` or `bool`. It has no NaN-safe helpers, no exact sine hash (no
+`float32Bounds`) and no cap on the passes of a `Loop`. Anything else, and the options it does
+not map (the README lists them), decline with `outside-profile`; with
+`fallback`, the existing GLSL target then compiles the expression.
 
 ### Interval results
 

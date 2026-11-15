@@ -1,14 +1,14 @@
 // Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
 exports[`IR slice: GLSL text Round adds no 0.5 before floor 1`] = `
-"float _round(float x) {
+"float _gpu_ir_round(float x) {
   float a = abs(x);
   float r = floor(a);
   if (a - r >= 0.5) r += 1.0;
   return x < 0.0 ? -r : r;
 }
 float f(float in0_x) {
-  return _round(in0_x);
+  return _gpu_ir_round(in0_x);
 }"
 `;
 
@@ -46,7 +46,7 @@ exports[`IR slice: GLSL text an element-wise operation is one per element 1`] = 
 `;
 
 exports[`IR slice: GLSL text an integer Mod computes on ints 1`] = `
-"float _imod(float a, float b) {
+"float _gpu_ir_imod(float a, float b) {
   if (b == 0.0) return uintBitsToFloat(0x7fc00000u);
   int ia = int(a), ib = int(b);
   int r = ia - ib * (ia / ib);
@@ -54,7 +54,7 @@ exports[`IR slice: GLSL text an integer Mod computes on ints 1`] = `
   return float(r);
 }
 float f(float in0_n, float in1_m) {
-  return _imod(in0_n, in1_m);
+  return _gpu_ir_imod(in0_n, in1_m);
 }"
 `;
 

@@ -123,8 +123,10 @@ describe('the option selects the IR compiler', () => {
   });
   test('the option is an error with another target', () => {
     expect(() =>
-      compile(box(['Add', 'x', 1]), { ...IR, to: 'glsl' } as never)
-    ).toThrow(/the profile "ir" is defined for the target "javascript" only/);
+      compile(box(['Add', 'x', 1]), { ...IR, to: 'python' } as never)
+    ).toThrow(
+      /the profile "ir" is defined for the targets "javascript" and "glsl" only/
+    );
   });
 });
 
@@ -1164,8 +1166,8 @@ describe('a lifted input: its type, the other modes and targets', () => {
       box(['Function', ['Add', ['Multiply', 'n', 'j'], 1], 'j'], e)
     );
     const code = compileSlice(box(['g', 'x'], e), { target: 'glsl' }).code;
-    expect(code).toMatch(/float u0_g\(float \w+, float \w+\)/);
-    expect(code).toMatch(/u0_g\(in0_x, in1_n\)/);
+    expect(code).toMatch(/float _fn_ir_u0_g\(float \w+, float \w+\)/);
+    expect(code).toMatch(/_fn_ir_u0_g\(in0_x, in1_n\)/);
   });
 });
 

@@ -1456,6 +1456,92 @@ every Desmos row before it is evaluated or compiled, and removes its
 `evaluate` and `compile` handlers of `At` and `Which` together: 207 index
 sites need the floor rewrite, 659 have an integer index.
 
+GLSL: the plan (2026-11-14, from a read of the existing GLSL target, of
+`print-glsl.ts` and of Tycho's shader code; sizes are estimates). The engine
+has no `wgsl` target. A GLSL result has no `run`: `code` is an expression, or
+statements that end in `return`, in which an input is its bare name;
+`preamble` holds the helpers and user functions; `freeSymbolTypes[name]
+.lowered` is the uniform type (`float`, `vec2`, `float[5]`, …). The host
+wraps `code` in its own function and declares the uniforms. Tycho compiles to
+GLSL at 8 sites, reads `code`, `preamble`, `freeSymbols`,
+`freeSymbolTypes[n].lowered`, `warnings` and `float32Bounds`, passes
+`inputs`, `symbolic`, `vars`, `storage: {S: 'sampler2D'}` and, for the
+colormap, `functions`, and renames helpers by the prefixes `_gpu_` and `_fn_`
+to join two compilations in one shader. The printer of the pipeline already
+gives the body, the functions and the helpers separately. Batches, in order:
+
+| Batch | Adds | Estimate in `ir/` |
+| --- | --- | --- |
+| G1 | `profile: 'ir'` for `to: 'glsl'`: an adapter that gives the result contract for a scalar real expression of scalar inputs and declines the rest; bare input names; helpers and functions under the `_gpu_` and `_fn_` prefixes; a shadow measure of the GLSL `compile()` calls | 110 to 140 |
+| G2 | a list of 2 to 4 reals is a `vecN`, as a result and as an input | 30 to 50 |
+| G3 | `At` on a uniform array; the cap on loop passes | 30 to 50 |
+| G4 | the profile tried first for GLSL in a Tycho build: its codegen and render audits on the GLSL seam | 0 |
+| G5 | `storage` (a list read from a sampler) | 60 to 100 |
+| G6 | colours, and the colormap function if `functions` returns | 80 to 160 |
+| G7 | the complex lane as `vec2` | 150 to 250 |
+| G8 | the default | 0 |
+
+Not carried over from the existing GLSL target: the NaN-safe helpers and
+the finite proof (1,796 lines), the exact sine hash with `float32Bounds`,
+the fragment pre-check (2,066 lines), the hoisting of temporaries, the
+copies of a user function per argument type, `callerLocals`, the shader and
+function assemblers. Choices taken for G1 (reversible): an input is its bare
+name (hosts declare and `#define` it); the direct `GLSLTarget` API and the
+fallback of a decline stay on the existing GLSL target.
+
+Batch G1, 2026-11-14. `compile(expr, { to: 'glsl', profile: 'ir' })` goes
+through `ir/adapter-glsl.ts` (151 lines): the result contract of the existing
+target for a scalar expression of scalar inputs, with bare input names, the
+helpers under `_gpu_ir_` and the user functions under `_fn_ir_` (the existing
+target has a `_gpu_round` of its own), `freeSymbolTypes` from the existing
+target's own function; a list or tuple, a root function literal, `vars`,
+`storage`, `functions` and a `Loop` with a budget decline. The WebGL value
+tests ran: 18 programs assembled as a host does agree with the interpreter,
+and a reviewer compiled 69 more in both host forms. The reserved-word table
+of GLSL was completed (53 words), so the existing target also refuses an
+input named `active`. The shadow measure counts the GLSL `compile()` calls
+of the suite under `glsl:public`, and counts a compile with `inputs` once.
+
+The first shadow run with GLSL exhausted the memory on one test file
+(`ce-584-shared-subexpression-size.test.ts`): a shared node read in both
+arms of an `If` is lowered once per arm, so a chain of such conditionals
+doubles at each level, on both targets (4.2 MB of text and 18 s at depth 14).
+The lowering now declines above 50,000 lowered nodes; the worst program
+under the limit takes about 2.6 s. Sharing the node before the `If` would
+remove the growth and make a lazy arm eager; it was not taken.
+
+Measured in a worktree at `ca402e5d915757bf347de1438dff6bf6728b142a` plus the
+patch; 6,066 lines in `ir/`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,479 of 10,854 (96.5%) |
+| Every JavaScript compile | 23,900 of 38,929 (61.4%) |
+| Public JavaScript `compile()` calls | 13,408 of 28,061 (47.8%) |
+| GLSL `compile()` calls | 600 of 2,321 (25.9%); 569 of the 1,530 that the existing target compiles (37.2%) |
+
+No test fails in the shadow run; with the switch on, the one test of CE-1267.
+Largest causes of a GLSL decline: the complex lane 167; a list or tuple
+result 96; the option `vars` 48; another option 29.
+
+User decisions of 2026-11-14 on GLSL:
+
+- **The existing GLSL target is to be deleted too** (about 25,500 lines of
+  `gpu-*` and `glsl-*` files), with `javascript-target.ts` and the structured
+  route: the definition of done covers both targets. Until then a GLSL
+  decline falls back to it. The direct public API of the target
+  (`GLSLTarget`, `compileFunction`, `compileShader`; 187 uses in the tests,
+  none in Tycho) is removed with it: the user approved the removal of the
+  public GLSL APIs (2026-11-14). `compile(expr, { to: 'glsl' })` stays. The
+  removal is a breaking change, listed as such in the changelog of the
+  release that makes it.
+- **NaN through `min`, `max` and `sin` on GLSL**: no helper is carried over.
+  Tycho's render audit on the GLSL lane decides: if a picture changes, the
+  narrowest helper that restores it is added.
+- **The warning of a float32-unsafe argument stays** (Tycho reads it to send
+  a curve to its CPU lane), without the exact sine hash machinery behind it;
+  what the warning costs to produce is to be measured.
+
 User decisions of 2026-11-14:
 
 - **How a host changes the lowering of an operator.** No hook in the new

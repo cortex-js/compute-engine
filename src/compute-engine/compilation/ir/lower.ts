@@ -144,6 +144,13 @@ type Facts = {
  *  depth. A larger node is lowered, and its parts are folded. */
 const CLOSED_SIZE = 10_000;
 
+/** The most nodes that one compilation lowers. A shared node is lowered
+ *  once per region (the memo of `value()`), so the two arms of an `If` that
+ *  both read a shared graph lower it once each, and a chain of such `If`s
+ *  takes a time and gives a text exponential in its depth. Over the limit
+ *  the program declines. */
+const NODE_LIMIT = 50_000;
+
 /** `fold: false` (the `constantFold: false` option of the profile `ir`):
  *  no closed sub-expression is evaluated with `N()`. `mode: 'complex'`: a
  *  row that can leave the reals takes its complex signature unless its
@@ -495,7 +502,10 @@ export function lower(
     return v;
   };
 
+  let lowered = 0;
   const node = (e: Expression, want: boolean): V | undefined => {
+    if (++lowered > NODE_LIMIT)
+      decline(root, `more than ${NODE_LIMIT} nodes to lower`);
     if (isNumber(e))
       return number(e) ?? decline(e, 'a complex number with an infinite part');
     if (isSymbol(e)) return symbol(e, want);

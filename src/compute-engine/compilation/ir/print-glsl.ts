@@ -57,7 +57,7 @@ export const GLSL: Syntax = Object.freeze({
     'neg': '(-$0)',
     'mul': '($0 * $1)',
     'div': '($0 / $1)',
-    'pow': { text: '_pow($0, $1)', helpers: ['_pow'] },
+    'pow': { text: '_gpu_ir_pow($0, $1)', helpers: ['_gpu_ir_pow'] },
     'sqrt': 'sqrt($0)',
     'abs': 'abs($0)',
     'exp': 'exp($0)',
@@ -69,9 +69,9 @@ export const GLSL: Syntax = Object.freeze({
     'deg': 'radians($0)',
     'floor': 'floor($0)',
     'ceil': 'ceil($0)',
-    'round': { text: '_round($0)', helpers: ['_round'] },
+    'round': { text: '_gpu_ir_round($0)', helpers: ['_gpu_ir_round'] },
     'mod': 'mod($0, $1)',
-    'mod.int': { text: '_imod($0, $1)', helpers: ['_imod'] },
+    'mod.int': { text: '_gpu_ir_imod($0, $1)', helpers: ['_gpu_ir_imod'] },
     'max': 'max($0, $1)',
     'min': 'min($0, $1)',
     'emax': 'max($0, $1)',
@@ -97,8 +97,8 @@ export const GLSL: Syntax = Object.freeze({
     'asinh': 'asinh($0)',
   },
   helpers: {
-    _pow: [
-      'float _pow(float a, float b) {',
+    _gpu_ir_pow: [
+      'float _gpu_ir_pow(float a, float b) {',
       '  if (b == floor(b) && b >= 1.0 && b <= 16.0) {',
       '    float r = a;',
       '    for (int i = 1; i < int(b); i++) r *= a;',
@@ -113,8 +113,8 @@ export const GLSL: Syntax = Object.freeze({
     ].join('\n'),
     // Half away from zero, with no addition of 0.5 (which rounds up just
     // below 0.5 and near 2^23).
-    _round: [
-      'float _round(float x) {',
+    _gpu_ir_round: [
+      'float _gpu_ir_round(float x) {',
       '  float a = abs(x);',
       '  float r = floor(a);',
       '  if (a - r >= 0.5) r += 1.0;',
@@ -124,8 +124,8 @@ export const GLSL: Syntax = Object.freeze({
     // The floored modulo of integers, on `int`s: exact for every operand
     // within 2^24, intermediate values included (a `float` product `b * q`
     // rounds: `Mod(-15000000, 6000001)`).
-    _imod: [
-      'float _imod(float a, float b) {',
+    _gpu_ir_imod: [
+      'float _gpu_ir_imod(float a, float b) {',
       `  if (b == 0.0) return ${NAN};`,
       '  int ia = int(a), ib = int(b);',
       '  int r = ia - ib * (ia / ib);',
@@ -157,10 +157,13 @@ export const GLSL: Syntax = Object.freeze({
   ],
   close: '}',
   ret: (value) => `return ${value};`,
-  call: (fn, args) => `${fn}(${args.join(', ')})`,
+  // A helper is named `_gpu_ir_…` and a user function `_fn_ir_…`: a host
+  // that joins two compilations in one shader renames by `_gpu_` and `_fn_`,
+  // and the `ir_` keeps them apart from the existing GLSL target's names.
+  call: (fn, args) => `_fn_ir_${fn}(${args.join(', ')})`,
   fn: (name, params, result, body) =>
     [
-      `${typeName(result)} ${name}(${params.map((p) => declarator(p.type, p.name)).join(', ')}) {`,
+      `${typeName(result)} _fn_ir_${name}(${params.map((p) => declarator(p.type, p.name)).join(', ')}) {`,
       ...body,
       '}',
     ].join('\n'),
@@ -189,7 +192,7 @@ export function printGlsl(
   const entry = entryOf(p);
   const parameters = entry.body.params.map((v, k) => ({
     input: entry.paramNames[k],
-    name: glslParameterName(entry.paramNames[k], k),
+    name: syntax.input(entry.paramNames[k], k),
     type: typeName(p.types[v]),
   }));
   const returnType = typeName(entry.results[0]);

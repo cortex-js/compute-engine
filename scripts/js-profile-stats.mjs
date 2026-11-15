@@ -20,7 +20,8 @@
 // normalized message, with one example of each, and the declines of the
 // existing compiler that the profile admitted, by message.
 // `CE_JS_PROFILE=ir` and `CE_JS_PROFILE_SHADOW=ir` measure the profile `ir`
-// in the same format.
+// in the same format. The GLSL compilations (`CE_JS_PROFILE_SHADOW=ir` only,
+// the consumer `glsl:public`) have a total and messages of their own.
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -54,19 +55,20 @@ for (const file of files) {
         })
       );
     for (const k of Object.keys(t)) t[k] += s[k] ?? 0;
+    const prefix = name.startsWith('glsl:') ? 'glsl ' : '';
     for (const [message, n] of Object.entries(
       s.baselineDeclinedAdmittedMessages ?? {}
     ))
       admittedOverBaseline.set(
-        message,
-        (admittedOverBaseline.get(message) ?? 0) + n
+        prefix + message,
+        (admittedOverBaseline.get(prefix + message) ?? 0) + n
       );
     for (const [kind, map] of [
       ['declined', s.declinedMessages],
       ['failed', s.failedMessages],
     ])
       for (const [message, n] of Object.entries(map ?? {})) {
-        const key = `${kind}: ${message}`;
+        const key = `${prefix}${kind}: ${message}`;
         const m = shadowMessages.get(key);
         if (m === undefined)
           shadowMessages.set(key, {
@@ -165,11 +167,15 @@ if (shadow.size > 0) {
   console.log(
     `${'consumer'.padEnd(w)} ${num('compiled')} ${num('baseline')} ${num('admitted')} ${'%'.padStart(7)} ${num('declined')} ${num('failed')} ${num('base-decl')} ${num('b-d-adm')}`
   );
+  const glsl = Object.fromEntries(Object.keys(sum).map((k) => [k, 0]));
   for (const [name, t] of shadowRows) {
-    for (const k of Object.keys(sum)) sum[k] += t[k];
+    const into = name.startsWith('glsl:') ? glsl : sum;
+    for (const k of Object.keys(sum)) into[k] += t[k];
     console.log(row(name, t));
   }
   console.log(row('total', sum));
+  if (shadowRows.some(([name]) => name.startsWith('glsl:')))
+    console.log(row('glsl total', glsl));
   console.log(
     `\n'baseline': compilations that the existing compiler compiled; 'admitted', 'declined', 'failed': the profile on these. 'base-decl': compilations that the existing compiler declined; 'b-d-adm': of those, admitted by the profile.`
   );
@@ -189,10 +195,9 @@ if (shadow.size > 0) {
     if (`${kind}${example}` !== key)
       console.log(`          e.g. ${oneLine(example)}`);
   }
-  if (sum.otherMessages > 0)
-    console.log(
-      `  ${String(sum.otherMessages).padStart(6)}  (messages not kept)`
-    );
+  const notKept = sum.otherMessages + glsl.otherMessages;
+  if (notKept > 0)
+    console.log(`  ${String(notKept).padStart(6)}  (messages not kept)`);
 }
 if (admittedOverBaseline.size > 0) {
   console.log(
