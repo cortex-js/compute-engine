@@ -287,6 +287,14 @@ export class _BoxedValueDefinition
    * @internal */
   _blockLocal = false;
 
+  /** The marks of a definition whose value an activation holds, of a
+   * parameter of a function literal and of the variable of a binder
+   * (`ambient-chain.ts`, `function-literal.ts`, `binders.ts`). Fields, so
+   * that marking a definition does not change the shape of the object. */
+  _activated?: true;
+  _functionLiteralParameter?: true;
+  _isBinderVariable?: true;
+
   /** The declared PLACEHOLDER SKELETON, when the declaration's type was a
    * bare collection constructor (`list`, `set`, `dictionary`, `collection`,
    * `indexed_collection` — each constrains collection kind without restricting

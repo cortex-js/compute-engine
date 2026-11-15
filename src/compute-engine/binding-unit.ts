@@ -1048,17 +1048,25 @@ function definitionId(def: object | undefined): number {
  * the operation in progress (`current`), with their parents at any depth.
  * The environment of an operation that has no entry of its own is left out,
  * and only its parents are kept: two operations on one input then give the
- * same key. `undefined` when there is no environment.
+ * same key. The environment of the operation in progress is left out when
+ * no node of `exprs` reads an environment (no symbol occurrence and no call
+ * of a free head): the key of a constant expression is then the same in
+ * every operation. A call of a function that has a definition is not such
+ * a read: the body is not walked, and what it reads is covered by the
+ * version of the definition, which the memo of the caller checks.
+ * `undefined` when there is no environment.
  */
 export function unitEnvironmentStamp(
   current: UnitEnvironment | undefined,
   exprs: readonly unknown[]
 ): Map<UnitEnvironment, number> | undefined {
   const envs: UnitEnvironment[] = [];
-  if (current !== undefined) envs.push(current);
+  let reads = false;
   type Node = {
     _kind?: string;
     _env?: UnitEnvironment;
+    _freeHeadScope?: object;
+    _freeHeadEnv?: UnitEnvironment;
     ops?: readonly unknown[];
     values?: readonly unknown[];
   };
@@ -1072,12 +1080,20 @@ export function unitEnvironmentStamp(
     const n = node as Node;
     if (n._kind === undefined) continue;
     if (n._kind === 'symbol') {
+      reads = true;
       if (n._env !== undefined) envs.push(n._env);
       continue;
+    }
+    // A free head reads the environment that holds its reading as a
+    // function, as in `unitEnvironmentsOf()`.
+    if (n._freeHeadScope !== undefined) {
+      reads = true;
+      if (n._freeHeadEnv !== undefined) envs.push(n._freeHeadEnv);
     }
     const children = n._kind === 'dictionary' ? n.values : n.ops;
     if (children !== undefined) for (const child of children) stack.push(child);
   }
+  if (reads && current !== undefined) envs.push(current);
   if (envs.length === 0) return undefined;
   const stamp = new Map<UnitEnvironment, number>();
   const seen = new Set<UnitEnvironment>();

@@ -429,6 +429,17 @@ describe('the snapshot of a value definition', () => {
     // definition: it counts frames of the stack, which a restore does not
     // change, so it is not a state of the record.
     '_holders',
+    // A mark set once when the definition is made the value definition of
+    // an activation; never cleared, so never restored.
+    '_activated',
+    // A mark set once when the definition is made a parameter of a function
+    // literal; never cleared, so never restored. A definition that existed
+    // before the literal and that the literal adopts as a parameter keeps
+    // the mark after a restore.
+    '_functionLiteralParameter',
+    // A mark set once when the definition is made the variable of a binder;
+    // never cleared, so never restored.
+    '_isBinderVariable',
   ]);
 
   test('every mutable field of a value definition is in its snapshot', () => {

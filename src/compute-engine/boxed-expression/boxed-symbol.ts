@@ -371,11 +371,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * The environment of the binding unit of this occurrence: that of the
    * outermost boxing that made it (`binding-unit.ts`). A symbol made outside
    * a boxing gets an environment of its own at the first requirement
-   * written on it. Declared, not initialized: the constructor sets it only
-   * for a symbol that a boxing makes.
+   * written on it. A field of every symbol, so that all symbols have one
+   * shape; the constructor sets it only for a symbol that a boxing makes.
    * @internal
    */
-  declare _env?: UnitEnvironment;
+  _env?: UnitEnvironment;
 
   /**
    * The home scope of a free name (a canonical symbol with no definition).
@@ -386,7 +386,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * definition has no home scope: its entry is keyed on (definition, name).
    * @internal
    */
-  declare _homeScope?: Scope;
+  _homeScope?: Scope;
 
   /** True on a raw symbol that the walk of the raw operands of a lazy call
    * (`expandMacroOperands()`, `box.ts`) put in place of a macro name that
@@ -394,7 +394,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * binder binds. `canonical` does not expand it. Set on a fresh symbol
    * only, never on a symbol of the caller.
    * @internal */
-  declare _keptName?: true;
+  _keptName?: true;
 
   /**
    * For a symbol with a definition: the scope whose chain gave the definition

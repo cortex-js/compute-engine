@@ -1801,11 +1801,11 @@ export class BoxedFunction
    * free call head, `f` in `f(x)`, `binding-unit.ts`). The boxing
    * declares no function for the head: the call is canonical with no
    * definition, and its head is resolved when the call is evaluated
-   * (`_canonicalToEvaluate()`). Declared, not initialized, so that a call
-   * whose head is not free carries no own property for it.
+   * (`_canonicalToEvaluate()`). A field of every call, so that all calls
+   * have one shape.
    * @internal
    */
-  declare _freeHeadScope?: Scope;
+  _freeHeadScope?: Scope;
 
   /**
    * For a free call head
@@ -1817,7 +1817,7 @@ export class BoxedFunction
    * not initialized, as `_freeHeadScope` is.
    * @internal
    */
-  declare _freeHeadEnv?: UnitEnvironment;
+  _freeHeadEnv?: UnitEnvironment;
 
   /**
    * The definition of the head of this call: its own definition, or, for a
@@ -1857,7 +1857,7 @@ export class BoxedFunction
    * same call during that boxing (`a := f(1)`, then `f := t ↦ a + 1`, then
    * the type of `a`) gets `undefined`. Declared, not initialized, so that a
    * call whose head is not free carries no own property for it. */
-  declare private _freeHeadReboxing?: boolean;
+  private _freeHeadReboxing?: boolean;
 
   /**
    * For a free call head (`_freeHeadScope`): this call boxed again against
