@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "settings": {
+    "precision": 50,
+    "jit": "off",
+    "boxApi": "box",
+    "dagDepth": 20,
+    "documentSize": 64,
+    "retainedUnits": 8,
+    "replacements": 12,
+    "retentionCheckpoints": 3,
+    "warmup": 50,
+    "iterations": 200,
+    "rounds": 4,
+    "profileIterations": 1000,
+    "allocationIterations": 1000,
+    "samplingInterval": 32768,
+    "snapshots": false
+  },
+  "arms": [
+    {
+      "name": "current-source-controls",
+      "root": "../..",
+      "commit": "bbc28d9cad900d050c9ed83eaa02add399ae3b76",
+      "entry": "src/compute-engine.ts",
+      "sourceOnly": true,
+      "build": {
+        "kind": "source-controls",
+        "command": null,
+        "notes": "tsx loader; no production timing claim"
+      },
+      "features": [
+        "macro"
+      ]
+    }
+  ],
+  "only": [
+    "scalar/prepare-first",
+    "dag/prepare-first",
+    "function/prepare-first",
+    "closure/prepare-first",
+    "binder/prepare-first",
+    "document/box",
+    "edit-body",
+    "edit-type",
+    "scalar/evaluate/relevant",
+    "scalar/N/unrelated",
+    "ce1210/D01"
+  ],
+  "nodeFlags": [
+    "--import",
+    "tsx"
+  ]
+}

@@ -271,8 +271,11 @@ before implementation; do not silently delete a fixture from the gate.
 Owner: measurement session, with coordinator resolving semantic questions.
 
 Deliver a small adapter/harness, exact fixture inputs, source/build manifests,
-raw measurements, and a reproducible invocation. Compare 0.186.0
-(`c4856e003557e367d4a2272d37d1567e9dd7a9b3`) with a pinned current commit.
+raw measurements, and a reproducible invocation. Compare the pre-binding source
+commit `c4856e003557e367d4a2272d37d1567e9dd7a9b3` with a pinned current commit.
+The post-mortem calls this comparator “0.186.0”; its package actually declares
+0.185.1. Preserve the commit and report both the historical label and package
+provenance rather than substituting another release.
 Do not run old fixtures through a substitute API without labeling the change.
 Read benchmark instructions before modifying a harness and add its README entry.
 

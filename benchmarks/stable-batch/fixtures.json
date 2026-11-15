@@ -1,0 +1,2458 @@
+{
+  "schemaVersion": 1,
+  "protocol": "stable-batch-fixture-v1",
+  "diagnostics": "Normalized semantic labels; an adapter maps native diagnostics explicitly. No public API or final diagnostic spelling is promised.",
+  "referenceSyntax": "Unit, instance and artifact fields name prior step ids. Dotted names select entries. MathJSON bodies are literal source; boxedSource requests boxing the child before constructing its binder. Epsil is parsed as supplied by the future adapter.",
+  "fixtures": [
+    {
+      "id": "F01",
+      "requiredPhase": 1,
+      "title": "Typed runtime value updates",
+      "witnesses": [
+        "test/compute-engine/bound-once.test.ts"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "u",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "slot",
+              "name": "x",
+              "type": "real"
+            },
+            {
+              "kind": "expression",
+              "name": "answer",
+              "body": [
+                "Add",
+                "x",
+                1
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "i",
+          "op": "instantiate",
+          "unit": "u",
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "w2",
+          "op": "write",
+          "instance": "i",
+          "name": "x",
+          "value": 2,
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "v2",
+          "op": "evaluate",
+          "unit": "u",
+          "entry": "answer",
+          "instance": "i",
+          "expect": {
+            "status": "ready",
+            "value": 3
+          }
+        },
+        {
+          "id": "w4",
+          "op": "write",
+          "instance": "i",
+          "name": "x",
+          "value": 4,
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "v4",
+          "op": "evaluate",
+          "unit": "u",
+          "entry": "answer",
+          "instance": "i",
+          "expect": {
+            "status": "ready",
+            "value": 5
+          }
+        }
+      ],
+      "invariants": {
+        "sameRevision": [
+          "v2",
+          "v4"
+        ],
+        "staticTypes": {
+          "x": "real"
+        },
+        "staticAnalysisDuringWrites": 0,
+        "bindingLookupsDuringStaticReads": 0,
+        "readTokenValidations": 0,
+        "dependencyPropagation": 0
+      }
+    },
+    {
+      "id": "F02",
+      "requiredPhase": 1,
+      "title": "Forward functions in both orders",
+      "witnesses": [
+        "test/compute-engine/bound-once.test.ts",
+        "docs/plans/2026-11-12-program-operator-spec.md"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "a",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "definition",
+              "name": "f",
+              "parameters": [
+                {
+                  "name": "x",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": [
+                "Add",
+                [
+                  "g",
+                  "x"
+                ],
+                1
+              ]
+            },
+            {
+              "kind": "definition",
+              "name": "g",
+              "parameters": [
+                {
+                  "name": "x",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": [
+                "Multiply",
+                2,
+                "x"
+              ]
+            },
+            {
+              "kind": "expression",
+              "name": "answer",
+              "body": [
+                "f",
+                3
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "b",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "definition",
+              "name": "g",
+              "parameters": [
+                {
+                  "name": "x",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": [
+                "Multiply",
+                2,
+                "x"
+              ]
+            },
+            {
+              "kind": "definition",
+              "name": "f",
+              "parameters": [
+                {
+                  "name": "x",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": [
+                "Add",
+                [
+                  "g",
+                  "x"
+                ],
+                1
+              ]
+            },
+            {
+              "kind": "expression",
+              "name": "answer",
+              "body": [
+                "f",
+                3
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "a3",
+          "op": "evaluate",
+          "unit": "a",
+          "entry": "answer",
+          "expect": {
+            "status": "ready",
+            "value": 7
+          }
+        },
+        {
+          "id": "b3",
+          "op": "evaluate",
+          "unit": "b",
+          "entry": "answer",
+          "expect": {
+            "status": "ready",
+            "value": 7
+          }
+        }
+      ],
+      "invariants": {
+        "equalSignatures": [
+          [
+            "a.f",
+            "b.f"
+          ],
+          [
+            "a.g",
+            "b.g"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "F03",
+      "requiredPhase": 1,
+      "title": "Old handles survive a body edit",
+      "witnesses": [
+        "docs/plans/2026-11-11-bound-once-spec.md"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "old",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "definition",
+              "name": "f",
+              "parameters": [
+                {
+                  "name": "x",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": [
+                "Add",
+                [
+                  "g",
+                  "x"
+                ],
+                1
+              ]
+            },
+            {
+              "kind": "definition",
+              "name": "g",
+              "parameters": [
+                {
+                  "name": "x",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": [
+                "Multiply",
+                2,
+                "x"
+              ]
+            },
+            {
+              "kind": "expression",
+              "name": "answer",
+              "body": [
+                "f",
+                3
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "new",
+          "op": "revise",
+          "unit": "old",
+          "replace": [
+            {
+              "kind": "definition",
+              "name": "g",
+              "parameters": [
+                {
+                  "name": "x",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": [
+                "Multiply",
+                3,
+                "x"
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "old3",
+          "op": "evaluate",
+          "unit": "old",
+          "entry": "answer",
+          "expect": {
+            "status": "ready",
+            "value": 7
+          }
+        },
+        {
+          "id": "new3",
+          "op": "evaluate",
+          "unit": "new",
+          "entry": "answer",
+          "expect": {
+            "status": "ready",
+            "value": 10
+          }
+        }
+      ],
+      "invariants": {
+        "differentRevisions": [
+          "old",
+          "new"
+        ],
+        "oldHandleUnchanged": true
+      }
+    },
+    {
+      "id": "F04",
+      "requiredPhase": 1,
+      "title": "Independent free-name requirements",
+      "witnesses": [
+        "test/compute-engine/resolve-only-scratch-inference.test.ts",
+        "test/compute-engine/binding-units-infer-report.test.ts"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "host",
+          "op": "hostDeclare",
+          "name": "free",
+          "type": "unknown",
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "numeric",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "expression",
+              "name": "answer",
+              "body": [
+                "Add",
+                "free",
+                1
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "logical",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "expression",
+              "name": "answer",
+              "body": [
+                "Not",
+                "free"
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "read",
+          "op": "inspect",
+          "units": [
+            "numeric",
+            "logical"
+          ],
+          "hostName": "free",
+          "expect": {
+            "status": "ready",
+            "hostType": "unknown",
+            "numericRequirement": "number",
+            "logicalRequirement": "boolean"
+          }
+        }
+      ],
+      "invariants": {
+        "noCrossUnitConstraints": true,
+        "hostUnchanged": true
+      }
+    },
+    {
+      "id": "F05",
+      "requiredPhase": 1,
+      "title": "Mixed revision syntax requires explicit preparation",
+      "witnesses": [
+        "docs/plans/2026-11-11-bound-once-spec.md"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "a",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "expression",
+              "name": "x",
+              "body": 2
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "b",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "expression",
+              "name": "y",
+              "body": 3
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "mixed",
+          "op": "mix",
+          "entries": [
+            "a.x",
+            "b.y"
+          ],
+          "operator": "Add",
+          "expect": {
+            "status": "unsupported",
+            "reasonCode": "cross-revision-syntax"
+          }
+        },
+        {
+          "id": "explicit",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "expression",
+              "name": "sum",
+              "body": [
+                "Add",
+                2,
+                3
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "v",
+          "op": "evaluate",
+          "unit": "explicit",
+          "entry": "sum",
+          "expect": {
+            "status": "ready",
+            "value": 5
+          }
+        }
+      ],
+      "invariants": {
+        "noAutomaticEnvironmentMeet": true
+      }
+    },
+    {
+      "id": "F06",
+      "requiredPhase": 1,
+      "title": "Capture external operator metadata and handler",
+      "witnesses": [
+        "test/compute-engine/bound-once.test.ts"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "foo2",
+          "op": "hostOperator",
+          "name": "Foo",
+          "signature": "(real) -> real",
+          "parameters": [
+            "x"
+          ],
+          "body": [
+            "Multiply",
+            2,
+            "x"
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "old",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "expression",
+              "name": "answer",
+              "body": [
+                "Foo",
+                3
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "foo3",
+          "op": "hostOperator",
+          "name": "Foo",
+          "signature": "(real) -> real",
+          "parameters": [
+            "x"
+          ],
+          "body": [
+            "Multiply",
+            3,
+            "x"
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "new",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "expression",
+              "name": "answer",
+              "body": [
+                "Foo",
+                3
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "a",
+          "op": "evaluate",
+          "unit": "old",
+          "entry": "answer",
+          "expect": {
+            "status": "ready",
+            "value": 6
+          }
+        },
+        {
+          "id": "b",
+          "op": "evaluate",
+          "unit": "new",
+          "entry": "answer",
+          "expect": {
+            "status": "ready",
+            "value": 9
+          }
+        }
+      ],
+      "invariants": {
+        "externalVersionChecksDuringStaticReads": 0,
+        "mutableDescriptorReadsDuringStaticReads": 0,
+        "oldHandleUnchanged": true
+      }
+    },
+    {
+      "id": "F07",
+      "requiredPhase": 1,
+      "title": "Writes, duplicates, empty and initialization errors",
+      "witnesses": [
+        "docs/plans/2026-11-12-program-operator-spec.md",
+        "test/compute-engine/inferred-type-revision-live.test.ts"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "u",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "slot",
+              "name": "x",
+              "type": "real",
+              "initializer": 2
+            },
+            {
+              "kind": "expression",
+              "name": "answer",
+              "body": [
+                "Add",
+                "x",
+                1
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "i",
+          "op": "instantiate",
+          "unit": "u",
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "repeat",
+          "op": "writeMany",
+          "instance": "i",
+          "name": "x",
+          "values": [
+            4,
+            6,
+            8
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "bad",
+          "op": "write",
+          "instance": "i",
+          "name": "x",
+          "value": {
+            "str": "bad"
+          },
+          "expect": {
+            "status": "ready",
+            "diagnostics": [
+              "incompatible-type"
+            ],
+            "accepted": false
+          }
+        },
+        {
+          "id": "last",
+          "op": "evaluate",
+          "unit": "u",
+          "entry": "answer",
+          "instance": "i",
+          "expect": {
+            "status": "ready",
+            "value": 9
+          }
+        },
+        {
+          "id": "empty",
+          "op": "prepare",
+          "entries": [],
+          "expect": {
+            "status": "ready",
+            "diagnostics": [],
+            "entryCount": 0
+          }
+        },
+        {
+          "id": "duplicate",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "slot",
+              "name": "x",
+              "type": "integer",
+              "initializer": 1
+            },
+            {
+              "kind": "slot",
+              "name": "x",
+              "type": "integer",
+              "initializer": 2
+            },
+            {
+              "kind": "expression",
+              "name": "answer",
+              "body": "x"
+            }
+          ],
+          "expect": {
+            "status": "ready",
+            "diagnostics": [
+              {
+                "entry": 1,
+                "code": "variable-redeclaration"
+              }
+            ]
+          }
+        },
+        {
+          "id": "first",
+          "op": "evaluate",
+          "unit": "duplicate",
+          "entry": "answer",
+          "expect": {
+            "status": "ready",
+            "value": 1
+          }
+        },
+        {
+          "id": "direct",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "slot",
+              "name": "a",
+              "type": "real",
+              "initializer": "b"
+            },
+            {
+              "kind": "slot",
+              "name": "b",
+              "type": "real",
+              "initializer": 2
+            },
+            {
+              "kind": "expression",
+              "name": "sibling",
+              "body": 5
+            }
+          ],
+          "expect": {
+            "status": "ready",
+            "diagnostics": [
+              {
+                "entry": 0,
+                "code": "read-before-declaration"
+              }
+            ]
+          }
+        },
+        {
+          "id": "sibling",
+          "op": "evaluate",
+          "unit": "direct",
+          "entry": "sibling",
+          "expect": {
+            "status": "ready",
+            "value": 5
+          }
+        },
+        {
+          "id": "indirect",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "definition",
+              "name": "get",
+              "parameters": [],
+              "resultType": "real",
+              "body": "b"
+            },
+            {
+              "kind": "slot",
+              "name": "a",
+              "type": "real",
+              "initializer": [
+                "get"
+              ]
+            },
+            {
+              "kind": "slot",
+              "name": "b",
+              "type": "real",
+              "initializer": 2
+            },
+            {
+              "kind": "expression",
+              "name": "sibling",
+              "body": 5
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "runIndirect",
+          "op": "execute",
+          "unit": "indirect",
+          "expect": {
+            "status": "ready",
+            "diagnostics": [
+              {
+                "entry": 1,
+                "code": "uninitialized-value"
+              }
+            ],
+            "values": {
+              "sibling": 5
+            }
+          }
+        },
+        {
+          "id": "failed",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "slot",
+              "name": "a",
+              "type": "real",
+              "initializer": [
+                "AssertPresent",
+                "Missing"
+              ]
+            },
+            {
+              "kind": "slot",
+              "name": "b",
+              "type": "real",
+              "initializer": "a"
+            },
+            {
+              "kind": "expression",
+              "name": "sibling",
+              "body": 5
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "runFailed",
+          "op": "execute",
+          "unit": "failed",
+          "expect": {
+            "status": "ready",
+            "diagnostics": [
+              {
+                "entry": 0,
+                "code": "initializer-failed"
+              },
+              {
+                "entry": 1,
+                "code": "uninitialized-value"
+              }
+            ],
+            "values": {
+              "sibling": 5
+            }
+          }
+        }
+      ],
+      "invariants": {
+        "staticTypes": {
+          "u.x": "real"
+        },
+        "staticAnalysisDuringWrites": 0,
+        "badWritePreservesValue": true,
+        "validSiblingsExecute": true
+      }
+    },
+    {
+      "id": "F08",
+      "requiredPhase": 1,
+      "title": "Explicit literal transfer and revision-dependent refusals",
+      "witnesses": [
+        "test/compute-engine/closure-frame-retained.test.ts"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "a",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "slot",
+              "name": "data",
+              "type": "list<integer>",
+              "initializer": [
+                "List",
+                1,
+                2,
+                3
+              ]
+            },
+            {
+              "kind": "slot",
+              "name": "text",
+              "type": "string",
+              "initializer": {
+                "str": "hi"
+              }
+            },
+            {
+              "kind": "slot",
+              "name": "n",
+              "type": "real",
+              "initializer": 2
+            },
+            {
+              "kind": "definition",
+              "name": "make",
+              "parameters": [
+                {
+                  "name": "d",
+                  "type": "real"
+                }
+              ],
+              "resultType": "(real) -> real",
+              "body": [
+                "Function",
+                [
+                  "Add",
+                  "d",
+                  "x"
+                ],
+                "x"
+              ]
+            },
+            {
+              "kind": "expression",
+              "name": "closure",
+              "body": [
+                "make",
+                7
+              ]
+            },
+            {
+              "kind": "expression",
+              "name": "view",
+              "body": [
+                "Map",
+                [
+                  "Function",
+                  [
+                    "Add",
+                    "x",
+                    1
+                  ],
+                  "x"
+                ],
+                [
+                  "Range",
+                  1,
+                  3
+                ]
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "b",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "slot",
+              "name": "data",
+              "type": "list<integer>"
+            },
+            {
+              "kind": "slot",
+              "name": "text",
+              "type": "string"
+            },
+            {
+              "kind": "slot",
+              "name": "n",
+              "type": "real"
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "literal",
+          "op": "transfer",
+          "source": "a.data",
+          "target": "b.data",
+          "expect": {
+            "status": "ready",
+            "value": [
+              "List",
+              1,
+              2,
+              3
+            ]
+          }
+        },
+        {
+          "id": "text",
+          "op": "transfer",
+          "source": "a.text",
+          "target": "b.text",
+          "expect": {
+            "status": "ready",
+            "value": {
+              "str": "hi"
+            }
+          }
+        },
+        {
+          "id": "number",
+          "op": "transfer",
+          "source": "a.n",
+          "target": "b.n",
+          "expect": {
+            "status": "ready",
+            "value": 2
+          }
+        },
+        {
+          "id": "closure",
+          "op": "transfer",
+          "source": "a.closure",
+          "target": "b",
+          "expect": {
+            "status": "unsupported",
+            "reasonCode": "revision-dependent-value"
+          }
+        },
+        {
+          "id": "view",
+          "op": "transfer",
+          "source": "a.view",
+          "target": "b",
+          "expect": {
+            "status": "unsupported",
+            "reasonCode": "revision-dependent-value"
+          }
+        },
+        {
+          "id": "object",
+          "op": "transfer",
+          "hostValue": {
+            "kind": "mutable-object",
+            "fields": {
+              "x": 1
+            }
+          },
+          "target": "b",
+          "expect": {
+            "status": "unsupported",
+            "reasonCode": "mutable-value"
+          }
+        },
+        {
+          "id": "nested",
+          "op": "transfer",
+          "sourceAggregate": [
+            "a.closure",
+            1
+          ],
+          "target": "b",
+          "expect": {
+            "status": "unsupported",
+            "reasonCode": "revision-dependent-value"
+          }
+        }
+      ],
+      "invariants": {
+        "refusedTransferChangesNeitherInstance": true,
+        "classificationOnlyAtTransferBoundary": true
+      }
+    },
+    {
+      "id": "F09",
+      "requiredPhase": 1,
+      "title": "Callable slots explicitly refused in phase 1",
+      "witnesses": [
+        "docs/SCOPING-MODEL.md"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "u",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "slot",
+              "name": "h",
+              "type": "(real) scope -> real",
+              "initializer": [
+                "Function",
+                [
+                  "Add",
+                  "x",
+                  1
+                ],
+                "x"
+              ]
+            },
+            {
+              "kind": "definition",
+              "name": "read",
+              "parameters": [
+                {
+                  "name": "x",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": [
+                "h",
+                "x"
+              ]
+            }
+          ],
+          "expect": {
+            "status": "unsupported",
+            "reasonCode": "mutable-callable-slot"
+          }
+        }
+      ],
+      "invariants": {
+        "noLiveBindingFallback": true
+      }
+    },
+    {
+      "id": "F10",
+      "requiredPhase": 2,
+      "title": "Callable reassignment visible through closure",
+      "witnesses": [
+        "test/compute-engine/closure-block-locals.test.ts",
+        "docs/SCOPING-MODEL.md"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "u",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "slot",
+              "name": "h",
+              "type": "(real) scope -> real",
+              "initializer": [
+                "Function",
+                [
+                  "Add",
+                  "x",
+                  1
+                ],
+                "x"
+              ]
+            },
+            {
+              "kind": "definition",
+              "name": "read",
+              "parameters": [
+                {
+                  "name": "x",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": [
+                "h",
+                "x"
+              ]
+            },
+            {
+              "kind": "expression",
+              "name": "reader",
+              "body": [
+                "Function",
+                [
+                  "h",
+                  "x"
+                ],
+                "x"
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "i",
+          "op": "instantiate",
+          "unit": "u",
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "before",
+          "op": "call",
+          "instance": "i",
+          "entry": "reader",
+          "arguments": [
+            3
+          ],
+          "expect": {
+            "status": "ready",
+            "value": 4
+          }
+        },
+        {
+          "id": "replace",
+          "op": "write",
+          "instance": "i",
+          "name": "h",
+          "value": [
+            "Function",
+            [
+              "Multiply",
+              2,
+              "x"
+            ],
+            "x"
+          ],
+          "valueType": "(real) -> real",
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "after",
+          "op": "call",
+          "instance": "i",
+          "entry": "reader",
+          "arguments": [
+            3
+          ],
+          "expect": {
+            "status": "ready",
+            "value": 6
+          }
+        },
+        {
+          "id": "badType",
+          "op": "write",
+          "instance": "i",
+          "name": "h",
+          "value": [
+            "Function",
+            {
+              "str": "bad"
+            },
+            "x"
+          ],
+          "valueType": "(real) -> string",
+          "expect": {
+            "status": "ready",
+            "accepted": false,
+            "diagnostics": [
+              "incompatible-type"
+            ]
+          }
+        },
+        {
+          "id": "badEffect",
+          "op": "write",
+          "instance": "i",
+          "name": "h",
+          "value": [
+            "Function",
+            [
+              "Random"
+            ],
+            "x"
+          ],
+          "valueType": "(real) random -> real",
+          "expect": {
+            "status": "ready",
+            "accepted": false,
+            "diagnostics": [
+              "incompatible-effect"
+            ]
+          }
+        },
+        {
+          "id": "still",
+          "op": "call",
+          "instance": "i",
+          "entry": "reader",
+          "arguments": [
+            3
+          ],
+          "expect": {
+            "status": "ready",
+            "value": 6
+          }
+        }
+      ],
+      "invariants": {
+        "staticAnalysisDuringWrites": 0,
+        "sameRevision": [
+          "before",
+          "after",
+          "still"
+        ],
+        "effectBound": "scope"
+      }
+    },
+    {
+      "id": "F11",
+      "requiredPhase": 2,
+      "title": "Mutable closure frames stay distinct",
+      "witnesses": [
+        "test/compute-engine/closure-frame-retained.test.ts"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "u",
+          "op": "prepare",
+          "entries": [],
+          "epsil": "function mk(n: real) { () => do { n = n + 1; n } }\nlet c = mk(5)\nlet d = mk(10)\n[c(), d(), c()]",
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "v",
+          "op": "execute",
+          "unit": "u",
+          "expect": {
+            "status": "ready",
+            "value": [
+              "List",
+              6,
+              11,
+              7
+            ]
+          }
+        }
+      ],
+      "invariants": {
+        "distinctInvocationFrames": true,
+        "staticAnalysisDuringExecution": 0
+      }
+    },
+    {
+      "id": "F12",
+      "requiredPhase": 2,
+      "title": "Explicit fact context and ambient assumptions",
+      "witnesses": [
+        "docs/SIMPLIFY.md",
+        "docs/plans/2026-11-11-bound-once-spec.md"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "u",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "slot",
+              "name": "x",
+              "type": "real"
+            },
+            {
+              "kind": "expression",
+              "name": "root",
+              "body": [
+                "Sqrt",
+                [
+                  "Power",
+                  "x",
+                  2
+                ]
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "positive",
+          "op": "facts",
+          "facts": [
+            [
+              "Greater",
+              "x",
+              0
+            ]
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "s",
+          "op": "simplify",
+          "unit": "u",
+          "entry": "root",
+          "facts": "positive",
+          "expect": {
+            "status": "ready",
+            "value": "x",
+            "context": "positive"
+          }
+        },
+        {
+          "id": "ambient",
+          "op": "hostAssume",
+          "predicate": [
+            "Greater",
+            "x",
+            0
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "i",
+          "op": "instantiate",
+          "unit": "u",
+          "values": {
+            "x": -3
+          },
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "v",
+          "op": "evaluate",
+          "unit": "u",
+          "entry": "root",
+          "instance": "i",
+          "expect": {
+            "status": "ready",
+            "value": 3
+          }
+        },
+        {
+          "id": "n",
+          "op": "N",
+          "unit": "u",
+          "entry": "root",
+          "instance": "i",
+          "expect": {
+            "status": "ready",
+            "value": 3
+          }
+        }
+      ],
+      "invariants": {
+        "staticTypes": {
+          "x": "real"
+        },
+        "factDerivedResultRequiresContext": true,
+        "evaluateFactReads": 0,
+        "NFactReads": 0
+      }
+    },
+    {
+      "id": "F13",
+      "requiredPhase": 2,
+      "title": "Scalar mapping versus whole list",
+      "witnesses": [
+        "test/compute-engine/lambda-param-collection-inference.test.ts"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "u",
+          "op": "prepare",
+          "entries": [],
+          "epsil": "f(x) = x * 2\nfunction first(xs: list<real>) { xs[1] }\n[f([1, 2, 3]), first([1, 2, 3])]",
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "v",
+          "op": "execute",
+          "unit": "u",
+          "expect": {
+            "status": "ready",
+            "value": [
+              "List",
+              [
+                "List",
+                2,
+                4,
+                6
+              ],
+              1
+            ]
+          }
+        }
+      ],
+      "invariants": {
+        "mappingDecidedDuringPreparation": true,
+        "runtimeShapeTests": 0
+      }
+    },
+    {
+      "id": "F14",
+      "requiredPhase": 2,
+      "title": "Failed overload trial leaves no requirements",
+      "witnesses": [
+        "test/compute-engine/overload-trials.test.ts"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "u",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "external",
+              "name": "f",
+              "signature": "((integer, string) -> integer) & ((list<integer>, integer) -> integer)"
+            },
+            {
+              "kind": "expression",
+              "name": "call",
+              "body": [
+                "f",
+                "y",
+                {
+                  "str": "a"
+                }
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "inspect",
+          "op": "inspect",
+          "unit": "u",
+          "entry": "call",
+          "expect": {
+            "status": "ready",
+            "requirements": {
+              "y": "integer"
+            },
+            "valid": true
+          }
+        }
+      ],
+      "invariants": {
+        "rejectedArmRequirementsCommitted": 0
+      }
+    },
+    {
+      "id": "F15",
+      "requiredPhase": 2,
+      "title": "Typed mutual recursion and unresolved recursion",
+      "witnesses": [
+        "docs/plans/2026-11-12-program-operator-spec.md"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "typed",
+          "op": "prepare",
+          "entries": [],
+          "epsil": "function even(n: integer) -> boolean { if n == 0 { true } else { odd(n - 1) } }\nfunction odd(n: integer) -> boolean { if n == 0 { false } else { even(n - 1) } }\n[even(4), odd(4)]",
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "v",
+          "op": "execute",
+          "unit": "typed",
+          "expect": {
+            "status": "ready",
+            "value": [
+              "List",
+              "True",
+              "False"
+            ]
+          }
+        },
+        {
+          "id": "untyped",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "definition",
+              "name": "f",
+              "parameters": [
+                {
+                  "name": "x"
+                }
+              ],
+              "body": [
+                "g",
+                "x"
+              ]
+            },
+            {
+              "kind": "definition",
+              "name": "g",
+              "parameters": [
+                {
+                  "name": "x"
+                }
+              ],
+              "body": [
+                "f",
+                "x"
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready",
+            "diagnostics": [
+              "unresolved-recursion"
+            ]
+          }
+        },
+        {
+          "id": "decline",
+          "op": "compile",
+          "unit": "untyped",
+          "entry": "f",
+          "target": "javascript",
+          "expect": {
+            "status": "unsupported",
+            "reasonCode": "unsettled-shape"
+          }
+        }
+      ],
+      "invariants": {
+        "staticAnalysisDuringExecution": 0
+      }
+    },
+    {
+      "id": "F16",
+      "requiredPhase": 2,
+      "title": "Program ordered initialization and isolated errors",
+      "witnesses": [
+        "docs/plans/2026-11-12-program-operator-spec.md",
+        "test/epsil/programs.test.ts"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "forward",
+          "op": "prepare",
+          "entries": [],
+          "epsil": "let a = h(1)\nfunction h(x) { x + 1 }\na",
+          "form": "Program",
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "v",
+          "op": "execute",
+          "unit": "forward",
+          "expect": {
+            "status": "ready",
+            "value": 2
+          }
+        },
+        {
+          "id": "direct",
+          "op": "prepare",
+          "entries": [],
+          "epsil": "let a = b\nlet b = 2\n5",
+          "form": "Program",
+          "expect": {
+            "status": "ready",
+            "diagnostics": [
+              {
+                "entry": 0,
+                "code": "read-before-declaration"
+              }
+            ]
+          }
+        },
+        {
+          "id": "d",
+          "op": "execute",
+          "unit": "direct",
+          "expect": {
+            "status": "ready",
+            "value": 5
+          }
+        },
+        {
+          "id": "invalid",
+          "op": "prepare",
+          "entries": [],
+          "epsil": "let a = \"x\" + 1\n5",
+          "form": "Program",
+          "expect": {
+            "status": "ready",
+            "diagnostics": [
+              {
+                "entry": 0,
+                "code": "incompatible-type"
+              }
+            ]
+          }
+        },
+        {
+          "id": "i",
+          "op": "execute",
+          "unit": "invalid",
+          "expect": {
+            "status": "ready",
+            "value": 5
+          }
+        }
+      ],
+      "invariants": {
+        "validSiblingsExecute": true,
+        "staticThroughCallAnalysis": false
+      }
+    },
+    {
+      "id": "F17",
+      "requiredPhase": 2,
+      "title": "Compile mutable transitive inputs once",
+      "witnesses": [
+        "docs/COMPILATION-MODEL.md",
+        "test/compute-engine/compile-free-symbols-binders.test.ts"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "u",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "slot",
+              "name": "a",
+              "type": "real",
+              "initializer": 2
+            },
+            {
+              "kind": "definition",
+              "name": "f",
+              "parameters": [
+                {
+                  "name": "t",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": [
+                "Multiply",
+                "a",
+                "t"
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "c",
+          "op": "compile",
+          "unit": "u",
+          "entry": "f",
+          "target": "javascript",
+          "expect": {
+            "status": "ready",
+            "requiredInputs": {
+              "a": "real",
+              "t": "real"
+            }
+          }
+        },
+        {
+          "id": "c2",
+          "op": "callCompiled",
+          "artifact": "c",
+          "inputs": {
+            "a": 2,
+            "t": 3
+          },
+          "expect": {
+            "status": "ready",
+            "value": 6
+          }
+        },
+        {
+          "id": "c4",
+          "op": "callCompiled",
+          "artifact": "c",
+          "inputs": {
+            "a": 4,
+            "t": 3
+          },
+          "expect": {
+            "status": "ready",
+            "value": 12
+          }
+        }
+      ],
+      "invariants": {
+        "sameArtifact": [
+          "c2",
+          "c4"
+        ],
+        "mutableValueFolds": 0,
+        "compileCount": 1
+      }
+    },
+    {
+      "id": "F18",
+      "requiredPhase": 2,
+      "title": "Input type override refuses without specialization",
+      "witnesses": [
+        "docs/COMPILATION-MODEL.md"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "u",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "slot",
+              "name": "x",
+              "type": "real"
+            },
+            {
+              "kind": "expression",
+              "name": "answer",
+              "body": [
+                "Add",
+                "x",
+                1
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "bad",
+          "op": "compile",
+          "unit": "u",
+          "entry": "answer",
+          "target": "javascript",
+          "inputTypes": {
+            "x": "integer"
+          },
+          "expect": {
+            "status": "unsupported",
+            "reasonCode": "input-type-mismatch"
+          }
+        },
+        {
+          "id": "ok",
+          "op": "compile",
+          "unit": "u",
+          "entry": "answer",
+          "target": "javascript",
+          "inputTypes": {
+            "x": "real"
+          },
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "specialized",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "slot",
+              "name": "x",
+              "type": "integer"
+            },
+            {
+              "kind": "expression",
+              "name": "answer",
+              "body": [
+                "Add",
+                "x",
+                1
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        }
+      ],
+      "invariants": {
+        "preparedTypesUnchanged": true,
+        "differentRevisions": [
+          "u",
+          "specialized"
+        ]
+      }
+    },
+    {
+      "id": "F19",
+      "requiredPhase": 2,
+      "title": "Macro order capture hiding and cycles",
+      "witnesses": [
+        "test/compute-engine/macro-kind.test.ts",
+        "docs/plans/2026-11-12-macro-kind-spec.md"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "before",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "macro",
+              "name": "A",
+              "body": [
+                "Add",
+                "x",
+                1
+              ]
+            },
+            {
+              "kind": "expression",
+              "name": "read",
+              "body": "A"
+            },
+            {
+              "kind": "definition",
+              "name": "f",
+              "parameters": [
+                {
+                  "name": "x",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": "A"
+            },
+            {
+              "kind": "expression",
+              "name": "call",
+              "body": [
+                "f",
+                3
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "after",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "expression",
+              "name": "read",
+              "body": "A"
+            },
+            {
+              "kind": "definition",
+              "name": "f",
+              "parameters": [
+                {
+                  "name": "x",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": "A"
+            },
+            {
+              "kind": "expression",
+              "name": "call",
+              "body": [
+                "f",
+                3
+              ]
+            },
+            {
+              "kind": "macro",
+              "name": "A",
+              "body": [
+                "Add",
+                "x",
+                1
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "a",
+          "op": "evaluate",
+          "unit": "before",
+          "entry": "call",
+          "expect": {
+            "status": "ready",
+            "value": 4
+          }
+        },
+        {
+          "id": "b",
+          "op": "evaluate",
+          "unit": "after",
+          "entry": "call",
+          "expect": {
+            "status": "ready",
+            "value": 4
+          }
+        },
+        {
+          "id": "hidden",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "macro",
+              "name": "A",
+              "body": [
+                "Add",
+                "x",
+                1
+              ]
+            },
+            {
+              "kind": "definition",
+              "name": "f",
+              "parameters": [
+                {
+                  "name": "A",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": "A"
+            },
+            {
+              "kind": "expression",
+              "name": "answer",
+              "body": [
+                "f",
+                7
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "h",
+          "op": "evaluate",
+          "unit": "hidden",
+          "expect": {
+            "status": "ready",
+            "value": 7
+          },
+          "entry": "answer"
+        },
+        {
+          "id": "cycle",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "macro",
+              "name": "A",
+              "body": [
+                "Add",
+                "B",
+                1
+              ]
+            },
+            {
+              "kind": "macro",
+              "name": "B",
+              "body": [
+                "Multiply",
+                2,
+                "A"
+              ]
+            },
+            {
+              "kind": "expression",
+              "name": "read",
+              "body": "A"
+            }
+          ],
+          "expect": {
+            "status": "ready",
+            "diagnostics": [
+              {
+                "entry": 2,
+                "code": "macro-cycle"
+              }
+            ]
+          }
+        }
+      ],
+      "invariants": {
+        "equalExpandedBodies": [
+          [
+            "before.read",
+            "after.read"
+          ]
+        ],
+        "expansionUsesOccurrenceScope": true
+      }
+    },
+    {
+      "id": "F20",
+      "requiredPhase": 2,
+      "title": "Binder captures raw and already boxed syntax",
+      "witnesses": [
+        "docs/plans/2026-11-11-bound-once-spec.md",
+        "test/compute-engine/binder-mechanism.test.ts"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "u",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "expression",
+              "name": "raw",
+              "body": [
+                "Sum",
+                [
+                  "Power",
+                  "k",
+                  2
+                ],
+                [
+                  "Tuple",
+                  "k",
+                  1,
+                  3
+                ]
+              ]
+            },
+            {
+              "kind": "expression",
+              "name": "boxed",
+              "body": [
+                "Sum",
+                {
+                  "boxedSource": [
+                    "Power",
+                    "k",
+                    2
+                  ]
+                },
+                [
+                  "Tuple",
+                  "k",
+                  1,
+                  3
+                ]
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "r",
+          "op": "evaluate",
+          "unit": "u",
+          "entry": "raw",
+          "expect": {
+            "status": "ready",
+            "value": 14
+          }
+        },
+        {
+          "id": "b",
+          "op": "evaluate",
+          "unit": "u",
+          "entry": "boxed",
+          "expect": {
+            "status": "ready",
+            "value": 14
+          }
+        }
+      ],
+      "invariants": {
+        "bindingTypesStableDuringExecution": true,
+        "sameBindingForEachIndexOccurrence": true
+      }
+    },
+    {
+      "id": "F21",
+      "requiredPhase": 2,
+      "title": "Mutable widening and no initializer execution",
+      "witnesses": [
+        "docs/plans/2026-11-11-bound-once-spec.md"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "counter",
+          "op": "hostOperator",
+          "name": "Tick",
+          "signature": "() scope -> integer",
+          "body": 7,
+          "counter": "calls",
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "u",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "slot",
+              "name": "n",
+              "initializer": 2
+            },
+            {
+              "kind": "slot",
+              "name": "s",
+              "initializer": {
+                "str": "a"
+              }
+            },
+            {
+              "kind": "constant",
+              "name": "c",
+              "initializer": [
+                "Tick"
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "types",
+          "op": "inspect",
+          "unit": "u",
+          "expect": {
+            "status": "ready",
+            "types": {
+              "n": "integer",
+              "s": "string",
+              "c": "integer"
+            },
+            "initializerCalls": 0
+          }
+        },
+        {
+          "id": "i",
+          "op": "instantiate",
+          "unit": "u",
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "bad",
+          "op": "write",
+          "instance": "i",
+          "name": "n",
+          "value": 2.5,
+          "expect": {
+            "status": "ready",
+            "accepted": false,
+            "diagnostics": [
+              "incompatible-type"
+            ]
+          }
+        }
+      ],
+      "invariants": {
+        "noComputedLiteralType": true,
+        "integerNotWidenedToReal": true
+      }
+    },
+    {
+      "id": "F22",
+      "requiredPhase": 2,
+      "title": "Whole document and prelude revision replacement",
+      "witnesses": [
+        "docs/plans/2026-11-15-stable-batch-prototype-plan.md"
+      ],
+      "baseline": "unsupported: no immutable batch revision API",
+      "steps": [
+        {
+          "id": "old",
+          "op": "prepare",
+          "entries": [
+            {
+              "kind": "definition",
+              "name": "f",
+              "parameters": [
+                {
+                  "name": "x",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": [
+                "scale",
+                "x"
+              ]
+            },
+            {
+              "kind": "expression",
+              "name": "answer",
+              "body": [
+                "f",
+                3
+              ]
+            }
+          ],
+          "prelude": [
+            {
+              "kind": "definition",
+              "name": "scale",
+              "parameters": [
+                {
+                  "name": "x",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": [
+                "Multiply",
+                2,
+                "x"
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "new",
+          "op": "revise",
+          "unit": "old",
+          "prelude": [
+            {
+              "kind": "definition",
+              "name": "scale",
+              "parameters": [
+                {
+                  "name": "x",
+                  "type": "real"
+                }
+              ],
+              "resultType": "real",
+              "body": [
+                "Multiply",
+                3,
+                "x"
+              ]
+            }
+          ],
+          "expect": {
+            "status": "ready"
+          }
+        },
+        {
+          "id": "oldValue",
+          "op": "evaluate",
+          "unit": "old",
+          "entry": "answer",
+          "expect": {
+            "status": "ready",
+            "value": 6
+          }
+        },
+        {
+          "id": "newValue",
+          "op": "evaluate",
+          "unit": "new",
+          "entry": "answer",
+          "expect": {
+            "status": "ready",
+            "value": 9
+          }
+        }
+      ],
+      "invariants": {
+        "entirePreludePreparedPerRevision": true,
+        "oldHandleUnchanged": true,
+        "noParentRevisionTracking": true
+      }
+    }
+  ]
+}

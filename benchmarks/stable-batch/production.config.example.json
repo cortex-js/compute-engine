@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "lockOwner": "codex-batch-phase0",
+  "lockScript": "/Users/arno/.claude/scripts/box-lock.mjs",
+  "maxLoad": 12,
+  "settings": {
+    "precision": 50,
+    "jit": "off",
+    "boxApi": "box",
+    "dagDepth": 20,
+    "documentSize": 64,
+    "retainedUnits": 8,
+    "replacements": 12,
+    "retentionCheckpoints": 3,
+    "warmup": 50,
+    "iterations": 200,
+    "rounds": 4,
+    "profileIterations": 1000,
+    "allocationIterations": 1000,
+    "samplingInterval": 32768,
+    "snapshots": false
+  },
+  "nodeFlags": [],
+  "diagnosticFlags": [],
+  "profilePhase": "execution",
+  "memoryWorkload": "scalar/box",
+  "arms": [
+    {
+      "name": "plan-pinned-pre-binding",
+      "root": "/tmp/wt-ce-batch-baseline",
+      "commit": "c4856e003557e367d4a2272d37d1567e9dd7a9b3",
+      "entry": "dist/esm-min/compute-engine.js",
+      "build": {
+        "kind": "production-split",
+        "command": "BUILD=production node scripts/build.mjs",
+        "settings": {
+          "ENV": "production",
+          "target": "es2022",
+          "minify": true,
+          "drop": [
+            "debugger"
+          ],
+          "pure": [
+            "console.assert",
+            "console.log"
+          ],
+          "splitting": true,
+          "sourcemap": false
+        },
+        "toolchain": "COORDINATOR: replace with exact Node/esbuild versions and build manifest path",
+        "label": "Plan-pinned c4856e source; package 0.185.1, not certified published 0.186.0"
+      },
+      "features": []
+    },
+    {
+      "name": "ce-current",
+      "root": "../..",
+      "commit": "bbc28d9cad900d050c9ed83eaa02add399ae3b76",
+      "entry": "dist/esm-min/compute-engine.js",
+      "build": {
+        "kind": "production-split",
+        "command": "BUILD=production node scripts/build.mjs",
+        "settings": {
+          "ENV": "production",
+          "target": "es2022",
+          "minify": true,
+          "drop": [
+            "debugger"
+          ],
+          "pure": [
+            "console.assert",
+            "console.log"
+          ],
+          "splitting": true,
+          "sourcemap": false
+        },
+        "toolchain": "COORDINATOR: replace with exact Node/esbuild versions and build manifest path"
+      },
+      "features": [
+        "macro"
+      ]
+    }
+  ],
+  "budgets": {
+    "status": "pending-baseline-repeatability-and-coordinator-review",
+    "boxVsOld": null,
+    "prepareFirstVsOld": null,
+    "warmVsCurrent": null,
+    "valueEditsVsCurrent": null,
+    "fullEditsVsCurrent": null,
+    "allocationVsCurrent": null,
+    "retentionVsCurrent": null,
+    "hostAbsolute": null
+  }
+}

@@ -32,6 +32,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Worker threads** | `workers/*.mts` | CE (self, serial vs worker threads) | stdout |
 | **Tycho document open** | `tycho-document-open/evaluate.ts`, `rebind.ts` | CE (self; replays the `evaluate` and `rebind` calls Tycho makes when it opens `art/2ki2hjsouf`, from `2ki2hjsouf.fixture.json.gz`; ROADMAP CE-535, CE-536) | stdout |
 | **Scalar arithmetic profile** | `scalar-arithmetic.mjs` | CE source or production bundle; timings, cache counts, inspector profiles | `scalar-arithmetic-2026-11-03.json`; evaluation-cache architecture §11 |
+| **Stable batch baseline** | `stable-batch.mjs`, `stable-batch-tycho.mjs`, `stable-batch-document.mjs` | Pinned pre-binding/current CE; contract specifications, controls, timings and V8 diagnostics | [Phase 0 report](../docs/plans/2026-11-15-stable-batch-phase0-report.md) |
 | **Caches of evaluated values** | `evaluation-caches.ts` | CE (self; each cache on and off with `CE_CACHE_OFF`) | stdout |
 | **Pool in a worker (browsers)** | `workers/nested-pool-browser-probe.mjs` | CE bundle in Chromium · Firefox · WebKit (needs a Playwright, `PLAYWRIGHT=`) | stdout |
 | **Finite groups** | `run-group-theory.mjs finite` (`group-theory-finite.ts`) | CE (self; table validation, subgroup structure, automorphisms) | [Group methodology](group-theory.md); local JSON under `build/group-theory-benchmarks/` |
@@ -864,3 +865,63 @@ execution. These small controls do not represent a captured document corpus.
 budget, its admitted-cost control, repeated callee lookup work and invalidation
 after a definition change. It
 does not require a whole closed compilation to be linear in distinct nodes.
+
+## Stable batch baseline
+
+`stable-batch.mjs` is a measurement instrument, not a batch implementation.
+`stable-batch/fixtures.json` freezes F01–F22 from the prototype plan; all are
+explicitly unsupported by the baseline adapter. `baseline-controls.json` checks
+existing operations and states how they differ from the proposed contract.
+The workload matrix separates box, box-plus-first-execution, warm evaluate/N,
+value updates, and synthetic full-document rebuilds. The eleven CE-1210 cases
+retain their original `expr()` route and have separately named `box()` variants.
+CR2 is an attempted integration that remains unevaluated on both pinned builds;
+its structural control does not claim successful integration.
+
+Build isolated pinned source trees with the same installed dependencies and
+`BUILD=production node scripts/build.mjs`. Copy
+`stable-batch/production.config.example.json` outside the harness directory and
+fill in absolute roots, commits, build toolchain and provenance. The historical
+pre-binding commit `c4856e003557e367d4a2272d37d1567e9dd7a9b3` has package version
+0.185.1; the post-mortem called this source comparator “0.186.0”.
+
+```sh
+node benchmarks/stable-batch.mjs validate
+node --test --test-concurrency=1 benchmarks/stable-batch/harness.test.mjs
+node --test --test-concurrency=1 benchmarks/stable-batch-host.test.mjs
+node benchmarks/stable-batch.mjs controls /tmp/batch.config.json /tmp/batch-controls
+node benchmarks/stable-batch.mjs time /tmp/batch.config.json /tmp/batch-time
+node benchmarks/stable-batch.mjs profile /tmp/batch-profile.config.json /tmp/batch-profile
+node benchmarks/stable-batch.mjs memory /tmp/batch-memory.config.json /tmp/batch-memory
+```
+
+Take the box lock before measured runs. Each output directory must be new.
+Children run serially, in AB/BA order across rounds. Source, bundle, fixture
+and harness hashes, flags, lock checks, process checks and loads accompany the
+raw results. A detected contender invalidates the sample and stops the run.
+Keep rejected artifacts; repeat the affected round, never average it in.
+Use separate configurations for cheap and expensive operations, with their
+iteration counts recorded. Timing children use ordinary V8 without explicit GC.
+Profile children require at least 1,000 CPU samples for warm phases. For source
+attribution, make separate matched diagnostic split builds with external maps;
+they cannot masquerade as production timing builds. Memory children use sampled
+allocations including collected objects and explicit collection only outside
+timers; optional snapshots distinguish deliberately retained and dropped handles.
+Sampled allocation bytes are estimates, not constructor or exact object counts.
+
+The two Tycho adapters require a private, fingerprinted source snapshot plus its
+`ce-alt-hook.mjs` and a `tsx` loader. They do not modify the host checkout.
+`stable-batch-tycho.mjs <root> <CE-root> <othello|preludes|audit> <output.json>`
+checks Othello values, runs real preludes, or relocates the existing audit with
+explicit output paths. An audit with row/document failures is incomparable,
+even if the imported audit returned successfully. The old comparator is not
+compatible with the current host's macro API, so its audit is not a speed ratio.
+`stable-batch-document.mjs <snapshot-root> <state.json> <output.json>` measures
+the audit's real registration path for `art/2ki2hjsouf`, with an appended control
+prelude and scalar transfer, then measures a prelude edit through the existing
+manager. It checks an original document function and pinned registration
+coverage; both paths exclude plotting and full row compilation. In-place timing
+also omits the fresh setup variable pass, computed collections and color
+definitions: the paths are not equivalent work. Compare matched scopes and
+coverage before interpreting timings. The phase-0 report records exact commands,
+accepted samples, limitations, and the archived artifacts.

@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "note": "These are controls of existing operations, never evidence of prepared-batch semantics. Every counterpart names the changed API or missing observation.",
+  "controls": [
+    {
+      "id": "B01",
+      "fixtures": [
+        "F01",
+        "F07"
+      ],
+      "kind": "writes",
+      "expected": [
+        3,
+        5,
+        7
+      ],
+      "difference": "Production live binding and existing type rules, not an immutable revision"
+    },
+    {
+      "id": "B02",
+      "fixtures": [
+        "F02"
+      ],
+      "kind": "forward",
+      "expected": [
+        7,
+        7
+      ],
+      "difference": "Sequential host declarations in each order, not batch head collection"
+    },
+    {
+      "id": "B03",
+      "fixtures": [
+        "F03",
+        "F22"
+      ],
+      "kind": "independent-rebuild",
+      "expected": [
+        7,
+        10,
+        7
+      ],
+      "difference": "Two host engines, not old/new revisions within one engine; synthetic prelude rebuild workloads measured separately"
+    },
+    {
+      "id": "B04",
+      "fixtures": [
+        "F04"
+      ],
+      "kind": "independent-types",
+      "expected": [
+        3,
+        "False"
+      ],
+      "difference": "Two host engines, not independent prepared units sharing host registries"
+    },
+    {
+      "id": "B06",
+      "fixtures": [
+        "F06"
+      ],
+      "kind": "external-handler",
+      "expected": [
+        6,
+        9
+      ],
+      "difference": "Explicit undeclare/redeclare and fresh boxing; no stable old handle claim"
+    },
+    {
+      "id": "B08",
+      "fixtures": [
+        "F08"
+      ],
+      "kind": "literal-recreate",
+      "expected": [
+        "List",
+        1,
+        2,
+        3
+      ],
+      "difference": "Explicit JSON serialization and reboxing, not a batch transfer API"
+    },
+    {
+      "id": "B10",
+      "fixtures": [
+        "F09",
+        "F10"
+      ],
+      "kind": "callable-reassign",
+      "expected": [
+        4,
+        6
+      ],
+      "difference": "Production callable variables with live binding lookup, no static effect bound claim"
+    },
+    {
+      "id": "B11",
+      "fixtures": [
+        "F11"
+      ],
+      "kind": "closure",
+      "expected": [
+        8,
+        11,
+        9
+      ],
+      "difference": "Production closure capture; mutable-local counter remains a future contract fixture"
+    },
+    {
+      "id": "B12",
+      "fixtures": [
+        "F12"
+      ],
+      "kind": "fact-free-numeric",
+      "expected": 3,
+      "difference": "Numeric arithmetic only; explicit immutable fact-context cache identity unavailable"
+    },
+    {
+      "id": "B13",
+      "fixtures": [
+        "F13"
+      ],
+      "kind": "mapping",
+      "expected": [
+        "List",
+        2,
+        4,
+        6
+      ],
+      "difference": "Production scalar lambda mapping; prepared whole-list decision is not certified"
+    },
+    {
+      "id": "B14",
+      "fixtures": [
+        "F14"
+      ],
+      "kind": "overload",
+      "expected": "integer",
+      "difference": "Existing overload API; adapter reports unavailable if the release does not expose intersection signatures"
+    },
+    {
+      "id": "B15",
+      "fixtures": [
+        "F15"
+      ],
+      "unavailable": "Mutual recursion preparation and diagnostics are specified in F15; no substitute recursive evaluator"
+    },
+    {
+      "id": "B16",
+      "fixtures": [
+        "F16"
+      ],
+      "unavailable": "Program is proposed at the pinned sources; coordinator owns Epsil/Tycho gates, no Block substitution"
+    },
+    {
+      "id": "B17",
+      "fixtures": [
+        "F17",
+        "F18"
+      ],
+      "kind": "compile-inputs",
+      "expected": [
+        6,
+        12
+      ],
+      "difference": "Explicit scalar free-input expression, not transitive required-input discovery or prepared-type override"
+    },
+    {
+      "id": "B19",
+      "fixtures": [
+        "F19"
+      ],
+      "kind": "macro",
+      "expected": 4,
+      "difference": "Macro declared before boxing only; textual batch order, hiding and cycle expectations stay in F19",
+      "requiresFeature": "macro"
+    },
+    {
+      "id": "B20",
+      "fixtures": [
+        "F20"
+      ],
+      "kind": "binder",
+      "expected": [
+        14,
+        14
+      ],
+      "difference": "Current raw and already-boxed binder construction, no stable prepared binding claim"
+    },
+    {
+      "id": "B21",
+      "fixtures": [
+        "F21"
+      ],
+      "unavailable": "Initializer-free static analysis and mutable literal widening are future preparation behavior"
+    },
+    {
+      "id": "B05",
+      "fixtures": [
+        "F05"
+      ],
+      "unavailable": "No revision-mixing or explicit target-revision API"
+    }
+  ]
+}
