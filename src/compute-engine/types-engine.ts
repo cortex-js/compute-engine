@@ -1638,6 +1638,15 @@ export interface IComputeEngine {
    * @internal */
   _qualifiedHead: { name: string; definition: BoxedDefinition } | undefined;
 
+  /** The names that were declared as a macro on this engine
+   * (`ce.declare(name, { macro })`), in any scope. The set never shrinks: a
+   * name stays in it after the scope of its declaration is popped, and after
+   * a later declaration of the name that is not a macro. So a name that is
+   * not in the set is not a macro in any scope, and a name that is in the set
+   * may be one: `ce.lookupDefinition(name)` gives the definition that the
+   * current scope reads. The set of an engine with no macro is empty. */
+  readonly macroNames: ReadonlySet<string>;
+
   /** The number of macro definitions declared on this engine
    * (`ce.declare(name, { macro })`, `boxed-expression/macro.ts`). Zero means
    * that no name can resolve to a macro, and boxing skips every macro test.

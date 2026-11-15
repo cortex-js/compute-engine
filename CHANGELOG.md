@@ -29,6 +29,12 @@
 
 ### Improvements
 
+- **`ce.macroNames`** is the read-only set of the names that were declared
+  as a macro on the engine (`ce.declare(name, { macro })`), in any scope. The
+  set of an engine with no macro is empty, so a host can skip its own macro
+  handling. The set never shrinks: a name that is not in it is not a macro in
+  any scope, and for a name that is in it `ce.lookupDefinition(name)` gives
+  the definition that the current scope reads (CE-1324).
 - **The experimental profile `'ir'` compiles to GLSL.**
   `compile(expr, { to: 'glsl', profile: 'ir' })` compiles with the new
   compiler a real, integer, boolean, complex or colour result, or a list of

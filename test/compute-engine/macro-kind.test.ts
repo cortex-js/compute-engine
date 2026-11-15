@@ -1322,3 +1322,34 @@ describe('section 5: a stored body and an inlined body', () => {
     ]);
   });
 });
+
+describe('ce.macroNames (CE-1324)', () => {
+  test('an engine with no macro has an empty set', () => {
+    const ce = new ComputeEngine();
+    expect(ce.macroNames.size).toBe(0);
+    ce.declare('v', 'real');
+    ce.assign('w', 2);
+    expect(ce.macroNames.size).toBe(0);
+  });
+
+  test('a declared macro is in the set, a plain name is not', () => {
+    const ce = new ComputeEngine();
+    ce.declare('A', { macro: X2_Y2 });
+    ce.declare('v', 'real');
+    expect([...ce.macroNames]).toEqual(['A']);
+    expect(ce.macroNames.has('v')).toBe(false);
+  });
+
+  test('the set never shrinks: a macro of a popped scope stays in it', () => {
+    // The set is an upper bound; `lookupDefinition()` gives the definition
+    // that the current scope reads.
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declare('B', { macro: ['Multiply', 2, 'x'] });
+    expect(ce.macroNames.has('B')).toBe(true);
+    ce.popScope();
+    expect(ce.macroNames.has('B')).toBe(true);
+    expect(ce.lookupDefinition('B')).toBeUndefined();
+    expect(ce.box('B').json).toEqual('B');
+  });
+});

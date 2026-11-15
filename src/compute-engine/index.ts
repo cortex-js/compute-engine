@@ -1636,6 +1636,11 @@ export class ComputeEngine implements IComputeEngine {
    * @internal */
   _macroCount = 0;
 
+  /** See `IComputeEngine.macroNames`. */
+  get macroNames(): ReadonlySet<string> {
+    return this._macroNames;
+  }
+
   /** See `IComputeEngine._macroNames`.
    * @internal */
   readonly _macroNames = new Set<string>();
