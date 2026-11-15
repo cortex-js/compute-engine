@@ -14,16 +14,17 @@ const activatedTemplates = new WeakSet<Scope>();
 // its value in this evaluation of the node.
 const activationValues = new WeakMap<Scope, Map<object, unknown>>();
 
-// The static definitions of the scopes that have had an activation: their
-// value is read and written in an activation (`activationRecordOf()`).
-const activatedDefinitions = new WeakSet<object>();
+// A static definition of a scope that has had an activation: its value is
+// read and written in an activation (`activationRecordOf()`). A field of the
+// definition, not a side table: it is read at each read of a value.
+type ActivatedDefinition = { _activated?: true };
 
 /**
  * Record that `scope` is an activation of `template`, or holds the values
  * of an evaluation with no template (a call frame). `values` holds the
  * value of each static definition in this evaluation. With `known`, the
  * definitions of `values` are those of an activation registered before,
- * and are already in `activatedDefinitions`.
+ * and are already marked (`ActivatedDefinition`).
  */
 function registerScopeActivation(
   scope: Scope,
@@ -37,7 +38,9 @@ function registerScopeActivation(
   }
   if (values === undefined) return;
   activationValues.set(scope, values);
-  if (!known) for (const def of values.keys()) activatedDefinitions.add(def);
+  if (!known)
+    for (const def of values.keys())
+      (def as ActivatedDefinition)._activated = true;
 }
 
 // The body scope of the function literal that each call frame applies
@@ -76,7 +79,7 @@ export function holdsActivation(scope: Scope | null | undefined): boolean {
 /** True when the value of the static definition `def` is held by the
  * activations of its scope. */
 export function isActivatedDefinition(def: object): boolean {
-  return activatedDefinitions.has(def);
+  return (def as ActivatedDefinition)._activated === true;
 }
 
 /**

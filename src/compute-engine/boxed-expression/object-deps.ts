@@ -332,7 +332,8 @@ export function countObjectRead(): void {
  */
 export function mergeObjectDeps(deps: ObjectDeps | undefined): void {
   if (deps === undefined || _collectors.length === 0) return;
-  for (const [ref, version] of deps) {
+  for (const dep of deps) {
+    const [ref, version] = dep;
     const obj = ref.deref();
     if (obj === undefined) {
       // A dead reference cannot be matched against anything, so it is pushed
@@ -343,8 +344,9 @@ export function mergeObjectDeps(deps: ObjectDeps | undefined): void {
     }
     // An entry with two versions (`stampObjectDepsAtEnd()`) was served
     // because the read finds one of them now: that version is what the
-    // enclosing computation read.
-    const read = obj._readAgainAtEnd === true ? obj._version : version;
+    // enclosing computation read. An entry with one version was served
+    // because the read finds that version (the caller validated it).
+    const read = dep.length > 2 ? obj._version : version;
     for (let i = 0; i < _collectors.length; i++) collect(i, obj, read);
   }
 }

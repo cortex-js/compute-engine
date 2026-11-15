@@ -309,12 +309,12 @@ export function functionLiteralParameterNames(param: Expression): string[] {
 }
 
 /**
- * The value definitions of the parameters of the canonical function
- * literals. A parameter binding is added when it is created while the body
- * is canonicalized (`_setShadowedParameterDef()` in `index.ts`), so that a
- * nested literal whose type is computed before the enclosing literal is
- * complete sees it. `canonicalFunctionLiteralArguments()`
- * (`function-utils.ts`) adds the other parameter bindings when it declares
+ * The mark of a value definition of a parameter of a canonical function
+ * literal, a field of the definition. A parameter binding is marked when it
+ * is created while the body is canonicalized (`_setShadowedParameterDef()`
+ * in `index.ts`), so that a nested literal whose type is computed before the
+ * enclosing literal is complete sees it. `canonicalFunctionLiteralArguments()`
+ * (`function-utils.ts`) marks the other parameter bindings when it declares
  * the parameters.
  *
  * A reader uses it to know that a call is a call of a parameter, also when
@@ -330,22 +330,24 @@ export function functionLiteralParameterNames(param: Expression): string[] {
  * (the body was canonical before the literal was made, and its scope already
  * held the name).
  */
-const FUNCTION_LITERAL_PARAMETERS = new WeakMap<object, true>();
+type FunctionLiteralParameter = { _functionLiteralParameter?: true };
 
 /** Record `def` as the value definition of a function-literal parameter
- * (`FUNCTION_LITERAL_PARAMETERS`). `ce` is the engine of the literal. */
+ * (`FunctionLiteralParameter`). `ce` is the engine of the literal. */
 export function markFunctionLiteralParameter(
   ce: Expression['engine'],
   def: object
 ): void {
-  if (FUNCTION_LITERAL_PARAMETERS.has(def)) return;
-  FUNCTION_LITERAL_PARAMETERS.set(def, true);
+  (def as FunctionLiteralParameter)._functionLiteralParameter = true;
 }
 
 /** True when `def` is the value definition of a parameter of a canonical
- * function literal (`FUNCTION_LITERAL_PARAMETERS`). */
+ * function literal (`FunctionLiteralParameter`). */
 export function isFunctionLiteralParameter(def: object | undefined): boolean {
-  return def !== undefined && FUNCTION_LITERAL_PARAMETERS.has(def);
+  return (
+    (def as FunctionLiteralParameter | undefined)?._functionLiteralParameter ===
+    true
+  );
 }
 
 /**

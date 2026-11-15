@@ -462,11 +462,7 @@ export function readsActivation(def: BoxedDefinition): boolean {
 export function readsActivationHalf(def: BoxedBaseDefinition): boolean {
   if (isActivation(def)) return true;
   const own = def as BoxedValueDefinition;
-  return (
-    isFunctionLiteralParameter(own) ||
-    isBinderVariable(own) ||
-    own._blockLocal === true
-  );
+  return isBinderVariable(own) || own._blockLocal === true;
 }
 
 /**

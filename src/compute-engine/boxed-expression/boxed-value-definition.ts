@@ -724,21 +724,24 @@ export class _BoxedValueDefinition
    * at all (it lives in the context's assumed-value overlay, which the scope
    * that assumed it discards on its pop). */
   get storedValue(): Expression | undefined {
+    // In a type computation, a definition whose value an activation holds
+    // (a parameter, a local of a block) has no value, also a constant: its
+    // value is the value of one run, and a type computed in the run would
+    // be served after it. Tested first: the read of an activation walks the
+    // scope chain.
+    if (isActivatedDefinition(this) && inStaticTypingView(this._engine))
+      return undefined;
     const v = this._heldValue();
     // A static type does not depend on a value: in a type computation
     // (`static-typing-view.ts`) a definition that is not a constant has no
     // value. The exception is a variable that holds a function literal: the
     // signature of a user function comes from its value, and a write of such
     // a value moves the type version (`typeRead` in the `value` setter).
-    // A definition whose value an activation holds (a parameter, a local of
-    // a block) has no value there either, also a constant: its value is the
-    // value of one run, and a type computed in the run would be served
-    // after it.
     if (
       v !== undefined &&
       inStaticTypingView(this._engine) &&
-      (isActivatedDefinition(this) ||
-        (!this._isConstant && !holdsFunctionLiteral(v)))
+      !this._isConstant &&
+      !holdsFunctionLiteral(v)
     )
       return undefined;
     return v;
@@ -1142,10 +1145,9 @@ export class _BoxedValueDefinition
       // local, a parameter, a binder variable) keeps its recorded type. A
       // cycle of such variables (`a := b + 1; b := a + 1`) answers the
       // recorded type.
-      const held = this._heldValue();
+      const held = isActivatedDefinition(this) ? undefined : this._heldValue();
       if (
         isFormulaValue(this.name, held) &&
-        !isActivatedDefinition(this) &&
         !STATIC_VALUE_TYPE_IN_FLIGHT.has(this)
       ) {
         STATIC_VALUE_TYPE_IN_FLIGHT.add(this);
