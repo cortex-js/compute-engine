@@ -11,7 +11,11 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { asSmallInteger, asRational } from '../boxed-expression/numerics.js';
 import { bernoulliRational } from '../numerics/bernoulli.js';
-import { differentiate, isEngineAuthoredDefinition } from './derivative.js';
+import {
+  differentiate,
+  ellipticMaclaurinCoefficient,
+  isEngineAuthoredDefinition,
+} from './derivative.js';
 import { trigToExp } from './trig-rewrite.js';
 import { getFunctionProperties } from '../function-properties/index.js';
 import { exactComplexParts, exactZeroVerdict } from './contour.js';
@@ -606,6 +610,19 @@ function unaryTaylor(
   // underscore would collide with the `_` hole convention in the
   // differentiation machinery, so it must be avoided.
   b0 = foldZeroCoeff(ce, b0);
+  // The derivatives of the complete elliptic integrals are 0/0 at 0: read the
+  // coefficients from the series itself (DLMF 19.5.1).
+  if (
+    (op === 'EllipticK' || op === 'EllipticE') &&
+    b0.isSame(0) &&
+    isEngineAuthoredDefinition(ce.symbol(op))
+  )
+    return Array.from({ length: W + 1 }, (_, k) =>
+      ce.function('Multiply', [
+        ce.number(ellipticMaclaurinCoefficient(op, k)),
+        ce.Pi,
+      ])
+    );
   const v = ce.temporaryName('s', b0, op);
   const reduceHyp = HYPERBOLIC.has(op);
   let g: Expression = ce.function(op, [ce.symbol(v)]).canonical;

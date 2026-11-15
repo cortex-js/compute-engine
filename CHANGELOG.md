@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **The derivatives of `EllipticK` and `EllipticE` at `m = 0` are exact, and
+  `Series` of both at 0 evaluates.** `Apply(Derivative(EllipticK, n), 0)` gave
+  `NaN` (or a wrong `ComplexInfinity`), the closed form of the derivative being
+  0/0 there, and `Series(EllipticK(m), m, 0, 3)` stayed unevaluated.
+  `Derivative(EllipticK, n)` and `Derivative(EllipticE, n)` are now the
+  hypergeometric form of the derivative of the Maclaurin series (DLMF 19.5.1),
+  `K⁽ⁿ⁾(m) = (π/2)(½)ₙ²/n!·₂F₁(n + ½, n + ½; n + 1; m)`, finite at 0 and as
+  cheap at order 12 as at order 1 (the 4th closed-form derivative took seconds).
+  `Apply(Derivative(EllipticK, 1), 0)` is `π/8`, `Apply(Derivative(EllipticE, 2),
+  0)` is `−3π/64`, and `Series(EllipticK(m), m, 0, 3)` is
+  `π/2 + π/8·m + 9π/128·m² + 25π/512·m³`. (#591, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 ## 0.191.0 _2026-11-15_
 
 ### Breaking Changes

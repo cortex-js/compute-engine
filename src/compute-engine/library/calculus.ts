@@ -140,7 +140,9 @@ import {
   derivative,
   differentiate,
   derivativeKeyUseCount,
+  ellipticDerivativeBody,
   isDifferentiating,
+  isEngineAuthoredDefinition,
   blockValue,
   literalBodyOverHoles,
   memoizedDerivativeResult,
@@ -6743,6 +6745,19 @@ volumes
           : [];
         if (orders.length <= 1) {
           const order = orders[0] ?? 1;
+          // The closed form of `K′` and `E′` is 0/0 at m = 0 and grows with
+          // the order. The hypergeometric form (DLMF 19.5.1) is finite there.
+          if (
+            isSymbol(op) &&
+            (op.symbol === 'EllipticK' || op.symbol === 'EllipticE') &&
+            isEngineAuthoredDefinition(op)
+          ) {
+            const x = ce.symbol('x');
+            return ce.function('Function', [
+              ellipticDerivativeBody(ce, op.symbol, order, x),
+              x,
+            ]);
+          }
           return memoizedDerivativeResult(op, order, () => {
             const params = isFunction(op, 'Function') ? op.ops.slice(1) : [];
             const holes = parameterHoles(params.length);

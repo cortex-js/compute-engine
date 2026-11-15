@@ -310,6 +310,63 @@ export function isEngineAuthoredDefinition(opSym: Expression): boolean {
   );
 }
 
+/**
+ * The Maclaurin coefficient of order `k` of the complete `EllipticK` or
+ * `EllipticE` of the parameter `m`, as a rational multiple of π:
+ * `(π/2)·(a)ₖ(½)ₖ/(k!)²` with `a = ½` for K and `a = −½` for E (DLMF 19.5.1).
+ * The derivative of order `k` at 0 is `k!` times it.
+ */
+export function ellipticMaclaurinCoefficient(
+  head: 'EllipticK' | 'EllipticE',
+  k: number
+): [bigint, bigint] {
+  // (½)ₖ = ∏(2i + 1)/2ᵏ and (−½)ₖ = ∏(2i − 1)/2ᵏ
+  const shift = head === 'EllipticK' ? 1n : -1n;
+  let half = 1n;
+  let a = 1n;
+  let kFact = 1n;
+  for (let i = 0; i < k; i++) {
+    half *= BigInt(2 * i + 1);
+    a *= BigInt(2 * i) + shift;
+    kFact *= BigInt(i + 1);
+  }
+  // not reduced: `ce.number([n, d])` reduces
+  const num = half * a;
+  const den = 2n * 4n ** BigInt(k) * kFact * kFact;
+  return [num, den];
+}
+
+/**
+ * The `n`-th derivative (n ≥ 1) of the complete `EllipticK` or `EllipticE`
+ * of the parameter `m` as a hypergeometric function:
+ * `K⁽ⁿ⁾(m) = (π/2)(½)ₙ²/n!·₂F₁(n + ½, n + ½; n + 1; m)` and
+ * `E⁽ⁿ⁾(m) = (π/2)(−½)ₙ(½)ₙ/n!·₂F₁(n − ½, n + ½; n + 1; m)`, the derivative
+ * of the series of DLMF 19.5.1. Unlike the closed form in `K` and `E`,
+ * finite at `m = 0` (where that form is 0/0) and a size that does not grow
+ * with `n`.
+ */
+export function ellipticDerivativeBody(
+  ce: Expression['engine'],
+  head: 'EllipticK' | 'EllipticE',
+  n: number,
+  m: Expression
+): Expression {
+  const [num, den] = ellipticMaclaurinCoefficient(head, n);
+  let nFact = 1n;
+  for (let i = 2n; i <= BigInt(n); i++) nFact *= i;
+  const c = ce.number([num * nFact, den]);
+  const a: Expression = ce.number([
+    BigInt(2 * n) + (head === 'EllipticK' ? 1n : -1n),
+    2n,
+  ]);
+  return ce.expr([
+    'Multiply',
+    c,
+    'Pi',
+    ['Hypergeometric2F1', a, ce.number([BigInt(2 * n + 1), 2n]), n + 1, m],
+  ]);
+}
+
 //
 // ── Derivative trace ────────────────────────────────────────────────
 //
