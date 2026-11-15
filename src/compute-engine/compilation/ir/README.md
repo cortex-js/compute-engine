@@ -3,7 +3,7 @@
 An experiment: a table-driven compiler with an SSA representation and two thin
 printers, JavaScript and GLSL ES 3.00. `compile()` uses it only with the
 experimental option `profile: 'ir'`, on JavaScript and GLSL ("Selecting the
-pipeline" below). The entry is
+pipeline" below), and on `interval-js` ("The interval mode"). The entry is
 `compileSlice(expr, { target, passes, extend, iterationBudget })` in `index.ts`;
 it returns the code and its `warnings`. Anything out of scope throws a `Decline`
 with the fields `node`, `head` and `cause`, also for a refusal of the target
@@ -433,6 +433,104 @@ the interpreter gives a boolean. The helpers' size limit (about 1,000,000
 digits) throws a `RangeError`. The stored code holds no `bigint` (its literals
 are text), and `load()` gives the values of `run()`.
 
+## The interval mode
+
+`mode: 'interval'` (JavaScript only) computes every value as the `_IA` kernel
+of the interval library (`src/compute-engine/interval/`) that encloses it: a
+`real` or an `integer` is an `Interval` or an `IntervalResult`, a `boolean` a
+verdict, `'true'`, `'false'` or `'maybe'`. It is not a lane of the IR: the
+lowering is the one of the `strict` mode, and the printer is a third
+`Syntax` (`JS_INTERVAL` of `print-interval.ts`), in which each operation is
+the kernel of its row, with the operands in the order of the row's `fold`
+(`atan2(y, x)`). Every kernel takes and gives the kinds `empty`, `entire`,
+`singular` and `partial`, so the code never reads the kind of a value: the
+marks of a jump and of a clipped domain travel through every operation. The
+lanes are `real`, `integer` and `boolean`, the rank is 0, and there are no
+draws, frames or recursion. The passes `fold` (a double is not an
+enclosure) and `strength` (`x·x` is wider than `x^2` over an interval) are
+off.
+
+Spelled: the arithmetic (`div.q` is `_IA.div`), `Power` (`pow`, also of
+integers, is `_IA.powReal`; a power by the exact constant 2 is
+`_IA.square`, the operation `square` that the lowering makes), `Root` (`_IA.nthRootInterval`), `Sqrt`, `Abs`, `Exp`,
+`Ln`, `Log` of base 10 and 2, the trigonometric and hyperbolic functions
+and their inverses (also the reciprocal ones), `Arctan2`, `Hypot`,
+`Degrees` (the product by an enclosure of π, then the quotient by 180),
+`Floor`, `Ceil`, `Round`, `Truncate`, `Fract`, `Sign`, `Mod`, `Max`, `Min`,
+`Erf`, `Erfc`, `Gamma`, `GammaLn`, `Factorial`, `Factorial2`, `Binomial`,
+`GCD`, `LCM`, the comparisons, `And`, `Or`, `Not`, a `Block` with locals,
+user functions that are not recursive, and a root function literal.
+`Haversine`, `Zeta`, the complex and colour operations, `At` and the
+elements of lists, `Random` and the counts of a `Range` have no spelling
+and decline. In this batch a program with an `if`, a `loop` or a `region`
+instruction after the passes declines with the cause "the interval mode
+does not compile it yet" (`intervalRefusal()`; a cause of the mode ends
+with "on interval-js"): `If`, `Which`, `Sum`,
+`Product`, `Loop`, a lazy `And` whose arm reads a `vars` text.
+
+Constants. An integer and a real literal whose double is its value are a
+point `{ lo: c, hi: c }`; NaN is `{ kind: 'empty' }`; a boolean is `'true'`
+or `'false'`. A real literal whose double is not its value is marked
+`inexact` in the IR (`Literal.inexact`, the count of ulps; `literalKey()`
+tells it from the unmarked literal of the same double) and printed as the
+enclosure of that many ulps on each side, computed when the code is
+printed. The double is the value for a machine number, a decimal that is a
+double (`0.5`; `0.1` is not) and an exact number that is a double
+(`exactDoubleValue()`: `1/2`, `5`); another exact number takes one ulp per
+rounding of its double (`exactValueDoubleRoundings()`: `1/3` is
+`[0.33333333333333326, 0.33333333333333337]`). `Pi` and `ExponentialE` take
+one ulp, the factor of an angular unit two. A closed node is the value of
+`evaluate()` when it is an exact number that is a double, or a safe integer
+computed in big decimals (`Mod(1, 1/10)` is 0, `Floor(100π)` is 314); else
+the value of `N()` with one ulp (`Sin(1)`), when `N()` computes in big
+decimals of more than the 17 digits of a double (the engine's precision and
+the process-global `BigDecimal.precision` both at least 18); else, at
+machine precision, the node is lowered as written and the kernels enclose
+it at run time.
+
+`Power(x, p/q)` with a literal rational exponent, `q > 1`, is lowered as
+`Root(x, q)^p`, for any sign of `p`: `x^(2/3)` over `[-8, -1]` is `[1, 4]`.
+`_IA.powReal` is `_IA.powInterval` with a point exponent widened by one ulp
+on each side unless it is an integer or a multiple of 1/1024 of magnitude
+at most 1024: over a negative base such a float exponent gives the
+symmetric hull `[-M, M]` (`x^0.2` over `[-8, -1]` is `[-1.5157…, 1.5157…]`,
+where the interpreter reads `0.2` as `1/5` and the existing interval target
+gives `[-1.5157…, -1]`). The interpreter reads a float as a rational `p/q`
+only within about 1e-14 of the double and for `q` under about 3·10^5
+(`realPowerBranchTerms()`), and a multiple of 1/1024 is at least
+1/(1024·q) from every such `p/q` of odd `q`: `x^1.5` and `x^2.5` over a
+negative box are `empty`, as in the interpreter.
+
+The result has the stored form of the existing interval target
+(`StoredIntervalJavaScript`): `code`, an expression of the inputs object
+`_` (the expression itself for a body of one `return`), or for a root
+function literal the function of its arguments; `preambleOnce`, the user
+functions; `runtimeVersion` (`INTERVAL_RUNTIME_VERSION`). The code reads
+`_IA` only. `run()` is `createIntervalRuntime().load()` of the stored form,
+so `run()` and stored code loaded on a worker agree by construction: an
+input given as a number is a point, a boolean is a verdict, and the result
+is a kinded `IntervalResult` or a verdict, never a bare `{ lo, hi }`; an
+error of the code other than a `ReferenceError` or a cancellation is
+`entire`.
+
+`compile(expr, { to: 'interval-js', profile: 'ir' })` compiles with the mode
+(`adapter-interval.ts`). A decline is `'outside-profile'`; with `fallback`
+not `false`, the existing interval target then compiles the expression and
+a warning is logged. The result has `target: 'interval-js'`, `success`,
+`runtimeVersion`, `code`, `preamble` and `preambleOnce` (the same text),
+`calling` (`'expression'`, or `'lambda'` for a root `Function` literal,
+which declines when its body reads a free name), `booleanInputs`, `run`,
+`profile: 'ir'`, and for an expression `broadcast()`, `broadcastAsync()`,
+`shippable` and `willUsePool()`, built by `createIntervalRuntime()`
+(`loadBroadcast()`, `loadBroadcastSlice()`) over the stored result. Options:
+`inputs`, `symbolic`, `symbolDeps`, `varsObjectRefs` and `cse: false` as on
+JavaScript; `constantFold: false`, no closed node evaluated; `vars` only for
+a text that reads the inputs object (`readsVarsObject()`: `_.c`, read at
+each use), another text declines; a `mode` other than `'strict'`,
+`functions`, `operators`, `imports`, `preamble` and `strictTypes: true`
+decline by name; `entryChecks`, `storage`, `broadcast` and `quadrature`
+have no effect; `iterationBudget` is accepted.
+
 ## Lists
 
 A length is a number or an integer SSA value: the length of an input is a
@@ -773,8 +871,9 @@ GLSL a result of a run-time length; one of a stated length is a `vecN` or a
 ## How to add
 
 - An operator: one row in `OPERATORS`; a spelling in `JS.ops` and `GLSL.ops` for
-  each new IR operation (`op.int` falls back to `op`), and in `JS_BIGINT.ops`
-  when it is exact on `bigint` values. A target with no spelling declines the
+  each new IR operation (`op.int` falls back to `op`), in `JS_BIGINT.ops`
+  when it is exact on `bigint` values, and in `JS_INTERVAL.ops` when a kernel
+  of `_IA` encloses it. A target with no spelling declines the
   operation.
 - A list-reading operator: a row with a `'list'` operand (as `At`), or a
   reduction in `REDUCTIONS` (it reads its list through a source).

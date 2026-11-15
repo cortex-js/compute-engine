@@ -1,0 +1,164 @@
+/**
+ * The profile `'ir'` of `compile()` for the `interval-js` target
+ * (experimental): the result of the existing interval target from the slice
+ * compiler in the interval mode (`print-interval.ts`). Anything else
+ * declines with `'outside-profile'`; `compile()` then applies `fallback`
+ * (the existing interval target). See "The interval mode" in `README.md`.
+ */
+
+import type { Expression } from '../../global-types.js';
+import type { CompilationResult, IntervalValue } from '../types.js';
+import { INTERVAL_RUNTIME_VERSION } from '../../../common/runtime-versions.js';
+import {
+  isShippableCode,
+  makeBroadcastAsync,
+  makeWillUsePool,
+  type BroadcastAsyncSpec,
+} from '../../kernel-pool.js';
+import { createIntervalRuntime } from '../interval-runtime.js';
+import { readsVarsObject } from '../vars-inputs.js';
+import { isBooleanBindingType } from '../compiler-type-facts.js';
+import { ALL_PASSES } from './passes.js';
+import { compileSlice } from './index.js';
+import { entryOf } from './ir.js';
+import {
+  addSymbolDeps,
+  decline,
+  irTestExtension,
+  optionDecline,
+  sliceError,
+  type IR_OPTIONS,
+  type IrOptions,
+} from './adapter.js';
+
+/** The class of each option of `compile()` on `interval-js`, as
+ *  `IR_OPTIONS`: `mapped`, `no-op`, or `declined` when given
+ *  (`optionDecline()`; a `mode` other than `'strict'`). */
+const IR_INTERVAL_OPTIONS = {
+  to: 'mapped',
+  target: 'mapped',
+  profile: 'mapped',
+  fallback: 'mapped',
+  entryChecks: 'no-op',
+  iterationBudget: 'mapped',
+  symbolDeps: 'mapped',
+  varsObjectRefs: 'mapped',
+  cse: 'mapped',
+  constantFold: 'mapped',
+  mode: 'declined',
+  storage: 'no-op',
+  quadrature: 'no-op',
+  functions: 'declined',
+  vars: 'mapped',
+  symbolic: 'mapped',
+  inputs: 'mapped',
+  operators: 'declined',
+  imports: 'declined',
+  preamble: 'declined',
+  broadcast: 'no-op',
+  strictTypes: 'declined',
+} as const satisfies Record<
+  keyof typeof IR_OPTIONS,
+  'mapped' | 'no-op' | 'declined'
+>;
+
+export function compileWithIrProfileInterval(
+  expr: Expression,
+  options: IrOptions | undefined
+): CompilationResult<'interval-js', IntervalValue> {
+  try {
+    const refused = optionDecline(options, IR_INTERVAL_OPTIONS);
+    if (refused !== undefined)
+      throw decline(
+        `${refused} is not supported by the profile 'ir' on interval-js`
+      );
+    // `vars`: a read of the inputs object only. The mode evaluates both
+    // arms of an undecided condition, where another text would run where
+    // the interpreter does not run it.
+    const vars: Record<string, string> = Object.create(null);
+    for (const [name, text] of Object.entries(options?.vars ?? {})) {
+      if (typeof text !== 'string' || !readsVarsObject(text))
+        throw decline(
+          `the vars entry of ${name}, which is not a read of the inputs object, on interval-js`,
+          { binding: name }
+        );
+      vars[name] = text;
+    }
+    const s = compileSlice(expr, {
+      target: 'javascript',
+      mode: 'interval',
+      passes: {
+        ...ALL_PASSES,
+        ...(options?.cse === false ? { cse: false } : {}),
+      },
+      constantFold: options?.constantFold !== false,
+      iterationBudget: options?.iterationBudget,
+      vars,
+      extend: irTestExtension(),
+    });
+    const p = s.program;
+    const entry = entryOf(p);
+    const positional = entry.positional ?? 0;
+    const literal = entry.literal === true;
+    const inputs = entry.paramNames.filter((_, k) => k >= positional);
+    for (const name of inputs) options?.varsObjectRefs?.add(name);
+    if (literal && inputs.length > 0)
+      throw decline(
+        `a Function literal that reads the free name \`${inputs[0]}\`: its code is called with its arguments only`,
+        { binding: inputs[0] }
+      );
+    addSymbolDeps(p, options?.symbolDeps);
+    const booleans = inputs.filter(
+      (_, k) => p.types[entry.body.params[k + positional]].lane === 'boolean'
+    );
+    // A name of `vars` is a read of the inputs object, not an entry
+    // parameter: it is a boolean input when it is declared boolean, as in
+    // the existing target (`declaredBooleanNames()`).
+    for (const name of expr.unknowns)
+      if (
+        name in vars &&
+        !booleans.includes(name) &&
+        isBooleanBindingType(expr.engine.symbol(name).type?.type)
+      )
+        booleans.push(name);
+    const once = s.preambleOnce;
+    const shippable = isShippableCode(`${once}\n${s.code}`);
+    const result: CompilationResult<'interval-js', IntervalValue> = {
+      target: 'interval-js',
+      success: true,
+      runtimeVersion: INTERVAL_RUNTIME_VERSION,
+      code: s.code,
+      ...(once === '' ? {} : { preamble: once, preambleOnce: once }),
+      calling: s.calling,
+      ...(booleans.length > 0 ? { booleanInputs: booleans } : {}),
+      run: s.run as CompilationResult<'interval-js', IntervalValue>['run'],
+      profile: 'ir',
+    };
+    if (literal) return result;
+    // The batch members, built by `createIntervalRuntime()` over the stored
+    // result at their first call, so each cell is the value of `run()`.
+    const runtime = createIntervalRuntime();
+    let batch: ReturnType<typeof runtime.loadBroadcast> | undefined;
+    let slice: ReturnType<typeof runtime.loadBroadcastSlice> | undefined;
+    result.broadcast = (cells, o) =>
+      (batch ??= runtime.loadBroadcast(result))(cells, o);
+    const engine = expr.engine;
+    const spec: BroadcastAsyncSpec = {
+      kind: 'interval-js',
+      stored: result,
+      shippable,
+      iterationLimit: () => engine.iterationLimit,
+      lists: [],
+      booleans,
+      slice: (cells, o, out, range) =>
+        (slice ??= runtime.loadBroadcastSlice(result))(cells, o, out, range),
+      workers: () => engine.workers,
+    };
+    result.broadcastAsync = makeBroadcastAsync(spec);
+    result.shippable = shippable;
+    result.willUsePool = makeWillUsePool(spec);
+    return result;
+  } catch (e) {
+    throw sliceError(e);
+  }
+}

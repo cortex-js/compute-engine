@@ -30,6 +30,13 @@ import {
   type JavaScriptResult,
 } from './print-js.js';
 import { GLSL, printGlsl, type GlslResult } from './print-glsl.js';
+import {
+  INTERVAL_ROWS,
+  intervalRefusal,
+  JS_INTERVAL,
+  printInterval,
+  type IntervalPrinted,
+} from './print-interval.js';
 import { spellingOf, type Spelling, type Syntax } from './print.js';
 import { effects, effectTrace } from './effects.js';
 import {
@@ -68,6 +75,7 @@ export type { Program } from './ir.js';
 export type { PassOptions } from './passes.js';
 export type { JavaScriptResult } from './print-js.js';
 export type { GlslResult } from './print-glsl.js';
+export type { IntervalPrinted } from './print-interval.js';
 
 export type Target = 'javascript' | 'glsl';
 
@@ -321,9 +329,10 @@ export type SliceOptions = {
   /** `'complex'`: a row that can leave the reals takes its complex
    *  signature unless its operands prove a real value (README, "The
    *  complex lane"). `'bigint'` (JavaScript only): every number is an
-   *  integer, a JavaScript `bigint` (README, "The `bigint` mode"). Default
-   *  `'strict'`. */
-  readonly mode?: 'strict' | 'complex' | 'bigint';
+   *  integer, a JavaScript `bigint` (README, "The `bigint` mode").
+   *  `'interval'` (JavaScript only): every operation is the `_IA` kernel
+   *  that encloses it (README, "The interval mode"). Default `'strict'`. */
+  readonly mode?: 'strict' | 'complex' | 'bigint' | 'interval';
   /** The rule of `compile()`'s option: a `Sum` or a `Product` of more
    *  passes than the budget is NaN; on JavaScript, the passes of all the
    *  `Loop`s of one call of `run()`, nested ones and those of user
@@ -429,12 +438,18 @@ function tables(options: SliceOptions): {
     },
     helpers: options.extend?.helpers,
   };
+  const interval = options.mode === 'interval';
   const base =
-    options.mode === 'bigint' ? JS_BIGINT : TARGETS[options.target].syntax;
+    options.mode === 'bigint'
+      ? JS_BIGINT
+      : interval
+        ? JS_INTERVAL
+        : TARGETS[options.target].syntax;
+  const own = interval ? INTERVAL_ROWS : OPERATORS;
   if (options.extend === undefined && vars.length === 0)
-    return { rows: OPERATORS, syntax: base };
+    return { rows: own, syntax: base };
   return {
-    rows: [...OPERATORS, ...(x.rows ?? [])],
+    rows: [...own, ...(x.rows ?? [])],
     syntax: {
       ...base,
       ops: { ...base.ops, ...x.spellings },
@@ -453,8 +468,12 @@ export function sliceProgram(
 ): Program & { warnings: Warning[] } {
   const profile = TARGETS[options.target];
   const bigint = options.mode === 'bigint';
-  if (bigint && options.target !== 'javascript')
-    throw new Decline('program', `the bigint mode on ${options.target}`);
+  const interval = options.mode === 'interval';
+  if ((bigint || interval) && options.target !== 'javascript')
+    throw new Decline(
+      'program',
+      `the ${options.mode} mode on ${options.target}`
+    );
   const { rows, syntax } = tables(options);
   const p = lower(expr, rows, {
     fold: options.constantFold,
@@ -467,35 +486,68 @@ export function sliceProgram(
     ),
   });
   verify(p, rows);
-  const warnings = seededWarnings(p, rows);
+  // The interval mode has no draws or frames.
+  const warnings = interval ? [] : seededWarnings(p, rows);
   const passes = options.passes === false ? {} : (options.passes ?? ALL_PASSES);
   // The bigint mode: a helper throws at a pole (`Mod`, `At`, `Factorial`,
   // `Power`, `Binomial`, a call), so no operation is evaluated before it is
   // written: no `hoist` (it moves a guarded arm out of its guard), and no
   // `fold` (the folds of the rows compute with doubles).
+  // The interval mode: no `fold` (a double is not an enclosure) and no
+  // `strength` (`x·x` is wider than `x^2` over an interval).
   runPasses(
     p,
     {
       ...passes,
       scalarize: !profile.elementwise,
       ...(bigint ? { fold: false, hoist: false } : {}),
+      ...(interval ? { fold: false, strength: false } : {}),
     },
     rows
   );
-  const lanes: Lane[] = bigint ? ['integer', 'boolean'] : [...profile.lanes];
-  const refused = admits(p, { ...profile, lanes, syntax }, rows);
+  const lanes: Lane[] = bigint
+    ? ['integer', 'boolean']
+    : interval
+      ? ['real', 'integer', 'boolean']
+      : [...profile.lanes];
+  // A decline of the interval mode names its public target.
+  const where = interval
+    ? 'interval-js'
+    : `${options.target}${bigint ? ' in the bigint mode' : ''}`;
+  const refused = admits(
+    p,
+    {
+      ...profile,
+      lanes,
+      syntax,
+      ...(interval
+        ? { rank: 0, draws: false, frames: false, recursion: false }
+        : {}),
+    },
+    rows
+  );
   if (refused !== undefined)
     throw new Decline(
       refused.site ?? refused.head ?? 'program',
-      `${refused.cause} on ${options.target}${bigint ? ' in the bigint mode' : ''}`,
+      `${refused.cause} on ${where}`,
       refused.head
     );
+  const unsupported = interval ? intervalRefusal(p) : undefined;
+  if (unsupported !== undefined)
+    throw new Decline('program', `${unsupported} on ${where}`);
   return Object.assign(p, { warnings });
 }
 
 export function compileSlice(
   expr: Expression,
-  options: SliceOptions & { target: 'javascript' }
+  options: SliceOptions & { target: 'javascript'; mode: 'interval' }
+): IntervalPrinted & { warnings: Warning[]; program: Program };
+export function compileSlice(
+  expr: Expression,
+  options: SliceOptions & {
+    target: 'javascript';
+    mode?: Exclude<SliceOptions['mode'], 'interval'>;
+  }
 ): JavaScriptResult & { warnings: Warning[]; program: Program };
 export function compileSlice(
   expr: Expression,
@@ -504,34 +556,39 @@ export function compileSlice(
 export function compileSlice(
   expr: Expression,
   options: SliceOptions
-): (JavaScriptResult | GlslResult) & { warnings: Warning[]; program: Program } {
+): (JavaScriptResult | GlslResult | IntervalPrinted) & {
+  warnings: Warning[];
+  program: Program;
+} {
   const p = sliceProgram(expr, options);
   const held = options.storage && holdStorage(p, options.storage);
   if (held) throw new Decline('program', `${held} on ${options.target}`);
   const { rows, syntax } = tables(options);
   const printed =
-    options.target === 'javascript'
-      ? printJavaScript(
-          p,
-          rows,
-          expr.engine as never,
-          syntax,
-          options.iterationBudget
-        )
-      : printGlsl(
-          p,
-          rows,
-          options.bareInputs
-            ? {
-                ...syntax,
-                input: (name) =>
-                  typeof options.bareInputs === 'object' &&
-                  Object.hasOwn(options.bareInputs, name)
-                    ? options.bareInputs[name]
-                    : name,
-              }
-            : syntax
-        );
+    options.mode === 'interval'
+      ? printInterval(p, rows, syntax)
+      : options.target === 'javascript'
+        ? printJavaScript(
+            p,
+            rows,
+            expr.engine as never,
+            syntax,
+            options.iterationBudget
+          )
+        : printGlsl(
+            p,
+            rows,
+            options.bareInputs
+              ? {
+                  ...syntax,
+                  input: (name) =>
+                    typeof options.bareInputs === 'object' &&
+                    Object.hasOwn(options.bareInputs, name)
+                      ? options.bareInputs[name]
+                      : name,
+                }
+              : syntax
+          );
   // The printer writes the effectful instructions in the IR's order.
   const trace = effectTrace(p, rows, new Map());
   const order = printed.printed.order;

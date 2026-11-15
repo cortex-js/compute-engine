@@ -422,7 +422,12 @@ const cse: Pass = (p, rows) => {
   const scopes: Map<string, V>[] = [];
   const key = (i: Instr): string | undefined => {
     if (!fx.mergeable(i)) return undefined;
-    if (i.k === 'const') return literalKey(i.value.lane, i.value.value);
+    if (i.k === 'const')
+      return literalKey(
+        i.value.lane,
+        i.value.value,
+        i.value.lane === 'real' ? i.value.inexact : undefined
+      );
     if (i.k === 'op') return `o ${i.op} ${i.args.join(',')}`;
     if (i.k === 'list') return `l ${p.types[i.out].lane} ${i.args.join(',')}`;
     return undefined;

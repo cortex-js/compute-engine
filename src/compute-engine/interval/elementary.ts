@@ -2427,6 +2427,43 @@ function nthRootIntervalRaw(
 // degree) into the result, which the integer branch above, reading only the
 // value of the degree, would drop.
 export const nthRootInterval = liftJump(nthRootIntervalRaw);
+
+/**
+ * `x^y` for any reading of a point exponent: `powInterval`, with a finite
+ * point exponent widened by one ulp on each side first unless it is an
+ * integer (of any magnitude) or a multiple of 1/1024 of magnitude at most
+ * 1024. A float exponent such as
+ * `0.2` can stand for the rational `1/5`, of which a negative base has a
+ * real root (`(-8)^0.2` is `-1.5157…` in the interpreter), and over an
+ * exponent that is not a point `powInterval` encloses the real roots of a
+ * negative base by the symmetric hull `[-M, M]`. The interpreter reads a
+ * float as a rational p/q only when p/q is within about 1e-14 (relative) of
+ * the double and q is under about 3·10^5 (`realPowerBranchTerms()` of
+ * `numerics/real-power.ts`); two distinct rationals k/2^m and p/q differ by
+ * at least 1/(2^m·q), so for 2^m ≤ 1024 it admits no rational of odd
+ * denominator, a negative base has no real value, and the point keeps the
+ * principal-value reading (`x^1.5` over `[-2, -1]` is `empty`). A point
+ * integer exponent is never widened and keeps the integer power
+ * (`x^2000` over a negative base has one sign).
+ */
+function powRealRaw(
+  base: Interval | IntervalResult,
+  exponent: Interval | IntervalResult
+): IntervalResult {
+  const e = unwrap(exponent);
+  if (
+    e !== undefined &&
+    e.lo === e.hi &&
+    Number.isFinite(e.lo) &&
+    !Number.isInteger(e.lo) &&
+    !(Number.isInteger(e.lo * 1024) && Math.abs(e.lo) <= 1024)
+  )
+    return powInterval(base, { lo: nextDown(e.lo), hi: nextUp(e.lo) });
+  return powInterval(base, exponent);
+}
+// `liftJump` carries the marks of the exponent, which the widened branch
+// above, reading only its value, would drop.
+export const powReal = liftJump(powRealRaw);
 export const exp = liftJump(
   outwardUnlessExact(expRaw, exactInRange(0, Infinity))
 );

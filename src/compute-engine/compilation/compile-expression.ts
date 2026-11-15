@@ -42,6 +42,7 @@ import type { CanCompileResult } from './fragment.js';
 import { ScalarFragmentJavaScriptTarget } from './javascript-fragment-target.js';
 import { compileWithIrProfile, type IR_OPTIONS } from './ir/adapter.js';
 import { compileWithIrProfileGlsl } from './ir/adapter-glsl.js';
+import { compileWithIrProfileInterval } from './ir/adapter-interval.js';
 import {
   jsProfilePublicDefault,
   jsProfileShadowConsumer,
@@ -124,7 +125,7 @@ function assertProfileTarget(options: CompileExpressionOptions | undefined) {
   if (options?.profile === undefined) return;
   const ir = options.profile === 'ir';
   const targets = ir
-    ? 'the targets "javascript" and "glsl"'
+    ? 'the targets "javascript", "glsl" and "interval-js"'
     : 'the target "javascript"';
   if (options.target !== undefined)
     throw new Error(
@@ -133,7 +134,7 @@ function assertProfileTarget(options: CompileExpressionOptions | undefined) {
         '(the `target` option)'
     );
   const to = options.to ?? 'javascript';
-  if (to !== 'javascript' && !(to === 'glsl' && ir))
+  if (to !== 'javascript' && !((to === 'glsl' || to === 'interval-js') && ir))
     throw new Error(
       `Invalid compilation option "profile": the profile "${options.profile}" is ` +
         `defined for ${targets} only, not for "${to}"`
@@ -833,17 +834,23 @@ function compileInScope<
     // assembly of the JavaScript target.
     // The profile `ir` (experimental) compiles with the IR compiler
     // (`ir/adapter.ts`); a decline falls back in the catch below. On
-    // `glsl` (`ir/adapter-glsl.ts`), a decline falls back to the GLSL target.
-    if (options?.profile === 'ir' && targetName === 'glsl')
+    // `glsl` (`ir/adapter-glsl.ts`) and `interval-js`
+    // (`ir/adapter-interval.ts`), a decline falls back to that target.
+    if (
+      options?.profile === 'ir' &&
+      (targetName === 'glsl' || targetName === 'interval-js')
+    )
       try {
-        return compileWithIrProfileGlsl(
-          expr,
-          options
-        ) as unknown as CompilationResult<T, R>;
+        return (targetName === 'glsl'
+          ? compileWithIrProfileGlsl(expr, options)
+          : compileWithIrProfileInterval(
+              expr,
+              options
+            )) as unknown as CompilationResult<T, R>;
       } catch (e) {
         if (!isCompileDeclineError(e) || options.fallback === false) throw e;
         console.warn(
-          `Compilation fallback for "${expr.operator}" (target: glsl, profile: ir): ${e.message}`
+          `Compilation fallback for "${expr.operator}" (target: ${targetName}, profile: ir): ${e.message}`
         );
         return strictTypesChecked(
           expr,

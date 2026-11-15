@@ -125,7 +125,7 @@ describe('the option selects the IR compiler', () => {
     expect(() =>
       compile(box(['Add', 'x', 1]), { ...IR, to: 'python' } as never)
     ).toThrow(
-      /the profile "ir" is defined for the targets "javascript" and "glsl" only/
+      /the profile "ir" is defined for the targets "javascript", "glsl" and "interval-js" only/
     );
   });
 });

@@ -595,6 +595,19 @@ interpreter's value. A line is removed when the case declines or is fixed.
   applied through a call of a user function); the interpreter's
   `evaluate().N()` gives about `100!`, and its `.N()` also gives `NaN`.
   With the integrand written inline, the fallback gives the value.
+- `plausible?` — `interval-js`, `x: real` over the interval `[-1, 1]`:
+  `Block(Declare(t, real, 0), If(x > 0, Assign(t, 2x), Assign(t, -1)), t)`
+  gives the interval `[-1, -1]` (where the condition is undecided the code
+  evaluates both arms in turn, each arm writes the local, and the local
+  keeps the value of the second arm); the interpreter gives `1` at
+  `x = 0.5`.
+- `interval-js` (crafted: a box of width 10⁻⁶ across the edge of the
+  domain), `x: real` over `[-1.0000005, -0.9999995]`: `Arcsec(x)` gives a
+  lower end of `3.1405926537980786`, and the interpreter gives
+  `3.14059265379812650` at `x = -1.0000005`, below it by about 5·10⁻¹⁴.
+  `Arccsc(x)` and `Arcoth(x)` miss the value at the same point in the same
+  way. The kernels `_IA.asec`, `_IA.acsc` and `_IA.acoth` take one outward
+  step for the rounding of `1/x`, and the derivative there is about 1,000.
 
 ## The worker pool and `parallel for`: `runAsync()`
 

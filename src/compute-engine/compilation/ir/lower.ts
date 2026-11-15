@@ -42,6 +42,12 @@
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import type { Type } from '../../../common/type/types.js';
 import type { Expression } from '../../global-types.js';
+import type { NumericValue } from '../../numeric-value/types.js';
+import { BigDecimal } from '../../../big-decimal/index.js';
+import {
+  exactDoubleValue,
+  exactValueDoubleRoundings,
+} from '../../numeric-value/exact-integer-value.js';
 import {
   isDictionary,
   isFunction,
@@ -165,11 +171,13 @@ const NODE_LIMIT = 50_000;
  *  operands prove a real value (`OperatorRow.leaves`). `mode: 'bigint'`:
  *  every number is an integer, exact at any size (a closed node is the
  *  exact value of `evaluate()`); a real or complex value declines.
- *  `iterationBudget`:
+ *  `mode: 'interval'`: `'strict'`, with a real literal whose double is not
+ *  its value marked `inexact`, and `x^(p/q)` of a literal rational `p/q`
+ *  lowered as `Root(x, q)^p`. `iterationBudget`:
  *  a `Sum` or a `Product` of more passes than it is NaN. */
 export type LowerOptions = {
   readonly fold?: boolean;
-  readonly mode?: 'strict' | 'complex' | 'bigint';
+  readonly mode?: 'strict' | 'complex' | 'bigint' | 'interval';
   readonly iterationBudget?: number;
   /** The `vars` option: a name read as the host's text (`hostVarOp()`). */
   readonly vars?: readonly string[];
@@ -192,6 +200,7 @@ export function lower(
 ): Program {
   const ce = root.engine;
   const bigint = options.mode === 'bigint';
+  const interval = options.mode === 'interval';
   const b = new Builder(
     (op) => rowOfOp(rows, op)?.row.effect === 'pure',
     (i) =>
@@ -395,7 +404,11 @@ export function lower(
     if (factors) {
       const plain = { ...r, angle: undefined };
       const scale = (v: V, k: number) =>
-        apply(node, row('Multiply'), [v, b.constant(k, 'real')]);
+        apply(node, row('Multiply'), [
+          v,
+          // Two roundings (`Math.PI / 180`).
+          b.constant(k, 'real', interval ? 2 : undefined),
+        ]);
       return r.angle === 'operands'
         ? apply(
             node,
@@ -425,8 +438,17 @@ export function lower(
         node,
         `${r.head} of a matrix (a list of rank 2 or more) with a list or as a base: the interpreter's value is the matrix product or power, or element by element for some operands`
       );
+    // The interval mode: only for the library constant of the value
+    // (`ExponentialE`), not for a literal whose double is the value
+    // (`Power(2.718281828459045, x)` is not `Exp(x)`).
     const c = r.constantOperand;
-    if (c !== undefined && b.constants.get(args[c.index]) === c.value)
+    const operand = isFunction(node) ? node.ops[c?.index ?? 0] : undefined;
+    if (
+      c !== undefined &&
+      b.constants.get(args[c.index]) === c.value &&
+      (!interval ||
+        (isSymbol(operand) && CONSTANTS.get(operand.symbol) === c.value))
+    )
       return apply(
         node,
         row(c.head),
@@ -611,7 +633,10 @@ export function lower(
     if (++lowered > NODE_LIMIT)
       decline(root, `more than ${NODE_LIMIT} nodes to lower`);
     if (isNumber(e))
-      return number(e) ?? decline(e, 'a complex number with an infinite part');
+      return (
+        number(e, interval ? literalUlps(e.numericValue) : undefined) ??
+        decline(e, 'a complex number with an infinite part')
+      );
     if (isSymbol(e)) return symbol(e, want);
     if (!isFunction(e)) decline(e, 'not a number, a symbol or a function');
     // An invalid sub-expression (`Sin(Tuple(w))` of a vector `w`): the
@@ -738,15 +763,47 @@ export function lower(
       }
       case 'Multiply':
         return product(e);
+      case 'Power': {
+        // The interval mode: `x^(p/q)` of a literal rational exponent is
+        // the integer power `p` of the root of degree `q`, which the kernels
+        // enclose tightly for a negative `x` too.
+        const nv = isNumber(e.ops[1]) ? e.ops[1].numericValue : undefined;
+        const pq =
+          interval && typeof nv === 'object' && nv.isExact
+            ? e.ops[1].toRational()
+            : null;
+        if (pq === null || !pq.every(Number.isSafeInteger) || pq[1] < 2) {
+          // The interval mode: a power by the unmarked constant 2 (a
+          // literal, a name that holds 2) is `square`, the kernel of half
+          // the cost of `pow`.
+          if (!interval || e.nops !== 2) break;
+          const [x, k] = e.ops.map((op) => value(op)!);
+          return constant(k) === 2 && type(k).lane === 'integer'
+            ? apply(e, rowOfOp(rows, 'square')!.row, [x])
+            : apply(e, row('Power'), [x, k]);
+        }
+        const root = apply(e, row('Root'), [
+          value(e.ops[0])!,
+          b.constant(pq[1], 'integer'),
+        ]);
+        return pq[0] === 1
+          ? root
+          : apply(e, row('Power'), [root, b.constant(pq[0], 'integer')]);
+      }
       case 'Log': {
         // `Log(x, 10)` is `log10`, a real `Log(x, 2)` is `log2` (exact at a
         // power of the base, as the interpreter: `Floor(Log(1000, 10))` is
         // 3); another base is `Ln(x) / Ln(b)`.
         if (e.nops !== 2) break;
         const [x, base] = e.ops.map((op) => value(op)!);
-        if (constant(base) === 10) return apply(e, row('Log'), [x]);
+        // In the interval mode the base is 10 or 2 only on the integer
+        // lane: a decimal whose double is 10 (`10.0000000000000001`) is a
+        // real constant with an enclosure, and takes `Ln(x) / Ln(b)`.
+        const is = (n: number) =>
+          constant(base) === n && (!interval || type(base).lane === 'integer');
+        if (is(10)) return apply(e, row('Log'), [x]);
         if (
-          constant(base) === 2 &&
+          is(2) &&
           type(x).lane !== 'complex' &&
           options.mode !== 'complex'
         )
@@ -1008,9 +1065,28 @@ export function lower(
         resolvedValueDefinition(ce.box(s))?.value !== undefined);
     if ([...f.names].some(valued)) return undefined;
     let n: Expression;
+    // The interval mode: the value of `evaluate()` when it is an exact
+    // number that is a double, or a safe integer computed in big decimals
+    // (`Mod(1, 1/10)` is 0, `Floor(100π)` is 314); else the value of `N()`
+    // marked `inexact`, when `N()` computes in big decimals of more digits
+    // than a double holds, so that its double is within 1 ulp; else the node
+    // is lowered as written, and the kernels enclose it.
+    let exact = false;
     try {
       // The bigint mode: the exact value (`N()` of `2^70 + 1` is rounded).
-      n = bigint ? e.evaluate() : e.N();
+      n = bigint || interval ? e.evaluate() : e.N();
+      if (interval) {
+        const nv = isNumber(n) ? n.numericValue : undefined;
+        const big = bigDecimalFolds(ce.precision);
+        exact =
+          typeof nv === 'number'
+            ? big && Number.isSafeInteger(nv)
+            : nv !== undefined &&
+              nv.isExact &&
+              exactDoubleValue(nv) !== undefined;
+        if (!exact && !big) return undefined;
+        if (!exact) n = e.N();
+      }
     } catch (error) {
       if (error instanceof Error && error.name === 'CancellationError')
         throw error;
@@ -1021,13 +1097,16 @@ export function lower(
     // A value that is not an integer (a pole, `Mod(5, 0)`) is lowered as
     // written: its helper throws the pole where the node is evaluated.
     if (bigint && isNumber(n) && n.isInteger !== true) return undefined;
-    return isNumber(n) ? number(n) : undefined;
+    if (!isNumber(n)) return undefined;
+    return number(n, interval && !exact ? 1 : undefined);
   };
 
   /** The literal of the number `e`: an integer, a real, or a complex of
-   *  finite parts (not `ComplexInfinity`, which a real pole gives). */
+   *  finite parts (not `ComplexInfinity`, which a real pole gives).
+   *  `inexact`: the mark of a finite real (the interval mode). */
   const number = (
-    e: Expression & { re: number; im: number }
+    e: Expression & { re: number; im: number },
+    inexact?: number
   ): V | undefined => {
     if (bigint) {
       const n = e.isInteger === true ? toBigint(e) : null;
@@ -1035,8 +1114,18 @@ export function lower(
         decline(e, 'a number that is not an integer (the bigint mode)');
       return exact(n);
     }
+    if (e.im === 0 && inexact !== undefined && Number.isFinite(e.re))
+      return b.constant(e.re, 'real', inexact);
+    // The interval mode: an exact number that is a double is that double
+    // (`e.re` converts the numerator and the denominator of a rational that
+    // is not reduced separately).
+    const nv = interval && isNumber(e) ? e.numericValue : undefined;
+    const re =
+      (typeof nv === 'object' && nv.isExact
+        ? exactDoubleValue(nv)
+        : undefined) ?? e.re;
     if (e.im === 0)
-      return b.constant(e.re, Number.isSafeInteger(e.re) ? 'integer' : 'real');
+      return b.constant(re, Number.isSafeInteger(re) ? 'integer' : 'real');
     if (Number.isFinite(e.re) && Number.isFinite(e.im))
       return b.constant({ re: e.re, im: e.im }, 'complex');
     return undefined;
@@ -1142,7 +1231,7 @@ export function lower(
       // The symbol's binding, and the innermost binding of its name.
       if (isShadowedSymbol(e as never) || held(name)?.library !== true)
         decline(e, `${name} is not the library constant here`);
-      return b.constant(c, 'real');
+      return b.constant(c, 'real', interval ? 1 : undefined);
     }
     const h = held(name);
     if (cx.inFunction === undefined)
@@ -1710,4 +1799,45 @@ export function lower(
     const v = value(root)!;
     return rootParts ?? v;
   });
+}
+
+/**
+ * The interval mode: the count of ulps within which the double of the
+ * number literal `nv` is its value, or `undefined` when the double is the
+ * value (a machine number, a decimal or an exact number that is a double:
+ * `0.5`, `1/2`, `5`). A decimal `m·10^k` is a double when it is an integer
+ * that converts exactly, or `5^-k` divides `m` and the double of the
+ * quotient by `2^-k` is exact.
+ */
+function literalUlps(nv: number | NumericValue): number | undefined {
+  if (typeof nv === 'number' || nv.im !== 0 || !Number.isFinite(nv.re))
+    return undefined;
+  if (nv.isExact)
+    return exactDoubleValue(nv) === undefined
+      ? exactValueDoubleRoundings(nv)
+      : undefined;
+  const d = nv.bignumRe;
+  if (d === undefined) return 1;
+  const k = BigInt(d.exponent);
+  let n = d.significand;
+  let x = nv.re;
+  if (k < 0n) {
+    const five = 5n ** -k;
+    if (n % five !== 0n) return 1;
+    n /= five;
+    x *= 2 ** Number(-k);
+  } else n *= 10n ** k;
+  return Number.isInteger(x) && BigInt(x) === n ? undefined : 1;
+}
+
+/**
+ * The interval mode: whether `N()` computes in big decimals of more digits
+ * than the 17 of a double, so that its value read as a double is within
+ * 1 ulp. The engine's precision decides big decimals against doubles
+ * (`bignumPreferred()`, `precision > MACHINE_PRECISION`), and the
+ * process-global `BigDecimal.precision`, which another engine can have
+ * changed, sizes the big decimals (the note in `numerics/real-power.ts`).
+ */
+function bigDecimalFolds(precision: number): boolean {
+  return precision >= 18 && BigDecimal.precision >= 18;
 }

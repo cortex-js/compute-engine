@@ -47,9 +47,11 @@ export type IRType = {
 // read by `elem` with a literal index and printed as an array or a struct.
 
 /** A typed literal. An integer beyond the safe integers is a `bigint`
- *  (`mode: 'bigint'` only); a safe one is always a number. */
+ *  (`mode: 'bigint'` only); a safe one is always a number. `inexact`
+ *  (`mode: 'interval'` only): the value is not the double, which is within
+ *  that many ulps of it. */
 export type Literal =
-  | { readonly lane: 'real'; readonly value: number }
+  | { readonly lane: 'real'; readonly value: number; readonly inexact?: number }
   | { readonly lane: 'integer'; readonly value: number | bigint }
   | { readonly lane: 'boolean'; readonly value: boolean }
   | { readonly lane: 'complex'; readonly value: Cx };
@@ -57,13 +59,20 @@ export type Literal =
 /** The value of a constant. */
 export type Constant = number | bigint | boolean | Cx;
 
-/** The key of a constant: equal keys are one value (`-0` is not `0`). */
-export function literalKey(lane: Lane, value: Constant): string {
+/** The key of a constant: equal keys are one value (`-0` is not `0`, a
+ *  literal marked `inexact` is not the double). */
+export function literalKey(
+  lane: Lane,
+  value: Constant,
+  inexact?: number
+): string {
   const n = (x: number | bigint | boolean) =>
     Object.is(x, -0) ? '-0' : String(x);
-  return typeof value === 'object'
-    ? `c ${lane} ${n(value.re)} ${n(value.im)}`
-    : `c ${lane} ${n(value)}`;
+  const key =
+    typeof value === 'object'
+      ? `c ${lane} ${n(value.re)} ${n(value.im)}`
+      : `c ${lane} ${n(value)}`;
+  return inexact === undefined ? key : `${key} ~${inexact}`;
 }
 
 export type Region = {
@@ -414,11 +423,14 @@ export class Builder {
     return v;
   }
 
-  constant(value: Constant, lane: Lane): V {
-    return this.once(literalKey(lane, value), () => {
+  /** `inexact`: the mark of a real literal (`Literal`). */
+  constant(value: Constant, lane: Lane, inexact?: number): V {
+    return this.once(literalKey(lane, value, inexact), () => {
       const out = this.newValue(scalarType(lane));
       this.constants.set(out, value);
-      const literal = { lane, value } as Literal;
+      const literal = (
+        inexact === undefined ? { lane, value } : { lane, value, inexact }
+      ) as Literal;
       this.emit({ k: 'const', out, value: literal });
       return out;
     });

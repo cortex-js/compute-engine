@@ -42,6 +42,19 @@
   take such a list and return one. GLSL declines a list of points. The rows
   are not checked at the entry: a row of another length gives an unspecified
   result.
+- **The experimental profile `'ir'` compiles for `interval-js`.**
+  `compile(expr, { to: 'interval-js', profile: 'ir' })` compiles scalar
+  arithmetic, the elementary functions, powers, comparisons and calls of
+  user functions that are not recursive, with the result shapes of the
+  target (an `IntervalResult`, or the verdict `'true'`, `'false'` or
+  `'maybe'`). Any other program declines, and with `fallback` the existing
+  target then compiles it: a conditional, a `Sum`, a list. Without the
+  option `profile`, nothing changes.
+- **The interval library has a kernel `powReal(base, exponent)`**, also a
+  member of `IntervalArithmetic`: the power for an exponent given as an
+  interval, which encloses the real roots of a negative base when the
+  exponent is a float that can stand for a rational of odd denominator
+  (`powReal([-8, -8], [0.2, 0.2])` contains `-1.5157…`).
 
 ## 0.192.0 _2026-11-15_
 
