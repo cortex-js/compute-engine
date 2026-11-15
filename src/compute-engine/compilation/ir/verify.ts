@@ -214,12 +214,25 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
             `call ${i.fn}`
           )
         );
-        if (i.outs.length !== f.results.length)
+        // A list result of a run-time length has its length before it,
+        // which the type of the list names.
+        const [r] = f.results;
+        const n = lengthValues(r).length > 0 ? i.outs[0] : undefined;
+        if (
+          f.results.length !== 1 ||
+          i.outs.length !== (n === undefined ? 1 : 2)
+        )
           fail(`call ${i.fn}: ${i.outs.length} results`);
-        i.outs.forEach((o, k) => {
-          if (!isSubType(f.results[k], type(o)))
-            fail(`call ${i.fn}: result ${k}`);
-        });
+        if (n !== undefined) sub(n, scalarType('integer'), `call ${i.fn}`);
+        const out = i.outs[i.outs.length - 1];
+        if (
+          !isSubType(
+            mapLengths(r, () => n!),
+            type(out),
+            constant
+          )
+        )
+          fail(`call ${i.fn}: its result`);
       }
     }
   };

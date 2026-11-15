@@ -74,7 +74,7 @@ export type Signature = readonly [
 ];
 
 /** An engine setting that a row assumes at its default value. */
-export type Setting = 'angularUnit' | 'roundingTies';
+export type Setting = 'roundingTies';
 
 export type OperatorRow = {
   readonly head?: string;
@@ -88,6 +88,11 @@ export type OperatorRow = {
    *  the row `head` of the other operands (`e^x` is `Exp(x)`). */
   readonly constantOperand?: { index: number; value: number; head: string };
   readonly settings?: readonly Setting[];
+  /** Under an angular unit other than radians (`ANGLE_FACTORS`), the
+   *  operands are angles, multiplied by the radians of the unit
+   *  (`operands`), or the result is one, multiplied by the units of a
+   *  radian (`result`), as the interpreter converts them. */
+  readonly angle?: 'operands' | 'result';
   /** `operand`: the result can be (a part of) its list operand, so it can
    *  alias an input; otherwise the result is a new value. */
   readonly alias?: 'operand';
@@ -180,7 +185,8 @@ function frozenMap<K, T>(entries: [K, T][]): ReadonlyMap<K, T> {
   return Object.freeze(m);
 }
 
-const angle: Options = { settings: ['angularUnit'] };
+const angle: Options = { angle: 'operands' };
+const inverse: Options = { angle: 'result' };
 const list: Options = { threads: false };
 const part: Options = { threads: false, alias: 'operand' };
 
@@ -200,11 +206,11 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Cos',          1,          rc('cos', 1),                  { fold: Math.cos, ...angle }),
   row('Tan',          1,          rc('tan', 1),                  { fold: Math.tan, ...angle }),
   row('Cot',          1,          rc('cot', 1),                  { fold: (x: number) => 1 / Math.tan(x), ...angle }),
-  row('Degrees',      1,          [[[R], R, 'deg']],             { fold: (x: number) => (x * Math.PI) / 180, ...angle }),
+  row('Degrees',      1,          [[[R], R, 'deg']],             { fold: (x: number) => (x * Math.PI) / 180, ...inverse }),
   row('Real',         1,          [[[C], R, 'cre']],             {}),
   row('Imaginary',    1,          [[[C], R, 'cim']],             {}),
   row('Conjugate',    1,          [[[C], C, 'cconj']],           {}),
-  row('Argument',     1,          [[[C], R, 'carg']],            {}),
+  row('Argument',     1,          [[[C], R, 'carg']],            inverse),
   // The conversion of a real to the complex lane, which the lowering adds.
   row(undefined,      1,          [[[R], C, 'cplx']],            {}),
   row('Floor',        1,          [[[R], I, 'floor']],           { fold: Math.floor }),
@@ -217,13 +223,13 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Log',          1,          rc('log10', 1, 'clog10'),      { fold: Math.log10, ...cut }),
   row('Hypot',        2,          [[[R, R], R, 'hypot']],        { fold: Math.hypot }),
   row('Root',         2,          rc('root', 2),                 { fold: F.root, ...cut }),
-  row('Arctan',       1,          rc('atan', 1),                 { fold: Math.atan, ...angle }),
-  row('Arctan2',      2,          [[[R, R], R, 'atan2']],        { fold: F.atan2, ...angle }),
-  row('Arcsin',       1,          rc('asin', 1),                 { fold: Math.asin, ...angle, ...domain }),
-  row('Arccos',       1,          rc('acos', 1),                 { fold: Math.acos, ...angle, ...domain }),
-  row('Arccot',       1,          rc('acot', 1),                 { fold: F.acot, ...angle }),
-  row('Arcsec',       1,          rc('asec', 1),                 { fold: F.asec, ...angle, ...domain }),
-  row('Arccsc',       1,          rc('acsc', 1),                 { fold: F.acsc, ...angle, ...domain }),
+  row('Arctan',       1,          rc('atan', 1),                 { fold: Math.atan, ...inverse }),
+  row('Arctan2',      2,          [[[R, R], R, 'atan2']],        { fold: F.atan2, ...inverse }),
+  row('Arcsin',       1,          rc('asin', 1),                 { fold: Math.asin, ...inverse, ...domain }),
+  row('Arccos',       1,          rc('acos', 1),                 { fold: Math.acos, ...inverse, ...domain }),
+  row('Arccot',       1,          rc('acot', 1),                 { fold: F.acot, ...inverse }),
+  row('Arcsec',       1,          rc('asec', 1),                 { fold: F.asec, ...inverse, ...domain }),
+  row('Arccsc',       1,          rc('acsc', 1),                 { fold: F.acsc, ...inverse, ...domain }),
   row('Haversine',    1,          [[[R], R, 'hav']],             { fold: F.hav, ...angle }),
   row('Coth',         1,          rc('coth', 1),                 { fold: F.coth }),
   row('Arsinh',       1,          rc('asinh', 1),                { fold: Math.asinh }),
@@ -368,12 +374,21 @@ export const CONSTANTS: ReadonlyMap<string, number> = frozenMap([
   ['ExponentialE', Math.E],
 ]);
 
+/** The radians of an angle of 1 in each angular unit, and the angle of 1
+ *  radian in that unit. */
+export const ANGLE_FACTORS: Readonly<
+  Record<string, readonly [number, number]>
+> = deepFreeze({
+  deg: [Math.PI / 180, 180 / Math.PI],
+  grad: [Math.PI / 200, 200 / Math.PI],
+  turn: [2 * Math.PI, 1 / (2 * Math.PI)],
+});
+
 /** Whether the engine has the setting `s` at the value the rows assume. */
 export const SETTINGS: Record<
   Setting,
-  (ce: { angularUnit: string; roundingTies: string }) => boolean
+  (ce: { roundingTies: string }) => boolean
 > = Object.freeze({
-  angularUnit: (ce: { angularUnit: string }) => ce.angularUnit === 'rad',
   roundingTies: (ce: { roundingTies: string }) =>
     ce.roundingTies === 'away-from-zero',
 });

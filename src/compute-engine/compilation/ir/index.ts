@@ -181,6 +181,14 @@ export function admits(
     const m = region(f.body);
     if (m !== undefined) return m;
   }
+  if (entry.tuple === true && profile.syntax.retTuple === undefined)
+    return { head: 'Tuple', cause: 'a Tuple of elements of several shapes' };
+  // A function returns no list where lengths are stated only (GLSL).
+  const listResult = p.functions.find(
+    (f) => f !== entry && f.results[0].shape.length > 0
+  );
+  if (listResult !== undefined && !profile.runtimeLengths)
+    return { cause: `the list result of ${listResult.source}` };
   if (!profile.recursion && recursiveFunctions(p.functions).size > 0)
     return {
       cause: `a recursive function (${[...recursiveFunctions(p.functions)].join(', ')})`,

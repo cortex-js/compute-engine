@@ -193,12 +193,10 @@ describe('IR slice: the real functions at edge inputs', () => {
       interpret(ce, ce.box(['Root', 'x', 'y'] as never), { x: 0.5, y: 0 })
     ).toBe('none');
   });
-  test('an inverse trigonometric function declines with degrees', () => {
+  test('an inverse trigonometric function gives degrees with degrees', () => {
     const deg = makeEngine();
     deg.angularUnit = 'deg';
-    expect(declineOf(() => js(['Arctan', 'x'], deg)).cause).toMatch(
-      /angularUnit/
-    );
+    expect(js(['Arctan', 'x'], deg).run({ x: 1 })).toBeCloseTo(45, 12);
   });
 });
 
@@ -269,8 +267,13 @@ describe('IR slice: the forms of a declaration', () => {
         /a local of type list<real>/,
       ],
       [
-        ['Block', ['Declare', 't', "'unknown'", 'D'], ['At', 't', 1]],
-        /a list where a scalar/,
+        [
+          'Block',
+          ['Declare', 't', "'unknown'", 'D'],
+          ['Assign', 't', 'D'],
+          ['At', 't', 1],
+        ],
+        /a write to a constant .* or to a list local/,
       ],
     ] as [unknown, RegExp][])
       expect(declineOf(() => js(json)).cause).toMatch(cause);
@@ -496,9 +499,7 @@ describe('IR slice: declines', () => {
     const engine = new ComputeEngine();
     engine.declare('x', 'real');
     engine.angularUnit = 'deg';
-    expect(declineOf(() => js(['Sin', 'x'], engine)).message).toMatch(
-      /angularUnit/
-    );
+    expect(js(['Sin', 'x'], engine).run({ x: 30 })).toBeCloseTo(0.5, 12);
     engine.angularUnit = 'rad';
     engine.roundingTies = 'to-even';
     expect(declineOf(() => js(['Round', 'x'], engine)).message).toMatch(

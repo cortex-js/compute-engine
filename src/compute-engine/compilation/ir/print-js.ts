@@ -186,6 +186,8 @@ export const JS: Syntax = Object.freeze({
   close: '}',
   ret: (value, _type, copy) =>
     `return ${copy ? `structuredClone(${value})` : value};`,
+  retTuple: (values, copy) =>
+    `return [${values.map((v, k) => (copy[k] ? `structuredClone(${v})` : v)).join(', ')}];`,
   call: (fn, args) => `${fn}(${args.join(', ')})`,
   fn: (name, params, _result, body) =>
     [

@@ -345,7 +345,7 @@ export function compileWithIrProfile(
   // result, which a worker loads. There is no batch body (CE-410) and no
   // asynchronous copy (`parallelCode`): `runAsync()` runs `run()`. A batch
   // runs in one reconstruction-digit frame, as a loader runs each call.
-  const outputs = broadcastStrideOfType(expr.type.type);
+  const outputs = entry.tuple ? 1 : broadcastStrideOfType(expr.type.type);
   if (outputs > 1) result.broadcastOutputs = outputs;
   const inFrame = <T>(g: () => T): T => {
     if (bigint) throw bigintBroadcastError();

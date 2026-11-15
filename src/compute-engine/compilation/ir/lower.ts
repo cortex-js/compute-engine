@@ -70,6 +70,7 @@ import {
   type V,
 } from './ir.js';
 import {
+  ANGLE_FACTORS,
   CONSTANTS,
   REDUCTIONS,
   regionRow,
@@ -187,6 +188,11 @@ export function lower(
   >();
   const known = new WeakMap<Expression, Facts>();
   const inputLengths = new Set<V>();
+  // The root `Tuple`, or the last operand of a root `Block` that is one.
+  let rootTuple: Expression | undefined = root;
+  while (isFunction(rootTuple, 'Block')) rootTuple = rootTuple.ops.at(-1);
+  if (!isFunction(rootTuple, 'Tuple')) rootTuple = undefined;
+  let rootParts: V[] | undefined;
   const tuples = new Map<V, number>();
   /** `to`, marked a tuple where `from` is one, with the axis `from` has
    *  plus `shift`. */
@@ -364,6 +370,22 @@ export function lower(
 
   /** Apply `row` to the values `args`. */
   const apply = (node: Expression, r: OperatorRow, args: V[]): V => {
+    // An angle in another unit than radians: the operands of a direct
+    // function are converted to radians, the result of an inverse one from
+    // radians, with the factors of the unit at the time of the compilation.
+    const factors = r.angle && ANGLE_FACTORS[ce.angularUnit];
+    if (factors) {
+      const plain = { ...r, angle: undefined };
+      const scale = (v: V, k: number) =>
+        apply(node, row('Multiply'), [v, b.constant(k, 'real')]);
+      return r.angle === 'operands'
+        ? apply(
+            node,
+            plain,
+            args.map((v) => scale(v, factors[0]))
+          )
+        : scale(apply(node, plain, args), factors[1]);
+    }
     for (const s of r.settings ?? [])
       if (!SETTINGS[s](ce))
         decline(node, `${r.head} with a ${s} other than the default`);
@@ -530,11 +552,24 @@ export function lower(
           e,
           e.ops.map((op) => value(op)!)
         );
-      case 'Tuple':
-        return tuple(
-          e,
-          e.ops.map((op) => value(op)!)
-        );
+      case 'Tuple': {
+        const parts = e.ops.map((op) => value(op)!);
+        const t = parts.map(type);
+        // A root `Tuple` (or the last operand of a root `Block`) of tuples
+        // or of elements not of one shape (`Tuple(H)` of a list of run-time
+        // length) is no value of the program: the entry returns the array
+        // of its elements.
+        if (
+          e !== rootTuple ||
+          (!parts.some((v) => tuples.has(v)) &&
+            t.every(
+              (x) => same(x.shape, t[0].shape) && !lengthValues(x).length
+            ))
+        )
+          return tuple(e, parts);
+        rootParts = parts;
+        return parts[0];
+      }
       case 'PointList':
         return pointList(e);
       case 'Comprehension':
@@ -1159,7 +1194,15 @@ export function lower(
             )
           )
             decline(s, `a local of type ${typeName}`);
-          const v = scalar(value);
+          // A list (or a tuple) local of no stated type is its value, a
+          // local that no `Assign` writes (`assign()` declines one).
+          const v = cx.value(value)!;
+          if (type(v).shape.length > 0) {
+            if (typeName !== 'unknown')
+              decline(s, `a list value for a local declared ${typeName}`);
+            frame.names.set(name.symbol, { v, role: 'constant' });
+            return void (result = v);
+          }
           // With no type, a number is a real: a later write of a real to
           // `let t = 0` is valid.
           // In the bigint mode a real write declines: an integer stays one.
@@ -1286,7 +1329,10 @@ export function lower(
     if (!isSymbol(name)) decline(e, 'a write that is not to a name');
     const known = lookup(name.symbol);
     if (known?.binding.role === 'constant')
-      decline(e, 'a write to a constant (the interpreter refuses it)');
+      decline(
+        e,
+        'a write to a constant (the interpreter refuses it) or to a list local'
+      );
     if (known?.binding.role !== 'local')
       decline(e, 'a write to a name that is not a local');
     if (known.outer)
@@ -1336,5 +1382,8 @@ export function lower(
       return value(root.ops[0])!;
     });
   }
-  return b.program(() => value(root)!);
+  return b.program(() => {
+    const v = value(root)!;
+    return rootParts ?? v;
+  });
 }

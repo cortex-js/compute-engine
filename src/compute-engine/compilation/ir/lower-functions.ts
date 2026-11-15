@@ -17,7 +17,9 @@ import { isSubtype } from '../../../common/type/subtype.js';
 import type { Expression } from '../../global-types.js';
 import { isFunction } from '../../boxed-expression/type-guards.js';
 import {
+  isSubLane,
   isSubType,
+  sameShape,
   typeToString,
   type IRFunction,
   type IRType,
@@ -47,6 +49,7 @@ export function inputType(
   wide: 'real' | 'complex' = 'real'
 ): { lane: Lane; shape: (number | 'run-time')[] } | undefined {
   const lane = (t: Type, element: boolean): Lane | undefined => {
+    t = present(t);
     // A complex list entry declines (below).
     if (t === 'number' || (t === 'unknown' && !element))
       return !element ? wide : wide === 'complex' ? undefined : 'real';
@@ -71,6 +74,17 @@ export function inputType(
   }
   const l = lane(t, shape.length > 0);
   return l === undefined ? undefined : { lane: l, shape };
+}
+
+/** A union of one type and `nan` or `missing` members is that type
+ *  (`missing | rational`, `integer | nan` is an integer, `nan | number`,
+ *  `complex | nan`): the compiled
+ *  code gives NaN where the interpreter gives `Missing` (the caveats of
+ *  compiled code). */
+function present(t: Type): Type {
+  if (typeof t !== 'object' || t.kind !== 'union') return t;
+  const rest = t.types.filter((u) => u !== 'nan' && u !== 'missing');
+  return rest.length === 1 ? rest[0] : t;
 }
 
 /** `t` is a union whose every member is a real type, `nan` or an infinity
@@ -137,12 +151,20 @@ function signatureTypes(e: Fn, literal: Fn) {
           shape: [],
         };
   });
-  const r = signature?.result;
+  const r = signature?.result && present(signature.result);
+  // A list of reals, integers or booleans: the type of the body, whose
+  // length can be a value of the body.
+  const ir = r === undefined ? undefined : inputType(r);
+  const list = ir?.shape.length === 1 ? ir : undefined;
   const result =
-    r === undefined || r === 'unknown' || r === 'number' || r === 'any'
+    r === undefined ||
+    r === 'unknown' ||
+    r === 'number' ||
+    r === 'any' ||
+    list !== undefined
       ? undefined
       : scalarOf(literal, r, `the result of ${e.operator}`);
-  return { names, params, result };
+  return { names, params, result, list, r };
 }
 
 /** A user function: the IR function, its parameter types and its result
@@ -172,7 +194,7 @@ export function functionLowering(cx: Lowering) {
 
   /** The IR function of the user function of `key`, lowered once. */
   const define = (e: Fn, key: object, literal: Fn): UserFunction => {
-    const { names, params, result } = signatureTypes(e, literal);
+    const { names, params, result, list, r } = signatureTypes(e, literal);
     const ir: IRFunction = {
       name: `u${functions.size}_${e.operator.replace(/[^A-Za-z0-9]/g, '')}`,
       source: e.operator,
@@ -219,7 +241,27 @@ export function functionLowering(cx: Lowering) {
     cx.inFunction = e.operator;
     try {
       b.define(ir, () => {
-        const v = cx.scalar(literal.ops[0]);
+        const body = list
+          ? cx.value(literal.ops[0])!
+          : cx.scalar(literal.ops[0]);
+        const t = type(body);
+        if (
+          list !== undefined &&
+          (cx.tuples.has(body) ||
+            t.shape.length !== 1 ||
+            !isSubLane(t.lane, list.lane) ||
+            (list.shape[0] !== 'run-time' &&
+              !sameShape(t.shape, list.shape as number[], cx.constant)))
+        )
+          decline(
+            literal,
+            `a body of ${e.operator} that is not ${engineTypeToString(r!)}`
+          );
+        // A real body of a complex result is converted.
+        const v =
+          fn.result?.lane === 'complex' && type(body).lane !== 'boolean'
+            ? cx.widen(body, 'complex')
+            : body;
         if (fn.result !== undefined && !isSubType(type(v), fn.result))
           decline(
             literal,
@@ -301,10 +343,19 @@ export function functionLowering(cx: Lowering) {
         );
       return v;
     });
-    const out = b.newValue(fn.result);
+    // A list result of a run-time length: its length is a result of the
+    // call before it, the length of the returned list.
+    const n = fn.result.shape[0];
+    const outs =
+      typeof n === 'object' ? [b.newValue({ lane: 'integer', shape: [] })] : [];
+    const out = b.newValue(
+      outs.length > 0
+        ? { lane: fn.result.lane, shape: [{ v: outs[0] }] }
+        : fn.result
+    );
     b.emit({
       k: 'call',
-      outs: [out],
+      outs: [...outs, out],
       fn: fn.ir.name,
       args: [...args, ...inputs],
     });

@@ -1006,18 +1006,12 @@ describe('Degrees and Cot', () => {
     expect(compileSlice(box(json, engine), { target: 'glsl' }).code).toMatch(
       /sin\(radians\(/
     );
-    // Under grad or turn the row declines (Degrees(h) is in that unit).
+    // Under grad or turn, Degrees(h) is the angle in that unit.
     for (const unit of ['grad', 'turn'] as const) {
       const other = new ComputeEngine();
       other.angularUnit = unit;
       other.declare('h', 'real');
-      const o = outcome(box(['Degrees', 'h'], other));
-      expect([unit, 'message' in o && o.message]).toEqual([
-        unit,
-        expect.stringMatching(
-          /Degrees with a angularUnit other than the default/
-        ),
-      ]);
+      againstInterpreter(other, ['Degrees', 'h'], [{ h: 30 }, { h: -127.5 }]);
     }
   });
   test('Cot on the real lane and the complex lane', () => {
@@ -1484,6 +1478,109 @@ describe('a vars name that reads the inputs object, in a function body', () => {
     });
     expect('message' in o && o.message).toMatch(
       /the vars name P in a function/
+    );
+  });
+});
+
+describe('trigonometric rows under an angular unit other than radians', () => {
+  const engine = (unit: 'deg' | 'grad' | 'turn'): ComputeEngine => {
+    const e = new ComputeEngine();
+    e.angularUnit = unit;
+    e.declare('x', 'real');
+    e.declare('y', 'real');
+    e.declare('D', 'list<real>');
+    e.declare('z', 'complex');
+    return e;
+  };
+  const points = [
+    { x: 0.7, y: 1.3 },
+    // Not a whole number of turns: Cot has a pole there.
+    { x: 37.3, y: -0.4 },
+    { x: -2.2, y: 2 },
+  ];
+  for (const unit of ['deg', 'grad', 'turn'] as const)
+    test(`${unit}: direct and inverse functions, a list, the complex lane`, () => {
+      const e = engine(unit);
+      for (const json of [
+        ['Sin', 'x'],
+        ['Cos', 'x'],
+        ['Tan', 'x'],
+        ['Cot', 'x'],
+        ['Haversine', 'x'],
+        ['Sin', ['Add', ['Multiply', 2, 'x'], 'y']],
+        ['Cos', ['Multiply', 'x', 'y']],
+        ['Tan', ['Subtract', 'x', 1]],
+        ['Arcsin', ['Divide', 'x', 40]],
+        ['Arccos', ['Divide', 'y', 3]],
+        ['Arctan', 'x'],
+        ['Arccot', 'y'],
+        ['Arctan2', 'x', 'y'],
+      ])
+        againstInterpreter(e, json, points);
+      againstInterpreter(e, ['Sin', 'D'], [{ D: [0.5, 30, -2] }]);
+      // The complex lane: the interpreter converts the angle there too.
+      for (const json of [
+        ['Sin', 'z'],
+        ['Cos', 'z'],
+        ['Arcsin', 'z'],
+        ['Arctan', 'z'],
+        ['Argument', 'z'],
+      ]) {
+        const r = compile(box(json, e), {
+          ...IR,
+          fallback: false,
+        } as never) as CompilationResult<'javascript'>;
+        const z = { re: 0.3, im: 0.2 };
+        const expected = interpret(e, box(json, e), { z: z as never });
+        expect([
+          json,
+          agrees((r.run as (v: unknown) => unknown)({ z }), expected),
+        ]).toEqual([json, true]);
+      }
+      // The complex mode: Arcsin(2) leaves the reals.
+      const r = compile(box(['Arcsin', 'x'], e), {
+        ...IR,
+        fallback: false,
+        mode: 'complex',
+      } as never) as CompilationResult<'javascript'>;
+      const expected = interpret(e, box(['Arcsin', 'x'], e), { x: 2 });
+      expect(
+        agrees((r.run as (v: unknown) => unknown)({ x: 2 }), expected)
+      ).toBe(true);
+    });
+  test('GLSL: the factor of the unit is a multiplication', () => {
+    const code = compileSlice(box(['Sin', 'x'], engine('deg')), {
+      target: 'glsl',
+    }).code;
+    expect(code).toMatch(/sin\(\(in0_x \* 0\.017453292\d*\)\)/);
+  });
+  test('the unit set back to radians gives the code of radians', () => {
+    const e = engine('deg');
+    const json = ['Add', ['Sin', 'x'], ['Arctan', 'y']];
+    const degrees = (
+      compile(box(json, e), {
+        ...IR,
+        fallback: false,
+      } as never) as CompilationResult<'javascript'>
+    ).code;
+    e.angularUnit = 'rad';
+    const radians = (
+      compile(box(json, e), {
+        ...IR,
+        fallback: false,
+      } as never) as CompilationResult<'javascript'>
+    ).code;
+    expect(degrees).not.toEqual(radians);
+    const plain = new ComputeEngine();
+    plain.declare('x', 'real');
+    plain.declare('y', 'real');
+    expect(radians).toEqual(
+      (
+        compile(box(json, plain), {
+          ...IR,
+          fallback: false,
+        } as never) as CompilationResult<'javascript'>
+      ).code
     );
   });
 });

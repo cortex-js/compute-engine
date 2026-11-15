@@ -233,10 +233,10 @@ describe('the witnesses of the audit', () => {
     check(['moves', 'J', 1], [{ J: B }, { J: B.map((n) => 3 - n) }], TYCHO);
     check(['moves', 'J', ['At', 'J', 2]], [{ J: B }], TYCHO);
   });
-  test('a user function with a list result still declines (othello `legal`)', () => {
-    expect(declined(['legal', 'J', ['At', 'J', 1]], TYCHO)).toMatch(
-      /the result of legal is not a scalar/
-    );
+  test('a user function with a list result (othello `legal`)', () => {
+    const B = [1, 2, 1, -1, 2, 0, 1, 2];
+    const points = [{ J: B }, { J: B.map((n) => 3 - n) }];
+    check(['legal', 'J', ['At', 'J', 1]], points, TYCHO);
   });
 });
 
@@ -273,9 +273,9 @@ describe('the tuple-consumption rule', () => {
     expect(
       declined(['If', ['Less', 'x', 0], ['Tuple', 'x', 1], ['List', 1, 'x']])
     ).toMatch(/arms of a tuple and a list/);
-    expect(declined(['Tuple', ['Tuple', 'x', 1], ['Tuple', 'x', 1]])).toMatch(
-      /a tuple of tuples/
-    );
+    expect(
+      declined(['Length', ['Tuple', ['Tuple', 'x', 1], ['Tuple', 'x', 1]]])
+    ).toMatch(/a tuple of tuples/);
     expect(declined(['Tuple', 'x', 'True'])).toMatch(/elements of two types/);
     expect(
       declined(['Comprehension', 'k', ['Element', 'k', ['Tuple', 'x', 1]]])
@@ -470,5 +470,263 @@ describe('list parameters of user functions', () => {
     ce.declare('twice', '(real) -> real');
     ce.assign('twice', box(['Function', ['Multiply', 2, 'a'], 'a']));
     expect(declined(['twice', 'D'])).toMatch(/a list argument of twice/);
+  });
+});
+
+// The declines of Tycho's third corpus run: the result and parameter types
+// of user functions that are unions with an absent member, Prelude
+// statements whose value is a list or a tuple, and list results of user
+// functions.
+describe('result types with an absent member', () => {
+  const define = (name: string, type: string, json: Json) => {
+    ce.declare(name, type);
+    ce.assign(name, box(json));
+  };
+  test('missing | rational, nan | number, complex | nan, nan | real', () => {
+    define('l0', '(real) -> missing | rational', [
+      'Function',
+      ['Which', ['Less', 't', 1], ['Rational', 1, 2], ['Greater', 't', 3], 2],
+      't',
+    ]);
+    define('rr', '(real, real) -> nan | number', [
+      'Function',
+      ['Sqrt', ['Add', ['Power', 'a', 2], ['Power', 'b', 2]]],
+      'a',
+      'b',
+    ]);
+    define('yy', '(real) -> complex | nan', [
+      'Function',
+      ['Multiply', ['Sin', 't'], ['Sqrt', ['Subtract', 1, ['Power', 'x', 2]]]],
+      't',
+    ]);
+    define('pp', '(nan | real) -> real', [
+      'Function',
+      ['Multiply', 2, 's'],
+      's',
+    ]);
+    const points = [
+      { x: 0.5, y: 2 },
+      { x: 4, y: -1 },
+      { x: -0.3, y: 0.3 },
+    ];
+    check(['Add', ['l0', 'x'], 1], points);
+    check(['rr', 'x', 'y'], points);
+    check(['Add', ['yy', 'y'], 1], [points[0], points[2]]);
+    check(['pp', 'x'], points);
+    // Where the interpreter gives `Missing`, the compiled code gives NaN.
+    expect(ir(['l0', 'x']).run!({ x: 2 } as never)).toBeNaN();
+  });
+});
+
+/** The attributes of a constant local of the value `value`. */
+const constantOf = (value: Json) => [
+  'Dictionary',
+  ['KeyValuePair', { str: 'value' }, value],
+  ['KeyValuePair', { str: 'constant' }, 'True'],
+];
+
+describe('Prelude statements of a list or a tuple', () => {
+  const constant = (name: string, value: Json, last: Json) => [
+    'Block',
+    ['Declare', name, constantOf(value)],
+    last,
+  ];
+  test('a list local of run-time length in a one-element tuple', () => {
+    const json = constant(
+      'H',
+      [
+        'Comprehension',
+        ['Multiply', 'k', 'x'],
+        ['Element', 'k', ['Range', 1, 'n']],
+      ],
+      ['Tuple', 'H']
+    );
+    check(
+      json,
+      [
+        { n: 3, x: 0.5 },
+        { n: 1, x: 2 },
+      ],
+      { inputs: { n: 'integer' } }
+    );
+  });
+  test('a tuple local in a one-element tuple, a tuple of tuples', () => {
+    check(constant('O', ['Tuple', -1, 0, 0], ['Tuple', 'O']), [{}]);
+    check(['Tuple', ['Tuple', 'x', 1], ['Tuple', 2, 'x']], [{ x: 0.5 }]);
+  });
+  test('a root Tuple of a number, a boolean and a list', () => {
+    const r = check(
+      ['Tuple', 'x', ['Less', 'x', 0], 'D'],
+      [
+        { x: 0.5, D: [1, 2] },
+        { x: -1, D: [3] },
+      ]
+    );
+    expect(r.run!({ x: -1, D: [3] } as never)).toEqual([-1, true, [3]]);
+  });
+  test('a root Tuple of a list and a scalar: an input list is copied', () => {
+    const r = check(['Tuple', 'D', 'x'], [{ D: [1, 2, 3], x: 0.5 }]);
+    const D = [1, 2];
+    const got = r.run!({ D, x: 1 } as never) as unknown[];
+    expect(got).toEqual([[1, 2], 1]);
+    expect(got[0]).not.toBe(D);
+    expect(r.broadcastOutputs).toBeUndefined();
+  });
+  test('a list local that is not written; one that is written declines', () => {
+    check(
+      constant(
+        'L',
+        ['Map', ['Function', ['Sin', 'z'], 'z'], 'D'],
+        ['Add', 'L', 'L']
+      ),
+      [{ D: [1, 2, 3] }]
+    );
+    expect(
+      declined([
+        'Block',
+        [
+          'Declare',
+          't',
+          ['Dictionary', ['KeyValuePair', { str: 'value' }, 'D']],
+        ],
+        ['Assign', 't', ['List', 1]],
+        't',
+      ])
+    ).toMatch(/or to a list local/);
+    // An inner block that writes the outer list local; one that then
+    // declares its own of that name is an error of the canonical form.
+    const value = (v: Json) => [
+      'Dictionary',
+      ['KeyValuePair', { str: 'value' }, v],
+    ];
+    const inner = (...rest: Json[]) =>
+      declined([
+        'Block',
+        ['Declare', 'H', value('D')],
+        ['Block', ['Assign', 'H', ['List', 1]], ...rest],
+        ['At', 'H', 1],
+      ]);
+    expect(inner(0)).toMatch(/or to a list local/);
+    expect(inner(['Declare', 'H', value(['List', 5, 6])], 'H')).toMatch(
+      /static type error/
+    );
+    expect(
+      declined(['Block', ['Declare', 't', "'real'", 'D'], 0])
+    ).toMatch(/a list value for a local declared real/);
+  });
+  test('GLSL declines a root Tuple of several shapes', () => {
+    expect(() =>
+      compileSlice(box(['Tuple', ['List', 1, 'x'], 'x']), { target: 'glsl' })
+    ).toThrow(/a Tuple of elements of several shapes/);
+  });
+});
+
+describe('list results of user functions', () => {
+  ce.declare('total', '(list<integer>) -> integer');
+  ce.assign('total', box(['Function', ['Sum', 'S'], 'S']));
+  ce.declare('same', '(list<real>) -> list<real>');
+  ce.assign('same', box(['Function', 'L', 'L']));
+  ce.declare('three', '(real) -> list<real^3>');
+  ce.assign(
+    'three',
+    box(['Function', ['List', 'a', ['Multiply', 2, 'a'], 3], 'a'])
+  );
+  ce.declare('pt', '(real) -> tuple<real, real>');
+  ce.assign(
+    'pt',
+    box(['Function', ['Tuple', ['Cos', 'a'], ['Sin', 'a']], 'a'])
+  );
+  ce.declare('pairz', '(real) -> list<complex^2>');
+  ce.assign('pairz', box(['Function', ['List', 'a', 'a'], 'a']));
+  const B = [1, 0, 1, -1, 1, 0, 0, 1];
+  const boards = [{ J: B }, { J: B.map((n) => -n) }];
+  const legal = ['legal', 'J', ['At', 'J', 3]];
+  test('the othello witness, read by the list readers', () => {
+    for (const json of [
+      legal,
+      ['Length', legal],
+      ['At', legal, 1],
+      ['Sum', legal],
+      ['total', legal],
+      ['Block', ['Declare', 'X', constantOf(legal)], ['Add', 'X', 'X']],
+      ['Block', ['Declare', 'X', constantOf(legal)], ['Tuple', 'X']],
+    ])
+      check(json, boards, TYCHO);
+  });
+  test('two calls with lists of different lengths', () => {
+    check(
+      [
+        'Add',
+        ['Length', ['legal', 'J', 1]],
+        ['Length', ['legal', ['List', 1, 2, 1], 1]],
+      ],
+      boards,
+      TYCHO
+    );
+  });
+  test('a call in a Map body and in a Sum body', () => {
+    check(
+      ['Sum', ['Length', ['legal', 'J', 'k']], ['Limits', 'k', -1, 1]],
+      boards,
+      TYCHO
+    );
+    check(
+      [
+        'Map',
+        ['Function', ['Sum', ['legal', 'J', 'k']], 'k'],
+        ['Range', -1, 1],
+      ],
+      boards,
+      TYCHO
+    );
+  });
+  test('a function that returns its list parameter: the result is a copy', () => {
+    const r = check(['same', 'D'], [{ D: [1, 2, 3] }, { D: [4] }]);
+    const D = [1, 2];
+    expect(r.run!({ D } as never)).not.toBe(D);
+  });
+  test('a fixed-length list result; a tuple or complex list result declines', () => {
+    const points = [{ x: 0.5 }, { x: -2 }];
+    check(['three', 'x'], points);
+    check(['Add', ['three', 'x'], ['List', 1, 2, 3]], points);
+    expect(declined(['pt', 'x'])).toMatch(/the result of pt is not a scalar/);
+    // A declared complex element: a real body would take the real lane
+    // (`Sqrt(At(pairz(x), 1))` at x = -4 is 2i in the interpreter).
+    expect(declined(['Sqrt', ['At', ['pairz', 'x'], 1]])).toMatch(
+      /the result of pairz is not a scalar/
+    );
+  });
+  test('stored code loads and gives the values of run()', () => {
+    const r = ir(legal, TYCHO);
+    const stored = JSON.parse(
+      JSON.stringify({
+        code: r.code,
+        preambleOnce: r.preambleOnce,
+        reconstructionDigits: r.reconstructionDigits,
+        calling: r.calling,
+        entryPlan: r.entryPlan,
+        mode: r.mode,
+        runtimeVersion: r.runtimeVersion,
+      })
+    );
+    const f = createJavaScriptRuntime().load(stored);
+    for (const p of boards) expect(f(p)).toEqual(r.run!(p as never));
+  });
+  test('broadcast() of a scalar program that calls such a function', () => {
+    const r = ir(['Add', 'x', ['Length', ['three', 'x']]]);
+    expect(Array.from(r.broadcast!({ x: new Float64Array([1, 2]) }))).toEqual([
+      4, 5,
+    ]);
+  });
+  test('the bigint mode', () => {
+    const r = ir(['Length', legal], { ...TYCHO, mode: 'bigint' });
+    expect(r.run!({ J: B } as never)).toBe(
+      BigInt(interpret(['Length', legal], { J: B }) as number)
+    );
+  });
+  test('GLSL declines a list result', () => {
+    expect(() =>
+      compileSlice(box(['Sum', ['three', 'x']]), { target: 'glsl' })
+    ).toThrow(/the list result of three/);
   });
 });

@@ -1349,6 +1349,71 @@ fails as before. Largest causes of a decline in the suite: input type `any`
 numbers 102; a rational literal in the bigint mode 94; a complex infinity
 87; an input of type `list<list<real>>` 128.
 
+Tycho's third run (2026-11-14, build of
+`3927b6c89ac284a5088a752718937455ac3c8a23`, Tycho `0ffbde4e2` with its scratch
+patch; load 13 to 32 on 18 cores): no internal error. CORE audit 465 of 997
+JavaScript compilations admitted (47%), 2,971 calls compared with no
+difference. Seeded-random tests 694 of 696 (the two budget tests), 208 of 638
+compilations admitted, 200,324 calls with no difference. Plot tests (314
+files): 1,523 of 1,992 compilations admitted; 2,127,339 `run` calls and 2,519
+`broadcast` calls compared, 12 differences in 7 expressions, each one where
+the existing compiler is wrong (`Sqrt(s)` at -4 in the complex mode, `z² + a`
+with a complex input, an `Abs` that it drops from a declared range) or a
+pole. The index-floor test passes again. No admitted result reaches a field
+the profile lacks. Causes of a decline in the audit:
+
+| Declines | Cause |
+| --- | --- |
+| 179 | `Which` (101) and `At` (78): Tycho's in-place `compile` handler; 96 of them in 23 native documents, 83 in 6 Desmos imports (Tycho installs the handler on every engine) |
+| 92 | a user function that returns a list (`legal` of othello) |
+| 94 | `Sin` (59) and `Cos` (35) with the angular unit in degrees (one Desmos document, `art/n7uhaaoq1q`) |
+| 54 | `AsOklab` |
+| 18 | an input of type `list<tuple<integer, real, real, integer>^n>` |
+| 15 | an element-wise sum of lists of two run-time lengths |
+| 14, 14, 10, 5, 5, 5 | `Comprehension`, `ElementMax`, `If`, `Break`, a tuple in a local, a `Range` of reals |
+
+Without the handler on `At` and `Which` the audit would admit about 644 of
+997 (65%).
+
+Render audit of the same run (Tycho's CORE corpus, 24 states, the page run
+without and with the profile on one Tycho build whose engine bundle is the
+build's): no document renders differently. 21 states rendered and 3 did not
+paint on both arms (the software-WebGL 3-D states); series count, chromatic
+and dark fractions are equal on all 24; one non-background fraction moves by
+0.02% of the pixels, within the noise of that state. The page tally shows
+the profile active (for example 69 of 114 JavaScript compilations admitted
+on `neyret/oeupgr064p`). Batch control, 160,000 cells: 2.19 and 2.20 ms on
+the profile against 2.23 ms on the existing compiler (load 24 to 26). A next
+render run costs Tycho about 14 minutes of running.
+
+Tenth batch, 2026-11-14 (causes of Tycho's third run). A union of one type
+with `nan` or `missing` members is that type for an input, a parameter and a
+result of a user function (`missing | rational` is a real: 42 of the 92
+"function" declines; a `Missing` of the interpreter is NaN compiled). A local
+declared with a list or tuple value and never assigned is bound to the value.
+A `Tuple` at the root whose elements differ in shape or have a run-time
+length is the entry's several results, returned as an array (the form of
+every Prelude statement). A user function may return a list of rank 1: a call
+has two outs, the length and the list, and the printer reads the length of
+the returned array; a tuple result and a recursive call of such a function
+decline. The trigonometric rows under an angular unit other than radians
+multiply their operands, or the result of an inverse function, by the
+constant of the unit, on both lanes and on GLSL. Measured in a worktree at
+`3927b6c89ac284a5088a752718937455ac3c8a23` plus the patch; 5,841 lines in
+`ir/`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,463 of 10,849 (96.4%) |
+| Every JavaScript compile | 23,795 of 38,946 (61.1%) |
+| Public `compile()` calls | 13,305 of 28,069 (47.4%) |
+
+No test fails in the shadow run; with the switch on, the one test of CE-1267
+fails as before. Left from Tycho's list: `AsOklab` (54), a `list<tuple>`
+input (18), an element-wise sum of lists of two run-time lengths (15),
+`ElementMax` and `ElementMin` of scalars (14), an `If` with a tuple arm and
+no else (10), `Break` (5), a `Range` of reals (5).
+
 Open with the user: how a host changes the lowering of an operator when the
 existing compiler is deleted (a definition's `compile` handler returns text
 for it); whether a loop whose result is not read may be removed, counting no

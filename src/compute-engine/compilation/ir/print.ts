@@ -84,6 +84,10 @@ export type Syntax = {
   readonly close: string;
   /** `copy`: the value can be (or hold) an input. */
   ret(value: string, type: IRType, copy: boolean): string;
+  /** The return of the array of `values` (an entry `tuple`); `copy[k]`:
+   *  the value `k` can be (or hold) an input. Absent: the target declines
+   *  such an entry. */
+  retTuple?(values: string[], copy: boolean[]): string;
   call(fn: string, args: string[]): string;
   /** A function other than the entry. */
   fn(
@@ -344,6 +348,11 @@ export function printProgram(
         s.open.forEach((x) => line(x));
         lines.push(...body(inner, depth + 1));
         s.close(inner.yields.map(use)).forEach((x) => line(x));
+      } else if (i.k === 'call' && i.outs.length === 2) {
+        // The list, then its length (`lower-functions.ts`).
+        const [n, list] = i.outs.map(name);
+        line(syntax.declare(type(i.outs[1]), list, text(i)));
+        line(syntax.declare(type(i.outs[0]), n, syntax.length(list)));
       } else if (i.k === 'call' && i.outs.length !== 1) {
         throw new Error('slice printer: a call with several results');
       } else {
@@ -356,6 +365,12 @@ export function printProgram(
   };
 
   const returned = (f: IRFunction): string[] => {
+    const ys = f.body.yields;
+    if (f.tuple === true && syntax.retTuple !== undefined)
+      return [
+        ...body(f.body, 1),
+        '  ' + syntax.retTuple(ys.map(use), ys.map(alias)),
+      ];
     if (f.results.length !== 1)
       throw new Error('slice printer: a function with several results');
     const y = f.body.yields[0];

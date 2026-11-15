@@ -49,7 +49,14 @@ not folded, because `Sinh` is not in the slice. A sub-expression whose static
 type is `error` declines (`Sin(Tuple(w))` of a vector `w`, `2·Tuple(L, L)`). A
 throw of `N()` means "not folded": the node is lowered as written, except a
 `CancellationError`, which propagates. A row that depends on an engine setting
-declines when the setting is not the default.
+declines when the setting is not the default, except the angular unit: under
+`'deg'`, `'grad'` or `'turn'` the lowering multiplies each operand of a direct
+trigonometric row (`Sin`, `Cos`, `Tan`, `Cot`, `Haversine`) by the radians of
+one unit, and the result of an inverse row (`Arcsin`, ..., `Arctan2`,
+`Argument`, `Degrees`) by the units of one radian, on both lanes and both
+targets, as the interpreter converts them (`ANGLE_FACTORS`, the row field
+`angle`). Like every engine setting, the compiled code holds the factor of the
+unit at the time of the compilation.
 
 A root `Function` literal compiles to a function of positional parameters, then
 the inputs object for its free names: `run(3, 4, { x: 1.5 })`.
@@ -122,9 +129,14 @@ row has a spelling only where GLSL ES 3.00 has a builtin defined on every real
 (`atan`, `asinh`, `sign`, `trunc`, `fract`); the other rows decline there.
 
 Inputs: a union whose every member is a real type (ranged or not), `nan` or an
-infinity (`nan | real | signed_infinity`, `integer | nan`) is a real, also as
-the element of a list: a double holds each of its values (a `NaN` or infinite
-value gives an unspecified result). A scalar with no declared type, or of type
+infinity (`nan | real | signed_infinity`) is a real, also as the element of a
+list: a double holds each of its values (a `NaN` or infinite value gives an
+unspecified result). A union of one type and `nan` members has the lane of that
+type (`integer | nan` is an integer, also in the `bigint` mode; `nan | number`
+is a wide input, `complex | nan` a complex one). The same rule types the
+parameters and the result of a user function, where a `missing` member is also
+removed (`missing | rational` is a real): where the interpreter gives `Missing`,
+the compiled code gives NaN. A scalar with no declared type, or of type
 `unknown` or `number`, is a real in the `strict` mode (a deliberate difference from the existing compiler)
 and a complex in the `complex` mode; a scalar `complex` input is on the complex
 lane, and a number given for a complex input is lifted to `{re, im: 0}`, also
@@ -144,7 +156,17 @@ symbol; with the type `unknown`, or none, the local is a real (a boolean for a
 boolean value), as the interpreter admits a real write to `let t = 0`. The
 attribute `constant` (`Declare(K, {value: 240, constant: True})`) makes a local
 that an `Assign` does not write: such an `Assign` declines, as the interpreter
-refuses it. Another attribute declines.
+refuses it. Another attribute declines. A local of no stated type whose value is
+a list or a tuple (`Declare(H, {value: Comprehension(…)})`) is that value; an
+`Assign` to it declines, and so does a list value for a local of a stated type.
+
+A root `Tuple`, or the last operand of a root `Block` that is one, whose
+elements are tuples or are not of one shape (`Tuple(H)` of a list of run-time
+length, `Tuple(D, x)`) is no value of the program: the entry yields each element
+(`IRFunction.tuple`) and the JavaScript code returns the array of them, each
+element that can be an input copied (`Tuple(x, Less(x, 0), D)` is
+`[x, boolean, copy of D]`). Such a result has no `broadcastOutputs`; GLSL
+declines it.
 
 ## The complex lane
 
@@ -430,17 +452,29 @@ parameter, or has a value; an input of a list type; a name with a value read in
 the body; another `vars` name. A recursive function that reads no input
 compiles. A function value other than the literal of a `Map` or `Filter` or the
 root, and a list argument for a scalar parameter (the interpreter maps the
-function over the list) decline.
+function over the list) decline. A declared result `complex` of a real body is
+the body converted to the complex lane.
 
 A parameter declared a list of reals or integers
 (`(list<integer>, integer) -> integer`) is a list: of a stated length, which the
 argument must have, or of a run-time length, a hidden integer parameter before
 it that each call passes (the length of the argument), as the root function
 literal does: `f(D) + f([1, 2])` calls one function with lengths `D.length`
-and 2. A tuple argument, a list of lists, of booleans or of complex numbers, and
-a list result (`legal(B, p) := Comprehension(k, Element(k, Range(1, 64), …))`)
+and 2. A tuple argument, a list of lists, of booleans or of complex numbers
 decline. On GLSL a parameter of stated length is an array parameter
 (`float B[3]`); one of run-time length declines with the target's rule.
+
+A result declared a list of reals, integers or booleans (`list<integer>`,
+`list<real^3>`) has the type of the body, a list of rank 1 of a sub-lane of the
+declared one; a tuple body or result, and a list of complex numbers, decline. A
+run-time length of the result is a value of the body: the call has two results,
+the length and then the list, and the
+JavaScript code reads the length of the returned array (`.length`); the
+function returns one value, as any other. The verifier checks that the type of
+the list result names the length result of the same call. A result that can be
+a parameter (`same(L) := L`) is returned as a copy, so the result of a call is
+a new list. Declined: a recursive call of a function with a list result (its
+type is the body's), a list of lists, and a list result on GLSL.
 
 ## How to add
 

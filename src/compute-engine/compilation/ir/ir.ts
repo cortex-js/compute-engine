@@ -109,6 +109,9 @@ export type IRFunction = {
   readonly positional?: number;
   /** The entry is a root function literal (also one of no parameter). */
   readonly literal?: boolean;
+  /** The entry returns the array of its results: a root `Tuple` whose
+   *  elements are not of one shape, which is no value of the program. */
+  readonly tuple?: boolean;
   /** `params` are the parameters, `yields` the results. */
   readonly body: Region;
   readonly results: IRType[];
@@ -314,16 +317,23 @@ export class Builder {
     return this.open.includes(r);
   }
 
-  /** The program whose entry body is the region made by `f`. */
-  program(f: () => V): Program {
-    const body = this.region([], () => [f()]);
-    const results = [this.typeOf(body.yields[0])];
+  /** The program whose entry body is the region made by `f`; when `f`
+   *  gives several values, the entry returns the array of them (`tuple`). */
+  program(f: () => V | V[]): Program {
+    let tuple = false;
+    const body = this.region([], () => {
+      const v = f();
+      tuple = Array.isArray(v);
+      return Array.isArray(v) ? v : [v];
+    });
+    const results = body.yields.map((y) => this.typeOf(y));
     const main: IRFunction = {
       name: 'main',
       paramNames: this.paramNames,
       lengthOf: this.lengthOf,
       positional: this.positional,
       literal: this.literal,
+      ...(tuple ? { tuple } : {}),
       body,
       results,
     };
