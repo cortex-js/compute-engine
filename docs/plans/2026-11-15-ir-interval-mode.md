@@ -11,10 +11,14 @@ User decisions of 2026-11-15, which the text below includes:
 - The criterion of results and the criterion of time of section 12.
 - `Random()` is the interval `[0, 1]`, as on the existing target.
 - A float exponent over a negative base may be wider than on the existing
-  target (section 4).
+  target (section 4). Batch 4 removed the need for it: a float exponent is
+  now read as the interpreter reads it (section 4, "Since batch 4").
 - An integer that the program shows to be one number (a constant, a loop
   index, integer arithmetic on those) is a JavaScript number: the pass
   `plain` of section 5 is part of the design.
+- The mode compiles `Integrate` before the existing target is deleted
+  (batch 6, section 17). A `Loop`, a `Break`, a recursive function and the
+  `Enclosure` kind stay declines.
 
 The values in the examples were measured at that commit. "Interpreter" is
 `expr.subs({…}).N()` at points of the box. "Existing" is
@@ -223,6 +227,35 @@ and `_IA.nthRootInterval` give the tight result for an integer.
 
 The float exponent over a negative base is the one case of this note where
 the mode is known to be wider than the existing target by more than an ulp.
+
+**Since batch 4** (section 17), two rules of this section are replaced.
+
+A number that is not exact (a decimal, a machine number) is the point at its
+double: `1.8` is `[1.8, 1.8]`. Only an exact number with no double value
+(`1/3`, a radical), `Pi` and a folded closed node keep an enclosure. This is
+the caveat "the precision of the target" of compiled code: the existing
+target and the JavaScript code read the double too. Its cost, pinned by a
+test: at `x` equal to the double of 1.8, `Ceil(x - 1.8)` is 0 in the mode, on
+the existing target, in the JavaScript code and in the interpreter at machine
+precision, and 1 in the interpreter at the default precision, which subtracts
+the decimal 1.8 and gets 4.4·10⁻¹⁷.
+
+A float exponent `e` that is not an integer is read as the interpreter reads
+it (`realPowerBranchTerms()`): at the compilation for a literal, in the
+kernel `_IA.powReal(x, e, digits)` for an exponent known at run time, with
+the digits of the compiling engine written in the code. A reading `p/q` of
+odd `q` over a base that can be negative is `_IA.powRealBranch(x, e, p odd)`,
+the real root with its sign and the magnitude `|x|^e` of the double, as the
+interpreter at machine precision and the JavaScript code compute it. Every
+other float, and every float over a base that the lowering proves
+non-negative from its operations (`nonnegative()`: `Abs`, an even power,
+`exp`), is the principal power `_IA.pow(x, e)`, with no real value over a
+negative base. The widening and the `k/1024` rule are gone. An exact
+rational literal keeps root then integer power. The existing target computes
+`x^(p/q)` with `_IA.powRational` when `p/q` is the double: `x^2.2` at 32 is
+exactly `[2048, 2048]` there, and `Math.pow(32, 2.2)` is
+`2048.0000000000014`; the mode contains the latter, and such programs are in
+the test's list of exceptions against the existing target.
 
 ## 5. The result contract (question 3)
 
@@ -435,8 +468,11 @@ the three robustness tests.
 
 Known before any measure:
 
-1. A float exponent that is not an integer over a negative base is the
-   symmetric hull (section 4).
+1. A float exponent that is not an integer over a negative base was the
+   symmetric hull (section 4) until batch 4. Since batch 4 the mode computes
+   `|x|^e` with the double `e` where the existing target computes
+   `x^(p/q)`, and it reads an exponent known at run time, which the existing
+   target does not.
 2. A `WithRandomSeed` frame with a string seed declines (the lowering has no
    string); the existing target compiles it.
 3. A sum with constant bounds is a loop; the existing target writes it out
@@ -697,6 +733,16 @@ the target is deleted"), and most of it is outside what Tycho compiles.
   deletion, either the mode gets it or its compile contract goes.
 - `IntervalJavaScriptTarget` is exported from `src/compute-engine.ts`. Its
   deletion is a breaking change of the public API.
+- The closed form of an integral (batch 6) calls `closedFormIntegral()` of
+  `compilation/compile-integrals.ts`, a file of the shared layer of the old
+  compilers, through one function of `compilation/interval-quadrature.ts`.
+  Before that layer is deleted, the symbolic step moves to a module of its
+  own: `compile-integrals.ts` lines 40 to 280 (the degree-mode refusal, the
+  budgets, the timeout records and their key), `shadowedOperandSymbols()`,
+  `closedFormIntegral()` without its `vars` test, and the four
+  `antiderivative*` counters and the `ANTIDERIVATIVE_*` constants of
+  `compiler-state.ts`; about 500 lines, imported by 8 source files and 9
+  test files. A move with no change of behavior, reviewed on its own.
 - A message to `ce-compiler` before batch 1, naming the shared files and
   functions of section 8.
 
@@ -857,9 +903,22 @@ classes, with the fix where there is one:
   (119 boxes), `partial → interval`, `interval → singular`. Fix: the
   interpreter's reading of the float (`realPowerBranchTerms()`) decides, at
   compile time for a literal and in the kernel for a run-time exponent.
-- `partial ↔ singular` (about 190 boxes in three documents) and
-  `singular → entire` (9): not explained; the document functions are asked
-  of Tycho.
+- `partial ↔ singular` (about 190 boxes in three documents): the literal
+  again. Tycho compiles at `ce.precision = 'machine'`, where a literal is a
+  machine number, and the mode enclosed every such literal that is not an
+  integer by one ulp, `0.5` included, which is a double. So
+  `0.5·Sin(2x) + 0.5` reached `-1.7·10⁻¹⁶`, and `1/f` had a pole inside
+  its operand (`singular`, where the existing target gives the half-line
+  `[1, +∞]` as `partial`), and `Sqrt(f)` had a domain clip (`partial`,
+  where the existing target keeps the jump of a `Mod` as `singular`). The
+  one `false → maybe` has the same cause. Fixed by the choice above.
+- `singular → entire` (9, `neyret/pmciiapek6`): `1/N · Sum(…, i = 1..N)`
+  over a box where `N` is not one integer. The mode answers `entire` for
+  the loop bound (section 14, batch 2); the existing target answers
+  `singular` for the pole of `1/N`. Both say that the box has no enclosure.
+  An exception that stays.
+- `maybe → false` (1): the mode is tighter. In the arm `0 < x` the pass
+  `narrow` clamps `x`, so `Floor(x)` is 0 and the value is negative.
 - `true → maybe` (12): `Equal(x, x)`, which the existing target folds.
 - `interval → partial` (35): one case is Tycho's test
   `contradicted-partial.test.ts`, a two-clause `cases` whose second clause
@@ -930,3 +989,82 @@ earlier ones, and ends with a build for Tycho's audit.
    argument, is 9.8 times slower today. Not merged: a function that draws,
    has an effect or is on a cycle, and a call whose value is not visible
    (an arm, a loop body).
+
+**Batches 4 and 5, as written.** Batch 4 has the five items above, with
+the float exponent as section 4 ("Since batch 4") states it. Batch 5a: a
+pure node whose type is the value `true` or `false` is that verdict (the
+existing target's rule, `booleanClaim()`), and a decided condition takes its
+arm in the lowering; all 152 constant verdicts of the existing target on
+Tycho's programs are the same in the mode. Values that read no input are
+computed once: a constant read at each call and a pure operation or list of
+such values when the code is loaded (`preambleOnce`); an operation that can
+fail and a call of a function with no effect, not on a cycle, at a top
+level that runs at every call, at the first call under a flag
+(`preamblePerCall`), so that `compile()` and a load run no loop of the
+program; a failure there is thrown again at each call, which answers
+`entire`. Batch 5b is item 3.
+
+Measure of batch 4 on the exception records of Tycho's audit that can be
+replayed (2,328 of 3,000; `_TASKS/2026-11-15-interval-mode/`,
+`replay-t1-exceptions.mts`), class against the existing target before and
+after: equal within 4 ulps 0 and 1,850; tighter 142 and 286; wider 1,786
+and 127; shifted 109 and 5; a change of kind 289 and 59; a change of
+verdict 2 and 1. Batches 5a and 5b change no class. What is left: 112
+wider boxes of one document, a sum of 100 terms that the loop adds in
+another order (batch 7, below); 54 `singular → partial`, where the pass `narrow` clamps `x` in
+the arm of `If(0 < x, …)` and the mode has a value where the existing
+target reports a pole; the 5 `singular → entire` of section 16.
+
+Measure of batch 5a, time against the existing target (5,000 `run()` calls
+and 5,120 `broadcast()` cells per program): 209 programs that the existing
+target folds to a constant, median 8.47 before and 0.64 after per call,
+17.4 and 0.90 per cell; 188 other programs that the audit had above 1.1,
+1.19 and 1.02 per call, 1.19 and 1.05 per cell, with 45 still above 1.1
+(32 of the first 60 looked at are float or run-time exponents, measured
+before batch 4). Batch 5b: `neyret/sc3azg0frd` from 7.0 to 1.07.
+
+Above the criterion of time after batch 4: `x^a` with an exponent that
+changes at every call, 1.36 (the mode reads the exponent, the existing
+target does not), and with `a` fixed at 0.2, 1.16 (the mode computes the
+real root over a negative base, where the existing target gives `empty`).
+
+**Batch 7, not landed: the order of a sum.** The 112 wider boxes are
+`2/π · Sum(sin(i·x)/i, i = 1..100) + 3` (`neyret/0jqrzf0b8u`): the class of
+section 9, item 3, at 100 terms. Measured: the kernels are not the cause
+(`_IA.scale` and `_IA.scaleDiv` take a point and give what `_IA.mul` and
+`_IA.div` give; the rewrite to them, 63 lines in `plain.ts`, changed one
+record and was dropped). The cause is the order: each `_IA.add` is rounded
+outward by an ulp of its result, the loop adds from the first term, and the
+existing target writes a sum of constant bounds out as
+`add(t1, add(t2, …))`, which adds from the last. `Sum(x/i, i = 1..100)` at
+`x = -1.62` has the width 1.78·10⁻¹³ in the mode and 3.91·10⁻¹⁴ there. A
+loop that runs from the upper bound down brings the wider records from 127
+to 13, and removes three of the test's exceptions, but it makes four list
+sums differ, which the existing target adds from the first element. The
+rule that matches both is: a `Sum` or `Product` with `Limits` whose two
+bounds are constants runs from the upper bound down. It needs a mark on the
+loop instruction (`ir.ts`, `aggregate()` in `lower-lists.ts`, one argument
+in `print.ts`), files in which `ce-compiler` has a batch in flight; it
+waits for that batch, and for the user's word that these boxes matter
+(their bounds differ by about 10⁻¹⁴ relative). The two experiments are
+kept as patches in `_TASKS/2026-11-15-interval-mode/`.
+
+**Batch 6, integrals** (user decision; 43 of Tycho's programs).
+
+The lowering already makes the region `integrate` (`integral()` in
+`lower.ts`); the mode has no spelling of it. The existing target's rule
+(`compileIntervalIntegrate()`) has two parts:
+
+1. The enclosure `_IA.integrate(f, lo, hi, n)`: a partition of `n` pieces,
+   `n` from the budget of integrand evaluations and the count and depth of
+   the integrals in the expression tree (`integrateStats()`), a decline
+   when `n` would be under 4; an integral that a function call hides is
+   bounded at run time by the library. The mode takes this rule as it is,
+   with the same `n`, so that the bounds are the existing target's.
+2. The closed form: when the engine finds an antiderivative, the existing
+   target emits it under `_IA.integrateClosed`, which returns it only when
+   a scan of the integrand finds no pole. It is tighter than the
+   enclosure. Batch 6 first measures, on Tycho's programs and on the
+   suite's, how many integrals have a closed form there and how much wider
+   the enclosure alone is; the closed form is added if that measure shows
+   boxes outside the criterion of results.
