@@ -429,6 +429,42 @@ describe('EPSIL SERIALIZING OPERATORS', () => {
       'a + b + c + d'
     );
     expect(serializeEpsil(['And', 'a', ['And', 'b', 'c']])).toBe('a && b && c');
+    // ... except a right operand whose text starts with an operand of another
+    // operator of the same precedence: flat, `a * x % 2 * b` reads back as
+    // `((a * x) % 2) * b` (CE-1339).
+    const plain = (x: unknown): unknown => {
+      if (Array.isArray(x)) return x.map(plain);
+      if (x !== null && typeof x === 'object') {
+        const o = x as { fn?: unknown; sym?: unknown; num?: unknown };
+        if (o.fn !== undefined) return plain(o.fn);
+        if (o.sym !== undefined) return o.sym;
+        if (o.num !== undefined) return Number(o.num);
+      }
+      return x;
+    };
+    const reparsed = (e: Parameters<typeof serializeEpsil>[0]) =>
+      plain(parseEpsil(serializeEpsil(e))[0]);
+    for (const [expr, text] of [
+      [['Multiply', 'a', ['Multiply', ['Mod', 'x', 2], 'b']], 'a * (x % 2 * b)'],
+      [
+        ['Multiply', 'a', ['Multiply', ['Multiply', ['Mod', 'x', 2], 'c'], 'b']],
+        'a * (x % 2 * c * b)',
+      ],
+      [
+        ['Multiply', 'a', ['Multiply', ['Divide', 'x', 2], 'b']],
+        'a * (x / 2 * b)',
+      ],
+      [['Add', 'a', ['Add', ['Subtract', 'x', 'y'], 'b']], 'a + (x - y + b)'],
+      // On the left, and with no such first operand, the text stays flat.
+      [['Multiply', ['Multiply', ['Mod', 'x', 2], 'b'], 'a'], 'x % 2 * b * a'],
+    ] as const) {
+      expect(serializeEpsil(expr)).toBe(text);
+      expect(reparsed(expr)).toEqual(expr);
+    }
+    // A flat right operand reads back as another tree of the same value.
+    expect(
+      serializeEpsil(['Multiply', 'a', ['Multiply', 'b', ['Mod', 'x', 2]]])
+    ).toBe('a * b * (x % 2)');
     // A nested comparison is NOT a chain: `a < b < c` would read back as the
     // n-ary `Less(a, b, c)`, a different value.
     expect(serializeEpsil(['Less', 'a', ['Less', 'b', 'c']])).toBe(

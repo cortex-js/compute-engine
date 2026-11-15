@@ -39,6 +39,11 @@
 
 ### Bug Fixes
 
+- **Epsil text for a product nested in a product reads back as the same
+  expression when a factor is `%` or `/`.** `serializeEpsil(["Multiply",
+  "a", ["Multiply", ["Mod", "x", 2], "b"]])` gave `a * x % 2 * b`, which
+  reads back as `((a * x) % 2) * b`; it now gives `a * (x % 2 * b)`. A sum
+  nested in a sum is written the same way: `a + (x - y + b)`.
 - **`EisensteinE` of a high weight is correct when the imaginary part of τ
   is small.** `EisensteinE(100, 0.4 + 0.87i)` gave `80080.27 + 104512.03i`
   (the value is `49.3281 − 59.3508i`), and `EisensteinE(400, 0.4 + 0.87i)`

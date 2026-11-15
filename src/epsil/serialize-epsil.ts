@@ -477,7 +477,9 @@ export function serializeEpsil(
    *   left-associative `-`, `(x ^ 2) ^ 3` for the right-associative `^`.
    *   Without the parentheses `a - b - c` re-parses as `(a - b) - c` and
    *   `x ^ 2 ^ 3` as `x ^ (2 ^ 3)`. The associative heads above are exempt
-   *   when the operand has the same head.
+   *   when the operand has the same head, except a right operand whose
+   *   printed text starts with an operand of another operator of the same
+   *   precedence (see `startsWithEqualInfix`): `a * (x % 2 * b)`.
    * - A radical (`√x`) is, under a postfix operator: `√x!` re-parses as
    *   `Sqrt(x!)`, so `Factorial(Sqrt(x))` prints `(√x)!`.
    * - A negative number literal is, as the LEFT operand of an operator tighter
@@ -496,7 +498,8 @@ export function serializeEpsil(
     if (argOp) {
       if (argOp.precedence < op.precedence) return true;
       if (argOp.precedence === op.precedence) {
-        if (argHead === opName && ASSOCIATIVE_HEADS.has(opName)) return false;
+        if (argHead === opName && ASSOCIATIVE_HEADS.has(opName))
+          return side === 'right' && startsWithEqualInfix(arg, op, opName);
         // A comparison operand of a comparison is parenthesized on either
         // side: without the parentheses, `a < b <= c` re-parses as the chain
         // `a < b && b <= c`, not as a comparison of the truth value of
@@ -514,6 +517,33 @@ export function serializeEpsil(
       side === 'left' &&
       op.precedence > PREFIX_MINUS_PRECEDENCE &&
       isNegativeNumberLiteral(arg)
+    );
+  }
+
+  /**
+   * Whether the printed text of `arg`, an operand with the head `opName` of
+   * the associative operator `op`, starts with the left operand of another
+   * infix operator of the same precedence. The left spine of `arg` prints
+   * flat (each left operand of a left-associative operator needs no
+   * parentheses), so when `arg` is a RIGHT operand of `op`, the first operand
+   * of that inner operator joins the operator on its left: printed flat,
+   * `Multiply(a, Multiply(Mod(x, 2), b))` is `a * x % 2 * b`, which re-parses
+   * as `Multiply(Mod(Multiply(a, x), 2), b)`.
+   */
+  function startsWithEqualInfix(
+    arg: MathJsonExpression,
+    op: OperatorInfo,
+    opName: string
+  ): boolean {
+    let node: MathJsonExpression | null = arg;
+    while (node !== null && operator(node) === opName) node = operand(node, 1);
+    if (node === null) return false;
+    const nodeOp = OPERATORS[operator(node)];
+    return (
+      nodeOp !== undefined &&
+      !nodeOp.unary &&
+      !nodeOp.postfix &&
+      nodeOp.precedence === op.precedence
     );
   }
 
