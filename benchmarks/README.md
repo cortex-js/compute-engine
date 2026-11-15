@@ -925,3 +925,50 @@ also omits the fresh setup variable pass, computed collections and color
 definitions: the paths are not equivalent work. Compare matched scopes and
 coverage before interpreting timings. The phase-0 report records exact commands,
 accepted samples, limitations, and the archived artifacts.
+
+### Stable batch phase 1
+
+`stable-batch-phase1.mjs` measures the internal F01–F09 prototype separately
+from the phase-0 native adapter. Its scalar and named-function matrix separates
+preparation, preparation plus first execution, evaluate/N, relevant writes and
+unrelated writes. Native initial input declarations precede timing; candidate
+preparation includes collecting its slots. No closure, general DAG, compilation
+or real-host speed claim follows from this bounded matrix.
+
+```sh
+node --import tsx --test benchmarks/stable-batch/phase1.test.mjs
+node --test --test-concurrency=1 benchmarks/stable-batch-phase1.test.mjs
+node benchmarks/stable-batch/phase1-probes.mjs
+node benchmarks/stable-batch-phase1-build.mjs /tmp/phase1-build.json
+node benchmarks/stable-batch-phase1.mjs controls /tmp/phase1-pair.json /tmp/phase1-controls
+node benchmarks/stable-batch-phase1.mjs time /tmp/phase1-pair.json /tmp/phase1-time
+node benchmarks/stable-batch-phase1.mjs memory /tmp/phase1-memory.json /tmp/phase1-memory
+```
+
+Builds and measurements require the shared box lock. The build configuration
+names `root`, a fresh `output`, `experimental`, `lockOwner`, `lockScript` and
+`maxLoad`. It adds a private benchmark entry to the existing production split
+entries, without editing published exports. Its manifest records exact source,
+entry text, options, installed compiler and bundle hashes. Build the untouched
+current arm through the same helper with `experimental: false`.
+
+Pair configuration follows the phase-0 schema, with one `adapter: "prepared"`
+arm and one `adapter: "native"` reference. Use the emitted build manifests for
+arm provenance. An exact archived reference additionally names
+`archivedManifest` and `archivedArm`; the instrument verifies every archived
+bundle file and preserves historical source provenance. Use six process rounds,
+1,000 warmup calls and 10,000 measured calls for the timing matrix. Controls
+calibrate compiler-entry counters before timing. Assertions and explicit GC stay
+outside timing. All output directories must be new.
+
+Memory configuration uses three process rounds for sampled allocation, including
+collected objects and an allocating control. `settings.skipRetention: true`
+separates allocation runs. For retention, use `skipAllocation: true`, eight
+retained documents, twelve replacements and three checkpoints; repeat with
+forty checkpoints. `snapshots` and `retentionSnapshotsAt` select heap evidence.
+Every replacement is prepared, instantiated and first executed. The four-function,
+64-cell document uses multiplication for square and omits closures; it is not
+the phase-0 full-document workload. Report heap totals, code/metadata and document
+object families separately. See the [phase-1 report](../docs/plans/2026-11-15-stable-batch-phase1-report.md)
+and [mechanism ledger](../docs/plans/2026-11-15-stable-batch-phase1-ledger.md)
+for results and the exact limits of the throw-probe evidence.
