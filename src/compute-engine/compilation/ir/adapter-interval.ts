@@ -108,9 +108,11 @@ export function compileWithIrProfileInterval(
         { binding: inputs[0] }
       );
     addSymbolDeps(p, options?.symbolDeps);
-    const booleans = inputs.filter(
-      (_, k) => p.types[entry.body.params[k + positional]].lane === 'boolean'
-    );
+    // A scalar boolean input; a list of booleans is a list input.
+    const booleans = inputs.filter((_, k) => {
+      const t = p.types[entry.body.params[k + positional]];
+      return t.lane === 'boolean' && t.shape.length === 0;
+    });
     // A name of `vars` is a read of the inputs object, not an entry
     // parameter: it is a boolean input when it is declared boolean, as in
     // the existing target (`declaredBooleanNames()`).
@@ -121,6 +123,14 @@ export function compileWithIrProfileInterval(
         isBooleanBindingType(expr.engine.symbol(name).type?.type)
       )
         booleans.push(name);
+    // The inputs of a list or tuple type: the shared inputs of a batch.
+    const lists = [
+      ...new Set(
+        inputs.filter(
+          (_, k) => p.types[entry.body.params[k + positional]].shape.length > 0
+        )
+      ),
+    ];
     const once = s.preambleOnce;
     const shippable = isShippableCode(`${once}\n${s.code}`);
     const result: CompilationResult<'interval-js', IntervalValue> = {
@@ -131,6 +141,7 @@ export function compileWithIrProfileInterval(
       ...(once === '' ? {} : { preamble: once, preambleOnce: once }),
       calling: s.calling,
       ...(booleans.length > 0 ? { booleanInputs: booleans } : {}),
+      ...(lists.length > 0 ? { listInputs: lists } : {}),
       run: s.run as CompilationResult<'interval-js', IntervalValue>['run'],
       profile: 'ir',
     };
@@ -148,7 +159,7 @@ export function compileWithIrProfileInterval(
       stored: result,
       shippable,
       iterationLimit: () => engine.iterationLimit,
-      lists: [],
+      lists,
       booleans,
       slice: (cells, o, out, range) =>
         (slice ??= runtime.loadBroadcastSlice(result))(cells, o, out, range),

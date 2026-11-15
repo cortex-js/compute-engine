@@ -111,6 +111,19 @@ describe('the interval mode: the result contract', () => {
     expect(mode(['And', 'p', ['Less', 'x', 0]]).booleanInputs).toEqual(['p']);
   });
 
+  test('a list of booleans is a list input, not a boolean input', () => {
+    ce.declare('B', 'list<boolean>');
+    const r = mode(['Add', ['Length', 'B'], 'x']) as Result & {
+      listInputs?: string[];
+    };
+    expect(r.booleanInputs).toBeUndefined();
+    expect(r.listInputs).toEqual(['B']);
+    expect(r.run({ B: ['true', 'false'], x: 1 })).toEqual({
+      kind: 'interval',
+      value: { lo: 3, hi: 3 },
+    });
+  });
+
   test('a kinded result or a verdict, never a bare enclosure', () => {
     for (const json of PROGRAMS) {
       const r = mode(json);
@@ -296,16 +309,16 @@ describe('the interval mode: the result contract', () => {
 
 describe('the interval mode: the declines', () => {
   test.each([
-    [['Add', ['At', 'L', 1], 'x'], /a list|At/],
-    [['List', 'x', 'y'], /a list of rank 1/],
+    // Lists compile since batch 3 (`ir-interval-lists.test.ts`); a Range of
+    // a real operand declines.
+    [['Range', 0.5, 'x'], /a Range of a real operand/],
     [['Add', 'Z', 'x'], /the lane complex/],
     [['fact', 3], /a recursive function \(.*fact.*\)/],
     [['Zeta', 'x'], /Zeta \(the operation zeta\)/],
     [['Integrate', ['Sin', 't'], ['Limits', 't', 0, 'x']], /the region integrate/],
-    [['Map', ['Function', ['Multiply', 'k', 'x'], 'k'], 'L'], /the region build|rank 1/],
     [
       ['Block', ['Declare', 's', 'real', 0], ['Loop', ['Assign', 's', ['Add', 's', 'e']], ['Element', 'e', ['Range', 1, 3]]], ['Multiply', 's', 'x']],
-      /rangestep|a Loop/,
+      /a Loop/,
     ],
   ])('%j', (json, cause) => {
     const e = declineOf(() => mode(json));

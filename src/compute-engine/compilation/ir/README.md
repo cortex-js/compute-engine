@@ -445,8 +445,8 @@ the kernel of its row, with the operands in the order of the row's `fold`
 (`atan2(y, x)`). Every kernel takes and gives the kinds `empty`, `entire`,
 `singular` and `partial`, so the code never reads the kind of a value: the
 marks of a jump and of a clipped domain travel through every operation. The
-lanes are `real`, `integer` and `boolean`, the rank is 0, and a recursive
-function declines (with an undecided guard both arms run, and the recursion
+lanes are `real`, `integer` and `boolean`, a list or a tuple is a JavaScript
+array of such values (of arrays for rank 2), and a recursive function declines (with an undecided guard both arms run, and the recursion
 does not end). The passes `fold` (a double is not an enclosure) and
 `strength` (`x·x` is wider than `x^2` over an interval) are off; two passes
 of the mode run, `narrow` first and `plain` last.
@@ -462,14 +462,53 @@ and their inverses (also the reciprocal ones), `Arctan2`, `Hypot`,
 `GCD`, `LCM`, the comparisons, `And`, `Or`, `Not` (Kleene logic on
 verdicts), `If`, `Which`, a `Block` with locals, user functions that are
 not recursive, `Sum` and `Product` with `Limits`, `Random()` and
-`WithRandomSeed` of a number seed, and a root function literal.
-`Haversine`, `Zeta`, the complex and colour operations, `At` and the
-elements of lists, the counts of a `Range`, and the regions `build`,
-`filter` and `integrate` (`Map`, `Filter`, `Integrate`) have no spelling
-and decline; a `Loop` declines with the cause "the interval mode does not
+`WithRandomSeed` of a number seed, a root function literal, and the lists
+below. `Haversine`, `Zeta`, the complex and colour operations and the region
+`integrate` (`Integrate`) have no spelling and decline; a `Loop` declines with the cause "the interval mode does not
 compile it yet" (`intervalRefusal()`; a cause of the mode ends with "on
 interval-js"). A string seed and `Random` of a domain decline in the
 lowering.
+
+Lists. What the lowering makes of a list (sections "Lists" and "Tuples") is
+printed with the spellings of the mode, and what it declines for JavaScript
+stays declined (`Linspace`, a seeded `RandomChoice`, a comprehension of two
+clauses, `At` of a list of tuples that can be out of range). A list literal
+is the array of its elements; an element-wise operation is the kernel at
+each index, a loop that fills an array (no `Array.from()`); a reduction is
+the loop of the lowering (`Max()` of no element is `empty`); `build` (`Map`,
+a comprehension, the elements of a `Range`) is a loop that fills an array,
+with no deadline check; the `iterationBudget` does not count the elements
+of a list, as on the JavaScript target, and a count of 2^32 or more, which
+no array holds, throws the error of `_IA.decided()` before the first
+element (`entire`). `filter` keeps an element whose verdict is
+`'true'`, drops it for `'false'`, and for `'maybe'` throws the error of
+`_IA.decided()`: the length of the result is not one number, and the
+result is `entire`. `At` is `_IA.at(list, index)`, the interval extension
+of the interpreter's rule: the hull of the elements that the integers of
+the index select, `partial` when some select nothing, `empty` when none
+does (`At(List(x, 2x, x^2), Floor(y) + 1)`). The pass `plain` writes an `At`
+of a constant index in range of a stated length as `elem` (the `at` to
+`elem` rewrites of `scalarize` and `fold` do not run in the mode: both
+passes are off). A length is a plain integer of the bound 2^32: the length
+parameter of an input or of a parameter of a user function, the length
+result of a call, the count of a `filter`, and the count of a `Range`,
+`_IA.rangeCount(lo, hi, step)`, the engine's `rangeCount()` on numbers,
+which throws for a count of 2^32 or more; so are the index of a `build` and of a
+`filter`, and the index of `elem` (`$0[$1]`). The operands of a `Range` go
+through `number`: a bound that is not one integer in the box
+(`Range(1, n)` of `n` in `[1, 5]`) gives `entire`; a `Range` of an operand
+of a real type declines (its count over an interval is not one number in
+general). A comparison of two plain integers (the test of `Max()` of no
+element) is a verdict of numbers. A value whose length is not a plain
+integer declines. An `if` of two list arms (of one length value, as the
+lowering requires) joins element by element (`_IA.hull`). A list result,
+also a root `Tuple`, is an array of kinded results; `ret` writes no copy,
+because `run()` copies the inputs and the result and no kernel writes to an
+operand. An input of a list or tuple type (`list<real>`, `list<real^3>`,
+`tuple<real, real>`, `list<tuple<real, real>>`, `vector<integer^90001>`) is
+an array of the inputs object, whose elements `run()` converts
+(`processInput()`), and is named in `listInputs`, so that `broadcast()`
+converts it once and shares it between the cells.
 
 Conditionals. An `if` is printed with each arm once (`Syntax.verdictIf`):
 the condition is bound to a name, the first arm runs unless it is
@@ -510,9 +549,9 @@ an `if` result or a function result reads a plain integer, the pass adds
 adds `number` (`_IA.number(x)`: the number of a point that is an integer of
 magnitude at most 2^32, else a throw of the error of `_IA.decided()`, which
 `run()` and `broadcast()` answer with `entire`, and which `broadcast()`
-does not count as a failure). A `pow` whose exponent is plain is
+does not count as a failure). A scalar `pow` whose exponent is plain is
 `_IA.pow($0, n)` with a number exponent (`x^3` is `_IA.pow(_.x, 3)`); a
-power by the constant 2 stays `_IA.square`. Every other integer is an
+list power is `_IA.powReal` of each element; a power by the constant 2 stays `_IA.square`. Every other integer is an
 interval: `Floor(x) + 1` is `_IA.add(_IA.floor(_.x), { lo: 1, hi: 1 })`.
 So the bounds and the index of every loop are numbers, and no code tests a
 representation. A bound that is an interval (a slider `n` given as
@@ -520,7 +559,8 @@ representation. A bound that is an interval (a slider `n` given as
 A loop writes no deadline check, and the lowering writes no NaN test of the
 `iterationBudget` (NaN reads as `empty`): a loop of more passes than the
 budget (2^32 without one) throws the error of `_IA.decided()` before its
-first pass (`_IA.undecided()`), so the result is `entire`. A sum is a loop,
+first pass (`_IA.undecided()`), so the result is `entire`; so does a
+`build` or a `filter` of more elements, before its first element. A sum is a loop,
 which adds its terms in another order than the existing target's sum
 written out term by term: the ends can differ in the last digits.
 
@@ -575,7 +615,8 @@ not `false`, the existing interval target then compiles the expression and
 a warning is logged. The result has `target: 'interval-js'`, `success`,
 `runtimeVersion`, `code`, `preamble` and `preambleOnce` (the same text),
 `calling` (`'expression'`, or `'lambda'` for a root `Function` literal,
-which declines when its body reads a free name), `booleanInputs`, `run`,
+which declines when its body reads a free name), `booleanInputs`,
+`listInputs`, `run`,
 `profile: 'ir'`, and for an expression `broadcast()`, `broadcastAsync()`,
 `shippable` and `willUsePool()`, built by `createIntervalRuntime()`
 (`loadBroadcast()`, `loadBroadcastSlice()`) over the stored result. Options:

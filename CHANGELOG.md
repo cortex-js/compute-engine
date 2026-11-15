@@ -100,15 +100,22 @@
   or the verdict `'true'`, `'false'` or `'maybe'`). Where a condition is
   undecided over the input box, both arms are evaluated and the result is
   their hull; a local assigned in both arms has the hull of both values.
-  Any other program declines, and with `fallback` the existing target then
-  compiles it: a list, an integral, a `Loop`, a recursive function. Without
-  the option `profile`, nothing changes.
+  Lists and tuples compile too, as arrays of such values: `At` (an index
+  that is an interval gives the hull of the elements it can select),
+  element-wise operations, `Sum`, `Product`, `Max`, `Min` and `Length` of a
+  list, `Map`, a comprehension over a `Range`, `Filter`, and list or point
+  inputs and results. A list whose length is not one number over the input
+  box (a `Filter` with an undecided condition, a `Range` with a wide bound)
+  is `entire`. Any other program declines, and with `fallback` the existing
+  target then compiles it: an integral, a `Loop`, a recursive function, a
+  `Range` of real operands. Without the option `profile`, nothing changes.
 - **The interval library has the kernels `atLeast(v, c)` and
   `atMost(v, c)`** (the value `v` with its lower end raised to that of `c`,
   or its upper end lowered to that of `c`), **`number(x)`** (the number of
   a point that is an integer, an `UndecidedConditionError` otherwise) and
-  **`undecided(message)`**, which throws that error. They are members of
-  `IntervalArithmetic`.
+  **`undecided(message)`**, which throws that error, and
+  **`rangeCount(lo, hi, step)`**, the number of elements of a `Range` of
+  numbers. They are members of `IntervalArithmetic`.
 - **The interval library has a kernel `powReal(base, exponent)`**, also a
   member of `IntervalArithmetic`: the power for an exponent given as an
   interval, which encloses the real roots of a negative base when the

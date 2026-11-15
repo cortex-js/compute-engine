@@ -14,13 +14,16 @@
  * interval operation (an `if` or a function result included) reads a plain
  * integer, the pass adds `point` (`{ lo: n, hi: n }`); where a loop reads an
  * interval as a bound, it adds `number` (`_IA.number(x)`, which throws for
- * a value that is not one integer). A `pow` whose exponent is plain is
- * `pow.num`, the kernel `_IA.pow` of a number exponent. After the pass every
+ * a value that is not one integer). A scalar `pow` whose exponent is plain
+ * is `pow.num`, the kernel `_IA.pow` of a number exponent. After the pass every
  * loop has number bounds and a number index, and no code tests a
  * representation.
  */
 
 import {
+  lengthValues,
+  mapLengths,
+  outsOf,
   regionsOf,
   scalarType,
   type Instr,
@@ -42,6 +45,17 @@ const PLAIN: Record<string, string> = {
   'mul.int': 'mul.num',
 };
 
+/** The comparisons: a comparison of two plain integers is computed on
+ *  numbers and gives a verdict string (`'true'` or `'false'`). */
+const COMPARE: Record<string, string> = {
+  lt: '<',
+  le: '<=',
+  gt: '>',
+  ge: '>=',
+  eq: '===',
+  ne: '!==',
+};
+
 const I = 'integer';
 const plainRow = (
   arity: 1 | 2,
@@ -56,6 +70,9 @@ export const PLAIN_ROWS: readonly OperatorRow[] = Object.freeze([
   plainRow(2, [[[I, I], I, 'sub.num']]),
   plainRow(1, [[[I], I, 'neg.num']]),
   plainRow(2, [[[I, I], I, 'mul.num']]),
+  ...Object.keys(COMPARE).map((op) =>
+    plainRow(2, [[[I, I], 'boolean', `${op}.num`]])
+  ),
   plainRow(1, [[[I], I, 'point']]),
   plainRow(1, [[[I], I, 'number']], 'may-fail'),
   plainRow(2, [
@@ -71,6 +88,12 @@ export const PLAIN_SPELLINGS: Readonly<Record<string, string>> = Object.freeze(
     'sub.num': '($0 - $1)',
     'neg.num': '(-$0)',
     'mul.num': '($0 * $1)',
+    ...Object.fromEntries(
+      Object.entries(COMPARE).map(([op, js]) => [
+        `${op}.num`,
+        `($0 ${js} $1 ? 'true' : 'false')`,
+      ])
+    ),
     'point': '{ lo: $0, hi: $0 }',
     'number': '_IA.number($0)',
     'pow.num': '_IA.pow($0, $1)',
@@ -78,9 +101,23 @@ export const PLAIN_SPELLINGS: Readonly<Record<string, string>> = Object.freeze(
   }
 );
 
-export function plain(p: Program): void {
+/**
+ * A length is a plain integer of the bound 2^32: the length parameter of a
+ * list (of the entry or of a user function), the length result of a call,
+ * the count of a `filter` and of a `Range` (`rangecount`); the index of a
+ * `build` or a `filter` is one too, and `elem` and the operands of
+ * `rangecount` and `rangestep` read numbers. An `at` of a constant index in
+ * range of a stated length is an `elem`. Returns the refusal of a program
+ * where a length would not be one number (a `Range` of a real operand), or
+ * `undefined`.
+ */
+export function plain(p: Program): string | undefined {
   /** The bound of the magnitude of each plain value. */
   const bound = new Map<V, number>();
+  const fns = new Map(p.functions.map((f) => [f.name, f]));
+  for (const f of p.functions)
+    f.lengthOf.forEach((l, k) => l && bound.set(f.body.params[k], INDEX));
+  let refusal: string | undefined;
   /** The integer constants, by value. */
   const constants = new Map<V, number>();
   // The `point` of a plain value and the twin of a constant made in each
@@ -95,17 +132,17 @@ export function plain(p: Program): void {
   };
   const magnitude = (v: V) =>
     bound.get(v) ?? (constants.has(v) ? Math.abs(constants.get(v)!) : LIMIT);
+  /** The plain constant `value`. */
+  const twin = (value: number, out: Instr[]): V =>
+    made(`c ${value}`, out, (w) => {
+      bound.set(w, Math.abs(value));
+      const literal: Literal = { lane: I, value, plain: true };
+      return { k: 'const', out: w, value: literal };
+    });
   /** `v` as a number: a plain value, the twin of a constant, or `number`. */
   const asNumber = (v: V, out: Instr[]): V => {
     if (bound.has(v)) return v;
-    if (constants.has(v)) {
-      const value = constants.get(v)!;
-      return made(`c ${value}`, out, (w) => {
-        bound.set(w, Math.abs(value));
-        const literal: Literal = { lane: I, value, plain: true };
-        return { k: 'const', out: w, value: literal };
-      });
-    }
+    if (constants.has(v)) return twin(constants.get(v)!, out);
     return made(`n ${v}`, out, (w) => {
       bound.set(w, INDEX);
       return { k: 'op', out: w, op: 'number', args: [v] };
@@ -144,7 +181,22 @@ export function plain(p: Program): void {
       }
       if (
         i.k === 'op' &&
+        i.op in COMPARE &&
+        i.args.every((a) => bound.has(a) || constants.has(a))
+      ) {
+        // Two plain integers, compared on numbers, give a verdict string:
+        // the test of a total length against 0 in `Max`, for example.
+        i.args = i.args.map((a) => asNumber(a, body));
+        i.op = `${i.op}.num`;
+        body.push(i);
+        continue;
+      }
+      // A scalar power only: the rows of `pow.num` do not thread, and a list
+      // power stays `pow`, `_IA.powReal` of each element.
+      if (
+        i.k === 'op' &&
         (i.op === 'pow' || i.op === 'pow.int') &&
+        p.types[i.out].shape.length === 0 &&
         magnitude(i.args[1]) < LIMIT
       ) {
         i.args = [asInterval(i.args[0], body), asNumber(i.args[1], body)];
@@ -152,7 +204,33 @@ export function plain(p: Program): void {
         body.push(i);
         continue;
       }
-      if (i.k === 'loop') {
+      if (i.k === 'op' && i.op === 'at' && constants.has(i.args[1])) {
+        // `At(L, k)` of a constant `k` in range of a stated length.
+        const [k, n] = [constants.get(i.args[1])!, p.types[i.args[0]].shape[0]];
+        if (typeof n === 'number' && k !== 0 && Math.abs(k) <= n) {
+          i.args = [i.args[0], twin(k > 0 ? k - 1 : n + k, body)];
+          i.op = 'elem';
+        }
+      }
+      if (i.k === 'op' && (i.op === 'rangecount' || i.op === 'rangestep')) {
+        if (i.args.some((a) => p.types[a].lane !== I))
+          refusal ??= 'a Range of a real operand';
+        i.args = i.args.map((a) => asNumber(a, body));
+        bound.set(i.out, i.op === 'rangestep' ? 1 : INDEX);
+      } else if (i.k === 'op' && i.op === 'elem')
+        i.args = [i.args[0], asNumber(i.args[1], body)];
+      else if (i.k === 'call') {
+        const f = fns.get(i.fn)!;
+        i.args = i.args.map((a, k) =>
+          f.lengthOf[k] ? asNumber(a, body) : asInterval(a, body)
+        );
+        // The list, then its length (`lower-functions.ts`).
+        if (i.outs.length === 2) bound.set(i.outs[0], INDEX);
+      } else if (i.k === 'region' && (i.op === 'build' || i.op === 'filter')) {
+        i.args = i.args.map((a) => asNumber(a, body));
+        bound.set(i.regions[0].params[0], INDEX);
+        if (i.op === 'filter') bound.set(i.outs[0], INDEX);
+      } else if (i.k === 'loop') {
         i.lo = asNumber(i.lo, body);
         i.hi = asNumber(i.hi, body);
         i.init = i.init.map((v) => asInterval(v, body));
@@ -162,6 +240,14 @@ export function plain(p: Program): void {
         );
       } else if (i.k !== 'const' && i.k !== 'if')
         i.args = i.args.map((a) => asInterval(a, body));
+      // A length that is a constant is its plain twin.
+      for (const v of [...outsOf(i), ...regionsOf(i).flatMap((r) => r.params)]) {
+        p.types[v] = mapLengths(p.types[v], (n) =>
+          constants.has(n) ? asNumber(n, body) : n
+        );
+        if (lengthValues(p.types[v]).some((n) => !bound.has(n)))
+          refusal ??= 'a list whose length is not one number';
+      }
       regionsOf(i).forEach(region);
       body.push(i);
     }
@@ -170,4 +256,5 @@ export function plain(p: Program): void {
     scopes.pop();
   };
   p.functions.forEach((f) => region(f.body));
+  return refusal;
 }

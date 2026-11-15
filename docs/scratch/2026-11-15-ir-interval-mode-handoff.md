@@ -8,10 +8,12 @@ by session `ce-interval` (2026-11-15):
 measure of Tycho's core corpus is in section 12a of the note, a census of
 the suite's interval compilations runs in `/tmp/wt-ce-interval` (temporary
 instrumentation, not to land) and is recorded in section 12b. Batch 1 is
-committed, `926016f4ce9fcd4dc07e74541046e7d46a461020`. Batch 2 is written
-and reviewed (section 14 of the note; patches in
-`_TASKS/2026-11-15-interval-mode/`). Next: a packed build for Tycho's audit
-of the interval seam, then lists (`At`, list inputs) and integrals.
+committed, `926016f4ce9fcd4dc07e74541046e7d46a461020`; batch 2,
+`2f6274edecb93fee440093a969125e7e56da704f`; batch 3 (lists) follows.
+Tycho's audit of batches 1 and 2 is section 16 of the note, and the two
+batches that answer it are section 17 (patches and records in
+`_TASKS/2026-11-15-interval-mode/` and
+`~/dev/compute-engine-recovery/interval-dump/`).
 
 ## Goal
 

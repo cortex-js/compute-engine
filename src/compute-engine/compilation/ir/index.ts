@@ -515,7 +515,9 @@ export function sliceProgram(
     rows
   );
   if (interval) {
-    plain(p);
+    const refused = plain(p);
+    if (refused !== undefined)
+      throw new Decline('program', `${refused} on interval-js`);
     verify(p, rows);
   }
   const lanes: Lane[] = bigint
@@ -533,7 +535,7 @@ export function sliceProgram(
       ...profile,
       lanes,
       syntax,
-      ...(interval ? { rank: 0, recursion: false } : {}),
+      ...(interval ? { recursion: false } : {}),
     },
     rows
   );

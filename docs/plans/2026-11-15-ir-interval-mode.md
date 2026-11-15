@@ -747,4 +747,186 @@ the target is deleted"), and most of it is outside what Tycho compiles.
      and admits 18 that the existing target declines. The most frequent
      declines: a list (247), the step of a `Range` (59), the `Enclosure`
      kind (53), `Break` (20).
-4. Then what the measure ranks first.
+4. Then what the measure ranks first: lists (section 15), then integrals.
+   A packed build of batch 2 (`2f6274edecb93fee440093a969125e7e56da704f`)
+   went to `tycho-desk` on 2026-11-15 for its audit of the interval seam.
+
+## 15. Lists (batch 3)
+
+Lists are the first decline of both corpora: 171 of Tycho's 5,230 records
+(`At` in 105, most of them of a list literal with a constant or a computed
+index), and 247 of the 995 declines of the mode in CE's suite, with 59 more
+for the step of a `Range`. The IR has lists (README, "Lists" and "Tuples");
+the mode needs their representation and spellings. The rules:
+
+- **Representation.** A list or a tuple is a JavaScript array of the
+  values of the mode (intervals, verdicts, or arrays for rank 2), as on the
+  existing target. `run()` already converts an array input element by
+  element (`processInput()`) and wraps an array result element by element
+  (`freshIntervalValue()`). A list input is listed in `listInputs`, which
+  `broadcast()` reads as the inputs that every cell shares.
+- **A length is a plain integer**: a number, with the bound 2^32 of an
+  index (`plain`). So a reduction (`Sum(L)`, `Max(L)`) is a loop over
+  number indexes, and `elem`, the read of an element at an index in range,
+  is `$0[$1]` of a plain index. An index that is an interval goes through
+  `number`.
+- **`At`** is `_IA.at(list, index)`: the kernel is the interval extension
+  of the interpreter's rule. The index is an interval, so the result is
+  the hull of the elements that its integers select, `partial` when some
+  select nothing, `empty` when none does.
+- **Element-wise operations** are the `map` of the table: the kernel of
+  the operation at each index.
+- **Regions.** `build` (a `Map`, a comprehension, the elements of a
+  `Range`) is a loop that fills an array. `filter` keeps an element when
+  its verdict is `'true'`, drops it for `'false'`, and for `'maybe'` the
+  length of the result is not one number: it throws through
+  `_IA.undecided`, and the result is `entire`. The count of a `Range` is
+  the engine's `rangeCount()` on numbers (operands that are intervals go
+  through `number`).
+- **Soundness of a length.** Every list of the mode has one length at run
+  time, known as a number: a list whose length would depend on the box
+  (a filter, a range bound) is `entire`, never a list of a guessed length.
+- **Declines stay declines**: what the pipeline declines for JavaScript
+  (a list of complex numbers, a write to a list local, `At` of a nested
+  list out of range, a comprehension of several clauses), and a `Loop`.
+
+Not in this batch: `Integrate` (58 of Tycho's records), a seeded
+`RandomChoice`, `Linspace`.
+
+WRITTEN and reviewed on 2026-11-15. What it settled beyond these rules: a
+`Range` of an operand of a real type declines; the emitted code copies no
+result (`run()` copies, and no kernel writes to an operand); a comparison
+of two plain integers is computed on numbers; `At` with a constant index in
+range of a stated length is an `elem`; the `iterationBudget` does not count
+the elements of a list, as on the JavaScript target, and a list of 2^32
+elements or more is `entire`. 13,487 containment checks, element by
+element, none within the slack; no exception against the existing target.
+Time, six list programs: median ratio 1.00; `Max(List(x, y, x·y))` is at
+1.20, because the lowering folds over the list where the existing target
+writes two `max` calls (`Max(x, y, x·y)` of scalars is the same two
+calls). 163 lines added under `ir/`. The census of CE's suite (the shadow
+measure on the full suite at `d6667422d` plus the batch, no test failure):
+the mode admits 1,222 of the 1,974 interval compilations that the existing
+target compiles (61.9%, from 48.3% after batch 2), fails on none, and
+admits 41 that the existing target declines.
+
+## 16. Tycho's audit of batches 1 and 2
+
+From session `tycho-desk`, 2026-11-15, on a packed build of
+`2f6274edecb93fee440093a969125e7e56da704f`, over all Desmos states, with the
+document functions live (records in
+`~/dev/compute-engine-recovery/interval-dump/`: `t1-declines.json`,
+`t1-exceptions.json`, `t1-misses.json`, `t1-times.json`).
+
+**Admitted.** 4,607 of 5,230 distinct calls (88%); 623 declined. 475 of the
+declines are Tycho's own `compile` handlers on `Which` (348) and `At` (127),
+which the pipeline does not call ("the definition of Which has its own
+lowering"). That decline is a user decision of 2026-11-14 (the status
+document of the JavaScript compiler: no hook in the new compiler; a host
+rewrites the MathJSON before it compiles; a definition with a host handler
+declines until the host removes it), so these calls are Tycho's row MK,
+not a change of the mode. On `interval-js` the `Which` handler returns
+`undefined`, and the `At` handler only rewrites the index to the Desmos
+rule (`At(L, Max(Floor(i + 2ε·Max(1, |i|)), 0))`), which the mode compiles
+when Tycho writes it in the MathJSON. The others: lists (about 34), a
+document function whose body is a list (20), `Integrate` (43), `Choose`
+(7), `Break` (5), an `If` with arms of two types (5), `Apply` of a
+`Derivative` (5), and a few operators with no row.
+
+**Results.** 4,598 programs at 12 boxes each (55,176 boxes), each box
+checked at 6 points against the scalar JavaScript code (330,640 points). No
+miss is new in the mode: 59 points in 3 programs miss on both interval
+targets (`GCD` with a zero operand, `issues/CE-1341.md`, now with a corpus
+witness; `100/M` with `M = [0, 0]`; `Arccos` outside its domain, where the
+scalar code continues into the complex numbers). Against the existing
+target, by box: equal within 4 ulps 51,045; wider 3,304; shifted 224;
+tighter 203; a change of kind about 390; a change of verdict 14. The
+classes, with the fix where there is one:
+
+- A decimal literal (`y - 1.8`): the mode enclosed it by one ulp, the
+  existing target reads it as its double. This is most of the wider boxes
+  (1,529 of the 2,339 sampled are wider by less than 10⁻⁹ of the width),
+  and at a point box the mode gave an interval of a few ulps where the
+  existing target gives a point. CHOICE: a decimal literal is a point at
+  its double, as on the existing target and in the JavaScript code (the
+  caveat "the precision of the target"). The alternative is the enclosure:
+  rigorous against the interpreter's decimal, and the cause of these
+  differences. `Pi`, `1/3` and a folded closed node keep their enclosure,
+  as on the existing target.
+- A float exponent (`x^3.87`, `x^0.0333…`, `x^2.2`): `empty → interval`
+  (119 boxes), `partial → interval`, `interval → singular`. Fix: the
+  interpreter's reading of the float (`realPowerBranchTerms()`) decides, at
+  compile time for a literal and in the kernel for a run-time exponent.
+- `partial ↔ singular` (about 190 boxes in three documents) and
+  `singular → entire` (9): not explained; the document functions are asked
+  of Tycho.
+- `true → maybe` (12): `Equal(x, x)`, which the existing target folds.
+- `interval → partial` (35): one case is Tycho's test
+  `contradicted-partial.test.ts`, a two-clause `cases` whose second clause
+  is `Arccos(2x)`; to reproduce.
+
+**Time.** `run()`: median ratio 0.988; `broadcast()`, per cell: 1.038,
+above the criterion. The programs above 1.1 are 994 for `run()` and 1,753
+for `broadcast()`, with a sample of 600 calls per round (476 programs are
+below 0.9 too, so part of it is noise). What is not noise: 334 programs
+that the existing target compiles to a constant (a comparison that it can
+decide at compile time, `(…)^2 < 0`), median ratio 2.4; a few programs of
+document functions at 3 to 10 times (`neyret/sc3azg0frd`), not explained
+yet; and the per-cell cost of `broadcast()`. Fixes: a decided comparison is
+a constant; constants are named once per artifact.
+
+**Tycho's tests** with only the interval seam switched: 32 failures
+against 30. The two new ones: the `contradicted-partial` case above, and
+`compiled-iteration-budget.test.ts`, where a `Loop` whose values are not
+read is removed by the pipeline and so counts no pass (a rule of the
+pipeline, README "Effects"; the existing target and the interpreter stop
+at the budget).
+
+## 17. The batches after the audit
+
+Two batches, from section 16. Each has the tests and the measures of the
+earlier ones, and ends with a build for Tycho's audit.
+
+**Batch 4, results.**
+
+1. A decimal literal is a point at its double (section 16). The mark
+   `inexact` stays for a number with no double value that the engine holds
+   exactly (`1/3`, `Pi`, a radical) and for a folded closed node.
+2. `_IA.powReal(x, e, digits)`: for an exponent that is a point and not an
+   integer, the kernel asks the interpreter's reader of a float exponent
+   (`realPowerBranchTerms()`, with the digits recorded at the compilation,
+   as the JavaScript code records `reconstructionDigits`). A rational of
+   odd denominator: `_IA.powRealBranch`, the real root with its sign, as
+   the interpreter computes it. Anything else: `_IA.powInterval` with the
+   point, so a negative base has no value (`empty`), as the interpreter
+   gives a complex number. This replaces the widening of the exponent and
+   its `k/1024` exception, for a literal and for a run-time exponent. A
+   literal rational stays root then integer power.
+3. `Binomial` and `Choose` of real operands (`_IA.binomial`), which the
+   existing target compiles.
+4. `issues/CE-1341.md`: `GCD` with a zero operand, in the interval library.
+5. Tycho's guard case: `Which(x ≥ 0.5, 0, True, Arccos(2x))` over
+   `[0.49, 0.51]` at machine precision must be `interval`.
+6. The kind changes `partial ↔ singular` and `singular → entire` of the
+   audit, from the definitions in `t1-document-definitions.json`: the cause
+   of each, a fix where it is simple and sound, a line in the report
+   otherwise.
+
+**Batch 5, time.**
+
+1. A comparison that the engine decides for every value of its inputs is a
+   constant verdict (`(…)^2 < 0`, `Equal(x, x)`), by the rule the existing
+   target uses: 334 of Tycho's programs are constants there.
+2. Values that depend on no input are computed once per artifact, in
+   `preambleOnce`: a constant, a pure operation or a list of such values,
+   and a call of a pure user function of such values (wrapped, so that a
+   refusal of a loop makes the value `entire` and not a failure of the
+   load). This names each constant once (the per-cell time of
+   `broadcast()`) and computes `b(3π)` once (`neyret/ielrzhke1a`, 3.6 times
+   slower today).
+3. `cse` merges two calls of one pure function with the same arguments, on
+   every target of the pipeline (agreed with `ce-compiler`; `passes.ts`):
+   `neyret/sc3azg0frd`, whose functions call each other five times with one
+   argument, is 9.8 times slower today. Not merged: a function that draws,
+   has an effect or is on a cycle, and a call whose value is not visible
+   (an arm, a loop body).

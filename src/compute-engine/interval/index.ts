@@ -154,6 +154,7 @@ import {
   map as _map,
   points as _points,
   range as _range,
+  rangeCountOf as _rangeCountOf,
   seededChoice as _seededChoice,
 } from './collections.js';
 
@@ -318,6 +319,7 @@ export {
   map,
   points,
   range,
+  rangeCountOf,
   seededChoice,
 } from './collections.js';
 export type { SeededChoiceDomain } from './collections.js';
@@ -424,6 +426,9 @@ export const IntervalArithmetic = {
   map: _map,
   points: _points,
   range: _range,
+  // The count of a `Range` of numbers, for the interval mode of the IR
+  // pipeline.
+  rangeCount: _rangeCountOf,
   seededChoice: _seededChoice,
 
   // Trigonometric

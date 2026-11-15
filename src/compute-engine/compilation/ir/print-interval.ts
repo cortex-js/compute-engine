@@ -21,7 +21,8 @@
  * (the pass `plain`), and refuses to start, by the error of an undecided
  * condition (`run()` answers `entire`), when it has more passes than the
  * `iterationBudget`. `Random()` is the support `[0, 1]` of a draw, and a
- * random frame is its body.
+ * random frame is its body. A list or a tuple is an array of the values of
+ * the mode; its length and its indexes are numbers (the pass `plain`).
  *
  * A rule of the mode is here: `intervalRefusal()`, the constructs that the
  * mode does not compile yet.
@@ -34,7 +35,12 @@ import {
   type StoredIntervalJavaScript,
 } from '../interval-runtime.js';
 import { JS } from './print-js.js';
-import { printProgram, type Printed, type Syntax } from './print.js';
+import {
+  printProgram,
+  type Printed,
+  type RegionSpelling,
+  type Syntax,
+} from './print.js';
 import {
   argumentIndex,
   entryOf,
@@ -82,6 +88,37 @@ const loopOpen =
     `for (let ${k} = ${k}_lo; ${k} <= ${k}_hi; ${k}++) {`,
   ];
 
+/** The region `build` or `filter`: a loop over a number count that fills
+ *  an array; a count of 2^32 or more, which no array holds, throws before
+ *  the first element. The `iterationBudget` does not count the elements of
+ *  a list (`CompilationOptions.iterationBudget`), as on the JavaScript
+ *  target. A filter keeps an element for `'true'`, drops it for
+ *  `'false'`, and for `'maybe'` the length of its result is not one
+ *  number: it throws, and `run()` answers `entire`. */
+const fill =
+  (op: 'build' | 'filter'): RegionSpelling =>
+  ({ outs, args: [n], params: [k] }) => {
+    const out = outs[outs.length - 1];
+    return {
+      open: [
+        `const ${out} = [], ${out}_n = ${n};`,
+        `if (!(${out}_n < 4294967296)) _IA.undecided('A list of 2^32 elements or more');`,
+        `for (let ${k} = 0; ${k} < ${out}_n; ${k}++) {`,
+      ],
+      // A build yields its element; a filter its verdict, then its element.
+      close: ([a, b]) =>
+        op === 'build'
+          ? [`  ${out}.push(${a});`, '}']
+          : [
+              `  const ${out}_k = ${a};`,
+              `  if (${out}_k === 'true') ${out}.push(${b});`,
+              `  else if (${out}_k !== 'false') _IA.undecided('A Filter whose condition is undecided');`,
+              '}',
+              `const ${outs[0]} = ${out}.length;`,
+            ],
+    };
+  };
+
 /**
  * The syntax of the mode: the statement forms of `JS`, and a spelling for
  * each operation that a kernel computes, with the operands in the order of
@@ -90,7 +127,8 @@ const loopOpen =
  * enclosure of π and the quotient by 180. A constant is a point, or for a
  * literal marked `inexact` the enclosure of that many ulps on each side;
  * NaN is `empty`; a boolean a verdict; a plain integer (`plain.ts`) a
- * number.
+ * number. `at` is `_IA.at` (the interpreter's `At` over an interval index),
+ * `elem` the read of a number index, `rangecount` `_IA.rangeCount`.
  */
 export const JS_INTERVAL: Syntax = Object.freeze({
   ...JS,
@@ -106,9 +144,29 @@ export const JS_INTERVAL: Syntax = Object.freeze({
     draw: '{ lo: 0, hi: 1 }',
     atleast: '_IA.atLeast($0, $1)',
     atmost: '_IA.atMost($0, $1)',
+    // An index and a length are numbers (`plain.ts`).
+    elem: '$0[$1]',
+    at: '_IA.at($0, $1)',
+    rangecount: '_IA.rangeCount($0, $1, $2)',
+    rangestep: '($1 >= $0 ? 1 : -1)',
     ...PLAIN_SPELLINGS,
   },
+  // A loop that fills an array, with no `Array.from()`.
+  map: (lengths, body) => {
+    const index = lengths.map((_, d) => `i${d}`);
+    return lengths.reduceRight<string>(
+      (s, n, d) =>
+        `((_n) => { const _r = []; for (let ${index[d]} = 0; ${index[d]} < _n; ${index[d]}++) _r.push(${s}); return _r; })(${n})`,
+      body(index)
+    );
+  },
+  // No copy: `run()` copies the inputs and the result, and no kernel
+  // writes to an operand.
+  ret: (value) => `return ${value};`,
+  retTuple: (values) => `return [${values.join(', ')}];`,
   regions: {
+    build: fill('build'),
+    filter: fill('filter'),
     seeded: ({ outs }) => ({
       open: [...outs.map((o) => `let ${o};`), '{'],
       close: (ys) => [...ys.map((y, j) => `  ${outs[j]} = ${y};`), '}'],

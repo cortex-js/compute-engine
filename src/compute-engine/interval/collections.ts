@@ -31,6 +31,7 @@ import {
   RANGE_COUNT_TOLERANCE_CAP,
 } from '../numerics/range-count.js';
 import { add, mul } from './arithmetic.js';
+import { undecided } from './comparison.js';
 import {
   getValue,
   ok,
@@ -379,6 +380,19 @@ export function pointComponent(
 // jump in an operand (a `singular` result carrying a `value`) is re-tagged
 // on the result instead of being forgotten — see `liftJump` in `util.ts`.
 export const at = liftJump(atRaw);
+
+/**
+ * The count of `Range(lo, hi, step)` of numbers, the length of a list of the
+ * interval mode of the IR pipeline: the engine's `rangeCount()`. A count of
+ * 2^32 or more (also an infinite one) is no length of an array, which has at
+ * most 2^32 - 1 elements, and throws the error of `undecided()`, which
+ * `run()` and `broadcast()` answer with `entire`.
+ */
+export function rangeCountOf(lo: number, hi: number, step: number): number {
+  const n = rangeCount(lo, hi, step);
+  if (n < 2 ** 32) return n;
+  return undecided('A Range of 2^32 elements or more');
+}
 
 /**
  * One collection ELEMENT as an interval operand for a kernel: a raw number
