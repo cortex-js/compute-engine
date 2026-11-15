@@ -1,7 +1,8 @@
 /**
- * The profile `ir` of `compile()` on the `glsl` target (batch G1,
- * `src/compute-engine/compilation/ir/adapter-glsl.ts`): a scalar result of
- * scalar inputs.
+ * The profile `ir` of `compile()` on the `glsl` target (batches G1 and G2,
+ * `src/compute-engine/compilation/ir/adapter-glsl.ts`): a scalar or list
+ * result of scalar inputs and of inputs that are tuples or lists of 2 to 4
+ * elements (a `vecN`), and the option `vars`.
  *
  * - The fields of the result: `code` is an expression or statements that end
  *   in `return`, an input is its bare name, every helper and function of
@@ -24,6 +25,11 @@ import { GLSL } from '../../src/compute-engine/compilation/ir/print-glsl';
 import { _jsProfileShadowStats } from '../../src/compute-engine/js-profile-switch';
 import { GlslDriver } from '../../scripts/glsl-check/glsl-driver';
 import { interpret, makeEngine, type Point } from './ir-slice-oracle';
+import type { Expression } from '../../src/compute-engine/global-types';
+import {
+  isFunction,
+  isSymbol,
+} from '../../src/compute-engine/boxed-expression/type-guards';
 
 const ce = makeEngine();
 // A user function that reads an input of the compilation.
@@ -32,6 +38,23 @@ ce.declare('v8', 'real');
 ce.declare('float', 'real');
 ce.declare('sin', 'real');
 for (const word of ['active', 'common', 'sampler1D']) ce.declare(word, 'real');
+// Points (batch G2): `L` is `list<real^3>`.
+ce.declare('P', 'tuple<real, real>');
+ce.declare('R', 'tuple<real, real>');
+ce.declare('P3', 'tuple<real, real, real>');
+ce.declare('V4', 'list<real^4>');
+ce.declare('L5', 'list<real^5>');
+ce.declare('B2', 'tuple<boolean, boolean>');
+ce.declare('BL2', 'list<boolean^2>');
+ce.declare('pf', '(tuple<real, real>) -> real');
+ce.assign(
+  'pf',
+  ce.box(['Function', ['Add', ['At', 'a', 1], ['At', 'a', 2]], 'a'])
+);
+ce.assign(
+  'pr',
+  ce.box(['Function', ['Tuple', ['Cos', 'a'], ['Sin', 'a']], 'a'])
+);
 
 type Json = unknown;
 const IR = { to: 'glsl', profile: 'ir', fallback: false } as const;
@@ -217,6 +240,234 @@ function shader(r: ReturnType<typeof glsl>, result: string): string {
 );
 
 //
+// Points: a tuple or a list of 2 to 4 numbers is a `vecN` (batch G2)
+//
+
+type PointValue = Record<string, number | number[]>;
+// Tycho's options for a parametric curve.
+const TYCHO = { inputs: { t: 'real<0..7>' }, symbolic: ['t'] };
+/** The globals that the `vars` texts of `POINTS` name. */
+const GLOBALS = 'float g_x;\nstruct G { vec2 P; };\nG g;\nfloat g_a[2];';
+
+// prettier-ignore
+const POINTS: [label: string, json: Json, options: object, points: PointValue[]][] = [
+  ['the parametric witness', ['Tuple', ['Cos', 't'], ['Sin', 't']], TYCHO, [{ t: 0.5 }, { t: 2 }, { t: 6 }]],
+  ['a 3-tuple', ['Tuple', 'x', ['Sin', 'x'], ['Multiply', 2, 'y']], {}, [{ x: 0.5, y: 2 }, { x: -1.5, y: 0.25 }]],
+  ['a 4-list', ['List', 'x', 1, 'y', ['Exp', 'x']], {}, [{ x: 0.5, y: 2 }]],
+  ['a list of 5 numbers', ['List', 'x', 1, 'y', 2, 3], {}, [{ x: 0.5, y: 2 }]],
+  ['PointList of scalars', ['PointList', 'x', ['Cos', 'x']], {}, [{ x: 0.5 }, { x: -2 }]],
+  ['an If between two points', ['If', ['Less', 'x', 0], ['Tuple', 'x', 1], ['Tuple', 1, 'x']], {}, [{ x: -1 }, { x: 2 }]],
+  ['an If with a point arm and no else', ['If', ['Less', 'x', 0], ['Tuple', 'x', 1]], {}, [{ x: -1 }, { x: -0.25 }]],
+  ['a point through a Block local', ['Block', ['Declare', 'q', 'unknown', ['Tuple', ['Cos', 'x'], ['Sin', 'x']]], ['Add', ['Multiply', 2, 'q'], ['Tuple', 'y', 1]]], {}, [{ x: 0.5, y: 2 }, { x: 3, y: -1 }]],
+  ['a boolean tuple', ['Tuple', ['Less', 'x', 0], ['Less', 'x', 1]], {}, [{ x: -1 }, { x: 0.5 }, { x: 2 }]],
+  ['2·P + R', ['Add', ['Multiply', 2, 'P'], 'R'], {}, [{ P: [1, 2], R: [0.5, -1] }, { P: [-3, 0.25], R: [2, 7] }]],
+  ['At(P, 2)', ['At', 'P', 2], {}, [{ P: [1, 2] }, { P: [-3, 0.25] }]],
+  ['Sin of a 3-tuple input, times x', ['Multiply', 'x', ['Sin', 'P3']], {}, [{ x: 2, P3: [0.5, 1, -2] }]],
+  ['a list<real^3> and a list<real^4> input', ['Add', ['At', 'L', 3], ['At', 'V4', -1]], {}, [{ L: [1, 2, 3], V4: [4, 5, 6, 7] }]],
+  ['a vars scalar', ['Add', 'x', 'y'], { vars: { x: 'g_x' } }, [{ x: 0.5, y: 2 }, { x: -1, y: 3 }]],
+  ['a vars point (a member)', ['Add', ['Multiply', 'y', 'P'], 'R'], { vars: { P: 'g.P' } }, [{ y: 2, P: [1, 2], R: [0.5, -1] }]],
+  ['a vars element read in a user function', ['rx', 'x'], { vars: { y: 'g_a[1]' } }, [{ x: 0.5, y: 2 }, { x: -1, y: 3 }]],
+  // A boolean input element is 1 (True) or 0 (False) in a point.
+  ['a tuple<boolean, boolean> input', ['If', ['At', 'B2', 1], 'x', 'y'], {}, [{ B2: [1, 0], x: 0.5, y: 2 }, { B2: [0, 1], x: 0.5, y: 2 }]],
+  ['a list<boolean^2> input', ['If', ['At', 'BL2', 2], 'x', 'y'], {}, [{ BL2: [1, 0], x: 0.5, y: 2 }, { BL2: [0, 1], x: 0.5, y: 2 }]],
+];
+
+/** The programs that the existing GLSL target does not compile, so their
+ *  fields are not compared with its fields. */
+const NOT_COMPARED = new Set([
+  'a boolean tuple',
+  'a tuple<boolean, boolean> input',
+  'a list<boolean^2> input',
+]);
+
+/** The interpreter's value: a tuple or a list is an array; an input array
+ *  is a `Tuple` for a tuple input, a `List` otherwise. */
+function interpretPoint(json: Json, point: PointValue): unknown {
+  const read = (e: Expression): unknown =>
+    isFunction(e, 'Tuple') || isFunction(e, 'List')
+      ? e.ops.map(read)
+      : isSymbol(e, 'True') || isSymbol(e, 'False')
+        ? isSymbol(e, 'True')
+        : (e as { re: number }).re;
+  const values = Object.fromEntries(
+    Object.entries(point).map(([k, v]) => [
+      k,
+      Array.isArray(v)
+        ? ce.function(
+            /^(L|V4|BL2)$/.test(k) ? 'List' : 'Tuple',
+            v.map((n) =>
+              /^B/.test(k) ? (n ? ce.True : ce.False) : ce.number(n)
+            )
+          )
+        : ce.number(v),
+    ])
+  );
+  return ce.withValues(values as never, () =>
+    read(
+      ce
+        .box(json as never)
+        .evaluate()
+        .N()
+    )
+  );
+}
+
+/** One fragment shader per component of the result: the host's function
+ *  `<result> userFn(<inputs>)`, whose point inputs are `vecN` parameters
+ *  made from `float` uniforms (`u_P_0`, `u_P_1`), and whose `vars` inputs
+ *  are globals that `main()` sets. */
+function pointShaders(
+  r: ReturnType<typeof glsl>,
+  vars: Record<string, string>,
+  expected: unknown
+): string[] {
+  const type = (n: string) => r.freeSymbolTypes![n].lowered!;
+  const size = (n: string) => Number(/^b?vec(\d)$/.exec(type(n))?.[1] ?? 1);
+  const value = (n: string) =>
+    size(n) === 1
+      ? `u_${n}_0`
+      : `${type(n)}(${Array.from({ length: size(n) }, (_, k) => `u_${n}_${k}`).join(', ')})`;
+  const params = r.freeSymbols!.filter((n) => vars[n] === undefined);
+  // The type of the result, from the interpreter's value.
+  const count = Array.isArray(expected) ? expected.length : undefined;
+  const scalar =
+    [expected].flat()[0] === true || [expected].flat()[0] === false
+      ? 'bool'
+      : 'float';
+  const result =
+    count === undefined
+      ? scalar
+      : count >= 2 && count <= 4
+        ? `${scalar === 'bool' ? 'b' : ''}vec${count}`
+        : `${scalar}[${count}]`;
+  const body = r.code.includes(';') ? r.code : `return ${r.code};`;
+  return Array.from({ length: Number(count ?? 1) }, (_, k) =>
+    [
+      '#version 300 es',
+      'precision highp float;',
+      'precision highp int;',
+      ...r.freeSymbols!.flatMap((n) =>
+        Array.from({ length: size(n) }, (_, j) => `uniform float u_${n}_${j};`)
+      ),
+      GLOBALS,
+      'out vec4 fragColor;',
+      r.preamble ?? '',
+      `${result} userFn(${params.map((n) => `${type(n)} ${n}`).join(', ')}) {`,
+      body,
+      '}',
+      'void main() {',
+      ...Object.entries(vars).map(([n, text]) => `  ${text} = ${value(n)};`),
+      `  fragColor = vec4(float(userFn(${params.map(value).join(', ')})${count === undefined ? '' : `[${k}]`}), 0.0, 0.0, 0.0);`,
+      '}',
+    ].join('\n')
+  );
+}
+
+describe('IR profile on GLSL: points', () => {
+  test.each(POINTS.map(([label, json, options]) => [label, json, options]))(
+    '%s: the fields of the existing target',
+    (label, json, options) => {
+      const r = glsl(json, options as object);
+      expect(r.profile).toBe('ir');
+      let existing: ReturnType<typeof glsl> | undefined;
+      try {
+        existing = compile(ce.box(json as never), {
+          to: 'glsl',
+          fallback: false,
+          ...(options as object),
+        });
+      } catch {
+        existing = undefined;
+      }
+      // `lowered` (the uniform type the host declares) and the type are the
+      // existing target's for each program it compiles.
+      expect(existing === undefined).toBe(NOT_COMPARED.has(label as string));
+      if (existing !== undefined) {
+        expect([...r.freeSymbols!].sort()).toEqual(
+          [...existing.freeSymbols!].sort()
+        );
+        expect(r.freeSymbolTypes).toEqual(existing.freeSymbolTypes);
+      }
+      const again = glsl(json, options as object);
+      expect([again.code, again.preamble]).toEqual([r.code, r.preamble]);
+    }
+  );
+
+  test('the parametric witness is the code of the existing target', () => {
+    const json = ['Tuple', ['Cos', 't'], ['Sin', 't']];
+    expect(glsl(json, TYCHO).code).toBe('vec2(cos(t), sin(t))');
+    expect(compile(ce.box(json as never), { to: 'glsl', ...TYCHO }).code).toBe(
+      'vec2(cos(t), sin(t))'
+    );
+  });
+
+  test('a point input is a vec2, a list<real^3> input a vec3; the vars text is written for the name, which stays an input', () => {
+    const r = glsl(['Add', ['Multiply', 'y', 'P'], 'R'], {
+      vars: { P: 'g.P' },
+    });
+    expect(r.freeSymbolTypes!.P.lowered).toBe('vec2');
+    expect(r.freeSymbols).toContain('P');
+    expect(r.code).toMatch(/g\.P\[/);
+    expect(r.code).not.toMatch(/(?<!\.)\bP\b/);
+    expect(glsl(['At', 'L', 1]).freeSymbolTypes!.L.lowered).toBe('vec3');
+    for (const B of ['B2', 'BL2'])
+      expect(
+        glsl(['If', ['At', B, 1], 'x', 'y']).freeSymbolTypes![B].lowered
+      ).toBe('bvec2');
+    const s = glsl(['Add', 'x', 'y'], { vars: { x: 'u_x' } });
+    expect(s.code).toBe('(u_x + y)');
+    expect(s.freeSymbols).toEqual(['x', 'y']);
+  });
+});
+
+(chromiumAvailable() ? describe : describe.skip)(
+  'IR profile on GLSL: points in WebGL2',
+  () => {
+    let driver: GlslDriver;
+    beforeAll(async () => {
+      driver = await GlslDriver.start();
+    }, 60_000);
+    afterAll(async () => driver?.stop());
+
+    test('each component gives the interpreter value within single-float precision', async () => {
+      const items = POINTS.flatMap(([label, json, options, points]) => {
+        const vars = (options as { vars?: Record<string, string> }).vars ?? {};
+        const r = glsl(json, options);
+        const sources = pointShaders(r, vars, interpretPoint(json, points[0]));
+        return points.flatMap((p) => {
+          const expected = [interpretPoint(json, p)].flat();
+          expect(expected.length).toBe(sources.length);
+          const uniforms = Object.fromEntries(
+            r.freeSymbols!.flatMap((n) =>
+              [p[n]].flat().map((x, j) => [`u_${n}_${j}`, x])
+            )
+          );
+          return sources.map((source, k) => ({
+            name: `${label} [${k}] at ${JSON.stringify(p)}`,
+            source,
+            uniforms,
+            expected: expected[k],
+          }));
+        });
+      });
+      const values = await driver.evaluate(items);
+      const failures: string[] = [];
+      values.forEach((v, k) => {
+        const { name, expected } = items[k];
+        if (!v.ok) return failures.push(`${name}: ${v.log}`);
+        const e = typeof expected === 'boolean' ? Number(expected) : expected;
+        if (typeof e !== 'number' || Number.isNaN(e))
+          return failures.push(`${name}: interpreter ${String(e)}`);
+        if (!(Math.abs(v.value - e) <= 1e-3 * Math.max(1, Math.abs(e))))
+          failures.push(`${name}: ${v.value} vs ${e}`);
+      });
+      expect(failures).toEqual([]);
+      expect(items.length).toBeGreaterThanOrEqual(50);
+    }, 120_000);
+  }
+);
+
+//
 // Declines, fallback, canCompile()
 //
 
@@ -233,9 +484,18 @@ function declined(json: Json, options: object = {}) {
 describe('IR profile on GLSL: declines', () => {
   // prettier-ignore
   test.each([
-    ['a list result', ['List', 'x', 1], {}, /a list or tuple result/],
-    ['a tuple result', ['Tuple', 'x', 'y'], {}, /a list or tuple result|Tuple/],
-    ['a list input', ['Sum', 'L'], {}, /the list input `L`/],
+    ['a tuple of several shapes', ['Tuple', 'x', 'L'], {}, /a Tuple of elements of several shapes/],
+    ['a list input of run-time length', ['Sum', 'D'], {}, /the list D has a run-time length/],
+    ['a list input of 5 elements', ['At', 'L5', 1], {}, /the list input `L5`/],
+    ['a tuple argument of a user function', ['pf', 'P'], {}, /the parameter a of pf is not a scalar/],
+    ['a tuple result of a user function', ['At', ['pr', 'x'], 1], {}, /the result of pr is not a scalar/],
+    ['a vars text that is an expression', ['Add', 'x', 1], { vars: { x: '(u_x + 1.0)' } }, /the vars entry of x/],
+    ['a vars text that calls', ['Add', 'x', 1], { vars: { x: 'f(u)' } }, /the vars entry of x/],
+    ['a vars name with a value', ['Add', 'h', 'x'], { vars: { h: 'u_h' } }, /the vars entry of h/],
+    ['a vars text named as a word of GLSL', ['Add', 'x', 1], { vars: { x: 'float' } }, /the vars entry of x/],
+    ['a vars member named as a word of GLSL', ['Add', 'x', 1], { vars: { x: 'u.sample' } }, /the vars entry of x/],
+    ['a vars member with a gl_ prefix', ['Add', 'x', 1], { vars: { x: 'u.gl_x' } }, /the vars entry of x/],
+    ['a vars member with __', ['Add', 'x', 1], { vars: { x: 'u.a__b' } }, /the vars entry of x/],
     ['a root Function literal', ['Function', ['Add', 'u', 1], 'u'], {}, /a Function literal/],
     ['functions', ['Add', 'x', 1], { functions: { s: 'float s(float t) { return t; }' } }, /`functions`/],
     ['operators', ['Add', 'x', 1], { operators: { Add: ['+', 11] } }, /`operators`/],
@@ -246,7 +506,6 @@ describe('IR profile on GLSL: declines', () => {
     ['strictTypes', ['Add', 'x', 1], { strictTypes: true }, /`strictTypes`/],
     ['broadcast', ['Add', 'x', 1], { broadcast: true }, /`broadcast`/],
     ['mode', ['Add', 'x', 1], { mode: 'complex' }, /`mode` with the value 'complex'/],
-    ['vars', ['Add', 'x', 1], { vars: { x: 'u_x' } }, /`vars`/],
     ['an iterationBudget with a Loop', ['Block', ['Declare', 's', 'real', 0],
       ['Loop', ['Assign', 's', ['Add', 's', 'k']], ['Element', 'k', ['Range', 1, 5]]], 's'],
       { iterationBudget: 100 }, /`iterationBudget` with a Loop/],
@@ -288,12 +547,13 @@ describe('IR profile on GLSL: declines', () => {
         to: 'glsl',
         profile: 'ir',
         vars: { x: 'u_x' },
+        preamble: '// host',
       });
       expect(r.success).toBe(true);
       expect(r.profile).toBeUndefined();
       expect(r.code).toMatch(/u_x/);
       expect(warn).toHaveBeenCalledWith(
-        expect.stringMatching(/profile: ir.*`vars`/)
+        expect.stringMatching(/profile: ir.*`preamble`/)
       );
     } finally {
       warn.mockRestore();
@@ -374,7 +634,7 @@ describe('IR profile on GLSL: declines', () => {
   test('canCompile() answers for the profile on glsl', () => {
     const options = { to: 'glsl', profile: 'ir' } as const;
     expect(canCompile(ce.box(['Sin', 'x']), options).ok).toBe(true);
-    const no = canCompile(ce.box(['List', 'x', 1]), options);
+    const no = canCompile(ce.box(['Sum', 'D']), options);
     expect(no.ok).toBe(false);
     expect(!no.ok && no.diagnostic.code).toBe('outside-profile');
   });

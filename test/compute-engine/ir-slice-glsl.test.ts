@@ -107,14 +107,13 @@ function shader(
   });
   const call = `f(${parameters.map((p) => p.name).join(', ')})`;
   const pack: Record<string, string> = {
-    'float': `vec4(${call}, 0.0, 0.0, 0.0)`,
-    'bool': `vec4(${call} ? 1.0 : 0.0, 0.0, 0.0, 0.0)`,
-    'float[3]': `vec4(r[0], r[1], r[2], 0.0)`,
-    'bool[3]': `vec4(r[0] ? 1.0 : 0.0, r[1] ? 1.0 : 0.0, r[2] ? 1.0 : 0.0, 0.0)`,
+    float: `vec4(${call}, 0.0, 0.0, 0.0)`,
+    bool: `vec4(${call} ? 1.0 : 0.0, 0.0, 0.0, 0.0)`,
   };
-  const result = returnType.endsWith('[3]')
-    ? `${returnType.replace('[3]', '')} r[3] = ${call};\n  `
-    : '';
+  // A list of 2 to 4 elements is a vector (`vec3`, `bvec2`).
+  for (const n of [2, 3, 4])
+    for (const b of ['', 'b'])
+      pack[`${b}vec${n}`] = `vec4(vec${n}(${call})${', 0.0'.repeat(4 - n)})`;
   return [
     '#version 300 es',
     'precision highp float;',
@@ -122,7 +121,7 @@ function shader(
     ...uniforms,
     'out vec4 color;',
     code,
-    `void main() {\n  ${result}color = ${pack[returnType]};\n}`,
+    `void main() {\n  color = ${pack[returnType]};\n}`,
   ].join('\n');
 }
 
@@ -195,7 +194,13 @@ function runJobs(jobs: Job[]): ({ error: string } | { values: number[][] })[] {
       for (const u of point) {
         const at = gl.getUniformLocation(program, u.name);
         if (at === null) continue;
-        if (Array.isArray(u.value)) gl.uniform1fv(at, u.value);
+        const vector = /^vec([234])$/.exec(u.type);
+        if (vector !== null)
+          gl[`uniform${vector[1] as '2' | '3' | '4'}fv`](
+            at,
+            u.value as number[]
+          );
+        else if (Array.isArray(u.value)) gl.uniform1fv(at, u.value);
         else if (typeof u.value === 'boolean')
           gl.uniform1i(at, u.value ? 1 : 0);
         else gl.uniform1f(at, u.value);

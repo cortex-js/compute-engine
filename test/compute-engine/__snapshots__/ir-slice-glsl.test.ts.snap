@@ -40,8 +40,8 @@ exports[`IR slice: GLSL text a loop counts with an int, each bound evaluated onc
 `;
 
 exports[`IR slice: GLSL text an element-wise operation is one per element 1`] = `
-"float[3] f(float in0_x, float in1_L[3]) {
-  return float[3]((in0_x + sin(in1_L[int(0.0)])), (in0_x + sin(in1_L[int(1.0)])), (in0_x + sin(in1_L[int(2.0)])));
+"vec3 f(float in0_x, vec3 in1_L) {
+  return vec3((in0_x + sin(in1_L[int(0.0)])), (in0_x + sin(in1_L[int(1.0)])), (in0_x + sin(in1_L[int(2.0)])));
 }"
 `;
 

@@ -30,15 +30,27 @@
 ### Improvements
 
 - **The experimental profile `'ir'` compiles to GLSL.**
-  `compile(expr, { to: 'glsl', profile: 'ir' })` compiles a scalar result
-  (real, integer or boolean) of scalar inputs with the new compiler and gives
-  a GLSL result: `code` is an expression, or statements that end in
-  `return`, in which an input is its name; `preamble` holds the helpers,
-  named `_gpu_ir_…`, and the user functions, named `_fn_ir_…`; `freeSymbols`
-  and `freeSymbolTypes` list the inputs. A list, a tuple, a `Function` literal and
-  the options `functions`, `operators`, `imports`, `preamble`, `storage`,
-  `vars`, `strictTypes`, `broadcast` and a mode other than `'strict'` decline;
-  with `fallback`, the existing GLSL target then compiles the expression.
+  `compile(expr, { to: 'glsl', profile: 'ir' })` compiles with the new
+  compiler a real, integer or boolean result, or a list of stated length, of
+  scalar inputs and of inputs that are tuples or lists of 2 to 4 numbers,
+  and gives a GLSL result. A point, or a list of 2 to 4 numbers, is a `vec2`,
+  `vec3` or `vec4`, as a result and as an input: `Tuple(Cos(t), Sin(t))` is
+  `vec2(cos(t), sin(t))`, and an input `P: tuple<real, real>` has
+  `freeSymbolTypes.P.lowered` equal to `vec2`, as with the existing GLSL
+  target; a list of another length is a `float[n]` result. `code` is an
+  expression, or statements that end in `return`, in which an input is its
+  name; `preamble` holds the helpers, named `_gpu_ir_…`, and the user
+  functions, named `_fn_ir_…`; `freeSymbols` and `freeSymbolTypes` list the
+  inputs. With `vars`, a name is read as the host's text, which must be a
+  name, or a member or an element of one (`u_x`, `u.P`, `u[0]`), and the
+  name stays in `freeSymbols`. Declined: a list input of another length, a
+  list result of a user function, a `Function` literal, a `vars` text of
+  another form or a `vars` name that has a value, and the options
+  `functions`, `operators`, `imports`, `preamble`, `storage`, `strictTypes`,
+  `broadcast` and a mode other than `'strict'`; with `fallback`, the existing
+  GLSL target then compiles the expression. On JavaScript the profile now
+  compiles an input of a tuple type such as `tuple<real, real>`, given as an
+  array (`run({ P: [1, 2] })`).
 - **The code of the experimental profile `'ir'` can be stored, loaded and
   sent to a worker.** A result of `compile(expr, { profile: 'ir' })` now has
   `runtimeVersion`, `preambleOnce` and `entryPlan`, as a result of the

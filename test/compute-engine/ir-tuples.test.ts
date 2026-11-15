@@ -285,6 +285,67 @@ describe('the tuple-consumption rule', () => {
       declined(['sumsq', ['Typed', ['Tuple', 'x', 1], "'list<real>'"]])
     ).toMatch(/an argument of sumsq/);
   });
+  test('a tuple input of scalars is an array of its elements, a tuple', () => {
+    ce.declare('Pt', 'tuple<real, real>');
+    ce.declare('Qt', 'tuple<real, integer>');
+    const tuple = (v: number[]) =>
+      ce.function(
+        'Tuple',
+        v.map((n) => ce.number(n))
+      );
+    for (const json of [
+      ['Add', ['Multiply', 2, 'Pt'], 'Qt'],
+      ['At', 'Pt', 2],
+      ['Sum', 'Qt'],
+      ['Sin', 'Pt'],
+    ])
+      for (const [Pt, Qt] of [
+        [
+          [1, 2],
+          [0.5, -1],
+        ],
+        [
+          [-3, 0.25],
+          [2, 7],
+        ],
+      ]) {
+        const want = ce.withValues({ Pt: tuple(Pt), Qt: tuple(Qt) }, () =>
+          read(box(json).evaluate().N())
+        );
+        expect(agree(ir(json).run!({ Pt, Qt } as never), want)).toBe(true);
+      }
+    expect(declined(['Abs', 'Pt'])).toMatch(/Abs of a tuple/);
+    expect(declined(['Less', 'Pt', 3])).toMatch(/Less of a tuple/);
+    expect(
+      declined(['At', 'P2', 1], { inputs: { P2: 'tuple<real, boolean>' } })
+    ).toMatch(/the input P2/);
+    // An element of type `unknown` or `any` declines, as in a list; a
+    // `number` element is a real.
+    for (const T of ['tuple<unknown, unknown>', 'tuple<any, real>'])
+      expect(declined(['Add', ['At', 'T', 1], 1], { inputs: { T } })).toMatch(
+        /the input T/
+      );
+    expect(
+      ir(['Add', ['At', 'T', 1], 1], {
+        inputs: { T: 'tuple<number, number>' },
+      }).run!({ T: [1.5, 2] } as never)
+    ).toBe(2.5);
+  });
+  test('a root Function literal with a tuple parameter, and a tuple input in the bigint mode', () => {
+    const f = ir([
+      'Function',
+      ['Add', ['At', 'p', 1], ['Multiply', 2, ['At', 'p', 2]]],
+      ['Typed', 'p', "'tuple<real, real>'"],
+    ]);
+    expect(f.calling).toBe('lambda');
+    expect((f.run as (p: number[]) => number)([3, 4])).toBe(11);
+    const b = ir(['Add', ['At', 'N', 1], ['Multiply', 2, ['At', 'N', 2]]], {
+      mode: 'bigint',
+      inputs: { N: 'tuple<integer, integer>' },
+    });
+    expect(b.run!({ N: [3n, 4n] } as never)).toBe(11n);
+    expect(b.run!({ N: [2n ** 60n, 1n] } as never)).toBe(2n ** 60n + 2n);
+  });
 });
 
 describe('the static type error and effects', () => {
@@ -377,12 +438,12 @@ describe('results', () => {
       [3, 1.5],
     ]);
   });
-  test('GLSL: a tuple is an array of floats', () => {
+  test('GLSL: a tuple of 2 to 4 numbers is a vector', () => {
     const code = compileSlice(box(['Tuple', ['Cos', 'x'], ['Sin', 'x']]), {
       target: 'glsl',
     }).code;
-    expect(code).toMatch(/float\[2\] f\(float in0_x\)/);
-    expect(code).toMatch(/return float\[2\]\(cos\(in0_x\), sin\(in0_x\)\);/);
+    expect(code).toMatch(/vec2 f\(float in0_x\)/);
+    expect(code).toMatch(/return vec2\(cos\(in0_x\), sin\(in0_x\)\);/);
   });
 });
 
@@ -820,7 +881,7 @@ describe('the causes of the third corpus run', () => {
       /arms of two types/
     );
     const glsl = compileSlice(box(json), { target: 'glsl' }).code;
-    expect(glsl).toMatch(/float\[2\]\(/);
+    expect(glsl).toMatch(/vec2\(/);
   });
   test('a Range of a real upper bound: its elements are integers', () => {
     const points = [{ K: 3.5 }, { K: 4 }, { K: -2.5 }];

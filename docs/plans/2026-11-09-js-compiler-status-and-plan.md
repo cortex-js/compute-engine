@@ -1524,6 +1524,30 @@ No test fails in the shadow run; with the switch on, the one test of CE-1267.
 Largest causes of a GLSL decline: the complex lane 167; a list or tuple
 result 96; the option `vars` 48; another option 29.
 
+Batch G2, 2026-11-14. On GLSL a tuple or list of 2 to 4 numbers is a
+`vecN` (`bvecN` for booleans), as a result and as an input, with the
+`lowered` type of the existing target; another stated length is a `float[n]`
+result. A `tuple<…>` input of scalars is the list of its elements on both
+targets (an array on JavaScript). The `vars` option on GLSL: the host's text
+replaces the name at each read, restricted to names with member or
+constant-index accesses, each name checked against the reserved words. A
+user function that takes or returns a point, and a list input of another
+length, decline. 260 value shaders compiled in WebGL2 by a reviewer with no
+wrong value. Measured in a worktree at
+`63d959a6e159fcf0790ba66824114ed5987fc3fb` plus the patch; 6,139 lines in
+`ir/`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,475 of 10,848 (96.6%) |
+| Every JavaScript compile | 23,917 of 38,923 (61.4%) |
+| Public JavaScript `compile()` calls | 13,431 of 28,061 (47.9%) |
+| GLSL `compile()` calls | 764 of 2,340 (32.6%); 719 of the 1,546 that the existing target compiles (46.5%) |
+
+No test fails in the shadow run; with the switch on, the one test of CE-1267.
+Largest causes of a GLSL decline: the complex lane 169; the option
+`functions` 21 and other options 29.
+
 User decisions of 2026-11-14 on GLSL:
 
 - **The existing GLSL target is to be deleted too** (about 25,500 lines of

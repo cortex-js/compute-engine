@@ -2615,11 +2615,15 @@ program with a real or complex value anywhere (`n/2`, `Floor(n/3)`,
 `outside-profile`, not `bigint-lane`.
 
 With `to: 'glsl'`, `profile: 'ir'` (experimental too) compiles a scalar
-result of scalar real, integer or boolean inputs to the result of the GLSL
-target: `code` is an expression, or statements that end in `return`, in
-which an input is its bare name; `preamble` holds the helpers (`_gpu_ir_…`)
-and the user functions (`_fn_ir_…`); `freeSymbolTypes[name].lowered` is
-`float` or `bool`. It has no NaN-safe helpers, no exact sine hash (no
+or a list result of stated length (a point `vec2(cos(t), sin(t))`; a list of
+2 to 4 numbers is a `vecN`, another length a `float[n]`) of real, integer or
+boolean inputs and of inputs that are tuples or lists of 2 to 4 numbers, to
+the result of the GLSL target: `code` is an expression, or statements that
+end in `return`, in which an input is its bare name, or its `vars` text (a
+name, a member or an element of one, such as `u_x`, `u.P` or `u[0]`; the
+name stays in `freeSymbols`); `preamble` holds the helpers (`_gpu_ir_…`) and
+the user functions (`_fn_ir_…`); `freeSymbolTypes[name].lowered` is `float`,
+`bool` or `vecN`, as the existing GLSL target reports it. It has no NaN-safe helpers, no exact sine hash (no
 `float32Bounds`) and no cap on the passes of a `Loop`. Anything else, and the options it does
 not map (the README lists them), decline with `outside-profile`; with
 `fallback`, the existing GLSL target then compiles the expression.

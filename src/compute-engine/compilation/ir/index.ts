@@ -287,8 +287,9 @@ export type SliceOptions = {
    *  `$` followed by a digit. */
   readonly vars?: Readonly<Record<string, string>>;
   /** GLSL: an input is spelled by its name, which the host declares
-   *  (`compile()`'s profile); default `in<k>_<name>`. */
-  readonly bareInputs?: boolean;
+   *  (`compile()`'s profile), or by its text in the map (`compile()`'s
+   *  `vars` on GLSL); default `in<k>_<name>`. */
+  readonly bareInputs?: boolean | Readonly<Record<string, string>>;
 };
 
 /** The rows and the syntax of one compilation: those of `extend`, and a
@@ -409,7 +410,16 @@ export function compileSlice(
       : printGlsl(
           p,
           rows,
-          options.bareInputs ? { ...syntax, input: (name) => name } : syntax
+          options.bareInputs
+            ? {
+                ...syntax,
+                input: (name) =>
+                  typeof options.bareInputs === 'object' &&
+                  Object.hasOwn(options.bareInputs, name)
+                    ? options.bareInputs[name]
+                    : name,
+              }
+            : syntax
         );
   // The printer writes the effectful instructions in the IR's order.
   const trace = effectTrace(p, rows, new Map());

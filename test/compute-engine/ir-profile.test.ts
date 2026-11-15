@@ -819,7 +819,7 @@ describe('an input of an extended-real type is on the real lane', () => {
       { target: 'glsl' }
     ).code;
     expect(code).toMatch(/float in0_sigma/);
-    expect(code).toMatch(/float in1_S\[3\]/);
+    expect(code).toMatch(/vec3 in1_S/);
   });
 });
 

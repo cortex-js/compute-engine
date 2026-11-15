@@ -6,9 +6,10 @@
  * target. `pow` of a negative base and a non-integer exponent is what the
  * driver gives (GLSL leaves it undefined; NaN is inside the caveats). The
  * driver may reorder and round: no bits are promised. A boolean is `bool`; a list is
- * an array, `float[3]` (GLSL ES 3.00 has no array of arrays, and the target
- * declines a nested list). A loop counts with an `int`. The target has no
- * element-wise operations: the `scalarize` pass runs first.
+ * a vector of 2 to 4 elements, `vec3`, or an array, `float[5]` (GLSL ES 3.00
+ * has no array of arrays, and the target declines a nested list). A loop
+ * counts with an `int`. The target has no element-wise operations: the
+ * `scalarize` pass runs first.
  */
 
 import { entryOf, type IRType, type Program } from './ir.js';
@@ -17,13 +18,18 @@ import { printProgram, type Printed, type Syntax } from './print.js';
 
 const NAN = 'uintBitsToFloat(0x7fc00000u)';
 
-function typeName(t: IRType): string {
+/** `float`, `bool`; a list of 2 to 4 elements is a vector (`vec2`,
+ *  `bvec3`: a point of the host), another list an array (`float[5]`). */
+export function typeName(t: IRType): string {
   const scalar = t.lane === 'boolean' ? 'bool' : 'float';
-  if (t.shape.length > 1 || typeof t.shape[0] === 'object')
+  const n = t.shape[0];
+  if (t.shape.length > 1 || typeof n === 'object')
     throw new Error(
       `slice GLSL printer: no type for ${JSON.stringify(t.shape)}`
     );
-  return t.shape.length === 0 ? scalar : `${scalar}[${t.shape[0]}]`;
+  if (n === undefined) return scalar;
+  if (n >= 2 && n <= 4) return `${t.lane === 'boolean' ? 'b' : ''}vec${n}`;
+  return `${scalar}[${n}]`;
 }
 
 /** A declarator: `float x` or `float x[3]`. */

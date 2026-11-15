@@ -341,8 +341,10 @@ flattened) decline.
 A `Tuple` is a list of fixed length in the representation, with no type of its
 own: a tuple of scalars of one lane (an integer among reals is widened; a
 boolean among numbers declines) is the list of its elements, an array on
-JavaScript (`Tuple(Cos(t), Sin(t))` is `[0.54, 0.84]` at `t = 1`) and a
-`float[n]` on GLSL. A tuple of lists is a list of rows (`Tuple(L)` of a list of
+JavaScript (`Tuple(Cos(t), Sin(t))` is `[0.54, 0.84]` at `t = 1`). On GLSL a
+list of 2 to 4 elements, a tuple or not, is a `vec2`, `vec3` or `vec4`
+(`bvec2`, ... for booleans; `vec2(cos(t), sin(t))`), and another length a
+`float[n]`. A tuple of lists is a list of rows (`Tuple(L)` of a list of
 stated length); a tuple of tuples declines. `PointList` with no list component
 is the tuple of its components; with list components it is the list of the
 tuples of their elements at each index, a scalar component in every tuple, as
@@ -371,8 +373,12 @@ gives (`If(t ≤ W, Tuple(Cos(t), Sin(t)))` at `t > W` is `(NaN, NaN)`); a list
 arm, a boolean tuple and a `Which` with no `True` clause decline, as the
 interpreter gives `Missing` there. A tuple result of the root has
 `broadcastOutputs` of its type (`broadcastStrideOfType()`), so a batch with
-`outputs` gives its elements per cell. An input of a type with a tuple
-(`list<tuple<real, real>>`) declines.
+`outputs` gives its elements per cell. An input of a tuple type of scalars
+of one lane (`tuple<real, real>`; an integer among reals is a real) is the
+list of its elements, marked a tuple, so the rule above reads it: on
+JavaScript its value is the array of its elements (`P: [1, 2]`), on GLSL a
+`vecN`. A tuple of booleans and numbers, and an input of a type with a
+tuple inside (`list<tuple<real, real>>`), decline.
 
 ## Effects
 
@@ -479,8 +485,9 @@ argument must have, or of a run-time length, a hidden integer parameter before
 it that each call passes (the length of the argument), as the root function
 literal does: `f(D) + f([1, 2])` calls one function with lengths `D.length`
 and 2. A tuple argument, a list of lists, of booleans or of complex numbers
-decline. On GLSL a parameter of stated length is an array parameter
-(`float B[3]`); one of run-time length declines with the target's rule.
+decline. On GLSL a parameter of stated length is a vector of 2 to 4
+elements (`vec3 B`) or an array parameter (`float B[5]`); one of run-time
+length declines with the target's rule.
 
 A result declared a list of reals, integers or booleans (`list<integer>`,
 `list<real^3>`) has the type of the body, a list of rank 1 of a sub-lane of the
@@ -627,21 +634,32 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it next to the
 `compile(expr, { to: 'glsl', profile: 'ir' })` compiles with this pipeline too
 (`adapter-glsl.ts`, batch G1 of
 `docs/plans/2026-11-09-js-compiler-status-and-plan.md`), for a scalar result
-(real, integer or boolean) of scalar inputs, and gives the result of the
-existing GLSL target: no `run`; `code` is an expression, or statements that end
-in `return …;`, in which an input is its bare name (the option `bareInputs` of
+(real, integer or boolean) or a list of stated length (batch G2: a point, as
+`vec2(cos(t), sin(t))`, or a `float[n]`) of inputs that are scalars or lists
+of 2 to 4 elements (`tuple<real, real>`, `list<real^3>`), and gives the
+result of the existing GLSL target: no `run`; `code` is an expression, or
+statements that end in `return …;`, in which an input is its bare name (the option `bareInputs` of
 `compileSlice()`; the host declares the uniform or the parameter); `preamble`
 holds the helpers and the user functions, named `_gpu_ir_…` and `_fn_ir_…` in
 the GLSL syntax (a host that joins two compilations renames by `_gpu_` and
 `_fn_`; `ir_` keeps them apart from the names of the existing GLSL target);
 `freeSymbols` are the inputs; `freeSymbolTypes` has the `type` and `provenance`
 of the existing target (`freeSymbolTypes()` of `compile-references.ts`) and the
-`lowered` type that the code reads (`float`, `bool`); `unsupported` is empty,
-`mode` is `'strict'`, `profile` is `'ir'`. Declined with `'outside-profile'`: a
-list or tuple result or input, a root `Function` literal, the options
-`functions`, `operators`, `imports`, `preamble`, `storage`, `callerLocals`,
-`vars`, `strictTypes: true`, `broadcast: true`, a `mode` other than `'strict'`,
-an `iterationBudget` with a `Loop` (GLSL counts no `Loop` pass; a `Sum` or a
+`lowered` type that the code reads (`float`, `bool`, `vec2`, `bvec3`: the
+existing target's for each input it compiles); `unsupported` is empty,
+`mode` is `'strict'`, `profile` is `'ir'`. A name of `vars` is an input whose
+read is the host's text (`x + y` with `vars: {x: 'u_x'}` is `(u_x + y)`, and
+`x` stays in `freeSymbols` with its type): a name, a member or an element of
+one (`u_x`, `u.P`, `u[0]`), which calls nothing and is spliced at each read;
+a read in a user function is passed as any input (see "User functions").
+Another text, a text with a name that is a GLSL word or holds `__` or a
+`gl_` prefix (`u.sample`, `u.gl_x`), a text whose first name could not be an
+input name (below), and a name that has a value in the engine decline. Declined with
+`'outside-profile'`: a list input of another length (`At` on a uniform array
+is batch G3), a list result of a user function, a root `Function` literal,
+the options `functions`, `operators`, `imports`, `preamble`, `storage`,
+`callerLocals`, `strictTypes: true`, `broadcast: true`, a `mode` other than
+`'strict'`, an `iterationBudget` with a `Loop` (GLSL counts no `Loop` pass; a `Sum` or a
 `Product` over the budget is NaN), and an input name that is not a plain GLSL
 identifier, is a reserved word (`gpu-reserved.ts`), can be a name of the printer
 (`v<digits>…`, `_gpu_…`, `_fn_…`) or is the name of a function that the code

@@ -910,9 +910,34 @@ export function lower(
       : fns.capture(e, name, t);
   };
 
+  /** The IR type of an input of the engine type `t`; a tuple of scalars of
+   *  one lane (an integer among reals is a real) is the list of its
+   *  elements, which `input()` marks a tuple. */
+  const inputIR = (t: Type) => {
+    if (typeof t !== 'object' || t.kind !== 'tuple')
+      return inputType(t, cx.wide);
+    const lanes = new Set(
+      t.elements.map((x) => {
+        // An element of type `unknown` declines, as in a list.
+        const ir =
+          x.type === 'unknown' ? undefined : inputType(x.type, cx.wide);
+        return ir?.shape.length === 0 ? ir.lane : 'none';
+      })
+    );
+    const lane =
+      lanes.size === 1
+        ? [...lanes][0]
+        : lanes.size === 2 && lanes.has('real') && lanes.has('integer')
+          ? 'real'
+          : 'none';
+    return lane === 'none' || lane === 'complex'
+      ? undefined
+      : { lane, shape: [t.elements.length] };
+  };
+
   /** `ir`, the type of an input, is the IR type of the engine type `t`. */
   const sameInput = (ir: IRType, t: Type): boolean => {
-    const x = inputType(t, cx.wide);
+    const x = inputIR(t);
     return (
       x !== undefined &&
       x.lane === ir.lane &&
@@ -932,7 +957,7 @@ export function lower(
     t: Parameters<typeof inputType>[0],
     positional = false
   ): V => {
-    const ir = inputType(t, cx.wide);
+    const ir = inputIR(t);
     if (ir === undefined)
       decline(e, `the input ${name} of type ${engineTypeToString(t)}`);
     const shape = ir.shape.map((n) => {
@@ -943,6 +968,7 @@ export function lower(
       return { v: length };
     });
     const v = b.param(name, { lane: ir.lane, shape });
+    if (typeof t === 'object' && t.kind === 'tuple') tuples.set(v, 0);
     if (positional) b.positional += 1;
     frames[0].names.set(name, { v, role: positional ? 'index' : 'input' });
     return v;
