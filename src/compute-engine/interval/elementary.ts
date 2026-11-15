@@ -46,6 +46,10 @@ import {
 } from './rounding.js';
 import { prodExact } from '../numerics/interval-arithmetic.js';
 import {
+  realPowerBranchTerms,
+  realPowerReconstructionDigits,
+} from '../numerics/real-power.js';
+import {
   binomial as scalarBinomial,
   gamma as scalarGamma,
   gammaln as scalarGammaln,
@@ -2234,7 +2238,12 @@ function gcdRaw(
   if (!Array.isArray(uB)) return uB;
   const [aVal] = uA;
   const [bVal] = uB;
-  const enumerated = enumerateInteger2(aVal, bVal, scalarGcd);
+  // The absolute value: the scalar `gcd` returns the other operand as it
+  // is when one is 0 or both are equal (`gcd(0, -2)` is `-2`), and the
+  // value is 2.
+  const enumerated = enumerateInteger2(aVal, bVal, (p, q) =>
+    Math.abs(scalarGcd(p, q))
+  );
   if (enumerated) return enumerated;
   // Conservative fallback: 0 ≤ gcd(a, b) ≤ max(|a|, |b|).
   const m = Math.max(
@@ -2429,40 +2438,61 @@ function nthRootIntervalRaw(
 export const nthRootInterval = liftJump(nthRootIntervalRaw);
 
 /**
- * `x^y` for any reading of a point exponent: `powInterval`, with a finite
- * point exponent widened by one ulp on each side first unless it is an
- * integer (of any magnitude) or a multiple of 1/1024 of magnitude at most
- * 1024. A float exponent such as
- * `0.2` can stand for the rational `1/5`, of which a negative base has a
- * real root (`(-8)^0.2` is `-1.5157…` in the interpreter), and over an
- * exponent that is not a point `powInterval` encloses the real roots of a
- * negative base by the symmetric hull `[-M, M]`. The interpreter reads a
- * float as a rational p/q only when p/q is within about 1e-14 (relative) of
- * the double and q is under about 3·10^5 (`realPowerBranchTerms()` of
- * `numerics/real-power.ts`); two distinct rationals k/2^m and p/q differ by
- * at least 1/(2^m·q), so for 2^m ≤ 1024 it admits no rational of odd
- * denominator, a negative base has no real value, and the point keeps the
- * principal-value reading (`x^1.5` over `[-2, -1]` is `empty`). A point
- * integer exponent is never widened and keeps the integer power
- * (`x^2000` over a negative base has one sign).
+ * `x^y` with a point exponent that is not an integer read as the
+ * interpreter reads a float exponent (`realPowerBranchTerms()` of
+ * `numerics/real-power.ts`, to `digits` significant digits, clamped to
+ * [15, 17]; by default the digits of the global working precision): a
+ * rational `p/q` of odd denominator is the real root `±|x|^y` with the
+ * double `y`, negative when `p` is odd (`powRealBranch`: `x^0.2` at -8 is
+ * -1.5157…, `0.2` read as `1/5`), and any other point (`1.5`, an irrational) has no real value over a negative
+ * base (`powInterval`: `x^1.5` over `[-2, -1]` is `empty`). Every other
+ * exponent, a point integer (of any magnitude) or an interval, is
+ * `powInterval`. The compiler of the interval mode decides a literal
+ * exponent at compile time; this routine decides an exponent known only
+ * at run time, and `digits` is the number recorded at the compilation.
  */
 function powRealRaw(
   base: Interval | IntervalResult,
-  exponent: Interval | IntervalResult
+  exponent: Interval | IntervalResult,
+  digits?: number
 ): IntervalResult {
   const e = unwrap(exponent);
   if (
     e !== undefined &&
     e.lo === e.hi &&
     Number.isFinite(e.lo) &&
-    !Number.isInteger(e.lo) &&
-    !(Number.isInteger(e.lo * 1024) && Math.abs(e.lo) <= 1024)
-  )
-    return powInterval(base, { lo: nextDown(e.lo), hi: nextUp(e.lo) });
+    !Number.isInteger(e.lo)
+  ) {
+    // The last reading is kept: a plot calls the kernel with one exponent
+    // over many boxes.
+    // The digits are clamped as `realPowerReconstructionDigits()` clamps
+    // the precision: a wider window would read any float as a rational.
+    const d =
+      digits !== undefined && Number.isFinite(digits)
+        ? Math.max(15, Math.min(17, Math.trunc(digits)))
+        : realPowerReconstructionDigits();
+    if (e.lo !== lastRead.e || d !== lastRead.digits) {
+      const terms = realPowerBranchTerms(undefined, e.lo, d);
+      lastRead.e = e.lo;
+      lastRead.digits = d;
+      lastRead.branch =
+        terms === undefined || terms[1] % 2 === 0
+          ? undefined
+          : terms[0] % 2 !== 0;
+    }
+    if (lastRead.branch !== undefined)
+      return powRealBranchRaw(base, e.lo, lastRead.branch);
+  }
   return powInterval(base, exponent);
 }
-// `liftJump` carries the marks of the exponent, which the widened branch
-// above, reading only its value, would drop.
+/** The last reading of `powRealRaw`: the exponent, the digits, and whether
+ *  the real root is negative (`undefined`: no real root). */
+const lastRead: { e: number; digits: number; branch?: boolean } = {
+  e: NaN,
+  digits: NaN,
+};
+// `liftJump` carries the marks of the exponent, which the branch above,
+// reading only its value, would drop.
 export const powReal = liftJump(powRealRaw);
 export const exp = liftJump(
   outwardUnlessExact(expRaw, exactInRange(0, Infinity))

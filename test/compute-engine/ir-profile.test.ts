@@ -1694,3 +1694,178 @@ describe('a literal value is read with no N() (CE-1065)', () => {
     expect((r!.run as (x: object) => unknown)({ t: 1 })).toEqual([2.5, 3, 4]);
   });
 });
+
+describe('cse merges two calls of a user function with no effect', () => {
+  /** The functions of the witness (Tycho's document `neyret/sc3azg0frd`):
+   *  `a_1` and `a_2` each call the previous function five times with the
+   *  same argument; `c_k` is a chain of 12 such functions. */
+  const engine = (): ComputeEngine => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('y', 'real');
+    e.declare('k', 'integer');
+    e.declare('n', 'integer');
+    const fn = (name: string, body: Json, ...params: string[]) =>
+      e.assign(name, box(['Function', body, ...params], e));
+    const five = (g: string): Json => [
+      'Add',
+      [
+        'Divide',
+        ['Add', ['Multiply', 'x', ['Cos', [g, 'x']]], ['Negate', ['Sin', [g, 'x']]]],
+        ['Add', ['Multiply', 'x', ['Sin', [g, 'x']]], ['Cos', [g, 'x']]],
+      ],
+      [g, 'x'],
+    ];
+    fn(
+      'a_0',
+      ['Divide', ['Multiply', 'Pi', 'x'], ['Multiply', 2, ['Add', ['Abs', 'x'], ['Multiply', ['Rational', 1, 2], 'Pi']]]],
+      'x'
+    );
+    fn('a_1', five('a_0'), 'x');
+    fn('a_2', five('a_1'), 'x');
+    fn('c_0', ['Add', ['Sin', 'x'], 1], 'x');
+    for (let j = 1; j <= 12; j++) fn(`c_${j}`, five(`c_${j - 1}`), 'x');
+    fn('f', ['Add', ['Sin', 'a'], ['Multiply', 'a', 'a']], 'a');
+    // A draw, directly and through a call; a seeded frame (its draw).
+    fn('D', ['Add', 'a', ['Random']], 'a');
+    fn('E', ['Multiply', 2, ['D', 'a']], 'a');
+    fn('S', ['WithRandomSeed', 1, ['Add', 'a', ['Random']]], 'a');
+    e.declare('R', '(integer) -> real');
+    fn('R', ['If', ['LessEqual', 'j', 0], 1.5, ['Add', 2, ['Multiply', 0.5, ['R', ['Subtract', 'j', 1]]]]], 'j');
+    e.declare('P', '(integer) -> real');
+    e.declare('Q', '(integer) -> real');
+    fn('P', ['If', ['Greater', 'j', 0], ['Q', ['Subtract', 'j', 1]], 1], 'j');
+    fn('Q', ['If', ['Greater', 'j', 0], ['P', ['Subtract', 'j', 1]], 2], 'j');
+    // A list of a run-time length: a call with two results.
+    e.declare('L', '(integer) -> list<integer>');
+    fn('L', ['Map', ['Function', ['Multiply', 'i', 'i'], 'i'], ['Range', 1, 'm']], 'm');
+    return e;
+  };
+  const e = engine();
+  /** The number of calls of the function `name` in the text of `r`. */
+  const calls = (r: { code: string; preambleOnce?: string }, name: string) =>
+    ((r.preambleOnce ?? '') + r.code).match(
+      new RegExp(`\\bu\\d+_${name.replace('_', '')}\\(`, 'g')
+    )?.length ?? 0;
+  const run = (json: Json, options: Record<string, unknown> = {}) =>
+    compile(box(json, e), { ...IR, ...options, fallback: false } as never);
+  /** The interval mode: the result for the point `x`, which contains the
+   *  interpreter's value and equals the result with `cse: false`. */
+  const interval = (json: Json, point: Record<string, number>) => {
+    const r = run(json, { to: 'interval-js' });
+    const at = Object.fromEntries(
+      Object.entries(point).map(([k, v]) => [k, { lo: v, hi: v }])
+    );
+    const v = (r.run as (x: object) => any)(at);
+    const plain = run(json, { to: 'interval-js', cse: false });
+    expect(v).toEqual((plain.run as (x: object) => unknown)(at));
+    const expected = interpret(e, box(json, e), point) as number;
+    expect([point, v.value.lo <= expected && expected <= v.value.hi]).toEqual([
+      point,
+      true,
+    ]);
+    return r;
+  };
+  const points = [{ x: 0.3 }, { x: -2.5 }, { x: 7 }];
+
+  test('the witness: a_2(x) calls a_1 once and a_1 calls a_0 once', () => {
+    const json = ['Multiply', 1000, ['Add', ['Divide', ['Arctan', 'x'], ['a_2', 'x']], -1]];
+    const r = againstInterpreter(e, json, points);
+    expect([calls(r, 'a_1'), calls(r, 'a_0')]).toEqual([1, 1]);
+    const plain = run(json, { cse: false });
+    expect([calls(plain, 'a_1'), calls(plain, 'a_0')]).toEqual([5, 5]);
+    for (const point of points) {
+      const i = interval(json, point);
+      expect([calls(i, 'a_1'), calls(i, 'a_0')]).toEqual([1, 1]);
+    }
+  });
+  test('the same call twice in one expression, on each target', () => {
+    const json = ['Add', ['f', 'x'], ['Multiply', 2, ['f', 'x']]];
+    expect(calls(againstInterpreter(e, json, points), 'f')).toBe(1);
+    expect(calls(interval(json, points[0]), 'f')).toBe(1);
+    const glsl = run(json, { to: 'glsl' });
+    expect(glsl.code.match(/_fn_ir_u\d+_f\(/g)).toHaveLength(1);
+    expect(
+      run(json, { to: 'glsl', cse: false }).code.match(/_fn_ir_u\d+_f\(/g)
+    ).toHaveLength(2);
+  });
+  test('different arguments are two calls', () => {
+    const r = againstInterpreter(e, ['Add', ['f', 'x'], ['f', 'y']], [
+      { x: 0.3, y: 2 },
+    ]);
+    expect(calls(r, 'f')).toBe(2);
+  });
+  test('a function that draws, directly or through a call, is called each time', () => {
+    const r = run(['Subtract', ['D', 'x'], ['D', 'x']]);
+    expect(calls(r, 'D')).toBe(2);
+    // Two draws: the difference is not 0 (a probability of about 2^-52).
+    expect((r.run as (x: object) => number)({ x: 0.5 })).not.toBe(0);
+    const through = run(['Subtract', ['E', 'x'], ['E', 'x']]);
+    expect([calls(through, 'E'), calls(through, 'D')]).toEqual([2, 1]);
+    expect((through.run as (x: object) => number)({ x: 0.5 })).not.toBe(0);
+    const i = run(['Add', ['E', 'x'], ['E', 'x']], { to: 'interval-js' });
+    expect(calls(i, 'E')).toBe(2);
+  });
+  test('a function with an effect (a seeded frame) is called each time', () => {
+    const r = run(['Add', ['S', 'x'], ['S', 'x']]);
+    expect(calls(r, 'S')).toBe(2);
+    expect(calls(run(['Add', ['S', 'x'], ['S', 'x']], { to: 'interval-js' }), 'S')).toBe(2);
+  });
+  test('a recursive function and two mutually recursive ones are called each time', () => {
+    const r = againstInterpreter(e, ['Add', ['R', 'k'], ['R', 'k']], [
+      { k: 3 },
+      { k: 0 },
+    ]);
+    expect(r.code.match(/\bu\d+_R\(/g)).toHaveLength(2);
+    const pq = againstInterpreter(e, ['Add', ['P', 'k'], ['P', 'k']], [
+      { k: 3 },
+      { k: 4 },
+    ]);
+    expect(pq.code.match(/\bu\d+_P\(/g)).toHaveLength(2);
+    // The interval mode declines a recursive function.
+    for (const json of [['R', 'k'], ['P', 'k']]) {
+      const o = outcome(box(json, e), { to: 'interval-js' });
+      expect('message' in o && o.message).toMatch(/a recursive function/);
+    }
+  });
+  test('a call in an arm or in a loop body is not read after it', () => {
+    const arm = ['List', ['If', ['Greater', 'x', 0], ['f', 'x'], 0], ['f', 'x']];
+    expect(calls(againstInterpreter(e, arm, points), 'f')).toBe(2);
+    expect(calls(run(arm, { to: 'interval-js' }), 'f')).toBe(2);
+    const loop = [
+      'List',
+      ['Sum', ['Multiply', 'j', ['f', 'x']], ['Limits', 'j', 1, 'n']],
+      ['f', 'x'],
+    ];
+    const r = againstInterpreter(e, loop, [
+      { x: 0.3, n: 3 },
+      { x: -1, n: 0 },
+    ]);
+    expect(calls(r, 'f')).toBe(2);
+    expect(calls(run(loop, { to: 'interval-js' }), 'f')).toBe(2);
+  });
+  test('a call with two results, a list and its length', () => {
+    const json = ['Add', ['Sum', ['L', 'n']], ['Length', ['L', 'n']], ['Max', ['L', 'n']]];
+    const r = againstInterpreter(e, json, [{ n: 4 }, { n: 7 }, { n: 1 }]);
+    expect(calls(r, 'L')).toBe(1);
+    expect(calls(run(json, { cse: false }), 'L')).toBe(3);
+    expect((r.run as (x: object) => number)({ n: 4 })).toBe(50);
+    const i = interval(json, { n: 4 });
+    expect(calls(i, 'L')).toBe(1);
+  });
+  test('a chain of 12 functions, each calling the previous five times', () => {
+    const r = run(['c_12', 'x']);
+    // One call per function: 13 calls, not 5^12 at run time.
+    expect(calls(r, 'c_[0-9]+')).toBe(13);
+    // The value of a shorter chain against the interpreter.
+    againstInterpreter(e, ['c_3', 'x'], points);
+    expect(calls(run(['c_12', 'x'], { to: 'interval-js' }), 'c_[0-9]+')).toBe(13);
+  });
+  test('2,000 calls with distinct arguments are 2,000 calls', () => {
+    const sum = box(
+      ['Add', ...Array.from({ length: 2000 }, (_, j) => ['f', ['Add', 'x', j + 1]])],
+      e
+    );
+    expect(calls(compile(sum, { ...IR, fallback: false }), 'f')).toBe(2000);
+  });
+});

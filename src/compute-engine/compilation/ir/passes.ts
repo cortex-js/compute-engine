@@ -20,7 +20,9 @@
  * - `strength`: `pow` with a literal exponent 1 to 16 is a product: the
  *   definition of `pow` (`realPow()`).
  * - `cse`: an instruction that repeats an earlier mergeable one whose value
- *   is visible reads that value instead. No value is moved.
+ *   is visible reads that value instead, and so does a call of a function
+ *   that is not effectful and not on a cycle of calls (each of its results).
+ *   No value is moved.
  * - `dce`: an instruction whose values are not read (by an instruction, a
  *   yield or a type) is removed, when it is removable.
  *
@@ -38,6 +40,7 @@ import {
   mapDirectArgs,
   mapLengths,
   outsOf,
+  recursiveFunctions,
   regionsOf,
   scalarType,
   type Constant,
@@ -418,9 +421,17 @@ const strength: Pass = (p) => {
 
 const cse: Pass = (p, rows) => {
   const fx = effects(p, rows);
-  // The keys of the visible instructions, one map per open region.
-  const scopes: Map<string, V>[] = [];
+  const cyclic = recursiveFunctions(p.functions);
+  // The keys of the visible instructions, one map per open region, to
+  // their values.
+  const scopes: Map<string, V[]>[] = [];
   const key = (i: Instr): string | undefined => {
+    // A call of a function with no effect, not on a cycle of calls: a
+    // `may-fail` one too, since the visible call failed if this one would.
+    if (i.k === 'call')
+      return fx.of(i) !== 'effectful' && !cyclic.has(i.fn)
+        ? `c ${i.fn} ${i.args.join(',')}`
+        : undefined;
     if (!fx.mergeable(i)) return undefined;
     if (i.k === 'const')
       return literalKey(
@@ -439,10 +450,10 @@ const cse: Pass = (p, rows) => {
       if (k === undefined) return undefined;
       const found = scopes.map((s) => s.get(k)).find((v) => v !== undefined);
       if (found !== undefined) {
-        subst.set(outsOf(i)[0], found);
+        outsOf(i).forEach((o, j) => subst.set(o, found[j]));
         return [];
       }
-      scopes[scopes.length - 1].set(k, outsOf(i)[0]);
+      scopes[scopes.length - 1].set(k, outsOf(i));
       return undefined;
     },
     (inside) => {

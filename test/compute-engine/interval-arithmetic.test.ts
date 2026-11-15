@@ -1020,6 +1020,19 @@ describe('INTERVAL ENCLOSURE REGRESSIONS (REVIEW.md E8–E12)', () => {
     expectInterval(gcd({ lo: 6, hi: 6 }, { lo: 0, hi: 9 }), 1, 6, 1);
   });
 
+  test('gcd with a zero operand or equal operands is not negative (CE-1341)', () => {
+    // The scalar gcd returns the other operand as it is: gcd(0, -2) is 2.
+    const point = (v: number) => ({ kind: 'interval', value: { lo: v, hi: v } });
+    expect(gcd({ lo: 0, hi: 0 }, { lo: -2, hi: -2 })).toEqual(point(2));
+    expect(gcd({ lo: -2, hi: -2 }, { lo: 0, hi: 0 })).toEqual(point(2));
+    expect(gcd({ lo: -3, hi: -3 }, { lo: -3, hi: -3 })).toEqual(point(3));
+    expect(gcd({ lo: 6, hi: 6 }, { lo: -4, hi: -4 })).toEqual(point(2));
+    expect(gcd({ lo: 0, hi: 0 }, { lo: 0, hi: 0 })).toEqual(point(0));
+    // lcm with a zero operand is 0, and is not negative otherwise.
+    expect(lcm({ lo: 0, hi: 0 }, { lo: -2, hi: -2 })).toEqual(point(0));
+    expect(lcm({ lo: -3, hi: -3 }, { lo: -3, hi: -3 })).toEqual(point(3));
+  });
+
   test('E11: lcm encloses interior maxima', () => {
     // lcm(2, k) for k ∈ [1,6] reaches 10 (lcm(2,5)); corners gave max 6.
     expectInterval(lcm({ lo: 2, hi: 2 }, { lo: 1, hi: 6 }), 2, 10, 1);

@@ -48,6 +48,7 @@ import {
   exactDoubleValue,
   exactValueDoubleRoundings,
 } from '../../numeric-value/exact-integer-value.js';
+import { realPowerBranchTerms } from '../../numerics/real-power.js';
 import {
   isDictionary,
   isFunction,
@@ -659,6 +660,13 @@ export function lower(
       );
     if (options.vars?.includes(e.operator) === true)
       decline(e, `a call of the vars name ${e.operator}`);
+    // The interval mode: a pure node whose type is the value `true` or
+    // `false` (`Equal(x, x)`, `(x + 1)^2 < 0` of a real `x`) is that
+    // verdict, the rule of the existing interval target (`booleanClaim()`).
+    const claim = e.type.type;
+    if (interval && typeof claim === 'object' && claim.kind === 'value')
+      if (typeof claim.value === 'boolean' && e.isPure === true)
+        return b.constant(claim.value, 'boolean');
     const user = userBinding(e);
     if (user !== undefined || fns.recursive(e)) return fns.call(e, user);
     if (!isLibraryOperator(e as never, e.operator))
@@ -779,6 +787,26 @@ export function lower(
         // the integer power `p` of the root of degree `q`, which the kernels
         // enclose tightly for a negative `x` too.
         const nv = isNumber(e.ops[1]) ? e.ops[1].numericValue : undefined;
+        // A float literal that is not an integer is its double `e`, read
+        // as the interpreter reads it (`realPowerBranchTerms()`), now: over
+        // a base that can be negative, `p/q` of odd `q` is the real root
+        // `±|x|^e` with the double (`pow.branch`); anything else, and every
+        // float over a base that the lowering proves non-negative, is the
+        // principal power `x^e` (`pow.principal`), with no real value over
+        // a negative base.
+        const float =
+          !interval || nv === undefined
+            ? undefined
+            : typeof nv === 'number'
+              ? nv
+              : !nv.isExact && nv.im === 0
+                ? nv.re
+                : undefined;
+        const terms =
+          float !== undefined && Number.isFinite(float) && !Number.isInteger(float)
+            ? (realPowerBranchTerms(undefined, float) ?? null)
+            : undefined;
+        const odd = terms != null && terms[1] % 2 !== 0;
         const pq =
           interval && typeof nv === 'object' && nv.isExact
             ? e.ops[1].toRational()
@@ -789,6 +817,17 @@ export function lower(
           // the cost of `pow`.
           if (!interval || e.nops !== 2) break;
           const [x, k] = e.ops.map((op) => value(op)!);
+          if (terms !== undefined) {
+            // A base proved non-negative by the lowering (`nonnegative()`,
+            // not the type or the value of an input).
+            const op =
+              !odd || nonnegative(x)
+                ? 'pow.principal'
+                : terms[0] % 2 !== 0
+                  ? 'pow.branch'
+                  : 'pow.branch.even';
+            return apply(e, rowOfOp(rows, op)!.row, [x, k]);
+          }
           return constant(k) === 2 && type(k).lane === 'integer'
             ? apply(e, rowOfOp(rows, 'square')!.row, [x])
             : apply(e, row('Power'), [x, k]);
@@ -808,8 +847,9 @@ export function lower(
         if (e.nops !== 2) break;
         const [x, base] = e.ops.map((op) => value(op)!);
         // In the interval mode the base is 10 or 2 only on the integer
-        // lane: a decimal whose double is 10 (`10.0000000000000001`) is a
-        // real constant with an enclosure, and takes `Ln(x) / Ln(b)`.
+        // lane: a real constant whose double is 10 is a folded closed node
+        // with an enclosure, and takes `Ln(x) / Ln(b)`. A decimal is its
+        // double: `10.0000000000000001` is the integer 10.
         const is = (n: number) =>
           constant(base) === n && (!interval || type(base).lane === 'integer');
         if (is(10)) return apply(e, row('Log'), [x]);
@@ -1511,6 +1551,17 @@ export function lower(
     const cond = scalar(test);
     if (type(cond).lane !== 'boolean')
       decline(test, 'a condition that is not a boolean');
+    // The interval mode, whose `fold` is off: a decided condition takes its
+    // arm, and the other is not lowered, as on the existing interval target.
+    // A false one with no arm after it is lowered: the shape of the missing
+    // value is the shape of its arm.
+    const decided = interval ? b.constants.get(cond) : undefined;
+    if (decided === true) return value(then, want);
+    if (
+      decided === false &&
+      (rest.length > 0 || otherwise !== undefined || first !== undefined)
+    )
+      return conditional(node, rest, otherwise, want, first);
     return branch(
       node,
       cond,
@@ -1833,30 +1884,23 @@ export function lower(
 /**
  * The interval mode: the count of ulps within which the double of the
  * number literal `nv` is its value, or `undefined` when the double is the
- * value (a machine number, a decimal or an exact number that is a double:
- * `0.5`, `1/2`, `5`). A decimal `m·10^k` is a double when it is an integer
- * that converts exactly, or `5^-k` divides `m` and the double of the
- * quotient by `2^-k` is exact.
+ * value. A number that is not exact (a machine number or a decimal: `1.8`)
+ * is its double, as on the existing target and in the JavaScript code (the
+ * precision of the target); so is an exact number that is a double (`1/2`,
+ * `5`). An exact number with no double value (`1/3`, a radical) is
+ * enclosed.
  */
 function literalUlps(nv: number | NumericValue): number | undefined {
-  if (typeof nv === 'number' || nv.im !== 0 || !Number.isFinite(nv.re))
+  if (
+    typeof nv === 'number' ||
+    !nv.isExact ||
+    nv.im !== 0 ||
+    !Number.isFinite(nv.re)
+  )
     return undefined;
-  if (nv.isExact)
-    return exactDoubleValue(nv) === undefined
-      ? exactValueDoubleRoundings(nv)
-      : undefined;
-  const d = nv.bignumRe;
-  if (d === undefined) return 1;
-  const k = BigInt(d.exponent);
-  let n = d.significand;
-  let x = nv.re;
-  if (k < 0n) {
-    const five = 5n ** -k;
-    if (n % five !== 0n) return 1;
-    n /= five;
-    x *= 2 ** Number(-k);
-  } else n *= 10n ** k;
-  return Number.isInteger(x) && BigInt(x) === n ? undefined : 1;
+  return exactDoubleValue(nv) === undefined
+    ? exactValueDoubleRoundings(nv)
+    : undefined;
 }
 
 /**

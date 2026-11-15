@@ -6,7 +6,10 @@
  *   folded, and evaluated in a region where it was not written.
  * - `may-fail`: can throw or not terminate (a loop over too many
  *   iterations); may be removed when its value is not read, but is not
- *   merged, folded, moved or evaluated where it was not written.
+ *   merged, folded, moved or evaluated where it was not written. One
+ *   exception, in `cse`: a call of a function that is not on a cycle of
+ *   calls is merged with an earlier visible call of the same arguments,
+ *   which failed if this one would.
  * - `effectful`: changes or reads state; is evaluated exactly once per
  *   evaluation that the program asks for, in program order.
  *

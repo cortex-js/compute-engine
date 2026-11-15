@@ -117,6 +117,9 @@ export type Printed = {
   readonly helpers: string[];
   /** The effectful instructions, in the order they are printed. */
   readonly order: Omit<TraceEntry, 'region'>[];
+  /** The name and the text of each value of `once`, in the order of the
+   *  program (the entry first). */
+  readonly once: Map<V, readonly [string, string]>;
 };
 
 export function spellingOf(
@@ -244,14 +247,19 @@ export function mayAliasInput(
   return alias;
 }
 
+/** `once`: the values that the target computes once, out of the
+ *  functions, each bound to its name (`Printed.once`). */
 export function printProgram(
   p: Program,
   syntax: Syntax,
-  rows: readonly OperatorRow[]
+  rows: readonly OperatorRow[],
+  once?: ReadonlySet<V>
 ): Printed {
   const index = useIndex(p);
   const fx = effects(p, rows);
   const inlined = inlinedValues(p, syntax, rows, fx, index);
+  once?.forEach((v) => inlined.delete(v));
+  const onceText = new Map<V, readonly [string, string]>();
   const alias = mayAliasInput(p, rows, index);
   const names = new Map<V, string>();
   const helpers = new Set<string>();
@@ -447,7 +455,8 @@ export function printProgram(
         throw new Error('slice printer: a call with several results');
       } else {
         const out = outsOf(i)[0];
-        if (!inlined.has(out))
+        if (once?.has(out)) onceText.set(out, [name(out), text(i)]);
+        else if (!inlined.has(out))
           line(syntax.declare(type(out), name(out), text(i)));
       }
     }
@@ -480,5 +489,11 @@ export function printProgram(
       }));
       return syntax.fn(f.name, params, f.results[0], returned(f));
     });
-  return { body: main, functions, helpers: [...helpers], order };
+  return {
+    body: main,
+    functions,
+    helpers: [...helpers],
+    order,
+    once: onceText,
+  };
 }

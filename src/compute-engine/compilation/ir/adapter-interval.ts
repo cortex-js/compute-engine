@@ -132,13 +132,20 @@ export function compileWithIrProfileInterval(
       ),
     ];
     const once = s.preambleOnce;
-    const shippable = isShippableCode(`${once}\n${s.code}`);
+    const perCall = s.preamblePerCall;
+    const shippable = isShippableCode(`${once}\n${perCall ?? ''}\n${s.code}`);
     const result: CompilationResult<'interval-js', IntervalValue> = {
       target: 'interval-js',
       success: true,
       runtimeVersion: INTERVAL_RUNTIME_VERSION,
       code: s.code,
-      ...(once === '' ? {} : { preamble: once, preambleOnce: once }),
+      ...(once === ''
+        ? {}
+        : {
+            preamble: perCall === undefined ? once : `${once}\n${perCall}`,
+            preambleOnce: once,
+          }),
+      ...(perCall === undefined ? {} : { preamblePerCall: perCall }),
       calling: s.calling,
       ...(booleans.length > 0 ? { booleanInputs: booleans } : {}),
       ...(lists.length > 0 ? { listInputs: lists } : {}),

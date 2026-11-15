@@ -472,12 +472,14 @@ of the mode run, `narrow` first and `plain` last.
 
 Spelled: the arithmetic (`div.q` is `_IA.div`), `Power` (`pow`, also of
 integers, is `_IA.powReal`; a power by the exact constant 2 is
-`_IA.square`, the operation `square` that the lowering makes), `Root` (`_IA.nthRootInterval`), `Sqrt`, `Abs`, `Exp`,
+`_IA.square`, the operation `square` that the lowering makes; a float
+literal exponent below), `Root` (`_IA.nthRootInterval`), `Sqrt`, `Abs`, `Exp`,
 `Ln`, `Log` of base 10 and 2, the trigonometric and hyperbolic functions
 and their inverses (also the reciprocal ones), `Arctan2`, `Hypot`,
 `Degrees` (the product by an enclosure of π, then the quotient by 180),
 `Floor`, `Ceil`, `Round`, `Truncate`, `Fract`, `Sign`, `Mod`, `Max`, `Min`,
-`Erf`, `Erfc`, `Gamma`, `GammaLn`, `Factorial`, `Factorial2`, `Binomial`,
+`Erf`, `Erfc`, `Gamma`, `GammaLn`, `Factorial`, `Factorial2`, `Binomial`
+and `Choose` (also of real operands, `binomial.real`, a row of the mode),
 `GCD`, `LCM`, the comparisons, `And`, `Or`, `Not` (Kleene logic on
 verdicts), `If`, `Which`, a `Block` with locals, user functions that are
 not recursive, `Sum` and `Product` with `Limits`, `Random()` and
@@ -528,6 +530,13 @@ operand. An input of a list or tuple type (`list<real>`, `list<real^3>`,
 an array of the inputs object, whose elements `run()` converts
 (`processInput()`), and is named in `listInputs`, so that `broadcast()`
 converts it once and shares it between the cells.
+
+Decided comparisons. A pure node whose type is the value `true` or `false`
+is that verdict, the rule of the existing interval target (`booleanClaim()`
+of `compile-conditions.ts`): `(x + 1)^2 < 0` and `Equal(x, x)` of a real `x`
+are `'false'` and `'true'`, and `x < y` is computed. A condition that is
+such a verdict, or a constant, takes its arm in the lowering, and the other
+arm is not lowered (`fold` is off in the mode).
 
 Conditionals. An `if` is printed with each arm once (`Syntax.verdictIf`):
 the condition is bound to a name, the first arm runs unless it is
@@ -589,8 +598,14 @@ or `'false'`. A real literal whose double is not its value is marked
 `inexact` in the IR (`Literal.inexact`, the count of ulps; `literalKey()`
 tells it from the unmarked literal of the same double) and printed as the
 enclosure of that many ulps on each side, computed when the code is
-printed. The double is the value for a machine number, a decimal that is a
-double (`0.5`; `0.1` is not) and an exact number that is a double
+printed. The double is the value for a number that is not exact (a machine
+number or a decimal: `0.1`, `1.8`, as in the JavaScript code: the precision
+of the target), so the interpreter at the default precision, which
+computes with the decimal, can differ: at `x` the double of 1.8,
+`Ceil(x - 1.8)` is 0 in the mode, on the existing target and in the
+interpreter at machine precision, and 1 in the interpreter at the default
+precision (`x - 1.8` is about 4.4e-17 there); and for an exact number that
+is a double
 (`exactDoubleValue()`: `1/2`, `5`); another exact number takes one ulp per
 rounding of its double (`exactValueDoubleRoundings()`: `1/3` is
 `[0.33333333333333326, 0.33333333333333337]`). `Pi` and `ExponentialE` take
@@ -605,22 +620,62 @@ it at run time.
 
 `Power(x, p/q)` with a literal rational exponent, `q > 1`, is lowered as
 `Root(x, q)^p`, for any sign of `p`: `x^(2/3)` over `[-8, -1]` is `[1, 4]`.
-`_IA.powReal` is `_IA.powInterval` with a point exponent widened by one ulp
-on each side unless it is an integer or a multiple of 1/1024 of magnitude
-at most 1024: over a negative base such a float exponent gives the
-symmetric hull `[-M, M]` (`x^0.2` over `[-8, -1]` is `[-1.5157…, 1.5157…]`,
-where the interpreter reads `0.2` as `1/5` and the existing interval target
-gives `[-1.5157…, -1]`). The interpreter reads a float as a rational `p/q`
-only within about 1e-14 of the double and for `q` under about 3·10^5
-(`realPowerBranchTerms()`), and a multiple of 1/1024 is at least
-1/(1024·q) from every such `p/q` of odd `q`: `x^1.5` and `x^2.5` over a
-negative box are `empty`, as in the interpreter.
+A float literal exponent that is not an integer is its double `e`, read
+when the program is lowered as the interpreter reads it
+(`realPowerBranchTerms()`), which takes only the sign from the reading:
+over a base that can be negative, a rational `p/q` of odd `q` is
+`pow.branch` (`pow.branch.even` for an even `p`), the real root `±|x|^e`
+with the double, `_IA.powRealBranch` (`x^0.2`, `x^2.2`,
+`x^0.6000000000000001`); any other float, and every float over a base that
+the lowering proves non-negative from its operations and constants
+(`nonnegative()`: `Abs(x - 1)^0.2`; not from the type, an assumption or a
+value of an input, which the code does not keep), is `pow.principal`, `_IA.pow`
+of the double as on the existing target, which has no value over a
+negative base (`x^1.5`, `x^3.87`). The existing target computes
+`x^(p/q)` with `_IA.powRational` where `e` is the double of `p/q`: at
+`x = 1e300`, `x^0.2` is `1.0000000000000077e60` in the mode and in the
+interpreter at machine precision, and `[9.999999999999998e59,
+1.0000000000000001e60]` there. An
+exponent known at run time is `_IA.powReal(x, e, digits)`, which applies
+the same reading when `e` is a point that is not an integer (and keeps the
+last reading, so a plot with one exponent reads it once), and is
+`_IA.powInterval` otherwise; `digits` is `realPowerReconstructionDigits()`
+when the code is printed, written in the code, so that stored code reads
+the exponent as the engine that compiled it.
+
+Values computed once (`computedOnce()` of `print-interval.ts`). A value
+that depends on no input, parameter, loop index or draw is computed when
+the code is loaded, in `preambleOnce`, and read by its name: a constant that
+is not a number or a verdict and that code run at each call reads (a
+constant read only by such values is written in their text); a pure
+operation or a list of such values, in any function and any region (no
+kernel throws, except `_IA.rangeCount()`, which is not moved); and an
+operation that can fail (`_IA.number`) or a call of a function that has no
+effect and is not on a cycle, of such values, only at a top level that runs
+at every call: the top level of the entry, and of a function that such a
+top level calls (`b(3π)` in the body of `w`, called as `w(x)`). Nothing
+that draws or has an effect is moved. The values follow the functions,
+those of a function before those of its callers. Those that cannot throw
+and run no loop are computed in `preambleOnce`, when the code is loaded.
+The others (an operation that can fail, a call, and what is computed from
+them) are computed at the first call of the loaded code, in a `try` of
+`preamblePerCall`, so `compile()` and a load run no loop of the program;
+each later call tests a flag, `_once`, and throws again the error of the
+first call if there was one: `run()` and `broadcast()` then answer
+`entire`, as when the value is computed at the call (a `Sum` over the
+`iterationBudget` in `b`). Each load (`run()`, `broadcast()`, a stored copy
+on a worker) computes them once. A value computed once is shared by every
+call: no kernel writes to an operand (a widened result
+is written only into a wrapper that the kernel made, `rounding.ts`), and
+`run()` copies its result (`freshIntervalValue()`), so a change of a
+returned value does not change the next result.
 
 The result has the stored form of the existing interval target
 (`StoredIntervalJavaScript`): `code`, an expression of the inputs object
 `_` (the expression itself for a body of one `return`), or for a root
 function literal the function of its arguments; `preambleOnce`, the user
-functions; `runtimeVersion` (`INTERVAL_RUNTIME_VERSION`). The code reads
+functions and the values computed at the load; `preamblePerCall`, the
+values computed at the first call, when there are some; `runtimeVersion` (`INTERVAL_RUNTIME_VERSION`). The code reads
 `_IA` only. `run()` is `createIntervalRuntime().load()` of the stored form,
 so `run()` and stored code loaded on a worker agree by construction: an
 input given as a number is a point, a boolean is a verdict, and the result
@@ -632,7 +687,8 @@ error of the code other than a `ReferenceError` or a cancellation is
 (`adapter-interval.ts`). A decline is `'outside-profile'`; with `fallback`
 not `false`, the existing interval target then compiles the expression and
 a warning is logged. The result has `target: 'interval-js'`, `success`,
-`runtimeVersion`, `code`, `preamble` and `preambleOnce` (the same text),
+`runtimeVersion`, `code`, `preambleOnce`, `preamblePerCall` when there is
+one, `preamble` (the two, in that order),
 `calling` (`'expression'`, or `'lambda'` for a root `Function` literal,
 which declines when its body reads a free name), `booleanInputs`,
 `listInputs`, `run`,
@@ -778,8 +834,9 @@ declines.
 
 `pure` (merged, removed, moved, folded, evaluated where it was not written),
 `may-fail` (removed when unused; shared by the lowering with an evaluation of
-the same node that dominates it; nothing else), `effectful` (keeps its place,
-count and order). The effect of a user function is the least fixed point over
+the same node that dominates it, and by `cse` for a call; nothing else),
+`effectful` (keeps its place, count and order). The effect of a user function
+is the least fixed point over
 its calls, from `pure`, and from `may-fail` for a function on a cycle of calls:
 a recursive function may not terminate, so it and its callers are at least
 `may-fail`, and a guarded recursive call is not evaluated before its guard. A
@@ -792,6 +849,16 @@ none. The operands of `And`, `Or` and a chain are lowered lazily, in arms; the
 `hoist` pass makes a speculatable arm a plain `and` or `or`. After each pass a
 check compares the sequence of effectful instructions (operation, operands,
 results and region); the same check runs over the printer's order.
+
+The pass `cse` merges an instruction with an earlier one of the same operation
+and operands whose value is visible (written before it in its region or in a
+region around it, not in an arm or a loop body that has ended): a `pure`
+operation, and a call of a user function that is not `effectful` and not on a
+cycle of calls, with each of its results (a list and its length). A `may-fail`
+call is merged because the visible call failed if the second would. So
+`a_1(x) = g(a_0(x), a_0(x), …)` calls `a_0` once, and a chain of such functions
+runs in a time proportional to its length. A function that draws, directly or
+through a call, is `effectful` and is called each time.
 
 A `WithRandomSeed` frame whose body has one draw site evaluated once (not under
 a loop, a `Map`, `Filter`, `Sum` or `Product` body, or a call of an effectful

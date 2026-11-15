@@ -6,8 +6,9 @@
  */
 
 import { ComputeEngine, INTERVAL_KIND } from '../../src/compute-engine';
+import { BigDecimal } from '../../src/big-decimal';
 import { compile } from '../../src/compile';
-import { createIntervalRuntime } from '../../src/interval';
+import { createIntervalRuntime, IntervalArithmetic } from '../../src/interval';
 import { CompileDeclineError } from '../../src/compute-engine/compilation/diagnostics';
 import type { Expression } from '../../src/compute-engine/global-types';
 
@@ -39,6 +40,15 @@ ce.assign(
 );
 
 const IR = { to: 'interval-js', profile: 'ir' } as const;
+
+/** The code of `r` with each constant of `preambleOnce` written where it is
+ *  read. */
+const inlined = (r: { code: string; preambleOnce?: string }): string =>
+  [...(r.preambleOnce ?? '').matchAll(/^const (v\d+) = (.*);$/gm)].reduce(
+    (code, [, name, text]) =>
+      code.replace(new RegExp(`\\b${name}\\b`, 'g'), text),
+    r.code
+  );
 type Result = {
   success: boolean;
   code: string;
@@ -302,7 +312,7 @@ describe('the interval mode: the result contract', () => {
       mode(['Add', ['Sin', 'x'], ['Cos', 'x']], { cse: false }).run(box)
     ).toEqual(mode(['Add', ['Sin', 'x'], ['Cos', 'x']]).run(box));
     expect(
-      mode(['Add', 'x', ['Sin', 1]], { constantFold: false }).code
+      mode(['Add', 'x', ['Sin', 1]], { constantFold: false }).preambleOnce
     ).toMatch(/_IA\.sin\(\{ lo: 1, hi: 1 \}\)/);
   });
 });
@@ -536,9 +546,9 @@ describe('the interval mode: plain integers', () => {
     );
   });
   test('an integer that depends on an input stays on kernels', () => {
-    expect(mode(['Add', ['Floor', 'x'], 1]).code).toBe(
-      '_IA.add(_IA.floor(_.x), { lo: 1, hi: 1 })'
-    );
+    const r = mode(['Add', ['Floor', 'x'], 1]);
+    expect(r.code).toMatch(/^_IA\.add\(_IA\.floor\(_\.x\), (v\d+)\)$/);
+    expect(r.preambleOnce).toMatch(/^const v\d+ = \{ lo: 1, hi: 1 \};$/);
   });
   test('a product of indexes whose bound reaches 2^53 is not plain', () => {
     const r = mode([
@@ -622,5 +632,469 @@ describe('the interval mode: the size of conditionals', () => {
     ];
     expect(time(() => mode(triple))).toBeLessThan(1000);
     expect(mode(triple).run({ x: 0, n: 3 })).toEqual({ kind: 'interval', value: { lo: 0, hi: 0 } });
+  });
+});
+
+describe('the interval mode: batch 4, results', () => {
+  /** `f` of a fresh engine at machine precision, as Tycho's, with `x`, `y`
+   *  and `a` declared `real`; then the process-global precision of the big
+   *  decimals, which the engine writes, is the default engine's again. */
+  const atMachine = <T>(f: (engine: ComputeEngine) => T): T => {
+    const engine = new ComputeEngine();
+    engine.precision = 'machine';
+    for (const v of ['x', 'y', 'a']) engine.declare(v, 'real');
+    try {
+      return f(engine);
+    } finally {
+      BigDecimal.precision = ce.precision;
+    }
+  };
+  const both = (engine: ComputeEngine, json: unknown) => {
+    const expr = engine.box(json as never);
+    return [
+      compile(expr, { ...IR, fallback: false } as never),
+      compile(expr, { to: 'interval-js' } as never),
+    ] as unknown as [Result, Result];
+  };
+  const defaultEngine = () => {
+    const engine = new ComputeEngine();
+    for (const v of ['x', 'y', 'a']) engine.declare(v, 'real');
+    return engine;
+  };
+
+  test.each([
+    [['Add', 'x', 0.5], '_IA.add(_.x, { lo: 0.5, hi: 0.5 })'],
+    [['Add', 'x', 1.8], '_IA.add(_.x, { lo: 1.8, hi: 1.8 })'],
+  ])('a decimal literal is a point at its double: %j', (json, code) => {
+    expect(inlined(both(defaultEngine(), json)[0])).toBe(code);
+    expect(atMachine((m) => inlined(both(m, json)[0]))).toBe(code);
+  });
+
+  test('a decimal literal is a point: a pole of 1 / (0.5·Sin(2x) + 0.5) at the edge', () => {
+    const json = ['Divide', 1, ['Add', ['Multiply', 0.5, ['Sin', ['Multiply', 2, 'x']]], 0.5]];
+    const box = { x: { lo: -1.88, hi: 8.12 } };
+    const expected = {
+      kind: 'partial',
+      value: { lo: 1, hi: Infinity },
+      domainClipped: 'hi',
+    };
+    for (const results of [both(defaultEngine(), json), atMachine((m) => both(m, json))]) {
+      expect(results[0].run(box)).toEqual(expected);
+      expect(results[1].run(box)).toEqual(expected);
+    }
+  });
+
+  test('a decimal literal is a point: a decided comparison', () => {
+    const json = [
+      'Less',
+      ['Add', ['Multiply', 0.5, ['Sin', ['Divide', ['Floor', 'x'], 6]], ['Sin', ['Divide', ['Floor', 'y'], 6]]], 0.5],
+      ['Rational', 1, 2],
+    ];
+    const box = { x: { lo: 40.73, hi: 50.73 }, y: { lo: 0.72, hi: 10.72 } };
+    expect(both(defaultEngine(), json)[0].run(box)).toBe('false');
+    expect(atMachine((m) => both(m, json)[0].run(box))).toBe('false');
+  });
+
+  test("Tycho's guard: the clamp of a decimal bound is the point", () => {
+    // `x ≥ 0.5` narrows `x` to `[0.5, 0.51]` in the first arm and to
+    // `[0.49, 0.5]` in the second, where `Arccos(2x)` is in its domain.
+    const guard = [
+      'Which',
+      ['GreaterEqual', 'x', 0.5],
+      0,
+      'True',
+      ['Arccos', ['Multiply', 2, 'x']],
+    ];
+    const [r, old] = atMachine((m) => both(m, guard));
+    const box = { x: { lo: 0.49, hi: 0.51 } };
+    expect(r.run(box).kind).toBe('interval');
+    expect(r.run(box)).toEqual(old.run(box));
+    // `1/3` has no double: its enclosure leaves `3x` above 1 at one ulp.
+    const third = [
+      'Which',
+      ['GreaterEqual', 'x', ['Rational', 1, 3]],
+      0,
+      'True',
+      ['Arccos', ['Multiply', 3, 'x']],
+    ];
+    const [r3, old3] = atMachine((m) => both(m, third));
+    const box3 = { x: { lo: 0.33, hi: 0.34 } };
+    expect(r3.run(box3)).toMatchObject({ kind: 'partial', domainClipped: 'hi' });
+    expect(r3.run(box3)).toEqual(old3.run(box3));
+  });
+
+  test('a float exponent is its double: x^2.2 is |x|^e, not x^(11/5)', () => {
+    // The interpreter at machine precision and the JavaScript code compute
+    // `Math.pow(32, 2.2)`, `2048.0000000000014`; `x^(11/5)` at 32 is 2048.
+    atMachine((m) => {
+      const expr = m.box(['Power', 'x', 2.2] as never);
+      const r = both(m, ['Power', 'x', 2.2])[0];
+      for (const at of [32, 1e6]) {
+        const v = r.run({ x: at }).value;
+        const interpreter = expr.subs({ x: m.number(at) }).N().re;
+        expect(interpreter).toBe(Math.pow(at, 2.2));
+        expect(v.lo).toBeLessThanOrEqual(Math.pow(at, 2.2));
+        expect(v.hi).toBeGreaterThanOrEqual(Math.pow(at, 2.2));
+      }
+      expect(r.run({ x: 32 }).value.lo).toBeGreaterThan(2048);
+    });
+  });
+
+  test('a float exponent is read to the digits of the compiling engine', () => {
+    // `0.333333333333333` (15 digits) is `1/3` when read to the 15 digits
+    // of a machine-precision engine, and no rational of odd denominator
+    // when read to 17. The containment test computes its reference at 21
+    // digits, where a negative base has no real value, so it skips this
+    // case: the reading at 15 digits is pinned here.
+    const e = 0.333333333333333;
+    atMachine((m) => {
+      const r = both(m, ['Power', 'x', e])[0];
+      expect(r.code).toContain('powRealBranch');
+      const got = r.run({ x: -8 });
+      expect(got.kind).toBe('interval');
+      const root = -Math.pow(8, e);
+      expect(got.value.lo).toBeLessThanOrEqual(root);
+      expect(got.value.hi).toBeGreaterThanOrEqual(root);
+      // The interpreter gives the real root, rounded to 15 digits.
+      const v = m.box(['Power', 'x', e] as never).subs({ x: m.number(-8) }).N();
+      expect(v.im === 0).toBe(true);
+      expect(Math.abs(v.re - root)).toBeLessThan(1e-14 * Math.abs(root));
+    });
+    // At the default precision the same literal has no real root.
+    const d = both(defaultEngine(), ['Power', 'x', e])[0];
+    expect(d.code).not.toContain('powRealBranch');
+    expect(d.run({ x: -8 })).toEqual({ kind: 'empty' });
+  });
+
+  test('a base that is provably non-negative: the principal power, as the existing target', () => {
+    // Tycho's `neyret/dmibg1uaof`.
+    const json = [
+      'Power',
+      ['Add', ['Power', ['Abs', ['Subtract', 'x', 1]], 0.2], ['Power', ['Abs', ['Add', ['Multiply', 2, 'x'], 1]], 0.2]],
+      { num: '5.0' },
+    ];
+    const [r, old] = atMachine((m) => both(m, json));
+    expect(r.code).not.toContain('powRealBranch');
+    expect(r.code).not.toContain('nthRoot');
+    for (const box of [
+      { x: { lo: -1.623107644263655, hi: -1.623107644263655 } },
+      { x: { lo: -2, hi: 3 } },
+      { x: { lo: 0.9, hi: 1.1 } },
+    ])
+      expect(r.run(box)).toEqual(old.run(box));
+  });
+
+  test('the principal power reads no value or assumption of an input', () => {
+    // An assigned value that `vars` replaces: `x` is read from the inputs.
+    const assigned = new ComputeEngine();
+    assigned.declare('x', 'real');
+    assigned.assign('x', 2);
+    const r = compile(assigned.box(['Power', 'x', 0.2] as never), {
+      ...IR,
+      fallback: false,
+      vars: { x: '_.x' },
+    } as never) as unknown as Result;
+    expect(r.code).toContain('powRealBranch');
+    const v = r.run({ x: -32 }).value;
+    expect(v.lo).toBeLessThanOrEqual(-2);
+    expect(v.hi).toBeGreaterThanOrEqual(-2);
+    // An assumption, which `forget()` removes after the compilation.
+    const assumed = new ComputeEngine();
+    assumed.declare('x', 'real');
+    assumed.assume(assumed.box(['GreaterEqual', 'x', 0] as never) as never);
+    const s = compile(assumed.box(['Power', 'x', 0.2] as never), {
+      ...IR,
+      fallback: false,
+    } as never) as unknown as Result;
+    assumed.forget('x');
+    expect(s.code).toContain('powRealBranch');
+    expect(s.run({ x: -32 }).value.hi).toBeGreaterThanOrEqual(-2);
+    expect(s.run({ x: -32 }).value.lo).toBeLessThanOrEqual(-2);
+    BigDecimal.precision = ce.precision;
+  });
+
+  test('a decimal literal is its double: Ceil(x - 1.8)', () => {
+    // The caveat of the precision of the target. At `x` the double of 1.8,
+    // `x - 1.8` is 0 in the mode, on the existing target, in the
+    // JavaScript code and in the interpreter at machine precision, and
+    // about 4.4e-17 in the interpreter at the default precision, which
+    // computes with the decimal 1.8: `Ceil` is 0 against 1.
+    const json = ['Ceil', ['Subtract', 'x', 1.8]];
+    const [r, old] = both(defaultEngine(), json);
+    expect(r.run({ x: 1.8 })).toEqual({ kind: 'interval', value: { lo: 0, hi: 0 } });
+    expect(old.run({ x: 1.8 })).toEqual({ kind: 'interval', value: { lo: 0, hi: 0 } });
+    const double = [BigInt(1.8 * 2 ** 52), 2n ** 52n];
+    expect(
+      atMachine((m) => m.box(json as never).subs({ x: m.number(double as never) }).N().re)
+    ).toBe(0);
+    expect(
+      ce.box(json as never).subs({ x: ce.number(double as never) }).N().re
+    ).toBe(1);
+  });
+
+  test('an exponent known at run time is read when it is a point', () => {
+    const r = mode(['Power', 'x', 'y']);
+    expect(r.code).toBe('_IA.powReal(_.x, _.y, 17)');
+    const base = { lo: -8, hi: -1 };
+    // `0.2` is `1/5`: the real root, as the interpreter gives at -8.
+    const fifth = r.run({ x: base, y: 0.2 });
+    expect(fifth.kind).toBe('interval');
+    expect(fifth.value.lo).toBeLessThanOrEqual(
+      ce.box(['Power', -8, 0.2] as never).N().re
+    );
+    expect(fifth.value.hi).toBeLessThan(-0.99);
+    // `1.5` is `3/2`: no real value over a negative base.
+    expect(r.run({ x: base, y: 1.5 })).toEqual({ kind: 'empty' });
+    // The digits are those of the compilation: 15 at machine precision.
+    expect(atMachine((m) => both(m, ['Power', 'x', 'a'])[0].code)).toBe(
+      '_IA.powReal(_.x, _.a, 15)'
+    );
+  });
+
+  test('a run-time exponent at an edge of the doubles gives a kinded result', () => {
+    const r = mode(['Power', 'x', 'y']);
+    for (const y of [NaN, Infinity, -Infinity, 0, -0, 5e-324, 2 ** 53, 2 ** 53 + 2])
+      for (const x of [{ lo: -8, hi: -1 }, { lo: -2, hi: 3 }, { lo: 0.5, hi: 4 }]) {
+        const v = r.run({ x, y });
+        expect(typeof v.kind).toBe('string');
+      }
+  });
+
+  test('Binomial and Choose of reals: _IA.binomial in the mode only', () => {
+    for (const head of ['Binomial', 'Choose']) {
+      const r = mode([head, 'x', 'y']);
+      expect(r.code).toBe('_IA.binomial(_.x, _.y)');
+      expect(r.run({ x: 5, y: 2.5 })).toEqual(
+        (compile(ce.box([head, 'x', 'y'] as never), { to: 'interval-js' } as never) as unknown as Result).run({ x: 5, y: 2.5 })
+      );
+    }
+    // The JavaScript target keeps the integer signature.
+    expect(() =>
+      compile(ce.box(['Binomial', 'x', 'y'] as never), {
+        to: 'javascript',
+        profile: 'ir',
+        fallback: false,
+      } as never)
+    ).toThrow(CompileDeclineError);
+  });
+});
+
+describe('the interval mode: decided comparisons', () => {
+  test('a comparison whose type is a verdict is that verdict, as on the existing target', () => {
+    const existing = (json: unknown) =>
+      (
+        compile(ce.box(json as never), {
+          to: 'interval-js',
+          fallback: false,
+        } as never) as unknown as Result
+      ).code;
+    const square = ['Less', ['Power', ['Add', 'x', 1], 2], 0];
+    for (const [json, verdict] of [
+      [square, 'false'],
+      [['Equal', 'x', 'x'], 'true'],
+    ] as const) {
+      expect(mode(json).code).toBe(`'${verdict}'`);
+      expect(existing(json)).toBe(`'${verdict}'`);
+      expect(mode(json).run({ x: { lo: -3, hi: 2 } })).toBe(verdict);
+    }
+    // Not decided: computed.
+    expect(mode(['Less', 'x', 'y']).code).toBe('_IA.less(_.x, _.y)');
+    expect(mode(['Less', 'x', 'y']).run({ x: { lo: 0, hi: 2 }, y: 1 })).toBe(
+      'maybe'
+    );
+    // A decided condition takes its arm; the other is not compiled.
+    expect(mode(['If', square, 'x', ['Sqrt', 'x']]).code).toBe('_IA.sqrt(_.x)');
+    // A false one with no other arm: the missing value has its arm's shape.
+    const box = { x: { lo: 1, hi: 2 } };
+    for (const json of [
+      ['If', square, ['Tuple', 'x', 1]],
+      ['If', square, 'x'],
+    ]) {
+      const old = compile(ce.box(json as never), {
+        to: 'interval-js',
+        fallback: false,
+      } as never) as unknown as Result;
+      expect(mode(json).run(box)).toEqual(old.run(box));
+    }
+    expect(mode(['If', square, ['Tuple', 'x', 1]]).run(box)).toEqual([
+      { kind: 'empty' },
+      { kind: 'empty' },
+    ]);
+    expect(mode(['If', square, 'x']).run(box)).toEqual({ kind: 'empty' });
+  });
+});
+
+describe('the interval mode: values computed once', () => {
+  ce.assign(
+    'b',
+    ce.box([
+      'Function',
+      ['Sum', ['Sin', ['Multiply', 'k', 't']], ['Limits', 'k', 1, 10]],
+      't',
+    ] as never)
+  );
+  ce.assign(
+    'huge',
+    ce.box([
+      'Function',
+      ['Sum', ['Sin', ['Multiply', 'k', 't']], ['Limits', 'k', 1, 1e12]],
+      't',
+    ] as never)
+  );
+  const count = (text: string, s: string) => text.split(s).length - 1;
+
+  test('a constant read at each call is named once, in preambleOnce', () => {
+    const r = mode([
+      'Add',
+      ['Multiply', 'Pi', 'x'],
+      ['Multiply', 'Pi', 'y'],
+      ['Multiply', 'Pi', ['Sin', 'x']],
+    ]);
+    const pi = '{ lo: 3.1415926535897927, hi: 3.1415926535897936 }';
+    expect(r.code).not.toMatch(/\{ lo:/);
+    expect(count(r.preambleOnce!, pi)).toBe(1);
+    expect(r.preambleOnce).toMatch(/^const v\d+ = \{ lo: 3\.14/);
+  });
+
+  test('a call of constant arguments at the top level is computed once', () => {
+    const r = mode(['Add', ['b', ['Multiply', 3, 'Pi']], 'x']) as Result & {
+      preamblePerCall?: string;
+    };
+    // The call is in the code of the first call, and not in the code.
+    expect(r.code).toMatch(/^_IA\.add\(_\.x, v\d+\)$/);
+    expect(count(r.preamblePerCall!, '_b({')).toBe(1);
+    // Its value is the value of the call computed at each call.
+    const box = { x: { lo: 0, hi: 1 } };
+    const v = r.run(box);
+    expect(v.kind).toBe('interval');
+    expect(r.run(box)).toEqual(v);
+    const reference = mode(['Add', ['b', 'y'], 'x']).run({
+      ...box,
+      y: { lo: 3 * Math.PI, hi: 3 * Math.PI },
+    });
+    expect(v.value.lo).toBeCloseTo(reference.value.lo, 12);
+    expect(v.value.hi).toBeCloseTo(reference.value.hi, 12);
+    // In a function that the top level calls: its top level runs at every
+    // call too, and its value is computed before the call of `w`.
+    ce.assign(
+      'w',
+      ce.box(['Function', ['Multiply', ['b', 2], 't'], 't'] as never)
+    );
+    const w = mode(['Add', ['w', 3], 'x']) as Result & {
+      preamblePerCall?: string;
+    };
+    const first = w.preamblePerCall!;
+    expect(count(first, '_b(')).toBe(1);
+    expect(count(first, '_w(')).toBe(1);
+    expect(first.indexOf('_b(')).toBeLessThan(first.indexOf('_w('));
+    expect(w.run(box).kind).toBe('interval');
+  });
+
+  test('a call is computed at the first call, not by compile() or the load', () => {
+    // `b` computes 10 sines per call, and the rest of the program none.
+    const sin = jest.spyOn(IntervalArithmetic, 'sin');
+    try {
+      const r = mode(['Add', ['b', ['Multiply', 3, 'Pi']], 'x']) as Result & {
+        preamblePerCall?: string;
+      };
+      expect(r.preambleOnce).not.toMatch(/_b\(\{/);
+      expect(count(r.preamblePerCall!, '_b({')).toBe(1);
+      const loaded = createIntervalRuntime().load(
+        JSON.parse(JSON.stringify(r))
+      );
+      expect(sin).toHaveBeenCalledTimes(0);
+      for (let k = 0; k < 1000; k++) r.run({ x: k });
+      expect(sin).toHaveBeenCalledTimes(10);
+      // `broadcast()` and a stored copy are loads of their own: each
+      // computes it at its first call.
+      for (let k = 0; k < 3; k++)
+        r.broadcast!({ x: new Float64Array([0, 0, 1, 2]) });
+      expect(sin).toHaveBeenCalledTimes(20);
+      loaded({ x: 0 });
+      loaded({ x: 1 });
+      expect(sin).toHaveBeenCalledTimes(30);
+    } finally {
+      sin.mockRestore();
+    }
+    // No value that can throw: no flag.
+    const plain = mode(['Add', ['Multiply', 'Pi', 'x'], 1]) as Result & {
+      preamblePerCall?: string;
+    };
+    expect(plain.preamblePerCall).toBeUndefined();
+    expect(plain.preambleOnce).not.toMatch(/_once/);
+  });
+
+  test('a value that throws at its first call is entire at each call', () => {
+    const r = mode(['Add', ['b', ['Multiply', 3, 'Pi']], 'x'], {
+      iterationBudget: 5,
+    }) as Result & { preamblePerCall?: string };
+    expect(r.preamblePerCall).toMatch(/_once = e;/);
+    // The load does not fail, and every call and cell is entire.
+    const loaded = createIntervalRuntime().load(JSON.parse(JSON.stringify(r)));
+    for (const f of [r.run, loaded])
+      for (const x of [0, 1, { lo: -1, hi: 1 }])
+        expect(f({ x })).toEqual({ kind: 'entire' });
+    const out = r.broadcast!({ x: new Float64Array([0, 0, 1, 2]) });
+    expect([out[2], out[5]]).toEqual([
+      INTERVAL_KIND.entire,
+      INTERVAL_KIND.entire,
+    ]);
+    // A loop of 10^12 passes at the load: refused before its first pass.
+    const big = mode(['Add', ['huge', 1], 'x']);
+    expect(big.run({ x: 0 })).toEqual({ kind: 'entire' });
+  });
+
+  test('a value that can fail in an arm is computed where it is read', () => {
+    const r = mode(['If', ['Greater', 'x', 1.5], ['b', 2], 'y'], {
+      iterationBudget: 5,
+    }) as Result & { preamblePerCall?: string };
+    expect(r.preamblePerCall).toBeUndefined();
+    expect(r.code).toMatch(/_b\(v\d+\)/);
+    expect(r.run({ x: { lo: 0, hi: 1 }, y: 3 })).toEqual({
+      kind: 'interval',
+      value: { lo: 3, hi: 3 },
+    });
+    expect(r.run({ x: { lo: 2, hi: 3 }, y: 3 })).toEqual({ kind: 'entire' });
+  });
+
+  test('a change of a returned value does not change the next result', () => {
+    for (const json of [
+      ['Multiply', 2, 'Pi'],
+      ['List', 'Pi', 'x'],
+      ['If', ['Greater', 'x', 0], 'Pi', ['Multiply', 2, 'Pi']],
+    ]) {
+      const r = mode(json);
+      const box = { x: 1 };
+      const first = JSON.stringify(r.run(box));
+      const v = r.run(box);
+      for (const w of Array.isArray(v) ? v : [v]) {
+        if (w.value === undefined) continue;
+        w.value.lo = 99;
+        w.value.hi = 100;
+      }
+      expect(JSON.stringify(r.run(box))).toBe(first);
+    }
+  });
+
+  test('2,000 constants and a constant list of 10,000 elements', () => {
+    const many = mode([
+      'Add',
+      ...Array.from({ length: 2000 }, (_, k) => ['Sin', ['Add', 'x', k + 1]]),
+    ]);
+    // Each constant is named once.
+    expect(count(many.preambleOnce!, '\n') + 1).toBe(2000);
+    expect(many.code).not.toMatch(/\{ lo:/);
+    expect(many.run({ x: 0 }).kind).toBe('interval');
+    const elements = Array.from({ length: 10_000 }, (_, k) => [
+      'Rational',
+      k + 1,
+      7,
+    ]);
+    const list = mode(['At', ['List', ...elements], ['Floor', 'x']]);
+    // One declaration: the list, with its elements written in it.
+    expect(count(list.preambleOnce!, '\n')).toBe(0);
+    expect(list.code).toMatch(/^_IA\.at\(v\d+, _IA\.floor\(_\.x\)\)$/);
+    const v = list.run({ x: 7 });
+    expect(v.value.lo <= 1 && 1 <= v.value.hi).toBe(true);
   });
 });

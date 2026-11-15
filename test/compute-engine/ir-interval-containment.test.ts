@@ -1,14 +1,27 @@
 /**
  * The interval mode of the IR pipeline (`compile(expr, { to: 'interval-js',
- * profile: 'ir' })`), batches 1 and 2: containment and the comparison with
- * the existing interval target.
+ * profile: 'ir' })`), batches 1, 2 and 4: containment and the comparison
+ * with the existing interval target, on an engine at the default precision
+ * and, for `MACHINE_CASES`, on an engine at machine precision.
  *
  * Containment: for each program, at seeded random boxes (points, narrow and
  * wide, across 0 and across the edges of domains), the interpreter's value
  * at points of the box (`expr.subs({…}).N()`, the double read as an exact
  * rational) is inside the result when the result carries an enclosure, and
  * an `empty` result means that no sampled point has a real value. An end may
- * miss by at most 2 ulps; the checks that need that slack are counted.
+ * miss by at most 2 ulps; the checks that need that slack are counted. A
+ * program of `MACHINE_CASES` is compiled on an engine at machine precision,
+ * where a literal is a machine number, and its reference is computed on the
+ * default engine: the interpreter at machine precision rounds each step to
+ * 15 digits (`(|x − 1|^0.2 + |2x + 1|^0.2)^5` at -2 is 96.00000000000105
+ * there, 96.00000000000013 with the doubles), and the literals of the
+ * reference are their doubles (`doubles()`), so it computes what the
+ * machine interpreter computes, without the rounding. One reading differs:
+ * the default engine reads a float exponent to 17 digits and the machine
+ * engine to 15, so an exponent that is a rational of odd denominator at 15
+ * digits only (`0.333333333333333`) has no real reference over a negative
+ * base and its points are skipped; `ir-interval-contract.test.ts` pins that
+ * case ("a float exponent is read to the digits of the compiling engine").
  *
  * The comparison: the same kind as the result of the existing target and
  * bounds equal within 4 ulps or tighter. The programs for which some box
@@ -21,16 +34,21 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import { BigDecimal } from '../../src/big-decimal';
 import { compile } from '../../src/compile';
 import { IntervalArithmetic as IA } from '../../src/compute-engine/interval/index';
 import { nextDown, nextUp } from '../../src/compute-engine/numerics/numeric';
 import type { Expression } from '../../src/compute-engine/global-types';
 
 const ce = new ComputeEngine();
-ce.declare('x', 'real');
-ce.declare('y', 'real');
-ce.declare('n', 'integer');
-ce.declare('m', 'integer');
+const declare = (engine: ComputeEngine) => {
+  engine.declare('x', 'real');
+  engine.declare('y', 'real');
+  engine.declare('n', 'integer');
+  engine.declare('m', 'integer');
+  engine.declare('a', 'real');
+};
+declare(ce);
 ce.assign(
   'g',
   ce.box(['Function', ['Add', ['Power', 't', 2], 1], 't'] as never)
@@ -55,10 +73,17 @@ ce.assign(
 );
 
 type Json = unknown;
-/** A program, and the centres of its boxes (the edges of its domain). */
-type Case = { json: Json; centres?: number[] };
+/** A program, and the centres of its boxes (the edges of its domain).
+ *  `points`: an input whose box is a point drawn from its list, given to
+ *  the interpreter as a machine number (`engine.number(v)`), so that a
+ *  float exponent is read as a float and not by the terms of a rational. */
+type Case = { json: Json; centres?: number[]; points?: Record<string, number[]> };
 
-const C = (json: Json, centres?: number[]): Case => ({ json, centres });
+const C = (
+  json: Json,
+  centres?: number[],
+  points?: Record<string, number[]>
+): Case => ({ json, centres, points });
 const x = 'x';
 const y = 'y';
 
@@ -145,26 +170,46 @@ const CASES: Case[] = [
   C(['If', ['Greater', x, 0], ['Sum', ['Power', x, 'k'], ['Limits', 'k', 1, 4]], ['Negate', x]], [0]),
   C(['Sum', ['Multiply', ['Power', -1, 'k'], ['Divide', ['Power', x, 'k'], 'k']], ['Limits', 'k', 1, 6]]),
   C(['Power', x, 7]), C(['Power', 'n', 3]), C(['Add', ['Floor', x], 1], [1]),
+  // Batch 4: a decimal literal is its double
+  C(['Add', x, 1.8]), C(['Subtract', y, 1.8]), C(['Multiply', 1.8, x, y]),
+  C(['Add', ['Multiply', 0.3, x], 0.7]), C(['Less', x, 1.8], [1.8]),
+  C(['GreaterEqual', ['Multiply', 0.1, x], 0.3], [3]),
+  C(['Divide', 1, ['Add', ['Multiply', 0.5, ['Sin', ['Multiply', 2, x]]], 0.5]], [-0.7853981633974483]),
+  // Batch 4: a float exponent read as the interpreter reads it
+  C(['Power', x, 2.2], [0, -2, 2]), C(['Power', x, 3.87], [0, -2, 2]),
+  C(['Power', x, 0.6000000000000001], [0, -32, 2]), C(['Power', x, ['Divide', 1, 2.2]], [0, -32, 2]),
+  C(['Power', x, 0.4545454545454545], [0, -32, 2]), C(['Power', x, -0.2], [0, -8, 2]),
+  C(['Power', x, 0.0333], [0, -2, 2]), C(['Power', x, 'a'], [0, -8, 2]),
+  C(['Add', ['Power', x, 3.87], 1.8], [0, -2]),
+  C(['Power', x, 2.2], [32, 1e6, -1e6]), C(['Power', x, 0.2], [1e300, -1e300, 1e6]),
+  // A run-time exponent that reads as `p/q` of odd `q`, and one that does not.
+  C(['Power', x, 'a'], [0, -8, 2], { a: [0.2, 0.6000000000000001, 2.2, -0.2, 1.5, 0.37] }),
+  // A base that is provably non-negative: the principal power.
+  C(['Power', ['Abs', ['Subtract', x, 1]], 0.2], [1, -1.623107644263655]),
+  C(['Power', ['Add', ['Power', ['Abs', ['Subtract', x, 1]], 0.2], ['Power', ['Abs', ['Add', ['Multiply', 2, x], 1]], 0.2]], { num: '5.0' }], [1, -0.5, -1.623107644263655]),
+  // Batch 4: Binomial and Choose of reals, GCD and LCM with 0
+  C(['Binomial', x, y], [0, 2, -1]), C(['Binomial', x, 2.5], [0, 3, -1]), C(['Choose', x, 2], [0, 1]),
+  C(['Choose', 'n', 'm']), C(['GCD', 'n', 0]), C(['GCD', ['Floor', x], ['Floor', y]], [0, -1]),
+  C(['LCM', 'n', 0]), C(['LCM', ['Floor', x], ['Floor', y]], [0, -1]),
 ];
+
+/** The programs that also run on an engine at machine precision, where a
+ *  literal is a machine number. */
+const MACHINE_CASES: Case[] = CASES.filter((c) => {
+  const text = JSON.stringify(c.json);
+  return /\d\.\d|"Power"|Binomial|Choose|GCD|LCM/.test(text);
+});
 
 /** The programs whose result differs from the existing target's at some
  *  box: an other kind, or a bound wider by more than 4 ulps. */
 // prettier-ignore
 const EXCEPTIONS: string[] = [
-  // A float exponent that is not a multiple of 1/1024 over a negative
-  // base: the symmetric hull (`_IA.powReal`), where the existing target
-  // reads the float as a rational (design note, section 4).
-  JSON.stringify(['Power', x, 0.2]),
-  JSON.stringify(['Power', x, 0.6]),
   // `Root(x, 2)^3`: the root and the power each round outward, 5 ulps at
   // the upper end where `_IA.powRational` gives the tighter enclosure.
   JSON.stringify(['Power', x, ['Rational', 3, 2]]),
   // The existing target reads `Mod(1, 1/10)` as a jump; the mode folds it
   // to the exact 0.
   JSON.stringify(['Add', ['Mod', 1, ['Rational', 1, 10]], x]),
-  // The decimal base is not its double: the mode encloses it with one ulp
-  // on each side, where the existing target reads the double as a point.
-  JSON.stringify(['Power', 2.718281828459045, x]),
   // A local assigned in both arms of an undecided `If`: the hull of both
   // values. The existing target keeps the second arm's value ([-1, -1]
   // over [-1.71, 0.29]), which excludes the value 2x at x > 0 (design
@@ -176,18 +221,60 @@ const EXCEPTIONS: string[] = [
   // section 9).
   JSON.stringify(['Sum', ['Sin', ['Multiply', 'k', x]], ['Limits', 'k', 1, 3]]),
   JSON.stringify(['Sum', ['Multiply', ['Power', -1, 'k'], ['Divide', ['Power', x, 'k'], 'k']], ['Limits', 'k', 1, 6]]),
+  `machine ${JSON.stringify(['Sum', ['Multiply', ['Power', -1, 'k'], ['Divide', ['Power', x, 'k'], 'k']], ['Limits', 'k', 1, 6]])}`,
+  // The existing target computes x^(p/q); the mode x^e with the double e,
+  // as the interpreter at machine precision and the JavaScript code: at
+  // x = 1e300, x^0.2 is 1.0000000000000077e60, the existing target gives
+  // [9.999999999999998e59, 1.0000000000000001e60].
+  JSON.stringify(['Power', x, 0.2]), `machine ${JSON.stringify(['Power', x, 0.2])}`,
+  JSON.stringify(['Power', x, 2.2]), `machine ${JSON.stringify(['Power', x, 2.2])}`,
+  // A run-time exponent: the mode reads a point exponent as the
+  // interpreter does; the existing target calls `powInterval` with no
+  // reading, which has no value over a negative base (`x^a` at a = -0.2
+  // over [-4, 4] is `singular` at 0, the existing target `partial`).
+  JSON.stringify(['Power', x, 'a']), `machine ${JSON.stringify(['Power', x, 'a'])}`,
 ];
+
+/** A miss of the containment: the point, the interpreter's value there and
+ *  the result of the mode. */
+type Miss = { point: Record<string, number>; v: number | boolean; got: unknown };
+
+/** The distance of `v` from the enclosure of `got`, relative to `|v|`. */
+const relativeMiss = (v: number, got: unknown): number => {
+  const k = (got as Kinded).value;
+  if (k === undefined) return Infinity;
+  return Math.max(k.lo - v, v - k.hi, 0) / Math.abs(v);
+};
+
+/** The programs whose comparison the interpreter decides within its
+ *  tolerance (1e-10): `1.7999999999999998 < 1.8` is `False`, the mode and
+ *  the existing target compare the doubles. A miss is excused at a point
+ *  within the tolerance of 1.8 only. */
+const TOLERANCE: Record<string, (m: Miss) => boolean> = {
+  [`machine ${JSON.stringify(['Less', x, 1.8])}`]: (m) =>
+    Math.abs(m.point.x - 1.8) <= ce.tolerance,
+};
+
+/** The programs whose reference is wrong: the interpreter's `Choose` of a
+ *  double near 1 is wrong from the 15th digit (CE-1346), and the mode
+ *  encloses the exact value. A miss is excused within 1e-5 of 1 and below
+ *  1e-14 of the value only. */
+const INTERPRETER_DEFECTS: Record<string, (m: Miss) => boolean> = {
+  [JSON.stringify(['Choose', x, 2])]: (m) =>
+    Math.abs(m.point.x - 1) < 1e-5 &&
+    typeof m.v === 'number' &&
+    relativeMiss(m.v, m.got) < 1e-14,
+};
+const EXCUSED = { ...TOLERANCE, ...INTERPRETER_DEFECTS };
 
 /** The programs whose containment fails by a kernel of the interval
  *  library: `asec`, `acsc` and `acoth` take one outward step after an
  *  operation whose error their derivative amplifies near -1 (at
- *  x = -1.0000005, `_IA.asec` gives a lower end 2.2e-14 above the value);
- *  `_IA.gcd` keeps the sign of a negative operand (`GCD(0, -2)` is
- *  `[-2, -2]`, the interpreter gives 2). */
+ *  x = -1.0000005, `_IA.asec` gives a lower end 2.2e-14 above the value). */
 // prettier-ignore
 const KERNEL_DEFECTS: string[] = [
   JSON.stringify(['Arcsec', x]), JSON.stringify(['Arccsc', x]),
-  JSON.stringify(['Arcoth', x]), JSON.stringify(['GCD', 'n', 'm']),
+  JSON.stringify(['Arcoth', x]),
 ];
 
 // A seeded generator (mulberry32).
@@ -205,12 +292,22 @@ function random(seed: number): () => number {
 type Box = Record<string, { lo: number; hi: number }>;
 const integer = (name: string) => name === 'n' || name === 'm';
 
-function boxes(expr: Expression, centres: number[], rnd: () => number): Box[] {
+function boxes(
+  expr: Expression,
+  centres: number[],
+  rnd: () => number,
+  points: Record<string, number[]> = {}
+): Box[] {
   const names = expr.unknowns as string[];
   const widths = [0, 1e-6, 0.3, 2, 8];
   return Array.from({ length: 24 }, () => {
     const b: Box = {};
     for (const v of names) {
+      if (points[v] !== undefined) {
+        const p = points[v][Math.floor(rnd() * points[v].length)];
+        b[v] = { lo: p, hi: p };
+        continue;
+      }
       if (integer(v)) {
         const lo = Math.floor(rnd() * 12) - 4;
         const hi = rnd() < 0.5 ? lo : lo + Math.floor(rnd() * 4);
@@ -246,23 +343,65 @@ function pointsOf(b: Box, rnd: () => number): Record<string, number>[] {
 }
 
 /** The double `v` as the exact rational the interpreter reads. */
-function exact(v: number): Expression {
-  if (Number.isInteger(v)) return ce.number(v);
+function exact(engine: ComputeEngine, v: number): Expression {
+  if (Number.isInteger(v)) return engine.number(v);
   let k = 0;
   while (!Number.isInteger(v * 2 ** k)) k++;
-  return ce.number([BigInt(v * 2 ** k), 2n ** BigInt(k)] as never);
+  return engine.number([BigInt(v * 2 ** k), 2n ** BigInt(k)] as never);
+}
+
+/** The exact decimal expansion of the double `v`. */
+function decimalOf(v: number): string {
+  let k = 0;
+  while (!Number.isInteger(v * 2 ** k)) k++;
+  const digits = (BigInt(v * 2 ** k) * 5n ** BigInt(k)).toString();
+  const sign = digits.startsWith('-') ? '-' : '';
+  const d = digits.replace('-', '').padStart(k + 1, '0');
+  return `${sign}${d.slice(0, d.length - k)}.${d.slice(d.length - k)}`;
+}
+
+/** `json` with each decimal literal replaced by its double: a decimal is
+ *  its double in compiled code (the precision of the target), so the
+ *  interpreter's value of this program is the reference. This encodes the
+ *  caveat that the test "a decimal literal is its double: Ceil(x - 1.8)"
+ *  (`ir-interval-contract.test.ts`) states with its numbers: the
+ *  default-precision interpreter computes with the decimal, and its value
+ *  can differ. */
+function doubles(json: Json): Json {
+  if (typeof json === 'number')
+    return Number.isInteger(json) || !Number.isFinite(json)
+      ? json
+      : { num: decimalOf(json) };
+  if (Array.isArray(json)) return json.map(doubles);
+  if (typeof json === 'object' && json !== null && 'num' in json)
+    return doubles(Number((json as { num: string }).num));
+  return json;
 }
 
 /** The interpreter's value at `point`: a finite real, a boolean, or
  *  `undefined` (no real value). */
 function interpret(
   expr: Expression,
-  point: Record<string, number>
+  point: Record<string, number>,
+  machineNames: string[] = []
 ): number | boolean | undefined {
+  const engine = expr.engine as ComputeEngine;
   const sub = Object.fromEntries(
-    Object.entries(point).map(([k, v]) => [k, exact(v)])
+    Object.entries(point).map(([k, v]) => [
+      k,
+      machineNames.includes(k) ? engine.number(v) : exact(engine, v),
+    ])
   );
-  const v = expr.subs(sub).N();
+  // The global precision of the big decimals is the default engine's while
+  // the reference is computed (an engine at machine precision writes 15).
+  const saved = BigDecimal.precision;
+  BigDecimal.precision = engine.precision;
+  let v: Expression;
+  try {
+    v = expr.subs(sub).N();
+  } finally {
+    BigDecimal.precision = saved;
+  }
   if (v.symbol === 'True') return true;
   if (v.symbol === 'False') return false;
   if (!v.isNumberLiteral || v.im !== 0 || !Number.isFinite(v.re))
@@ -286,9 +425,15 @@ const SAMPLES: string[] = [];
 const differences = new Map<string, string>();
 const misses = new Map<string, string[]>();
 
-describe('the interval mode: containment', () => {
-  test.each(CASES.map((c) => [JSON.stringify(c.json), c]))('%s', (label, c) => {
-    const expr = ce.box(c.json as never);
+/** The containment of the program `c` compiled on `engine`, against the
+ *  interpreter's value on the default engine, and its comparison with the
+ *  existing target; `label` is the key of `differences` and `misses`. */
+function contain(engine: ComputeEngine, label: string, c: Case): void {
+  {
+    const expr = engine.box(c.json as never);
+    // The canonical form of the compiling engine: at machine precision
+    // `1/2.2` is the machine number of the double quotient.
+    const reference = ce.box(doubles(expr.json) as never);
     const r = compile(expr, {
       to: 'interval-js',
       profile: 'ir',
@@ -300,33 +445,42 @@ describe('the interval mode: containment', () => {
     };
     const rnd = random(label.length * 7919 + 17);
     const failures: string[] = [];
-    for (const b of boxes(expr, c.centres ?? [], rnd)) {
+    // The misses that the reason of `EXCUSED` does not explain.
+    const unexcused: string[] = [];
+    const excuse = EXCUSED[label];
+    const fail = (text: string, m?: Miss) => {
+      failures.push(text);
+      if (excuse === undefined || m === undefined || !excuse(m))
+        unexcused.push(text);
+    };
+    const machineNames = Object.keys(c.points ?? {});
+    for (const b of boxes(expr, c.centres ?? [], rnd, c.points)) {
       const got = r.run(b);
       if (
         typeof got === 'string'
           ? !['true', 'false', 'maybe'].includes(got)
           : typeof (got as Kinded).kind !== 'string'
       )
-        failures.push(
-          `${JSON.stringify(b)}: not a kinded result ${JSON.stringify(got)}`
-        );
+        fail(`${JSON.stringify(b)}: not a kinded result ${JSON.stringify(got)}`);
       if (label === JSON.stringify(['Power', 'x', 2]))
         expect(IA.square(b.x)).toEqual(IA.powInterval(b.x, { lo: 2, hi: 2 }));
       for (const point of pointsOf(b, rnd)) {
-        const v = interpret(expr, point);
+        const v = interpret(reference, point, machineNames);
         if (v === undefined) continue;
         checks += 1;
         if (typeof v === 'boolean') {
           if (got === (v ? 'false' : 'true'))
-            failures.push(
-              `${JSON.stringify(b)} at ${JSON.stringify(point)}: ${got}, interpreter ${v}`
+            fail(
+              `${JSON.stringify(b)} at ${JSON.stringify(point)}: ${got}, interpreter ${v}`,
+              { point, v, got }
             );
           continue;
         }
         const k = got as Kinded;
         if (k.kind === 'empty') {
-          failures.push(
-            `${JSON.stringify(b)} at ${JSON.stringify(point)}: empty, interpreter ${v}`
+          fail(
+            `${JSON.stringify(b)} at ${JSON.stringify(point)}: empty, interpreter ${v}`,
+            { point, v, got }
           );
           continue;
         }
@@ -341,8 +495,9 @@ describe('the interval mode: containment', () => {
             );
           continue;
         }
-        failures.push(
-          `${JSON.stringify(b)} at ${JSON.stringify(point)}: ${JSON.stringify(got)}, interpreter ${v}`
+        fail(
+          `${JSON.stringify(b)} at ${JSON.stringify(point)}: ${JSON.stringify(got)}, interpreter ${v}`,
+          { point, v, got }
         );
       }
       // The comparison with the existing target.
@@ -355,7 +510,30 @@ describe('the interval mode: containment', () => {
         );
     }
     if (failures.length > 0) misses.set(label, failures);
-    if (!KERNEL_DEFECTS.includes(label)) expect(failures).toEqual([]);
+    if (!KERNEL_DEFECTS.includes(label)) expect(unexcused).toEqual([]);
+  }
+}
+
+describe('the interval mode: containment', () => {
+  test.each(CASES.map((c) => [JSON.stringify(c.json), c]))('%s', (label, c) =>
+    contain(ce, label, c)
+  );
+  // An engine at machine precision, as Tycho's: made here, because an
+  // engine writes the process-global precision of the big decimals, which
+  // the interpreter rounds at; the default is restored after.
+  describe('at machine precision', () => {
+    let machine: ComputeEngine;
+    beforeAll(() => {
+      machine = new ComputeEngine();
+      machine.precision = 'machine';
+      declare(machine);
+    });
+    afterAll(() => {
+      BigDecimal.precision = ce.precision;
+    });
+    test.each(
+      MACHINE_CASES.map((c) => [`machine ${JSON.stringify(c.json)}`, c])
+    )('%s', (label, c) => contain(machine, label, c));
   });
 
   test('the count of checks, and of those that used the slack', () => {
@@ -366,7 +544,9 @@ describe('the interval mode: containment', () => {
   });
 
   test('the programs that miss by a kernel of the library', () =>
-    expect([...misses.keys()].sort()).toEqual([...KERNEL_DEFECTS].sort()));
+    expect([...misses.keys()].sort()).toEqual(
+      [...KERNEL_DEFECTS, ...Object.keys(EXCUSED)].sort()
+    ));
 
   test('the programs that differ from the existing target', () => {
     console.log([...differences].map(([k, v]) => `${k}\n  ${v}`).join('\n'));
@@ -388,28 +568,50 @@ function sameOrTighter(got: unknown, was: unknown): boolean {
   );
 }
 
+/** The code of `r` with each constant of `preambleOnce` written where it is
+ *  read. */
+const inlined = (r: { code: string; preambleOnce?: string }): string =>
+  [...(r.preambleOnce ?? '').matchAll(/^const (v\d+) = (.*);$/gm)].reduce(
+    (code, [, name, text]) =>
+      code.replace(new RegExp(`\\b${name}\\b`, 'g'), text),
+    r.code
+  );
+
 describe('the interval mode: spellings', () => {
   // `ExponentialE` is `Exp`; a literal whose double is `Math.E` is not.
   test.each([
     [['Power', 'ExponentialE', x], '_IA.exp'],
     [['Power', 2.718281828459045, x], '_IA.powReal'],
     [['Power', x, 2], '_IA.square'],
-    // A base that is the integer 10 or 2 is `log10` or `log2`; a decimal
-    // whose double is 10 is not.
+    // A base that is the integer 10 or 2 is `log10` or `log2`, also a
+    // decimal whose double is 10: a decimal is its double.
     [['Log', x, 10], '_IA.log10'],
     [['Log', x, 2], '_IA.log2'],
-    [['Log', x, { num: '10.0000000000000001' }], '_IA.ln'],
+    [['Log', x, { num: '10.0000000000000001' }], '_IA.log10'],
+    // A float exponent read at compile time.
+    [['Power', x, 2.2], '_IA.powRealBranch(_.x, { lo: 2.2, hi: 2.2 }.lo, true)'],
+    [['Power', x, 0.6000000000000001], '_IA.powRealBranch(_.x, { lo: 0.6000000000000001, hi: 0.6000000000000001 }.lo, true)'],
+    [['Power', x, 0.4], '_IA.powRealBranch(_.x, { lo: 0.4, hi: 0.4 }.lo, false)'],
+    [['Power', x, 3.87], '_IA.pow(_.x, { lo: 3.87, hi: 3.87 }.lo)'],
+    // A base that is provably non-negative: the principal power.
+    [['Power', ['Abs', ['Subtract', x, 1]], 0.2], '_IA.pow(_IA.abs(_IA.add(_.x, { lo: -1, hi: -1 })), { lo: 0.2, hi: 0.2 }.lo)'],
+    // An exact rational: the root, then the integer power.
+    [['Power', x, ['Rational', 11, 5]], '_IA.pow(_IA.nthRootInterval(_.x, { lo: 5, hi: 5 }), 11)'],
+    [['Add', x, 1.8], '{ lo: 1.8, hi: 1.8 }'],
   ])('%j', (json, spelling) => {
     const r = compile(ce.box(json as never), {
       to: 'interval-js',
       profile: 'ir',
       fallback: false,
-    } as never) as unknown as { code: string };
-    expect(r.code).toContain(spelling);
+    } as never) as unknown as { code: string; preambleOnce?: string };
+    expect(inlined(r)).toContain(spelling);
   });
 
-  test('a decimal base whose double is 10 keeps the value below 3', () => {
-    // `Log(1000, 10.0000000000000001)` is just below 3: its `Floor` is 2.
+  test('a decimal base whose double is 10 is the base 10', () => {
+    // `Log(1000, 10.0000000000000001)` is just below 3 in the interpreter,
+    // whose `Floor` is 2; the decimal is its double, the integer 10, so the
+    // mode gives 3, as the JavaScript code of the profile (the precision of
+    // the target).
     const expr = ce.box([
       'Floor',
       ['Log', x, { num: '10.0000000000000001' }],
@@ -423,8 +625,13 @@ describe('the interval mode: spellings', () => {
     };
     const at = expr.subs({ x: 1000 } as never).N().re;
     expect(at).toBe(2);
-    const value = r.run({ x: 1000 }).value!;
-    expect(value.lo <= 2 && 2 <= value.hi).toBe(true);
+    expect(r.run({ x: 1000 }).value).toEqual({ lo: 3, hi: 3 });
+    const js = compile(expr, {
+      to: 'javascript',
+      profile: 'ir',
+      fallback: false,
+    } as never) as unknown as { run: (v: unknown) => number };
+    expect(js.run({ x: 1000 })).toBe(3);
   });
 });
 
@@ -443,10 +650,15 @@ describe('the interval mode at machine precision', () => {
       to: 'interval-js',
       profile: 'ir',
       fallback: false,
-    } as never) as unknown as { run: (b: Box) => Kinded; code: string };
+    } as never) as unknown as {
+      run: (b: Box) => Kinded;
+      code: string;
+      preambleOnce?: string;
+    };
     // Not one folded literal (`Sqrt(2)` is an exact radical, an enclosure
-    // of its double).
-    expect(r.code).toMatch(/^_IA\./);
+    // of its double): kernels, computed once when the code is loaded where
+    // the node reads no input.
+    expect(`${r.preambleOnce ?? ''}\n${r.code}`).toMatch(/\b_IA\./);
     const reference = new ComputeEngine();
     const v = reference
       .box(json as never)

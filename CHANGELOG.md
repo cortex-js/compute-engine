@@ -94,6 +94,10 @@
   the default compiler.
 - **In the experimental profile `'ir'`, an assignment in a bound of a `Sum`
   or a `Product` took effect.** Such a sum now declines.
+- **On `interval-js`, `GCD` with a zero operand or two equal negative
+  operands is no longer negative.** `GCD(0, -2)` gave `[-2, -2]`; it is
+  `[2, 2]`. The kernel `gcd` of the interval library is fixed, so the
+  existing target and the profile `'ir'` both give it.
 - **In the experimental profile `'ir'`, `broadcast()` with
   `entryChecks: false` refused a list input** that every cell shares.
 
@@ -132,9 +136,26 @@
   list, `Map`, a comprehension over a `Range`, `Filter`, and list or point
   inputs and results. A list whose length is not one number over the input
   box (a `Filter` with an undecided condition, a `Range` with a wide bound)
-  is `entire`. Any other program declines, and with `fallback` the existing
-  target then compiles it: an integral, a `Loop`, a recursive function, a
-  `Range` of real operands. Without the option `profile`, nothing changes.
+  is `entire`. A decimal literal is the point at its double, as in the
+  JavaScript code (`x + 1.8` adds the point `[1.8, 1.8]`), and a float
+  exponent is read as the interpreter reads it: `x^0.2` is the real root of
+  a negative `x`, `x^1.5` has no value there. `Binomial` and `Choose` of
+  real operands compile (`_IA.binomial`). A comparison that the engine
+  decides for every value of its inputs (`(x + 1)^2 < 0` or `Equal(x, x)`
+  of a real `x`) is that verdict, as on the existing target. A value that
+  reads no input is computed once: each constant when the code is loaded
+  (`preambleOnce`), and a call of constant arguments that runs at every
+  call (`b(3π)`) at the first call; if it throws there, every call is
+  `entire`, as when it is computed at each call. Any other program
+  declines, and with `fallback` the existing target then compiles it: an
+  integral, a `Loop`, a recursive function, a `Range` of real operands.
+  Without the option `profile`, nothing changes.
+- **With the profile `'ir'`, two calls of a user function with the same
+  arguments are one call** on every target (JavaScript, GLSL,
+  `interval-js`), when the function draws no random number, directly or
+  through a call, and is not recursive. A function `a_1(x)` that calls
+  `a_0(x)` five times calls it once, so a chain of such functions runs in a
+  time proportional to its length, not exponential in it.
 - **The interval library has the kernels `atLeast(v, c)` and
   `atMost(v, c)`** (the value `v` with its lower end raised to that of `c`,
   or its upper end lowered to that of `c`), **`number(x)`** (the number of
@@ -142,11 +163,14 @@
   **`undecided(message)`**, which throws that error, and
   **`rangeCount(lo, hi, step)`**, the number of elements of a `Range` of
   numbers. They are members of `IntervalArithmetic`.
-- **The interval library has a kernel `powReal(base, exponent)`**, also a
-  member of `IntervalArithmetic`: the power for an exponent given as an
-  interval, which encloses the real roots of a negative base when the
-  exponent is a float that can stand for a rational of odd denominator
-  (`powReal([-8, -8], [0.2, 0.2])` contains `-1.5157…`).
+- **The interval library has a kernel `powReal(base, exponent, digits?)`**,
+  also a member of `IntervalArithmetic`: the power for an exponent given as
+  an interval. A point exponent that is not an integer is read as the
+  interpreter reads a float exponent, to `digits` significant digits (by
+  default those of the working precision): a rational of odd denominator
+  gives the real root of a negative base (`powReal([-8, -8], [0.2, 0.2])` is
+  about `-1.5157`), any other float has no real value there
+  (`powReal([-8, -8], [1.5, 1.5])` is `empty`).
 
 ## 0.192.0 _2026-11-15_
 

@@ -29,6 +29,7 @@
  */
 
 import { nextDown, nextUp } from '../../numerics/numeric.js';
+import { realPowerReconstructionDigits } from '../../numerics/real-power.js';
 import { INTERVAL_RUNTIME_VERSION } from '../../../common/runtime-versions.js';
 import {
   createIntervalRuntime,
@@ -41,12 +42,18 @@ import {
   type RegionSpelling,
   type Syntax,
 } from './print.js';
+import { effects } from './effects.js';
 import {
+  argsOf,
   argumentIndex,
   entryOf,
+  lengthValues,
+  outsOf,
+  recursiveFunctions,
   regionsOf,
   type Program,
   type Region,
+  type V,
 } from './ir.js';
 import { deepFreeze, OPERATORS, type OperatorRow } from './operators.js';
 import { PLAIN_ROWS, PLAIN_SPELLINGS } from './plain.js';
@@ -122,8 +129,13 @@ const fill =
 /**
  * The syntax of the mode: the statement forms of `JS`, and a spelling for
  * each operation that a kernel computes, with the operands in the order of
- * the row's `fold`. `pow` (and `pow.int`) is `_IA.powReal`; `root`
- * `_IA.nthRootInterval`; `div.q` is `div`; `deg` the product by an
+ * the row's `fold`. `pow` (and `pow.int`) is `_IA.powReal`, with the
+ * digits of the reading of a float exponent fixed at the compilation
+ * (`printInterval()`); the powers of a float literal that the lowering
+ * reads are `_IA.powRealBranch` of the double (`pow.branch` for an odd
+ * numerator, `pow.branch.even`) and `_IA.pow` of the double
+ * (`pow.principal`), as the existing target;
+ * `root` `_IA.nthRootInterval`; `div.q` is `div`; `deg` the product by an
  * enclosure of π and the quotient by 180. A constant is a point, or for a
  * literal marked `inexact` the enclosure of that many ulps on each side;
  * NaN is `empty`; a boolean a verdict; a plain integer (`plain.ts`) a
@@ -139,6 +151,10 @@ export const JS_INTERVAL: Syntax = Object.freeze({
     ),
     neg: '_IA.negate($0)',
     pow: '_IA.powReal($0, $1)',
+    // The exponent is a constant point: its double.
+    'pow.branch': '_IA.powRealBranch($0, $1.lo, true)',
+    'pow.branch.even': '_IA.powRealBranch($0, $1.lo, false)',
+    'pow.principal': '_IA.pow($0, $1.lo)',
     root: '_IA.nthRootInterval($0, $1)',
     deg: `_IA.div(_IA.mul($0, ${enclosure(Math.PI, 1)}), { lo: 180, hi: 180 })`,
     draw: '{ lo: 0, hi: 1 }',
@@ -199,10 +215,25 @@ export const JS_INTERVAL: Syntax = Object.freeze({
   Object.freeze(t)
 );
 
-/** The rows of the mode: `OPERATORS`, `square`, which the lowering makes
- *  of a power by the constant 2, the clamps `atleast` and `atmost`, which
- *  the pass `narrow` makes, and the rows of the pass `plain`. */
+/** The rows of the mode: `Binomial` and `Choose` with a real signature
+ *  too (`_IA.binomial`; the other targets have the integer one only),
+ *  `OPERATORS`, `square`, which the lowering makes of a power by the
+ *  constant 2, the powers of a float exponent read at compile time, the
+ *  clamps `atleast` and `atmost`, which the pass `narrow` makes, and the
+ *  rows of the pass `plain`. */
 export const INTERVAL_ROWS: readonly OperatorRow[] = Object.freeze([
+  ...['Binomial', 'Choose'].map((head) =>
+    deepFreeze({
+      head,
+      arity: 2,
+      signatures: [
+        [['integer', 'integer'], 'integer', 'binomial'],
+        [['real', 'real'], 'real', 'binomial.real'],
+      ],
+      threads: false,
+      effect: 'pure',
+    } as OperatorRow)
+  ),
   ...OPERATORS,
   deepFreeze({
     arity: 1,
@@ -213,6 +244,15 @@ export const INTERVAL_ROWS: readonly OperatorRow[] = Object.freeze([
     threads: true,
     effect: 'pure',
   } as OperatorRow),
+  // A power by a float literal that the lowering reads at compile time.
+  ...['pow.branch', 'pow.branch.even', 'pow.principal'].map((op) =>
+    deepFreeze({
+      arity: 2,
+      signatures: [[['real', 'real'], 'real', op]],
+      threads: true,
+      effect: 'pure',
+    } as OperatorRow)
+  ),
   ...['atleast', 'atmost'].map((op) =>
     deepFreeze({
       arity: 2,
@@ -240,9 +280,110 @@ export function intervalRefusal(p: Program): string | undefined {
     : undefined;
 }
 
+/** The pure rows whose kernel of the mode throws (`_IA.rangeCount()`). */
+const THROWS = new Set(['rangecount']);
+
+/**
+ * The values of `p` that depend on no input, parameter, loop index or draw,
+ * which the code computes once: a constant that is not a number or a
+ * verdict and that an instruction computed at each call reads; a pure
+ * operation or a list of such values (or of constants) anywhere; and at a
+ * top level that runs at every call, an operation that can fail and a call
+ * of a function that has no effect and is not on a cycle, of such values.
+ * The top level of the entry runs at every call, and so does the top level
+ * of a function that such a top level calls. `rank`: the rank of the
+ * function of each value, the callees first; `late`: the values that can
+ * throw or run a loop (a call), and those computed from them.
+ */
+function computedOnce(
+  p: Program,
+  rows: readonly OperatorRow[]
+): { once: Set<V>; rank: Map<V, number>; late: Set<V> } {
+  const fx = effects(p, rows);
+  const cyclic = recursiveFunctions(p.functions);
+  const byName = new Map(p.functions.map((f) => [f.name, f]));
+  const calls = (r: Region, top: boolean): string[] =>
+    r.body.flatMap((i) => [
+      ...(i.k === 'call' && !cyclic.has(i.fn) ? [i.fn] : []),
+      ...(top ? [] : regionsOf(i).flatMap((inner) => calls(inner, false))),
+    ]);
+  // The functions whose top level runs at every call.
+  const every = new Set([p.entry]);
+  for (const name of every)
+    calls(byName.get(name)!.body, true).forEach((g) => every.add(g));
+  // The functions, each after the functions that it calls.
+  const order: string[] = [];
+  const visit = (name: string) => {
+    if (order.includes(name) || cyclic.has(name)) return;
+    calls(byName.get(name)!.body, false).forEach(visit);
+    if (!order.includes(name)) order.push(name);
+  };
+  p.functions.forEach((f) => visit(f.name));
+  const known = new Set<V>();
+  const once = new Set<V>();
+  const rank = new Map<V, number>();
+  const reads = new Set<V>();
+  const late = new Set<V>();
+  const walk = (r: Region, top: boolean, k: number) => {
+    for (const i of r.body) {
+      const [out] = outsOf(i);
+      const effect = fx.of(i);
+      const ready =
+        argsOf(i).every((a) => known.has(a)) &&
+        outsOf(i).length === 1 &&
+        lengthValues(p.types[out]).every((n) => known.has(n));
+      const pure = effect === 'pure' && (i.k !== 'op' || !THROWS.has(i.op));
+      const fallible =
+        top &&
+        (i.k === 'call'
+          ? effect !== 'effectful' && !cyclic.has(i.fn)
+          : i.k === 'op' && effect === 'may-fail');
+      if (i.k === 'const') known.add(out);
+      else if (
+        (i.k === 'op' || i.k === 'list' || i.k === 'call') &&
+        ready &&
+        ((pure && i.k !== 'call') || fallible)
+      ) {
+        known.add(out);
+        once.add(out);
+        rank.set(out, k);
+        if (!pure || i.k === 'call' || argsOf(i).some((a) => late.has(a)))
+          late.add(out);
+      } else argsOf(i).forEach((a) => reads.add(a));
+      regionsOf(i).forEach((inner) => walk(inner, false, k));
+      regionsOf(i).forEach((inner) =>
+        inner.yields.forEach((y) => reads.add(y))
+      );
+    }
+  };
+  for (const f of p.functions) {
+    walk(f.body, every.has(f.name), order.indexOf(f.name));
+    f.body.yields.forEach((y) => reads.add(y));
+  }
+  // A constant read by an instruction computed at each call is named; one
+  // read only by values of `once` is written in their text.
+  for (const f of p.functions) {
+    const constants = (r: Region): void =>
+      r.body.forEach((i) => {
+        regionsOf(i).forEach(constants);
+        if (i.k !== 'const' || !reads.has(i.out)) return;
+        const l = i.value;
+        if (l.lane === 'boolean' || (l.lane === 'integer' && l.plain)) return;
+        once.add(i.out);
+        rank.set(i.out, order.indexOf(f.name));
+      });
+    constants(f.body);
+  }
+  return { once, rank, late };
+}
+
 export type IntervalPrinted = StoredIntervalJavaScript & {
   readonly code: string;
   readonly preambleOnce: string;
+  /** Present when a value computed once can throw or run a loop: its
+   *  computation at the first call, and at each call the throw of the
+   *  error that it threw then. */
+  readonly preamblePerCall?: string;
   readonly calling: 'expression' | 'lambda';
   /** `createIntervalRuntime().load()` of the stored form. */
   readonly run: (...args: unknown[]) => unknown;
@@ -250,7 +391,15 @@ export type IntervalPrinted = StoredIntervalJavaScript & {
 };
 
 /** `iterationBudget`: a loop of more passes than it throws before its
- *  first pass. */
+ *  first pass. The values of `computedOnce()` are computed after the
+ *  functions (they can call them), those of a function before those of its
+ *  callers: in `preambleOnce`, when the code is loaded, except the values
+ *  that can throw or run a loop and those computed from them, which are
+ *  computed at the first call, in a `try` of `preamblePerCall`, so that
+ *  `compile()` and the load run no loop of the program. `_once` is
+ *  `undefined` before, `null` after, or the error thrown, which each call
+ *  throws again: it answers what it answers when the value is computed
+ *  there. */
 export function printInterval(
   p: Program,
   rows: readonly OperatorRow[],
@@ -258,11 +407,42 @@ export function printInterval(
   iterationBudget?: number
 ): IntervalPrinted {
   const limit = Math.min(Math.floor(iterationBudget ?? Infinity), 2 ** 32);
+  // The digits of the reading of a run-time float exponent, fixed now: the
+  // runtime has its own number library, whose precision says nothing about
+  // the engine's (`CompilationResult.reconstructionDigits`).
+  const pow = `_IA.powReal($0, $1, ${realPowerReconstructionDigits()})`;
+  const plan = computedOnce(p, rows);
   const printed = printProgram(
     p,
-    limit < 2 ** 32 ? { ...syntax, loopOpen: loopOpen(limit) } : syntax,
-    rows
+    {
+      ...syntax,
+      ops: { ...syntax.ops, pow },
+      ...(limit < 2 ** 32 ? { loopOpen: loopOpen(limit) } : {}),
+    },
+    rows,
+    plan.once
   );
+  const once = [...printed.once].sort(
+    ([a], [b]) => plan.rank.get(a)! - plan.rank.get(b)!
+  );
+  const late = once.filter(([v]) => plan.late.has(v)).map(([, x]) => x);
+  const computed = once
+    .filter(([v]) => !plan.late.has(v))
+    .map(([, [name, value]]) => `const ${name} = ${value};`);
+  if (late.length > 0)
+    computed.push(`let _once, ${late.map(([name]) => name).join(', ')};`);
+  const perCall = [
+    'if (_once !== null) {',
+    '  if (_once === undefined)',
+    '    try {',
+    ...late.map(([name, value]) => `      ${name} = ${value};`),
+    '      _once = null;',
+    '    } catch (e) {',
+    '      _once = e;',
+    '    }',
+    '  if (_once !== null) throw _once;',
+    '}',
+  ].join('\n');
   const entry = entryOf(p);
   const literal = entry.literal === true;
   const n = argumentIndex(entry, entry.positional ?? 0);
@@ -281,7 +461,10 @@ export function printInterval(
   const stored = {
     runtimeVersion: INTERVAL_RUNTIME_VERSION,
     code,
-    preambleOnce: [...printed.helpers, ...printed.functions].join('\n'),
+    preambleOnce: [...printed.helpers, ...printed.functions, ...computed].join(
+      '\n'
+    ),
+    ...(late.length > 0 ? { preamblePerCall: perCall } : {}),
     calling: literal ? ('lambda' as const) : ('expression' as const),
   };
   let run: IntervalPrinted['run'];
