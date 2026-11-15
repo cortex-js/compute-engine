@@ -80,8 +80,8 @@ Delete this file when parts 2 and 3 are done or have their own record.
   also made; `recordNodesOfOtherCalls` makes it now. Two results change,
   both for a function literal that the call did not evaluate
   (`issues/CE-1330.md` and the CHANGELOG entry). Tycho's gates passed.
-- STAGED on main 2026-11-15 by session `compute-engine-3f`, not committed
-  (patch `~/dev/compute-engine-recovery/closure-capture/land-step2-5951741d4-on-e5c3026fe.patch`):
+- `a9e831df1bfedc2b2a3155757c9e674735c4e3de` (2026-11-15, session
+  `compute-engine-3f`, after 0.192.0):
   a function value shares the body of its literal (part 2, item 6, second
   step); source +136 −348. `captureClosures`, `rerootKind` and
   `markCallableFrame` are deleted. The value is the literal with a new
@@ -91,7 +91,24 @@ Delete this file when parts 2 and 3 are done or have their own record.
   copied. A record of the activation on the `Function` node was built
   first and REJECTED by the dual review (a rebuild by `subs`, `map` or
   `simplify` drops it with no error). Full suite and stale-answer check
-  green; Tycho's gates were asked of `tycho-desk`.
+  green; Tycho's gates were asked of `tycho-desk` and had NOT run at the
+  commit (builds in `~/dev/compute-engine-recovery/closure-capture/`): read
+  its report before the next release.
+- IN PROGRESS 2026-11-15 (session `compute-engine-3f`, approved by the user
+  as the next item): the SPEC for stored function bodies as units (part 2,
+  item 4; slice 2 of the model). Records in
+  `~/dev/compute-engine-recovery/stored-bodies/`: `census.md` (the registry
+  and the repair as they stand, 1,321 + 155 lines; calls of a stored body
+  are already bound again at use, what stays fixed at store time is the
+  juxtaposition reading, the inferred signature and the effects; no
+  per-name counter exists) and, when its agent ends, `probe-report.md` (a
+  counter per name, a stamp per waiting definition, a check on use, behind
+  `CE_STORED_UNITS=1` in the worktree `/tmp/wt-ce-3f-units`). Tycho's
+  deletion inventory on 0.192.0 is
+  `~/dev/compute-engine-recovery/2026-11-15-tycho-deletion-inventory-ce-0.192.0.md`:
+  slice 2 deletes 150 to 350 lines in Tycho by itself and is the gate of
+  its inliner (2,711 lines), for which Tycho lists five needs. The spec is
+  shown to the user before any code lands.
 - CE-1317 is closed by the user's decision (documented; `issues/CLOSED.md`).
 - `src/api.md` still lists `TypeProvenanceEntry.epoch` and is regenerated at
   release.
