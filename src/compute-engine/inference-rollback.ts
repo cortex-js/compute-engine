@@ -42,19 +42,6 @@ export class InferenceRollbackFrame {
    * canonicalization-adjacent hot paths, and most record nothing. */
   private _journal: RollbackUndoEntry[] | null = null;
 
-  /** True for a frame that must not execute the construction-level repairs
-   * (`devolveUnappliedOperator`, `repairFreshMatrixInference`) — the
-   * repair-free TRIAL validation mode of phase 2c, which admits repairs by
-   * precondition without running them. No 2b consumer sets it: the static
-   * checking pass's frame wraps ordinary full canonicalization, where the
-   * repairs legitimately run (and are journaled, so they roll back). The
-   * repair helpers assert against it. */
-  readonly forbidsRepairs: boolean;
-
-  constructor(options: { forbidsRepairs?: boolean }) {
-    this.forbidsRepairs = options.forbidsRepairs ?? false;
-  }
-
   record(entry: RollbackUndoEntry): void {
     (this._journal ??= []).push(entry);
   }
@@ -104,13 +91,4 @@ export function activeRollbackFrame(host: {
 }): InferenceRollbackFrame | undefined {
   const frames = host._rollbackFrames;
   return frames.length === 0 ? undefined : frames[frames.length - 1];
-}
-
-/** True when some open rollback frame forbids the construction-level
- * repairs — the phase-2c trial mode. Asserted by the repair helpers
- * (`devolveUnappliedOperator`, `repairFreshMatrixInference`). */
-export function repairsForbiddenByRollbackFrame(host: {
-  _rollbackFrames: ReadonlyArray<InferenceRollbackFrame>;
-}): boolean {
-  return host._rollbackFrames.some((frame) => frame.forbidsRepairs);
 }

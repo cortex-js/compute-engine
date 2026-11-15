@@ -70,13 +70,12 @@ import {
  * - **§4.2 — resolution leaves no writes behind.** Nothing in this file
  *   mutates a symbol definition. Since phase 2c
  *   (`docs/TYPE-SYSTEM.md`) the guarantee is
- *   rollback-shaped rather than abstinence-shaped: admission may run a
- *   caller-supplied TRIAL ({@link ArmTrialFn}) — full `validateArguments`,
- *   whose in-loop `op._infer(param, 'narrow')` genuinely writes — but the
- *   caller runs each trial under a rollback frame that undoes every write
- *   whatever the verdict, so a rejected arm still leaves no trace. The
- *   trial-less paths (the cheap prefilter alone) remain write-free in the
- *   original, abstinence sense.
+ *   kept by the trial itself: admission may run a caller-supplied TRIAL
+ *   ({@link ArmTrialFn}) — `validateArguments` in trial mode, which runs
+ *   no repair and skips its final operand inference, and whose
+ *   requirements go in a trial environment that is thrown away — so a
+ *   rejected arm leaves no trace. The trial-less paths (the cheap prefilter
+ *   alone) remain write-free in the original, abstinence sense.
  * - **§4.3 — inference uses the JOIN over the surviving arms, not the winner.**
  *   Hence `resolveOverload` returns the whole `viable` set, not just
  *   `selected`: the result type is read off `selected` (most-specific-wins),
@@ -441,8 +440,8 @@ export interface AdmissionPolicies {
  * This replaced the write-free mirror filter (`operandAdmits`, sixteen
  * mirrored gate conditions kept in lockstep with `validateArguments` by
  * hand). Under trial-based resolution the filter no longer needs to predict
- * what validation will decide — the TRIAL is `validateArguments` itself, run
- * under a rollback frame — so the only job left here is to prune arms that
+ * what validation will decide — the TRIAL is `validateArguments` itself, in
+ * trial mode — so the only job left here is to prune arms that
  * cannot possibly fit, cheaply, before paying for a trial. Consequently the
  * rejection rule is minimal and PROOF-shaped:
  *
@@ -598,8 +597,8 @@ function prefilterAdmits(
  * that keeps `overload.ts` from importing `validate.ts` (which imports this
  * module): `resolveOverload` keeps its fused
  * instantiate/filter/rank loop, and `validateArguments` passes a closure that
- * runs ITSELF on the single arm, in trial mode, under a repair-forbidding
- * rollback frame — so the trial's inference writes are undone whatever the
+ * runs ITSELF on the single arm, in trial mode, in a trial environment that
+ * is thrown away — so the trial leaves no inference write whatever the
  * outcome, and its verdict is exactly full validation's.
  *
  * Returns `null` when the arm ADMITS the call, or the operand indices (in
@@ -616,7 +615,7 @@ export type ArmTrialFn = (
 
 /**
  * True when this arm's trial is PROVABLY a pass, so the trial — a full
- * `validateArguments` run under a rollback frame — can be skipped without
+ * `validateArguments` run in trial mode — can be skipped without
  * changing the verdict. This is a proof, not a mirror: `op.type.matches
  * (param)` is validation's own unconditional first admit at every position
  * (required, optional and variadic loops alike), so an arity-admitted GROUND
@@ -1015,7 +1014,7 @@ export function resolveOverload(
    * then takes byte-identical code paths to the pre-feature ones. */
   named?: NamedCallPermutations,
   /** The trial admission (phase 2c): an arm that survives the cheap prefilter
-   * is admitted iff its trial — full validation under a rollback frame,
+   * is admitted iff its trial — full validation in trial mode,
    * supplied by `validateArguments` — returns `null`. Omitted on the
    * trial-less cold path (`resolvedArm` result typing), where the prefilter
    * alone decides and the wider candidate set is tolerated. */
@@ -1856,7 +1855,7 @@ export function diagnoseNoMatch(
   options?: AdmissionPolicies,
   /** The same trial admission `resolveOverload` ran with (phase 2c). Each
    * arity-viable arm's refuted positions are the operands its TRIAL — full
-   * validation under a rollback frame — actually errored on, which is
+   * validation in trial mode — actually errored on, which is
    * strictly more faithful than the old per-position filter probing. Runs
    * only on the already-failing path, so trial cost is not a concern here.
    * Without it (the trial-less cold path) the prefilter's per-position

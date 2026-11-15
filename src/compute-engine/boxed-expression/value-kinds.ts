@@ -827,7 +827,7 @@ export function engineHasKindDeclarations(
  * records are copied, because a registration changes them in place. The
  * gates are not captured: they only open, and an open gate is safe.
  *
- * Used by the rollback frame of an inference trial (`removeBinding` in
+ * Used by an inference rollback frame (`removeBinding` in
  * `engine-declarations.ts`): a rollback puts the registry back together with
  * the definitions it refers to.
  */

@@ -1099,18 +1099,18 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         this.engine._typeResolver
       );
     }
-    // Not stored while an inference rollback frame is open: its undo restores
-    // declarations and types by raw writes that advance no counter of the
-    // key, so a result computed in the discarded trial would still match
-    // after the rollback (the effects memo below refuses to stamp there for
-    // the same reason).
+    // Not stored while a result may be discarded (`_resultMayBeDiscarded()`):
+    // a rollback frame's undo restores declarations and types by raw writes
+    // that advance no counter of the key, and a trial reads its own
+    // environment first, so a result computed then would still match after
+    // (the effects memo below refuses to stamp there for the same reason).
     // Nor while a list-hypothesis pass of any definition runs: this
     // derivation may have read a hypothesis that is then refuted
     // (`inListHypothesisPass`). Nor when it read the provisional signature
     // of a function whose own derivation was still running
     // (`noteReentrantSignatureRead`).
     if (
-      this.engine._rollbackFrames.length === 0 &&
+      !this.engine._resultMayBeDiscarded() &&
       !inListHypothesisPass() &&
       !frame.tainted
     )
@@ -1830,14 +1830,15 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * never overwritten, mirroring the install-time `def.readsRandomFrame ===
    * undefined` gate.
    *
-   * The refresh may run inside an inference ROLLBACK FRAME
-   * (`inference-rollback.ts`), whose undo restores definitions through raw
-   * slot writes and advances no version counter. A refresh that stamped its
-   * memo there would keep serving a set inferred from the discarded trial
-   * world after the rollback — the stamps would still match. So while any
-   * frame is open the closure computes and applies, but does NOT stamp: the
-   * first read after the frame closes recomputes against the restored world
-   * and corrects every field it touched.
+   * The refresh may run while a result may be discarded
+   * (`_resultMayBeDiscarded()`): inside an inference rollback frame, whose
+   * undo restores definitions through raw slot writes and advances no
+   * version counter, or in the trial of an overload arm, which reads its
+   * own environment first. A refresh that stamped its memo there would keep
+   * serving a set inferred from the discarded world afterwards — the stamps
+   * would still match. So then the closure computes and applies, but does
+   * NOT stamp: the first read afterwards recomputes and corrects every field
+   * it touched.
    */
   private _makeLiteralEffectsDeriver(
     literal: Expression,
@@ -1862,7 +1863,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         this._inferredDraws = reInferred.draws;
         if (restampFrameRead)
           this.readsRandomFrame = reInferred.readsRandomFrame;
-        if (ce._rollbackFrames.length === 0) {
+        if (!ce._resultMayBeDiscarded()) {
           stampedConformance = ce._conformanceVersion;
           stampedCallable = ce._callableVersion;
         }

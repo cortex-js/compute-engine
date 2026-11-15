@@ -1815,6 +1815,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         const unitScope = this._unitWriteScope(def);
         if (unitScope !== undefined)
           return this._inferInEnvironment(unitScope, t, inferenceMode);
+        // A trial writes on no definition: the requirement goes in the
+        // environment of the trial, keyed by the definition, and a read in
+        // the trial meets it with the type of the definition
+        // (`_typeOfDefinitionInUnit()`). It is thrown away with the trial.
+        if (this.engine._boxingState.trialEnvironment() !== undefined)
+          return this._inferInEnvironment(def.value, t, inferenceMode);
         const previousType = def.value.type;
         // `replace` is LAST-WRITE-WINS — the Epsil static pre-pass uses it
         // to apply the type effect of a top-level assignment, whose runtime

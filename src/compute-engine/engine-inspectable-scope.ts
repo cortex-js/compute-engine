@@ -71,8 +71,8 @@ class _InspectableScope implements InspectableScope {
   private _disposed = false;
 
   /** The engine this scope narrows against — consulted by
-   * `_recordNarrowing` for the open rollback frame, so a rejected trial's
-   * narrowing entry is retracted (journal family 8). */
+   * `_recordNarrowing` for the open rollback frame, so a narrowing made
+   * inside the frame is retracted (journal family 8). */
   private _engine: IComputeEngine;
 
   constructor(ce: IComputeEngine, parent: Scope | null) {

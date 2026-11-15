@@ -138,10 +138,7 @@ import type {
   ParameterRecord,
 } from '../global-types.js';
 import { recordTypeProvenance } from './type-provenance.js';
-import {
-  activeRollbackFrame,
-  repairsForbiddenByRollbackFrame,
-} from '../inference-rollback.js';
+import { activeRollbackFrame } from '../inference-rollback.js';
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
 import { isWildcard } from './pattern-utils.js';
@@ -195,12 +192,17 @@ const INDEXED_COLLECTION_OF_NUMBER = parseType('indexed_collection<number>');
  * (`EngineBoxingState.withTrial()`), which is thrown away when the trial
  * ends: a requirement that the trial writes on an operand is not kept, and
  * does not refuse the trial of the next arm (rule 13 of
- * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). A rollback frame
- * does not undo a write in an environment.
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`).
  */
 function inTrialEnvironment(ce: ComputeEngine, trial: ArmTrialFn): ArmTrialFn {
   return (declared, instance, solution, ops) =>
     ce._boxingState.withTrial(() => trial(declared, instance, solution, ops));
+}
+
+/** True while the trial of an overload arm is in progress: the
+ * construction-level repairs assert that they do not run then. */
+function inTrial(ce: ComputeEngine): boolean {
+  return ce._boxingState.trialEnvironment() !== undefined;
 }
 
 /**
@@ -1105,13 +1107,13 @@ function devolveUnappliedOperator(
   op: Expression
 ): Expression | null {
   if (!isSymbol(op)) return null;
-  // Must never execute inside a repair-FORBIDDING rollback frame — phase
-  // 2c's trial validation, which admits a repairable operand by
-  // `isRepairableOperatorSymbol` without running the repair. An ORDINARY
-  // frame (the Epsil static checking pass) legitimately reaches this: the
-  // repair declares nothing, so there is nothing to roll back.
+  // Must never execute in the trial of an overload arm (phase 2c), which
+  // admits a repairable operand by `isRepairableOperatorSymbol` without
+  // running the repair. A rollback frame (the Epsil static checking pass)
+  // legitimately reaches this: the repair declares nothing, so there is
+  // nothing to roll back.
   console.assert(
-    !repairsForbiddenByRollbackFrame(ce),
+    !inTrial(ce),
     'devolveUnappliedOperator must not run in trial (repair-free) validation'
   );
   const name = op.symbol;
@@ -1207,7 +1209,7 @@ export function canonicalValueOperand(
   const canonical = op.canonical;
   if (!isSymbol(canonical) || !/^[A-Z]$/.test(canonical.symbol))
     return canonical;
-  if (repairsForbiddenByRollbackFrame(ce)) return canonical;
+  if (inTrial(ce)) return canonical;
   if (!isRepairableOperatorSymbol(ce, canonical)) return canonical;
   return devolveUnappliedOperator(ce, canonical) ?? canonical;
 }
@@ -3979,13 +3981,14 @@ export interface ValidateArgumentsInternals {
    * as it does at a function literal's annotated parameter
    * (`refusesAbsentArgument`). */
   refusesAbsentAt?: (index: number) => boolean;
-  /** Repair-free TRIAL mode: this call is an overload arm's trial, running
-   * under a repair-forbidding rollback frame. The two construction-level
-   * repairs are admitted by their write-free preconditions and NOT executed
+  /** Repair-free TRIAL mode: this call is an overload arm's trial
+   * (`EngineBoxingState.withTrial()`). The two construction-level repairs
+   * are admitted by their write-free preconditions and NOT executed
    * (`devolveUnappliedOperator` would declare a shadow and request a
-   * rebuild; `repairFreshMatrixInference` would retype symbols and re-box).
-   * The winning arm's REAL validation — non-trial, no frame — performs any
-   * repairs, exactly once. */
+   * rebuild; `repairFreshMatrixInference` would retype symbols and re-box),
+   * and the final operand inference is skipped. The winning arm's REAL
+   * validation, outside the trial, performs any repairs and the inference,
+   * exactly once. */
   trial?: boolean;
   /** Contract B per-slot NaN policy of the operator being validated
    * (`docs/ERROR-MODEL.md` §4). When present, a proven-`NaN` operand in a
@@ -4439,73 +4442,62 @@ export function validateArguments(
         : undefined,
     };
     // Trial admission (phase 2c): an arm is viable iff running THIS function
-    // on it, in trial mode, succeeds. The trial runs under a rollback frame,
-    // so every inference write it performs — operand narrowing, signature
-    // refinement, auto-declares — is undone whatever the outcome, and under a
-    // boxing-pass window of its own (a frame must not straddle window
-    // boundaries; opening a nested window inside an existing one is two
-    // counter bumps). `forbidsRepairs` marks it as repair-free: the
-    // construction-level repairs are admitted by precondition inside trial
-    // mode and assert they never execute here. This replaced the write-free
-    // mirror filter, whose gate conditions had to track this function's
-    // admission logic by hand.
+    // on it, in trial mode, succeeds. A trial writes on no definition: the
+    // construction-level repairs are admitted by precondition and assert
+    // they never execute in a trial, and the operand inference at the end of
+    // this function is skipped; the winning arm validates again and makes
+    // these writes. This replaced the write-free mirror filter, whose gate
+    // conditions had to track this function's admission logic by hand.
     //
-    // Each trial also runs in an
-    // environment of its own (`inTrialEnvironment()`), which is thrown away
-    // when it ends.
+    // A requirement that a trial writes goes in an environment of its own
+    // (`inTrialEnvironment()`), which is thrown away when the trial ends.
     const mkArmTrial =
       (overlapTrial: boolean): ArmTrialFn =>
-      (declared, _instance, solution, armOps) =>
-        ce._withBoxingPassWindow(() =>
-          ce._withRolledBackInference(
-            () => {
-              const res = validateArguments(
-                ce,
-                armOps,
-                declared,
-                lazy,
-                threadable,
-                freshlyInferred,
-                stripMissing,
-                {
-                  trial: true,
-                  overlapTrial: overlapTrial || undefined,
-                  armSolution: solution,
-                  // The NaN policy is the operator's, not the arm's, so it
-                  // rides into every arm trial unchanged.
-                  nanPolicyAt: internals?.nanPolicyAt,
-                  // The arity verdict at an arrow slot is worded around the
-                  // operator's name and DECLINES without one, so an unnamed
-                  // trial would judge an inapplicable callback admissible and
-                  // report the arm viable.
-                  operatorName: internals?.operatorName,
-                  operatorDefinition: internals?.operatorDefinition,
-                  // The collection verdict is the operator's too: a trial
-                  // that admitted a `list<string>` at a numeric arm would
-                  // rank that arm viable, and final validation would then
-                  // refuse the call instead of selecting a string arm.
-                  checkNumericCollections: internals?.checkNumericCollections,
-                  // The provisional admission of a symbol with an inferred
-                  // type at a collection parameter is the operator's too
-                  // (`isProvisionalCollectionOperand`).
-                  provisionalCollectionOperands:
-                    admitsProvisionalCollectionOperands(internals),
-                }
-              );
-              // `null` = valid, operands unchanged. In trial mode no repair
-              // executes, so `substituted` is never set and a non-null result
-              // always carries at least one invalid operand — the refuted
-              // positions.
-              if (res === null) return null;
-              const refuted: number[] = [];
-              res.forEach((x, k) => {
-                if (!x.isValid) refuted.push(k);
-              });
-              return refuted.length === 0 ? null : refuted;
-            },
-            { forbidsRepairs: true }
-          )
+      (declared, _instance, solution, armOps) => {
+        const res = validateArguments(
+          ce,
+          armOps,
+          declared,
+          lazy,
+          threadable,
+          freshlyInferred,
+          stripMissing,
+          {
+            trial: true,
+            overlapTrial: overlapTrial || undefined,
+            armSolution: solution,
+            // The NaN policy is the operator's, not the arm's, so it
+            // rides into every arm trial unchanged.
+            nanPolicyAt: internals?.nanPolicyAt,
+            // The arity verdict at an arrow slot is worded around the
+            // operator's name and DECLINES without one, so an unnamed
+            // trial would judge an inapplicable callback admissible and
+            // report the arm viable.
+            operatorName: internals?.operatorName,
+            operatorDefinition: internals?.operatorDefinition,
+            // The collection verdict is the operator's too: a trial
+            // that admitted a `list<string>` at a numeric arm would
+            // rank that arm viable, and final validation would then
+            // refuse the call instead of selecting a string arm.
+            checkNumericCollections: internals?.checkNumericCollections,
+            // The provisional admission of a symbol with an inferred
+            // type at a collection parameter is the operator's too
+            // (`isProvisionalCollectionOperand`).
+            provisionalCollectionOperands:
+              admitsProvisionalCollectionOperands(internals),
+          }
         );
+        // `null` = valid, operands unchanged. In trial mode no repair
+        // executes, so `substituted` is never set and a non-null result
+        // always carries at least one invalid operand — the refuted
+        // positions.
+        if (res === null) return null;
+        const refuted: number[] = [];
+        res.forEach((x, k) => {
+          if (!x.isValid) refuted.push(k);
+        });
+        return refuted.length === 0 ? null : refuted;
+      };
     const mkTrial = (overlapTrial: boolean): ArmTrialFn =>
       inTrialEnvironment(ce, mkArmTrial(overlapTrial));
     const trial = mkTrial(false);
@@ -5145,7 +5137,7 @@ export function validateArguments(
       if (internals?.trial) {
         // TRIAL mode: the two construction-level repairs are admitted by
         // their write-free preconditions and NOT executed — a repair
-        // entangles state the trial's rollback frame must not touch (the
+        // entangles state that a trial must leave as it was (the
         // devolve shadow participates in the boxing-state rebuild loop; the
         // matrix repair re-boxes). A precondition is not a proof: the
         // winning arm's REAL validation runs the repair and may fail where
@@ -5968,9 +5960,11 @@ export function validateArguments(
   // gives the operand a scalar tier must not suppress a narrowing which
   // outlives the assumption.
   const finalOps = substituted ? result : ops;
-  // Check-only mode (`noInference`): the verdicts above stand, the
-  // narrowing below is skipped.
-  if (internals?.noInference) return substituted ? result : null;
+  // Check-only mode (`noInference`) and the trial of an overload arm: the
+  // verdicts above stand, the narrowing below is skipped. A trial writes on
+  // no definition: the winning arm validates again, and makes this write.
+  if (internals?.noInference || internals?.trial)
+    return substituted ? result : null;
   ce._withoutFacts(() => {
     i = 0;
     for (const param of params) {
@@ -6352,15 +6346,15 @@ function repairFreshMatrixInference(
   // narrowing that never took effect — but a SUCCESSFUL repair permanently
   // narrows an (possibly enclosing) definition, and a contained parse's
   // `scope.narrowings()` must see that.
-  // The repair must never execute inside a repair-FORBIDDING rollback frame
-  // — phase 2c's trial validation mode, which admits repairs by their
-  // write-free precondition (`couldRepairFreshMatrixInference`) without
-  // running them; the winning arm re-validates for real, outside any frame.
-  // An ORDINARY rollback frame (the Epsil static checking pass wraps full
-  // canonicalization in one) legitimately reaches this repair, and every
-  // write below is journaled so the frame rolls it back.
+  // The repair must never execute in the trial of an overload arm (phase
+  // 2c), which admits repairs by their write-free precondition
+  // (`couldRepairFreshMatrixInference`) without running them; the winning
+  // arm re-validates for real, outside the trial. A rollback frame (the
+  // Epsil static checking pass wraps full canonicalization in one)
+  // legitimately reaches this repair, and every write below is journaled so
+  // the frame rolls it back.
   console.assert(
-    !repairsForbiddenByRollbackFrame(ce),
+    !inTrial(ce),
     'repairFreshMatrixInference must not run in trial (repair-free) validation'
   );
 

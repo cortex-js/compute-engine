@@ -735,8 +735,11 @@ names instead of values.
 
 An intersection of arrow types is an overload set. Resolution filters
 inapplicable arms, orders applicable arms by specificity, and preserves
-declaration order for ties. Trial validation occurs in an inference rollback
-frame so rejected arms cannot mutate engine inference state.
+declaration order for ties. The trial validation of an arm writes on no
+definition, so a rejected arm cannot mutate engine inference state: it runs no
+repair, skips the final operand inference, and writes its requirements in a
+trial environment that is thrown away. The winning arm validates again outside
+the trial and makes these writes.
 
 The result type of a call is the result of the selected arm, with one
 exception. When the argument types do not decide the arm, the call can take
@@ -1808,14 +1811,17 @@ invalidates no cached type: the type version (`typeVersion`,
 ## Inference provenance and rollback
 
 Provenance belongs to definitions, not `Type` objects. Every inference write
-can record its source expression and axis. Rollback frames journal all
-inference-visible state changed during a trial, including type/effect writes,
-fresh-inference bookkeeping, and provisional registry changes. Frames nest;
-rollback is unconditional for speculative checks and must restore both values
-and invalidation metadata. A write in the environment of a unit or an
-operation is not journaled: a trial (the admission of an overloaded operator,
-the Epsil static check) runs in an environment that is thrown away when it
-ends.
+can record its source expression and axis. A rollback frame journals all
+inference-visible state changed while it is open, including type/effect writes,
+fresh-inference bookkeeping, and provisional registry changes. Its one user is
+the Epsil static check, which boxes a whole program in a frame and undoes it.
+Frames nest; rollback is unconditional and must restore both values and
+invalidation metadata. A cache does not store a result while a frame is open
+or a trial is in progress (`_resultMayBeDiscarded()`). A write in the
+environment of a unit or an operation is not journaled: the static check runs
+in a program environment, and the trial of an arm of an overloaded operator in
+a trial environment, each thrown away when it ends. A trial opens no frame: it
+writes on no definition ("Functions, overloads, and callbacks").
 
 The current implementation entry points are the definition provenance journal,
 the engine inference transaction helpers, and the state-event funnel described

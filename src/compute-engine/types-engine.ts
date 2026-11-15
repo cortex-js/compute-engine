@@ -755,6 +755,14 @@ export interface IComputeEngine {
    * @internal */
   _rollbackFrames: InferenceRollbackFrame[];
 
+  /** True while a result computed now may be thrown away: a rollback frame
+   * is open (its undo writes raw slots and moves no version), or the trial
+   * of an overload arm is in progress (a read takes the entry of the trial
+   * environment first, `EngineBoxingState.withTrial()`). A cache does not
+   * store a result then.
+   * @internal */
+  _resultMayBeDiscarded(): boolean;
+
   /** How many `evaluateAsync` calls are in flight, including ones suspended
    * at an `await`. A suspended async evaluation holds its eval context across
    * the suspension and hands control back to the host, so — unlike a
@@ -905,9 +913,9 @@ export interface IComputeEngine {
   /**
    * Run `fn` with a rollback frame open and ALWAYS roll the frame back — on
    * normal return AND on throw (the body's error is rethrown after the
-   * undo). Returns `fn`'s value. Always-rollback by design: a trial's
-   * outcome is a *decision*, not state, and the static checking pass checks
-   * and then discards — there is no commit form.
+   * undo). Returns `fn`'s value. Always-rollback by design: the Epsil static
+   * checking pass, its one user, checks and then discards — there is no
+   * commit form.
    *
    * Must be called inside a boxing-pass window (`_inferenceTxDepth > 0`);
    * open one with {@link _withBoxingPassWindow} when the caller is not
@@ -916,14 +924,8 @@ export interface IComputeEngine {
    * An expression or definition created inside the frame must not be
    * evaluated, canonicalized against, or resolved for symbol lookup after
    * the rollback; retention for *rendering* (`toString()`) is permitted.
-   *
-   * `options.forbidsRepairs` marks a repair-free TRIAL frame (phase 2c):
-   * the construction-level repairs assert they never run under one.
    * @internal */
-  _withRolledBackInference<T>(
-    fn: () => T,
-    options?: { forbidsRepairs?: boolean }
-  ): T;
+  _withRolledBackInference<T>(fn: () => T): T;
 
   /**
    * Run `fn` inside one boxing-pass window (the `_inferenceTxDepth` /

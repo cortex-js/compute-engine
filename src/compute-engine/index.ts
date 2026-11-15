@@ -1030,18 +1030,19 @@ export class ComputeEngine implements IComputeEngine {
    * @internal */
   _rollbackFrames: InferenceRollbackFrame[] = [];
 
+  /** See `IComputeEngine._resultMayBeDiscarded`.
+   * @internal */
+  _resultMayBeDiscarded(): boolean {
+    return (
+      this._rollbackFrames.length > 0 ||
+      this._boxingState.trialEnvironment() !== undefined
+    );
+  }
+
   /** See `IComputeEngine._withRolledBackInference` — the rollback-frame
    * primitive of `docs/TYPE-SYSTEM.md`, phase 2b.
-   * `options.forbidsRepairs` marks the frame as phase 2c's repair-free TRIAL
-   * validation: the construction-level repair helpers
-   * (`devolveUnappliedOperator`, `repairFreshMatrixInference`) assert they
-   * never execute under such a frame — trials admit repairs by their
-   * write-free preconditions without running them.
    * @internal */
-  _withRolledBackInference<T>(
-    fn: () => T,
-    options?: { forbidsRepairs?: boolean }
-  ): T {
+  _withRolledBackInference<T>(fn: () => T): T {
     // A rollback frame nests strictly inside ONE boxing-pass window: the
     // journal records `_freshlyInferred` membership, a per-window set that the
     // window lifecycle resets, so a frame straddling a window boundary would
@@ -1051,9 +1052,7 @@ export class ComputeEngine implements IComputeEngine {
       this._inferenceTxDepth > 0,
       'A rollback frame must be opened inside a boxing-pass window (see _withBoxingPassWindow)'
     );
-    const frame = new InferenceRollbackFrame({
-      forbidsRepairs: options?.forbidsRepairs,
-    });
+    const frame = new InferenceRollbackFrame();
     this._rollbackFrames.push(frame);
     let bodyError: { error: unknown } | undefined;
     try {

@@ -3,26 +3,46 @@ import {
   overloadArms,
   resolveOverload,
 } from '../../src/compute-engine/boxed-expression/overload';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
+
+/** Counts the trials of overload arms on `ce`, and those after which the
+ * type cache key moved (a write on a definition moves it). */
+function countTrialWrites(ce: ComputeEngine): { count: number; moved: number } {
+  const counts = { count: 0, moved: 0 };
+  const state = ce._boxingState;
+  const withTrial = state.withTrial.bind(state);
+  state.withTrial = <T>(fn: () => T): T => {
+    const before = ce._typeCacheGeneration();
+    counts.count += 1;
+    try {
+      return withTrial(fn);
+    } finally {
+      if (ce._typeCacheGeneration() !== before) counts.moved += 1;
+    }
+  };
+  return counts;
+}
 
 //
 // Phase 2c acceptance — TRIAL-BASED overload resolution
 // (`docs/TYPE-SYSTEM.md`, "No new import cycle" /
 // "Repairs are not trialed" / phasing §2c).
 //
-// An overload arm is admitted by running full validation on it in TRIAL mode
-// under a repair-forbidding rollback frame, replacing the hand-mirrored
-// write-free gate filter. These tests port the overload design's
+// An overload arm is admitted by running full validation on it in TRIAL mode,
+// replacing the hand-mirrored write-free gate filter. A trial writes on no
+// definition: it runs no repair, skips the final operand inference, and its
+// requirements go in a trial environment that is thrown away. These tests port the overload design's
 // write-freedom guarantees to the trial mechanism: rejected arms leave no
 // trace, §4.3's join inference is computed over the arms whose trials
 // succeeded, blame stays per-arm, and the repair-precondition no-fallback
 // semantics is byte-compatible with the filter era.
 //
 
-describe('OVERLOAD TRIALS — write-freedom via rollback', () => {
+describe('OVERLOAD TRIALS — write-freedom', () => {
   test('a REJECTED arm’s trial narrowing does not leak onto the operand', () => {
     const ce = new ComputeEngine();
     // Arm 2's trial narrows y toward list<integer> before failing on the
-    // second operand; the rollback must undo that narrowing, and the final
+    // second operand; that narrowing must not be kept, and the final
     // inference is the §4.3 join over the SURVIVING arms only (arm 1).
     ce.declare(
       'f',
@@ -48,7 +68,7 @@ describe('OVERLOAD TRIALS — write-freedom via rollback', () => {
     expect(call.ops[1].type.toString()).toBe('integer');
   });
 
-  test('a no-match call leaves ALL trial writes rolled back', () => {
+  test('a no-match call keeps no trial write', () => {
     const ce = new ComputeEngine();
     ce.declare(
       'h',
@@ -61,6 +81,71 @@ describe('OVERLOAD TRIALS — write-freedom via rollback', () => {
     const call = ce.box(['h', 'z', 'b']);
     expect(call.isValid).toBe(false);
     expect(ce.box('z').type.toString()).toBe('unknown');
+  });
+
+  test('a trial writes on no definition (a block local read by component)', () => {
+    // The trials of the arms of `take` admit `q[1]`. A trial writes on no
+    // definition, so the type cache key, which a write on a definition
+    // moves, is the same before and after each trial.
+    const ce = new ComputeEngine();
+    const trials = countTrialWrites(ce);
+    const { value } = executeEpsil(
+      ce,
+      'g(s) = do { let q = (s, 0); take(q[1], 2) }\ng([1, 2, 3])'
+    );
+    expect(trials.count).toBeGreaterThan(0);
+    expect(trials.moved).toBe(0);
+    // A copy into a local is not a use of the parameter: `g` is applied to
+    // each element.
+    expect(value.toString()).toMatch(
+      /^\[Error\(ErrorCode\("incompatible-type"/
+    );
+    expect(ce.box('g').type.toString()).toBe(
+      '(s: unknown) -> list<any> | string'
+    );
+  });
+
+  test('the in-loop narrowing of a trial writes on no definition (a comprehension index)', () => {
+    // The trial of the arm `(integer) -> integer` narrows the index `i`
+    // to `integer` while it checks the operand. That requirement goes in
+    // the trial environment and is thrown away: the index stays `real`,
+    // and the arm `(real) -> real` is selected.
+    const ce = new ComputeEngine();
+    ce.declare('f', '((integer) -> integer) & ((real) -> real)');
+    ce.declare('xs', 'list<real>');
+    const trials = countTrialWrites(ce);
+    const c = ce.box(['Comprehension', ['f', 'i'], ['Element', 'i', 'xs']]);
+    expect(trials.count).toBeGreaterThan(0);
+    expect(trials.moved).toBe(0);
+    expect(c.type.toString()).toBe('list<real>');
+  });
+
+  test('an arm refuted at a later operand leaves the index type of the call', () => {
+    const ce = new ComputeEngine();
+    ce.declare(
+      'f',
+      '((integer, string) -> integer) & ((real, number) -> number)'
+    );
+    ce.declare('xs', 'list<real>');
+    const c = ce.box([
+      'Comprehension',
+      ['Tuple', ['f', 'i', 2], 'i'],
+      ['Element', 'i', 'xs'],
+    ]);
+    expect(c.isValid).toBe(true);
+    expect(c.type.toString()).toBe('list<tuple<number, real>>');
+  });
+
+  test('an arm refuted after an earlier arm narrowed the operand keeps the call valid', () => {
+    const ce = new ComputeEngine();
+    ce.declare(
+      'f',
+      '((real, string) -> integer) & ((imaginary, number) -> number)'
+    );
+    ce.declare('xs', 'list<complex>');
+    const c = ce.box(['Comprehension', ['f', 'i', 2], ['Element', 'i', 'xs']]);
+    expect(c.isValid).toBe(true);
+    expect(c.type.toString()).toBe('list<number>');
   });
 });
 
@@ -219,7 +304,7 @@ describe('OVERLOAD TRIALS — result typing reads the validated resolution', () 
   });
 });
 
-describe('OVERLOAD TRIALS — trials nest inside enclosing rollback frames', () => {
+describe('OVERLOAD TRIALS — inside an enclosing rollback frame', () => {
   test('an overload call canonicalized inside a rollback frame resolves normally and rolls back cleanly', () => {
     const ce = new ComputeEngine();
     ce.declare(

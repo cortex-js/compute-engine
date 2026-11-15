@@ -1472,17 +1472,17 @@ export class _BoxedValueDefinition
       refined === recorded.type
         ? recorded
         : new BoxedType(refined, this._engine._typeResolver);
-    // Not stored while an inference rollback frame is open: its undo restores
-    // declarations and types by raw writes that advance no counter of the
-    // key, so a result computed in the discarded trial would still match
-    // after the rollback.
+    // Not stored while a result may be discarded (`_resultMayBeDiscarded()`):
+    // a rollback frame's undo restores declarations and types by raw writes
+    // that advance no counter of the key, and a trial reads its own
+    // environment first, so a result computed then would still match after.
     // Nor while a list-hypothesis pass of any definition runs: this
     // derivation may have read a hypothesis that is then refuted
     // (`inListHypothesisPass`). Nor when it read the provisional signature
     // of a function whose own derivation was still running
     // (`noteReentrantSignatureRead`).
     if (
-      this._engine._rollbackFrames.length === 0 &&
+      !this._engine._resultMayBeDiscarded() &&
       !inListHypothesisPass() &&
       !frame.tainted
     )

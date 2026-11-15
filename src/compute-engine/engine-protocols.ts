@@ -5043,7 +5043,7 @@ function makeDispatcherDeriver(
     inFlight = true;
     try {
       memo = derivedDispatcherEffects(ce, member);
-      if (ce._rollbackFrames.length === 0) {
+      if (!ce._resultMayBeDiscarded()) {
         stampedConformance = ce._conformanceVersion;
         stampedCallable = ce._callableVersion;
       }

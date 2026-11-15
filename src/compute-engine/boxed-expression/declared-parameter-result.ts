@@ -982,9 +982,9 @@ export function verifiedListHypothesis(
     };
     const value = iterate();
     // Not stored inside a pass of another verification, whose candidates
-    // are not final, nor while an inference rollback frame is open (see
-    // the memo of `_deriveSignature`, `boxed-operator-definition.ts`).
-    if (hypothesisPassDepth === 1 && ce._rollbackFrames.length === 0)
+    // are not final, nor while a result may be discarded (see the memo of
+    // `_deriveSignature`, `boxed-operator-definition.ts`).
+    if (hypothesisPassDepth === 1 && !ce._resultMayBeDiscarded())
       fixpointMemo.set(literal, { key: memoKey, value });
     return value === undefined ? undefined : answer(value);
   } finally {
