@@ -1,16 +1,16 @@
 /**
  * A recursive Epsil program that builds a list through a local copied from
- * an untyped parameter compiles (row 339 of the Tycho ledger,
- * `tycho/docs/COMPUTE_ENGINE.md`, 2026-09-29). Two mechanisms:
+ * a parameter declared `list` compiles (row 339 of the Tycho ledger,
+ * `tycho/docs/COMPUTE_ENGINE.md`, 2026-09-29). A self-call in a `function`
+ * clause body types `unknown` while the clause canonicalizes and installs
+ * (`_recursionKnotNames`); before, the knot's bare `function` type made
+ * `out = f(n - 1, out)` a broadcast guess that widened `out` past the list
+ * its spread gives.
  *
- * - `let out = acc` records `acc` as the initializer alias of `out`
- *   (`_initializerAlias`), so the first use that narrows `out` to a
- *   collection narrows `acc` too; before, `acc` stayed untyped and a call
- *   `f([0])` broadcast over the list.
- * - a self-call in a `function` clause body types `unknown` while the
- *   clause canonicalizes and installs (`_recursionKnotNames`); before, the
- *   knot's bare `function` type made `out = f(n - 1, out)` a broadcast
- *   guess that widened `out` past the list its spread gives.
+ * A copy of an UNTYPED parameter into a local is not a use of the
+ * parameter (user decision 2026-11-14): `let out = acc` followed by a use of
+ * `out` as a list gives `acc` no type, and a call with a list is applied to
+ * each element.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
@@ -43,15 +43,18 @@ function compiled(expr: any): unknown {
 }
 
 describe('a local copied from an untyped parameter (Tycho row 339)', () => {
-  test('the parameter learns the collection type from the use of the local', () => {
+  test('the parameter learns nothing from the use of the local', () => {
     const { expr } = box(
       'function f(acc) { let out = acc; out = [...out, 1]; out }\nf([0])'
     );
-    expect(signatureOf(expr, 'f')).toBe(
-      '(acc: collection<any>) -> collection<any>'
+    expect(signatureOf(expr, 'f')).toBe('(acc: unknown) -> unknown');
+    expect(expr.evaluate().toString()).toBe('[[0,1]]');
+    const { expr: annotated } = box(
+      'function f(acc: list) { let out = acc; out = [...out, 1]; out }\nf([0])'
     );
-    expect(compiled(expr)).toEqual([0, 1]);
-    expect(expr.evaluate().toString()).toBe('[0,1]');
+    expect(signatureOf(annotated, 'f')).toBe('(acc: list) -> list');
+    expect(compiled(annotated)).toEqual([0, 1]);
+    expect(annotated.evaluate().toString()).toBe('[0,1]');
   });
 
   test('a local reassigned from an untyped call before its use forwards nothing', () => {
@@ -64,11 +67,11 @@ describe('a local copied from an untyped parameter (Tycho row 339)', () => {
     expect(ce._recursionKnots.size).toBe(0);
   });
 
-  test('a captured outer local as the initializer is narrowed like a parameter', () => {
+  test('a captured outer local as the initializer learns nothing either', () => {
     const { expr } = box(
       'let acc = g()\nfunction f() { let out = acc; out = [...out, 1]; out }\nf()'
     );
-    expect(signatureOf(expr, 'f')).toBe('() -> collection<any>');
+    expect(signatureOf(expr, 'f')).toBe('() -> unknown');
   });
 
   test('a local assigned before its use forwards nothing', () => {
@@ -81,11 +84,9 @@ describe('a local copied from an untyped parameter (Tycho row 339)', () => {
 
   test('a recursive list builder compiles', () => {
     const { expr } = box(
-      'function f(n, acc) { let out = acc; if n > 0 { out = [...out, n]; out = f(n - 1, out) }; out }\nf(3, [])'
+      'function f(n, acc: list) { let out = acc; if n > 0 { out = [...out, n]; out = f(n - 1, out) }; out }\nf(3, [])'
     );
-    expect(signatureOf(expr, 'f')).toBe(
-      '(n: unknown, acc: collection<any>) -> collection<any>'
-    );
+    expect(signatureOf(expr, 'f')).toBe('(n: unknown, acc: list) -> list');
     expect(compiled(expr)).toEqual([3, 2, 1]);
     expect(expr.evaluate().toString()).toBe('[3,2,1]');
   });

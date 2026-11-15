@@ -3,7 +3,7 @@
  * an operator that is NOT element-wise and whose declared operand type has a
  * collection arm, binds a list argument WHOLE (user decision 2026-09-29).
  * The operand may reach the parameter through element-wise operators
- * (`mean(xs^2)`) or through a local of the body (`let ys = xs; mean(ys)`).
+ * (`mean(xs^2)`), not through a local of the body (`let ys = xs; mean(ys)`).
  * `Norm` is excluded, and a use with other operands (`mean(x, 1)`) does not
  * count: see the doc comment of `wholeCollectionParameterType` for the
  * reasons.
@@ -642,16 +642,20 @@ describe('Interpreter and compiled function agree', () => {
 });
 
 describe('Limitations of the rule, as they behave today', () => {
-  test('a use through a local alias is followed', () => {
-    // `let ys = xs` is a `Declare` whose operands are held raw, so the local
-    // is recorded by name (see `wholeCollectionParameterType`).
+  test('a use through a local copy is not a use of the parameter', () => {
+    // Only a direct use of the parameter counts (user decision 2026-11-14):
+    // the call is applied to each element. `h(xs: list)` takes it whole.
     const ce = new ComputeEngine();
     expect(
       epsilValue(ce, 'function h(xs) { let ys = xs\nmean(ys) }\nh([1, 2, 3])')
+    ).toBe('[1,2,3]');
+    expect(ce.symbol('h').type.toString()).toBe('(xs: unknown) -> number');
+    expect(
+      epsilValue(
+        new ComputeEngine(),
+        'function h(xs: list) { let ys = xs\nmean(ys) }\nh([1, 2, 3])'
+      )
     ).toBe('2');
-    expect(ce.symbol('h').type.toString()).toBe(
-      '(xs: collection<number> | value) -> number'
-    );
   });
 
   test('a call to a helper that the body assigns a function literal', () => {
@@ -670,12 +674,12 @@ describe('Limitations of the rule, as they behave today', () => {
         'function f(xs) { let h = (t) => t\nh = (t) => count(t)\nh(xs) }\nf([1, 2])'
       )
     ).toEqual(['2', '(xs: collection<any> | value) -> unknown']);
-    // Through an alias of the parameter.
+    // Through a local copy of the parameter: not a use of it.
     expect(
       value(
         'function f(xs) { let ys = xs\nlet h = (t) => count(t)\nh(ys) }\nf([1, 2])'
-      )[0]
-    ).toBe('2');
+      )[1]
+    ).toBe('(xs: unknown) -> unknown');
     // The last literal assigned before the call is read: an element-wise
     // helper keeps the map.
     expect(

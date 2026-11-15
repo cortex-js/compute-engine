@@ -155,7 +155,7 @@ h([1, 2, 3])`);
   test('the callee declares a local with the name that the argument reads', () => {
     const { value, diagnostics } = run(`
 let t = 1..oo
-g(s) = do { let t = s; take(t, 2) }
+g(s: list) = do { let t = s; take(t, 2) }
 g(map(x => x * 2, t))`);
     expect(diagnostics).toEqual([]);
     expect(elements(value)).toBe('[2, 4]');

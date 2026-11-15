@@ -219,18 +219,29 @@ describe('A CALL AT A POINT PARAMETER ON THE DESCRIPTOR ROUTE', () => {
   // `h` has an inferred signature.
   ce.assign('h', ce.box(body as any));
 
+  // The parameter of `h` is read by index, so it takes a list of points
+  // whole (user decision 2026-11-14): `h` of a list of points is the first
+  // point plus the second. The declared point parameter of `k` maps.
   test.each([
-    ['list<tuple<number, number>>', 'list<number>'],
-    ['tuple<number, number>', 'number'],
-    ['list<list<tuple<number, number>>>', 'list<list<number>>'],
+    ['list<tuple<number, number>>', 'list<number>', 'tuple<number, number>'],
+    ['tuple<number, number>', 'number', 'number'],
+    [
+      'list<list<tuple<number, number>>>',
+      'list<list<number>>',
+      'list<tuple<number, number>>',
+    ],
     [
       'tuple<number, number> | list<tuple<number, number>>',
       'list<number> | number',
+      'number | tuple<number, number>',
     ],
-  ])('over %s, both routes give %s', (t, expected) => {
+  ])('over %s, both routes give %s for k and %s for h', (t, ofK, ofH) => {
     const name = `v${t.length}_${t.charCodeAt(5)}`;
     ce.declare(name, t);
-    for (const f of ['k', 'h']) {
+    for (const [f, expected] of [
+      ['k', ofK],
+      ['h', ofH],
+    ]) {
       expect(ce.box([f, name]).type.toString()).toBe(expected);
       expect(derived(ce, f, [t])).toBe(expected);
     }
@@ -244,10 +255,13 @@ describe('A CALL AT A POINT PARAMETER ON THE DESCRIPTOR ROUTE', () => {
     expect(() =>
       ce.declare('vm', 'list<tuple<number, number>> | missing')
     ).toThrow(/the type `missing` cannot be declared/);
-    for (const f of ['k', 'h'])
-      expect(
-        derived(ce, f, ['list<tuple<number, number>> | missing'])
-      ).toBe('list<number> | missing');
+    expect(
+      derived(ce, 'k', ['list<tuple<number, number>> | missing'])
+    ).toBe('list<number> | missing');
+    // `h` takes the list whole, and its body is typed with the list.
+    expect(
+      derived(ce, 'h', ['list<tuple<number, number>> | missing'])
+    ).toBe('tuple<number, number>');
   });
 
   test('the value over a list of points matches the derived type', () => {

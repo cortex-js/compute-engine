@@ -1,7 +1,7 @@
 // Bubble sort, rebuilding the list around each swap, checked against `sort`.
 // The surrounding parts come from `take`/`drop`: a range `1..(j - 1)` cannot
 // express an empty prefix because it is descending when j is 1.
-bubbleSort(xs) = do {
+bubbleSort(xs: list) = do {
   let ys = xs
   let n = length(ys)
   if n > 1 {

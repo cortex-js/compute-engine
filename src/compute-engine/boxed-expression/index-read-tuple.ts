@@ -1,5 +1,5 @@
 import type { NamedElement, TupleType, Type } from '../../common/type/types.js';
-import { isInternedType } from '../../common/type/intern.js';
+import { isInternedType, keepOwnIdentity } from '../../common/type/intern.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -44,7 +44,10 @@ const INDEX_READ_TUPLES = new WeakSet<object>();
 
 /** Record that the tuple type `t` was made by index reads only. Returns `t`. */
 export function markIndexReadTuple(t: Type): Type {
-  if (typeof t === 'object' && t.kind === 'tuple') INDEX_READ_TUPLES.add(t);
+  if (typeof t === 'object' && t.kind === 'tuple') {
+    INDEX_READ_TUPLES.add(t);
+    keepOwnIdentity(t);
+  }
   return t;
 }
 

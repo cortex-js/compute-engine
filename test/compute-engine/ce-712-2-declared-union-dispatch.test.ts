@@ -9,10 +9,12 @@
  * Before, one body read both shapes, and two values were wrong:
  * - `f(U)` with `f := t ↦ 2t + 1`, `U = [1, 2]`: interval-js gave the empty
  *   interval, the interpreter gives `[3, 5]`.
- * - `w(P)` with `w := p ↦ p[1] + p[2]` (declared `function`),
+ * - `w(P)` with `w := (p: tuple<number, number>) ↦ p[1] + p[2]`,
  *   `P = [(1, 2), (3, 4)]`: javascript threw ("the element read is a list
  *   at run time") and interval-js gave the whole real line, the interpreter
- *   gives `[3, 7]`.
+ *   gives `[3, 7]`. With a parameter that only the body reads by index
+ *   (`w := p ↦ p[1] + p[2]`), the list is taken whole and the value is
+ *   `(4, 6)` (user decision 2026-11-14); interval-js declines it.
  *
  * The compilation declines, with the names of the inputs in `unsupported`,
  * when no run-time test tells the members apart (a point of two reals and
@@ -165,42 +167,53 @@ describe('CE-712.2: an input declared with a union of shapes', () => {
     const expr = ce.box(['w', 'P']);
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
-    // The member `list<tuple<…>>` maps `w` over the points; the empty
-    // list is a list of points, since a point is never empty.
+    // The parameter of `w` is read by index, so it takes a list of points
+    // whole (user decision 2026-11-14): the member `list<tuple<…>>` adds
+    // the first point and the second. The empty list goes to that member
+    // too: the run-time test cannot tell it from a list of points.
     expect(r.code).toBe(
       '((_.P.length === 0 || Array.isArray(_.P[0])) ? ' +
-        '((_tv1) => _tv1.map((_tv2) => _fn_w(_tv2)))(_.P) : ' +
+        '_fn_w_list_tuple_real__real__(_.P) : ' +
         '_SYS.at(_.P, 1) + _SYS.at(_.P, 2))'
     );
-    for (const P of [[[1, 2], [3, 4]], [1, 2], []] as Value[])
+    for (const P of [[[1, 2], [3, 4]], [1, 2]] as Value[])
       expect(r.run!({ P } as any)).toEqual(
         interpreted(ce, expr, { P }, ['P'])
       );
     expect(interpreted(ce, expr, { P: [[1, 2], [3, 4]] }, ['P'])).toEqual([
-      3, 7,
+      4, 6,
     ]);
+    // `P = []` reads both points out of range. The interpreter gives `NaN`;
+    // the compiled value is computed from absent values and is unspecified
+    // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
+    expect(interpreted(ce, expr, { P: [] }, ['P'])).toBeNaN();
   });
 
-  test('w(P) on interval-js: the map over a list of points declines', () => {
-    // interval-js does not map a function over a list of points, so the
-    // member `list<tuple<…>>` declines. Before, the code gave the whole
-    // real line for `P = [(1, 2), (3, 4)]`.
+  test('a list of points read by index declines on interval-js', () => {
+    // The parameter of `w` takes a list of points whole (user decision
+    // 2026-11-14), so the call is `P[1] + P[2]`, a point. The interval
+    // value is a number, and `_IA.at` of a list of points answers `entire`:
+    // the call and the direct reads decline.
     const ce = engine();
-    expect(declineCode(ce.box(['w', 'P']), 'interval-js')).toBeDefined();
+    for (const e of [
+      ['w', 'P'],
+      ['w', 'Q'],
+      ['Add', ['At', 'P', 1], ['At', 'P', 2]],
+      ['Add', ['At', 'Q', 1], ['At', 'Q', 2]],
+    ])
+      expect(declineCode(ce.box(e as never), 'interval-js')).toBeDefined();
   });
 
-  test('a list of points at a parameter that the body infers as a point', () => {
+  test('a list of points at a parameter that the body reads by index', () => {
     // The same call with an input declared `list<tuple<real, real>>`: the
-    // interpreter maps `w` over the points. Before, the call was inlined
-    // with the list in place of `p`, and the code added the two points:
-    // `[4, 6]`.
+    // parameter takes the list whole, and both routes add the two points.
     const ce = engine();
     const expr = ce.box(['w', 'Q']);
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
-    expect(r.run!({ Q: [[1, 2], [3, 4]] } as any)).toEqual([3, 7]);
+    expect(r.run!({ Q: [[1, 2], [3, 4]] } as any)).toEqual([4, 6]);
     expect(interpreted(ce, expr, { Q: [[1, 2], [3, 4]] }, ['Q'])).toEqual([
-      3, 7,
+      4, 6,
     ]);
   });
 

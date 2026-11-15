@@ -1,4 +1,5 @@
 import { provedAbsentDomainOf } from './proved-absent-domain.js';
+import { isIndexReadTuple } from './index-read-tuple.js';
 import { isCapturedValuelessSymbol } from './canonical-utils.js';
 import { isForwardCallReference } from './forward-call-reference.js';
 import {
@@ -19848,7 +19849,9 @@ function mapsAsPointList(
   const slot = plan.at(i);
   if (!slot.mappable || slot.elements === undefined) return false;
   if (isTuple(x)) return false;
-  if (isFunction(x, 'List') && x.nops === 0) return true;
+  // An indexed parameter (`isIndexReadTuple()`) takes the empty list whole.
+  if (isFunction(x, 'List') && x.nops === 0)
+    return !isIndexReadTuple(slot.elements);
   // A collection whose length is not known yet (a lazy `Map` over
   // `Range(0, n)` with `n` unbound) is mapped too: the map is then lazy
   // (`lazyBroadcastMapIfNeeded` in `setupDeclaredBroadcast`), as for a
@@ -19918,8 +19921,10 @@ function pointListOperandOfDescriptor(d: OperandDescriptor): PointListOperand {
  * such a call from the body (`wholeBoundPointArgumentResult`), with the
  * same test. Any other call of
  * such a function is typed by the point-list map, on both routes: with
- * `h := p ↦ p[1] + p[2]`, `h` over a `list<tuple<number, number>>` is a
- * `list<number>` (ROADMAP CE-488).
+ * `h := ((a, b)) ↦ a + b`, `h` over a `list<tuple<number, number>>` is a
+ * `list<number>` (ROADMAP CE-488). A tuple that only index reads made
+ * (`p ↦ p[1] + p[2]`) does not map over a list of points
+ * (`mapsOverPoints()`, `collection-utils.ts`): the list is bound whole.
  */
 function inferredPointCallBindsWhole(
   binding: BoxedDefinition,

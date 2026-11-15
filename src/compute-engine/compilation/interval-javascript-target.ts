@@ -229,6 +229,11 @@ import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 // target defined it. That made `Add(toString, 1)` refuse to compile as a
 // bogus "built-in operator with no fixed arity" instead of compiling
 // `toString` as an ordinary free symbol.
+/** The bases of the `At` reads that are themselves the base of another
+ * `At` (`b` in `At(At(b, i), j)`), recorded by the outer read before it
+ * compiles its base. */
+const AT_BASE_OPERANDS = new WeakSet<Expression>();
+
 const INTERVAL_JAVASCRIPT_OPERATORS: CompiledOperators = {
   __proto__: null as never,
   // We use high precedence since these become function calls
@@ -3407,6 +3412,29 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `number (its type is \`${coll.type.toString()}\`), and the interval ` +
           `target's value is a numeric interval.`
       );
+    // The same for a list whose elements are points or lists, when the read
+    // is used as a value (`L[1] + L[2]` with `L: list<tuple<real, real>>`):
+    // `_IA.at` answers `entire` for a nested element, one interval where the
+    // interpreter gives a point or a row. A read that is the base of another
+    // `At` (`M[1][2]`, the chained form of `M[1, 2]`) is not a value: the
+    // outer read selects a number, and `entire` encloses it.
+    const element =
+      typeof baseType !== 'string' &&
+      baseType.kind !== 'tuple' &&
+      !AT_BASE_OPERANDS.has(coll)
+        ? collectionElementType(baseType)
+        : undefined;
+    if (
+      element !== undefined &&
+      element !== 'unknown' &&
+      element !== 'any' &&
+      !isSubtype(element, 'number')
+    )
+      throw new Error(
+        `Could not compile \`At\`: an element of the base is not a number ` +
+          `(its type is \`${coll.type.toString()}\`), and the interval ` +
+          `target's value is a numeric interval.`
+      );
     // A COLLECTION index is a gather or a boolean mask, whose result is itself
     // a collection — one element per index entry. This target has no lowering
     // that builds such a per-entry selection at run time (a collection-valued
@@ -3484,11 +3512,21 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         }
       }
     }
-    return `_IA.at(${compileIntervalCollectionOperand(
-      coll,
-      compile,
-      target
-    )}, ${indexCode})`;
+    // An inner read `At(b, i)` that is this base is read through, not as a
+    // value (see the element guard above).
+    // The mark holds while the inner read is compiled: the same base read
+    // elsewhere as a value is not let through.
+    const inner = isFunction(coll, 'At') ? coll.op1 : undefined;
+    if (inner !== undefined) AT_BASE_OPERANDS.add(inner);
+    try {
+      return `_IA.at(${compileIntervalCollectionOperand(
+        coll,
+        compile,
+        target
+      )}, ${indexCode})`;
+    } finally {
+      if (inner !== undefined) AT_BASE_OPERANDS.delete(inner);
+    }
   },
 
   // Point coordinates. The operand must be a SINGLE point — see

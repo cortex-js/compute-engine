@@ -226,14 +226,16 @@ describe('A PARTIAL APPLICATION WHOSE BODY IS AN ERROR IS A FUNCTION', () => {
     );
   });
 
-  test('the point-list map before the partial application stays', () => {
+  test('a list of points is bound whole by the partial application', () => {
+    // The parameter `a` is read by index, so it takes the list whole (user
+    // decision 2026-11-14): one function of `t`.
     const call = ce.parse('h([(1, 2), (3, 4)])');
-    expect(call.type.toString()).toBe('list<(t: unknown) -> number>');
+    expect(call.type.toString()).toBe('(t: unknown) -> number');
     expect(call.evaluate().toString()).toBe(
-      '[(_) => Apply((a, t) => t + At(a, 1) + At(a, 2), (1, 2), _),(_) => Apply((a, t) => t + At(a, 1) + At(a, 2), (3, 4), _)]'
+      '(_) => Apply((a, t) => t + At(a, 1) + At(a, 2), [(1, 2),(3, 4)], _)'
     );
     expect(derived(ce, 'h', ['list<tuple<integer, integer>>'])).toBe(
-      'list<(t: unknown) -> number>'
+      '(t: unknown) -> number'
     );
   });
 

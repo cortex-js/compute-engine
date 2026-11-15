@@ -1,14 +1,13 @@
 /**
- * ROADMAP CE-35: a component read of a tuple local did not type the
- * parameter it holds.
+ * ROADMAP CE-35 made a component read of a tuple local type the parameter
+ * it holds: in `g(s) = do { let q = (s, 0); take(q[1], 2) }`, the read
+ * `q[1]` narrowed `s` to a list, and `g([1, 2, 3])` took the list whole.
  *
- * `g(s) = do { let q = (s, 0); take(q[1], 2) }` applied to `[1, 2, 3]` gave
- * element-wise `incompatible-type` errors: the read `q[1]` did not say that
- * `s` is a list, so `s` kept a scalar parameter type and the call mapped
- * over its argument. A destructuring `let (a, b) = (s, 0)` already made `a`
- * an alias of `s`. The `let` now remembers the tuple literal, and a read of
- * the local at a literal index narrows the symbol at that position
- * (`narrowTupleInitializerComponent`, `library/collections.ts`).
+ * Since the user decision of 2026-11-14 a copy of a parameter into a local
+ * (`let q = s`, `let q = (s, 0)`, `let (a, b) = (s, 0)`) is not a use of the
+ * parameter: only a direct use decides whether a list argument is taken
+ * whole. These programs are applied to each element of the list, and a
+ * parameter declared `list` takes it whole.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
@@ -23,28 +22,26 @@ describe('A COMPONENT READ OF A TUPLE LOCAL (CE-35)', () => {
   test.each([
     ['g(s) = do { let q = (s, 0); take(q[1], 2) }'],
     ['g(s) = do { let q = (0, s); take(q[2], 2) }'],
-    // A negative index counts from the end.
     ['g(s) = do { let q = (0, s); take(q[-1], 2) }'],
-    // The destructuring form, for reference.
     ['g(s) = do { let (a, b) = (s, 0); take(a, 2) }'],
-  ])('%s binds a list argument whole', (definition) => {
+  ])('%s is applied to each element of a list', (definition) => {
     const { value, signature } = run(`${definition}\ng([1, 2, 3])`);
-    expect(value).toBe('[1,2]');
-    expect(signature.startsWith('(s: indexed_collection<any>) ->')).toBe(true);
+    expect(value).toMatch(/^\[Error\(ErrorCode\("incompatible-type"/);
+    expect(signature.startsWith('(s: unknown) ->')).toBe(true);
   });
 
-  test('a numeric use of the component keeps a scalar parameter', () => {
-    const { value, signature } = run(
+  test.each([
+    ['g(s: list) = do { let q = (s, 0); take(q[1], 2) }'],
+    ['g(s: list) = do { let (a, b) = (s, 0); take(a, 2) }'],
+  ])('%s takes a list argument whole', (definition) => {
+    const { value } = run(`${definition}\ng([1, 2, 3])`);
+    expect(value).toBe('[1,2]');
+  });
+
+  test('a numeric use of the component maps over a list', () => {
+    const { value } = run(
       'g(s) = do { let q = (s, 0); q[1] + 1 }\ng([1, 2, 3])'
     );
     expect(value).toBe('[2,3,4]');
-    expect(signature).toBe('(s: unknown) -> number');
-  });
-
-  test('an assignment to the local before the read ends the alias', () => {
-    const { signature } = run(
-      'g(s) = do { let q = (s, 0); q = (1, 2); take(q[1], 2) }'
-    );
-    expect(signature.startsWith('(s: unknown) ->')).toBe(true);
   });
 });

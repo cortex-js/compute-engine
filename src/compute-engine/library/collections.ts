@@ -6410,59 +6410,6 @@ function parameterIndexReadType(
 }
 
 /**
- * When `xs` is a valueless block local that an untyped `let` initialized
- * from a tuple literal (`let q = (s, 0)`, recorded as `_initializerAlias` by
- * the `Declare` canonical handler, `library/core.ts`), and `index` is a
- * literal integer, the requirement `r` on the read `xs[index]` is also a
- * requirement on the component of the literal at that position, when that
- * component is an untyped, valueless symbol (a bare parameter `s`). That
- * symbol is narrowed with `r`, as a use of the leaf `a` of
- * `let (a, b) = (s, 0)` narrows `s`.
- *
- * Without this, in `g(s) = do { let q = (s, 0); take(q[1], 2) }` the use of
- * `q[1]` as a list did not reach `s`, which kept a scalar parameter type,
- * and `g([1, 2, 3])` applied `g` to each element of the list (CE-35).
- *
- * The write goes through the ordinary inference path (`_infer`), with the
- * guards of the alias of a bare symbol initializer
- * (`BoxedSymbol._inferWithoutFacts`, `boxed-symbol.ts`). An assignment to
- * the local clears the alias (`joinAssignmentEvidence`, `library/core.ts`).
- */
-function narrowTupleInitializerComponent(
-  xs: Expression,
-  index: Expression,
-  r: Type
-): void {
-  if (!isSymbol(xs)) return;
-  const binding = xs.engine.lookupDefinition(xs.symbol);
-  if (binding === undefined || !('value' in binding)) return;
-  const local = binding.value;
-  if (local !== xs.valueDefinition || local.value !== undefined) return;
-  const literal = local._initializerAlias;
-  if (!isFunction(literal, 'Tuple')) return;
-  if (!isSubtype(index.type.type, 'integer')) return;
-  let position = toInteger(index);
-  if (position === null) return;
-  // A negative index counts from the end, as for `At`: `q[-1]` is the last
-  // component.
-  if (position < 0) position = literal.nops + position + 1;
-  if (position < 1 || position > literal.nops) return;
-  const source = literal.ops[position - 1];
-  if (!isSymbol(source)) return;
-  const def = source.valueDefinition;
-  if (
-    def === undefined ||
-    !def.inferredType ||
-    def.isConstant ||
-    def.value !== undefined ||
-    !def.type.isUnknown ||
-    xs.engine._staticAssignmentEvidence?.get(def) !== undefined
-  )
-    return;
-  source._infer(() => r, 'narrow');
-}
-
-/**
  * `At`'s side of the same contract. The base learns `indexed_collection<r>`
  * under a numeric index, `dictionary<r>` under a string index, and the
  * two-arm shape its validation already wrote (`dictionary<r> |
@@ -6497,7 +6444,6 @@ function elementRequirementOfAt(
   if (ops.length !== 2) return undefined;
   const [xs, index] = ops;
   if (isRingConstant(xs)) return undefined;
-  narrowTupleInitializerComponent(xs, index, r);
   const indexType = index.type.type;
   // The index kind selects the arm when it is provable: a numeric index or a
   // gather/mask reads an indexed collection, a string key reads a keyed one.

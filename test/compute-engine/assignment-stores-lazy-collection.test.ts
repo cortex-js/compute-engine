@@ -60,7 +60,7 @@ describe('a variable assigned a lazy collection over itself', () => {
   test('in a function body, over a parameter', () => {
     expect(
       run(
-        'function h(a) { let out = a\n out = filter(out, c => c > 1)\n length(out) }\nh([1, 2, 3])'
+        'function h(a: list) { let out = a\n out = filter(out, c => c > 1)\n length(out) }\nh([1, 2, 3])'
       )
     ).toBe('2');
   });

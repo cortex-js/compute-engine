@@ -107,14 +107,15 @@ export function tryCompilePointListCall(
   // (see `dispatch` below). ROADMAP CE-412.
   const cells: boolean[] = [];
   // A parameter of a function with no signature of its own (`w` declared
-  // `function`, then assigned `p ↦ p[1] + p[2]`) has no declared type. The
-  // interpreter reads its slot from the signature that the body of the
-  // assigned literal infers (`pointListParamSlots()` in
-  // `boxed-function.ts`): when that type is a point, it maps a list of
-  // points one point at a time, so `w([(1, 2), (3, 4)])` is `[3, 7]`. The
-  // inferred point is read here the same way. Without it, the call was
-  // inlined with the list in place of `p`, and `p[1] + p[2]` added the two
-  // points: `[4, 6]`.
+  // `function`, then assigned a literal) has no declared type. The
+  // interpreter reads its slot from the signature of the assigned literal
+  // (`pointListParamSlots()` in `boxed-function.ts`): when that type is a
+  // point, it maps a list of points one point at a time, so with
+  // `w := (p: tuple<number, number>) ↦ p[1] + p[2]`, `w([(1, 2), (3, 4)])`
+  // is `[3, 7]`. The point is read here the same way. A tuple that only
+  // index reads made (`p ↦ p[1] + p[2]`) does not map (`mapsOverPoints()`,
+  // `collection-utils.ts`): the list is taken whole, and the value is
+  // `(4, 6)`.
   const literal = userFunctionLiteral(engine, h);
   const params = args.map((_a, i) => {
     let pt = userFunctionParamType(engine, h, i);

@@ -4,11 +4,11 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 //
 // A leaf of a destructuring `let` whose initializer is a tuple literal
 // takes the component at its position: in `let (a, b) = (s, 0)`, `a` holds
-// the value of the parameter `s`. A use of `a` as a list (`take(a, 2)`)
-// then types `s` as a collection, as `let a = s` does, so a call with a list
-// argument binds the list whole instead of applying the function to each
-// element (`recordPatternAliases`, the `Declare` canonical handler in
-// src/compute-engine/library/core.ts).
+// the value of the parameter `s`. A copy of a parameter into a local is not
+// a use of the parameter (user decision 2026-11-14): a use of `a` as a list
+// (`take(a, 2)`) says nothing about `s`, as `let a = s` does not, so a call
+// with a list argument is applied to each element. A parameter declared
+// `list` takes it whole.
 //
 
 function run(source: string): { value: string; signature: string } {
@@ -21,17 +21,25 @@ describe('A DESTRUCTURED PARAMETER IS AN ALIAS OF THE PARAMETER', () => {
   test.each([
     ['g(s) = do { let (a, b) = (s, 0); take(a, 2) }'],
     ['g(s) = do { let (a, (b, c)) = (0, (1, s)); take(c, 2) }'],
-    // The same function with a plain alias, for reference.
+    // The same function with a plain copy, for reference.
     ['g(s) = do { let a = s; take(a, 2) }'],
-  ])('%s binds a list argument whole', (definition) => {
+  ])('%s is applied to each element of a list', (definition) => {
     const { value, signature } = run(`${definition}\ng([1, 2, 3])`);
-    expect(value).toBe('[1,2]');
-    expect(signature.startsWith('(s: indexed_collection<any>) ->')).toBe(true);
+    expect(value).toMatch(/^\[Error\(ErrorCode\("incompatible-type"/);
+    expect(signature.startsWith('(s: unknown) ->')).toBe(true);
   });
 
-  test('an infinite lazy argument is bound whole', () => {
+  test.each([
+    ['g(s: list) = do { let (a, b) = (s, 0); take(a, 2) }'],
+    ['g(s: list) = do { let (a, (b, c)) = (0, (1, s)); take(c, 2) }'],
+  ])('%s binds a list argument whole', (definition) => {
+    const { value } = run(`${definition}\ng([1, 2, 3])`);
+    expect(value).toBe('[1,2]');
+  });
+
+  test('an infinite lazy argument is bound whole by a declared parameter', () => {
     const { value } = run(
-      'let t = 1..oo\ng(s) = do { let (t, u) = (s, 0); take(t, 2) }\ng(map(x => x * 2, t))'
+      'let t = 1..oo\ng(s: list) = do { let (t, u) = (s, 0); take(t, 2) }\ng(map(x => x * 2, t))'
     );
     expect(value).toBe('[2,4]');
   });

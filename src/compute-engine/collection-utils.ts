@@ -92,6 +92,7 @@ import {
   hasInferredType as hasInferredNameType,
 } from './boxed-expression/type-guards.js';
 import { restrictionParts } from './boxed-expression/conditional-value.js';
+import { isIndexReadTuple } from './boxed-expression/index-read-tuple.js';
 import { optionalParameterTarget } from './boxed-expression/function-literal.js';
 import {
   callbackParameterNames,
@@ -6683,6 +6684,18 @@ export function isPointParameterType(param: Type): boolean {
 }
 
 /**
+ * Whether a call maps over a list of points at the parameter of type
+ * `param`: a point parameter (`isPointParameterType()`), except a tuple that
+ * only the index reads of a bare parameter made (`h(v) = v[1] + v[2]`,
+ * `isIndexReadTuple()`). An indexed parameter takes its argument whole
+ * (user decision 2026-11-14), so `h` given a list of points reads the list
+ * by index; a written `v: tuple<number, number>` maps.
+ */
+function mapsOverPoints(param: Type): boolean {
+  return isPointParameterType(param) && !isIndexReadTuple(param);
+}
+
+/**
  * Whether a point of type `t` is accepted at the user-function parameter
  * declared as the point type `param`, by the rule that the argument check
  * uses for one point given as the whole argument: `t` is a subtype of
@@ -6810,7 +6823,7 @@ export function isPointListArgumentType(
   param: Type,
   seen?: AliasDescent
 ): boolean {
-  if (!isPointParameterType(param)) return false;
+  if (!mapsOverPoints(param)) return false;
   const stripped = stripMissingFromType(arg);
   const a = resolveTypeAlias(stripped);
   if (typeof a === 'string') return false;
@@ -6863,7 +6876,7 @@ export function isPointListArgumentType(
  * `k([])` was typed `R` (ROADMAP CE-506).
  */
 export function isEmptyListArgumentType(arg: Type, param: Type): boolean {
-  if (!isPointParameterType(param)) return false;
+  if (!mapsOverPoints(param)) return false;
   const t = resolveTypeAlias(stripMissingFromType(arg));
   if (typeof t === 'string' || t.kind !== 'list' || t.elements !== 'never')
     return false;
@@ -6911,7 +6924,7 @@ export function isEmptyListArgumentType(arg: Type, param: Type): boolean {
  * (`pointArgumentMayMixDepths`, ROADMAP CE-505).
  */
 export function isPointTensorArgumentType(arg: Type, param: Type): boolean {
-  if (!isPointParameterType(param)) return false;
+  if (!mapsOverPoints(param)) return false;
   if (pointTensorOf(arg, param, 0)) return true;
   if (pointArmsOfMixedRanks(arg, param)) return true;
   return isRecursivePointNesting(arg, param, undefined);
@@ -6950,7 +6963,7 @@ function isRecursivePointNesting(
  * and the compiled call gives `NaN` for such a value (ROADMAP CE-505).
  */
 export function pointArgumentMayMixDepths(arg: Type, param: Type): boolean {
-  if (!isPointParameterType(param)) return false;
+  if (!mapsOverPoints(param)) return false;
   const state = { cut: false, leaf: false, mixed: false };
   return (
     recursivePointNesting(arg, param, 0, undefined, state) === true &&
@@ -7297,7 +7310,7 @@ export function isPointOrPointListArgumentType(
   arg: Type,
   param: Type
 ): boolean {
-  if (!isPointParameterType(param)) return false;
+  if (!mapsOverPoints(param)) return false;
   const stripped = stripMissingFromType(arg);
   const a = resolveTypeAlias(stripped);
   if (typeof a === 'string') return false;

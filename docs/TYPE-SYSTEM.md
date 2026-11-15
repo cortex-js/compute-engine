@@ -1601,7 +1601,9 @@ the environment of the trial, which is thrown away with it. When the boxing
 of the literal ends, the type that a read then gives is written on the
 definition once, marked as inferred, with the use that last changed it as
 its provenance: `a ↦ a[1] + a[2]` is typed
-`(a: tuple<number, number>) -> number`. That write has no rollback record:
+`(a: tuple<number, number>) -> number`. This tuple is not a point
+parameter: a list argument is bound whole, not mapped point by point
+(`BROADCAST-MODEL.md`). The write on the definition has no rollback record:
 the definition was made by this boxing. When it changes a type, one state
 event follows it, because a type cached on another node during the boxing
 can depend on the type of the parameter before the literal was complete

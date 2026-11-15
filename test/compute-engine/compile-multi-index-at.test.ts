@@ -263,7 +263,13 @@ describe('Python: an index that is a collection declines', () => {
 });
 
 describe('The interval target compiles a chained At', () => {
-  test.each(BASES.map(([t]) => [t]))('%s', (type) => {
+  // `R[1, 2]` of a rank-3 tensor is a row, which an interval cannot hold:
+  // `_IA.at` answered `entire` where the interpreter gives `[3, 4]`. The
+  // read declines (`At` on interval-js declines a read of a list or a point
+  // that is used as a value).
+  test.each(
+    BASES.map(([t]) => [t]).filter(([t]) => t !== 'tensor<real^2x2x2>')
+  )('%s', (type) => {
     const ce = engine(type);
     const r = compile(ce.box(['At', 'R', 1, 2] as never), {
       to: 'interval-js',
@@ -271,6 +277,20 @@ describe('The interval target compiles a chained At', () => {
     })!;
     expect(r.success).toBe(true);
     expect(r.code).toContain('_IA.at(_IA.at(_.R, _k1), _k2)');
+  });
+
+  test('a read of a row of a rank-3 tensor declines', () => {
+    const ce = engine('tensor<real^2x2x2>');
+    let success: boolean;
+    try {
+      success = compile(ce.box(['At', 'R', 1, 2] as never), {
+        to: 'interval-js',
+        fallback: false,
+      })!.success;
+    } catch {
+      success = false;
+    }
+    expect(success).toBe(false);
   });
 });
 

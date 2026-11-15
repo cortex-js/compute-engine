@@ -1,4 +1,5 @@
 import { callableBindingInContext } from './binders.js';
+import { isIndexReadTuple } from './index-read-tuple.js';
 import { isForwardCallReference } from './forward-call-reference.js';
 import type {
   Expression,
@@ -885,9 +886,10 @@ export function inferredPointSignature(
  * When the signature was INFERRED and has a point parameter
  * (`inferredPointSignature`), the evaluation runs the point-list map before
  * it curries: an argument that maps (`inferredArgumentMaps`) gives a list
- * of functions. With `h(a, t) := a[1] + a[2] + t`, `h([(1, 2), (3, 4)])` is
- * `[t ↦ t + 3, t ↦ t + 7]`, a `list<(unknown) -> number>`, and
- * `h([1, 2])` is the function `t ↦ t + 3`. A list at a scalar parameter is
+ * of functions. With `h(a, t) := a[1] + a[2] + t`, `h([1, 2])` is the
+ * function `t ↦ t + 3`, and `h([(1, 2), (3, 4)])` is one function too: a
+ * tuple that only index reads made does not map over a list of points
+ * (`mapsOverPoints()`, `collection-utils.ts`). A list at a scalar parameter is
  * mapped to its cells, so when its elements may be lists the depth is not
  * known and the type is `list<any>`. An argument that may be a point or a
  * list of points gives `curried | list<curried>`. A DECLARED signature is a
@@ -1057,8 +1059,9 @@ export function inferredArgumentMaps(
  * - a list whose elements are numbers, or of unknown type (`[1, 2]`,
  *   `[x, x]` with `x` of unknown type): the body reads it by index as a
  *   point;
- * - a list of points, or an argument that may be a point or a list of
- *   points: the call maps over the points (`inferredArgumentMaps`);
+ * - at a point parameter that is not a tuple of index reads, a list of
+ *   points, or an argument that may be a point or a list of points: the
+ *   call maps over the points (`inferredArgumentMaps`);
  * - an argument of type `unknown`, `any`, `error` or `never`: nothing in
  *   the type shows that the signature does not describe it.
  *
@@ -1184,17 +1187,17 @@ function indexedElementType(t: Type): Type | undefined {
  *   `f(3, False)` is `42`.
  * - A list whose elements may be numbers (`list<any>`, `list<number |
  *   list<number>>`) may be read as a point, so the signature result is
- *   joined to the type. A list whose elements may be points may be mapped
- *   over by the evaluation, which reads the type of the VALUE, so
- *   `list<R>` is joined to the type, with `R` the signature result.
+ *   joined to the type. At a point parameter that is not a tuple of index
+ *   reads, a list whose elements may be points may be mapped over by the
+ *   evaluation, which reads the type of the VALUE, so `list<R>` is joined
+ *   to the type, with `R` the signature result.
  * - When another argument makes the call map (`inferredArgumentMaps`), the
  *   type is the list of the results of one call: the type derived from
  *   the body with each mapped argument typed as one of its elements (a
  *   point at a point parameter, an element of the list at a scalar
  *   parameter), and each other argument typed as itself. With
  *   `h(a, t) := a[1] + a[2] + t`, `h([[1, 2], [3, 4]], [10, 20])` is
- *   `[[14, 16], [24, 26]]`, a `list<vector<integer^2>>`, and `h(P, 1)`
- *   with `P` a list of points is a `list<number>`. When the body gives no
+ *   `[[14, 16], [24, 26]]`, a `list<vector<integer^2>>`. When the body gives no
  *   type, each element is `any` if an argument is bound whole, else the
  *   signature result. An element at a scalar parameter that may be a list
  *   is mapped to its cells, at a depth that the type does not say, and a
@@ -1248,7 +1251,8 @@ function inferredPointCallType(
     if (element === undefined) return;
     const e = stripMissingFromType(element);
     if (!provablyDisjoint(e, 'number')) numbers = true;
-    if (!provablyDisjoint(e, slots[i])) points += 1;
+    if (!provablyDisjoint(e, slots[i]) && !isIndexReadTuple(slots[i]))
+      points += 1;
   });
   // With two such arguments, or one beside a mapped argument, the call may
   // map over one of them and bind the other whole, and no type above

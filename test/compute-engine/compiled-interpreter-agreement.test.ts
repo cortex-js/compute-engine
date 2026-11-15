@@ -18,9 +18,10 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
  *   `incompatible-type` error that the static type of the call does not
  *   show, and the compiled value is unspecified.
  * - A parameter that reaches a whole-collection operator through an
- *   element-wise operator or a local alias binds a list whole on both
- *   routes (`mean(xs^2)` over `[1, 2, 3]` is `14/3`, not `[1, 4, 9]`), and
- *   so does a parameter declared `collection<any> | number`.
+ *   element-wise operator binds a list whole on both routes (`mean(xs^2)`
+ *   over `[1, 2, 3]` is `14/3`, not `[1, 4, 9]`), and so does a parameter
+ *   declared `collection<any> | number`. A local copy of the parameter is
+ *   not a use of it: the call is applied to each element.
  */
 
 const run = (
@@ -350,19 +351,21 @@ describe('A PARAMETER THAT REACHES A WHOLE-COLLECTION OPERATOR INDIRECTLY', () =
       '14',
       '14',
     ],
+    // A local copy is not a use of the parameter (user decision
+    // 2026-11-14): the call is applied to each element.
     [
-      'through a local alias',
+      'not through a local copy',
       'function a5(xs) { let ys = xs; mean(ys) }',
       'a5',
-      '2',
-      '2',
+      '[1,2,3]',
+      '[1,2,3]',
     ],
     [
-      'through an alias of an element-wise result',
+      'not through a local holding an element-wise result',
       'function a5b(xs) { let ys = xs^2; sum(ys) }',
       'a5b',
-      '14',
-      '14',
+      '[1,4,9]',
+      'declined',
     ],
     ['Max of the parameter', 'function a3(xs) { max(xs) }', 'a3', '3', '3'],
     ['Max of the squares', 'function a8(xs) { max(xs^2) }', 'a8', '9', '9'],
@@ -412,15 +415,6 @@ describe('A PARAMETER THAT REACHES A WHOLE-COLLECTION OPERATOR INDIRECTLY', () =
       '[1,2,3]',
       '[1,2,3]',
     ]);
-  });
-
-  test('a local overwritten after the alias no longer holds the parameter', () => {
-    expect(
-      executeEpsil(
-        ce,
-        'function o(xs) { let ys = xs; ys = 0; mean(ys) }\no([1, 2, 3])'
-      ).value.toString()
-    ).toBe('[0,0,0]');
   });
 
   test("an index of a Sum with the parameter's name is not the parameter", () => {

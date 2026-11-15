@@ -1698,6 +1698,30 @@ export function tryCompileUserFunction(
   }
   if (specialized !== undefined) return specialized;
 
+  // A list whose elements are not numbers (a list of points) at a parameter
+  // whose tuple type only index reads made is bound whole (user decision
+  // 2026-11-14), and the generic definition reads that parameter as one
+  // point. The copy for the list type, when it compiles, took the call
+  // above; when it does not (interval-js), the call declines.
+  if (literal !== undefined) {
+    const at = args.findIndex((a, i) => {
+      const pt =
+        userFunctionParamType(engine, h, i) ??
+        signatureParamType(literal.type.type, i);
+      if (pt === undefined || !isIndexReadTuple(pt) || isTuple(a))
+        return false;
+      const e = collectionElementType(a.type.type);
+      return e !== undefined && e !== 'unknown' && !isSubtype(e, 'number');
+    });
+    if (at >= 0)
+      throw new Error(
+        `Could not compile a call of \`${h}\`: argument ${at + 1} is a list ` +
+          `whose elements are not numbers, at a parameter that the body reads ` +
+          `by index. The parameter takes the list whole, and the definition ` +
+          `of \`${h}\` reads it as one point.`
+      );
+  }
+
   // One point named through an alias, a union with `missing` or a nominal
   // type whose definition is one point (`absentPointType()`), at a
   // parameter with no declared type, that the copy for one point above

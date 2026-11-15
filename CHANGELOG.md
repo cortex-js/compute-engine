@@ -5,6 +5,27 @@
 - The field `epoch` of `TypeProvenanceEntry` is removed. No part of the
   engine read it. The entries are reached through the internal field
   `_typeProvenance` of a definition.
+- **A copy of a parameter into a local is no longer a use of the
+  parameter.** Whether a function with an untyped parameter takes a list
+  argument whole or is applied to each element is decided by the direct uses
+  of the parameter only. `function h(xs) { let ys = xs; mean(ys) }` with
+  `h([1, 2, 3])` gives `[1, 2, 3]`, where it gave `2`; the same holds for a
+  component of a tuple local (`let q = (s, 0)`, then `take(q[1], 2)`) and a
+  leaf of a destructuring (`let (a, b) = (s, 0)`). Declare the parameter to
+  take the list whole: `function h(xs: list) { … }`.
+- **A parameter with no written type that the body reads by index takes a
+  list argument whole.** `h(v) = v[1] + v[2]` is still typed
+  `(v: tuple<number, number>) -> number`, but that type no longer makes a
+  call over a list of points one call per point: `h([(1, 2), (3, 4)])` is
+  `(4, 6)` (the first point plus the second), where it was `[3, 7]`. The
+  direct application `Apply(v ↦ v[1] + v[2], [(1, 2), (3, 4)])` already gave
+  `(4, 6)`, and both now agree. Compiled JavaScript gives `[4, 6]`, the
+  same point as an array. On `interval-js` the call declines, as `L[1]` does
+  that is a row or a point and is used as a value (it gave the whole real
+  line); GLSL declines it too. A list at another
+  parameter is still applied element by element, as before. To apply the
+  function to each point, declare the parameter:
+  `h2(v: tuple<number, number>) = v[1] + v[2]` gives `[3, 7]`.
 
 ### Improvements
 

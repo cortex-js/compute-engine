@@ -4200,12 +4200,6 @@ function joinAssignmentEvidence(
   )
     return;
   const target = def.value;
-  // Any assignment ends the aliasing of an initializer (`let out = acc`):
-  // after `out = g(x)` the local no longer holds `acc`'s value, whatever
-  // the type of `g(x)` (an `unknown`-typed value records no evidence, so the
-  // type alone cannot tell). The `let` that records the alias calls this
-  // first and sets the alias after it.
-  target._initializerAlias = undefined;
   // A block local whose first value has the type `unknown` keeps the type
   // `unknown`: no later value narrows it (`markOpenLocal()`).
   if (isOpenLocal(target)) return;
@@ -8703,7 +8697,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               { currentScopeOnly: true },
               widened
             );
-            recordPatternAliases(symbolExpr, value);
             return;
           }
           if (!isSymbol(symbolExpr)) return;
@@ -8717,63 +8710,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             },
             { currentScopeOnly: true }
           );
-          recordAlias(symbolExpr.symbol, value);
-        };
-
-        // An initializer that is a bare untyped symbol (`let out = acc`
-        // with `acc` a bare parameter) records no evidence, since its type
-        // is `unknown`. The local remembers it instead, so that a use that
-        // narrows the local before any assignment to it narrows the
-        // initializer too (`_initializerAlias`, read by
-        // `BoxedSymbol._inferWithoutFacts` in `boxed-symbol.ts`; every later
-        // assignment to the local clears it, see `joinAssignmentEvidence`).
-        //
-        // An initializer that is a tuple literal with such a symbol as a
-        // component (`let q = (s, 0)`) is remembered whole: a component read
-        // of the local at a literal index (`q[1]`) that narrows the read
-        // narrows the symbol at that position too (`elementRequirementOfAt`,
-        // `library/collections.ts`), as a destructuring `let (a, b) = (s, 0)`
-        // does for its leaf `a` (CE-35).
-        const isAliasableSymbol = (value: Expression): boolean => {
-          if (!isSymbol(value)) return false;
-          const source = value.valueDefinition;
-          return (
-            source !== undefined &&
-            source.inferredType &&
-            !source.isConstant &&
-            source.value === undefined &&
-            source.type.isUnknown
-          );
-        };
-        const recordAlias = (name: string, value: Expression): void => {
-          if (
-            !isAliasableSymbol(value) &&
-            !(isFunction(value, 'Tuple') && value.ops.some(isAliasableSymbol))
-          )
-            return;
-          const local = ce.context.lexicalScope.bindings.get(name);
-          if (local !== undefined && isValueDef(local))
-            local.value._initializerAlias = value;
-        };
-
-        // A destructuring `let (a, b) = (s, 0)` with a tuple literal of the
-        // same arity as its initializer gives each leaf the component at
-        // its position: the leaf `a` is an alias of `s`, as `let a = s` is.
-        // Without this, a use of `a` as a list (`take(a, 2)`) did not reach
-        // the parameter `s`, so `s` kept a scalar slot and a call with a
-        // list argument was applied to each element of the list.
-        const recordPatternAliases = (
-          pattern: Expression,
-          value: Expression
-        ): void => {
-          if (!isFunction(pattern, 'Tuple') || !isFunction(value, 'Tuple'))
-            return;
-          if (pattern.nops !== value.nops) return;
-          for (let i = 0; i < pattern.nops; i++) {
-            const leaf = pattern.ops[i];
-            if (isSymbol(leaf)) recordAlias(leaf.symbol, value.ops[i]);
-            else recordPatternAliases(leaf, value.ops[i]);
-          }
         };
 
         // A constant whose value is a constant default (an Epsil

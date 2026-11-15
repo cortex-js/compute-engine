@@ -4,6 +4,11 @@ import { isSubtype } from '../../src/common/type/subtype';
 import type { Type } from '../../src/common/type/types';
 import { deriveApplicationType } from '../../src/compute-engine/boxed-expression/derive-application-type';
 import { describeType } from '../../src/compute-engine/boxed-expression/operand-descriptor';
+import {
+  isIndexReadTuple,
+  markIndexReadTuple,
+} from '../../src/compute-engine/boxed-expression/index-read-tuple';
+import { internType } from '../../src/common/type/intern';
 
 /**
  * A call of a user function whose parameter type was INFERRED from index
@@ -167,28 +172,31 @@ describe('An argument at an inferred point parameter that may hold lists', () =>
     ce.declare('A', 'list<any>');
     ce.assign('A', ce.box(['List', ['List', 1, 2], ['List', 3, 4]]));
     check(ce, ['d', 'A'], '[4,6]');
-    // The value of `A` is a list of points: the call maps over them.
+    // The value of `A` is a list of points: an indexed parameter takes it
+    // whole (user decision 2026-11-14), the first point plus the second.
     ce.assign('A', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
-    check(ce, ['d', 'A'], '[3,7]');
+    check(ce, ['d', 'A'], '(4, 6)');
   });
 
-  test('a list of points maps the call', () => {
+  test('a list of points is bound whole', () => {
+    // An indexed parameter takes its argument whole (user decision
+    // 2026-11-14): the value is the first point plus the second.
     const ce = new ComputeEngine();
     ce.parse('d(a) := a[1] + a[2]').evaluate();
     ce.declare('P', 'list<tuple<number, number>>');
     ce.assign('P', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
-    check(ce, ['d', 'P'], '[3,7]');
-    expect(ce.box(['d', 'P']).type.toString()).toBe('list<number>');
+    check(ce, ['d', 'P'], '(4, 6)');
+    expect(ce.box(['d', 'P']).type.toString()).toBe('tuple<number, number>');
     // Points whose coordinates are of unknown type, in a function literal.
     for (const [f, value] of [
-      [ce.parse('y \\mapsto d([(y, y), (y, 2y)])'), '[2,3]'],
+      [ce.parse('y \\mapsto d([(y, y), (y, 2y)])'), '(2, 3)'],
       [
         ce.box([
           'Function',
           ['d', ['List', ['Tuple', 'y', 'y'], ['Tuple', 'y', 'y']]],
           'y',
         ]),
-        '[2,2]',
+        '(2, 2)',
       ],
     ] as const) {
       const applied = ce.box(['Apply', f, 1]).evaluate();
@@ -196,8 +204,8 @@ describe('An argument at an inferred point parameter that may hold lists', () =>
       expect(valueFits(applied, resultOf(f.type.type))).toBe(true);
     }
     // A call in the body of a named function.
-    ce.parse('Q(x) := d(P) + x').evaluate();
-    check(ce, ['Q', 1], '[4,8]');
+    ce.parse('Q(x) := d(P) + (x, x)').evaluate();
+    check(ce, ['Q', 1], '(5, 7)');
   });
 
   test('another argument that may make the call map', () => {
@@ -292,8 +300,16 @@ describe('An argument at an inferred point parameter that may hold lists', () =>
     expect(
       ce.box(['h', ['List', 1, 2], ['List', 10, 20]]).type.toString()
     ).toBe('list<number>');
-    // A list of points at the point parameter maps the call.
-    check(ce, ['h', ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]], 10], '[13,17]');
+    // A list of points at the indexed parameter is bound whole (user
+    // decision 2026-11-14): the sum of the two points plus a number is an
+    // error, and the call is typed `error`.
+    const points = ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]];
+    check(
+      ce,
+      ['h', points, 10],
+      'Error(ErrorCode("incompatible-type", "tuple", "number"))'
+    );
+    expect(ce.box(['h', points, 10]).type.toString()).toBe('error');
   });
 
   test('a function held by a symbol declared `function`', () => {
@@ -397,13 +413,12 @@ describe('An inferred signature is not a contract', () => {
         expect(routes(ce, 'd', [['Tuple', 1, 2]]).type).toBe('number');
       });
 
-      test('a list of points maps the call', () => {
+      test('a list of points is bound whole', () => {
         const ce = new ComputeEngine();
         define(ce, how, 'd', D);
-        // Before, the derived route typed the call `number`.
         expect(routes(ce, 'd', [P])).toEqual({
-          value: '[3,7]',
-          type: 'list<number>',
+          value: '(4, 6)',
+          type: 'tuple<integer, integer>',
         });
       });
 
@@ -490,14 +505,12 @@ describe('An inferred signature is not a contract', () => {
         expect(
           ce.box(['Apply', ['h', ['List', 1, 2]], 10]).evaluate().json
         ).toBe(13);
-        // A list of points maps before the call is curried: the value is a
-        // list of functions. Before, the type was `list<number>` on the
-        // boxed route of an operator definition, and the function type on
-        // the other routes.
+        // A list of points is bound whole by the indexed parameter: the
+        // value is one function of the remaining parameter.
         expect(routes(ce, 'h', [P])).toEqual({
           value:
-            '[(_) => Apply((a, t) => t + At(a, 1) + At(a, 2), (1, 2), _),(_) => Apply((a, t) => t + At(a, 1) + At(a, 2), (3, 4), _)]',
-          type: 'list<(t: unknown) -> number>',
+            '(_) => Apply((a, t) => t + At(a, 1) + At(a, 2), [(1, 2),(3, 4)], _)',
+          type: '(t: unknown) -> number',
         });
       });
     });
@@ -563,5 +576,49 @@ describe('A point of another arity that the body reads whole, beside a mapped ar
       .box(['c', ['Tuple', 3, 2], ['List', 1, 2]] as any)
       .evaluate();
     expect(valueFits(value, t!)).toBe(true);
+  });
+});
+
+describe('The index-read origin of a tuple survives interning', () => {
+  // The tuple that index reads give a parameter is marked by its object
+  // (`markIndexReadTuple()`). A nested block that returns the parameter puts
+  // that object in the result type, which is interned; the interning used
+  // to make the marked object the shared one for its spelling, and an
+  // interned object reads as unmarked, so the list of points was mapped
+  // again. Now a copy is interned (`keepOwnIdentity()`).
+  const points = ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]];
+  const literal = [
+    'Function',
+    [
+      'Block',
+      ['Declare', 'total', 'unknown', ['Add', ['At', 'v', 1], ['At', 'v', 2]]],
+      ['Tuple', 'total', ['Block', 'v']],
+    ],
+    'v',
+  ];
+
+  test('the Apply route and the assigned route take the list whole', () => {
+    for (let i = 0; i < 2; i++) {
+      const ce = new ComputeEngine();
+      const f = ce.box(literal as never);
+      expect(ce.box(['Apply', f, points] as never).evaluate().toString()).toBe(
+        '((4, 6), [(1, 2),(3, 4)])'
+      );
+      ce.assign('g', f);
+      expect(ce.box(['g', points] as never).evaluate().toString()).toBe(
+        '((4, 6), [(1, 2),(3, 4)])'
+      );
+    }
+  });
+
+  test('a marked tuple interned first keeps its mark', () => {
+    const t = markIndexReadTuple({
+      kind: 'tuple',
+      elements: [{ type: 'string' }, { type: 'boolean' }, { type: 'string' }],
+    });
+    const shared = internType(t);
+    expect(shared).not.toBe(t);
+    expect(isIndexReadTuple(t)).toBe(true);
+    expect(isIndexReadTuple(shared)).toBe(false);
   });
 });

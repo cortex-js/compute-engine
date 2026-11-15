@@ -42,6 +42,22 @@ const interned = new WeakSet<object>();
 /** Node count of each interned composite, for the size bound. */
 const sizes = new WeakMap<object, number>();
 
+/** The objects that must keep their own identity: `internType` interns a
+ * copy of such an object, never the object itself (`keepOwnIdentity`). */
+const ownIdentity = new WeakSet<object>();
+
+/**
+ * Record that `t` carries facts by identity (a mark held in a `WeakSet`,
+ * such as the index-read origin of a tuple, `index-read-tuple.ts`), so
+ * `internType` interns a copy of it. Interning the object itself would make
+ * it the shared object for its spelling: the mark would then be dropped by
+ * a reader that refuses an interned object, or reach every type with that
+ * spelling.
+ */
+export function keepOwnIdentity(t: Type): void {
+  if (typeof t === 'object') ownIdentity.add(t);
+}
+
 /** Is `t` an object this module handed out? */
 export function isInternedType(t: Readonly<Type>): boolean {
   return typeof t === 'object' && interned.has(t);
@@ -62,6 +78,7 @@ export function internType(t: Type): Type {
   const hit = table.get(key);
   if (hit !== undefined) return hit;
 
+  if (ownIdentity.has(t)) t = copyNode(t);
   freezeNode(t);
   interned.add(t);
   sizes.set(t, size);
@@ -113,6 +130,14 @@ function flatSize(t: Exclude<Type, string>): number | undefined {
     default:
       return undefined;
   }
+}
+
+/** A copy of the node and of the containers it owns. */
+function copyNode(t: Exclude<Type, string>): Exclude<Type, string> {
+  if (t.kind === 'tuple')
+    return { ...t, elements: t.elements.map((e) => ({ ...e })) };
+  if (t.kind === 'record') return { ...t, elements: { ...t.elements } };
+  return { ...t };
 }
 
 /** Freeze the node and the containers it owns (the leaves are strings or

@@ -1054,8 +1054,7 @@ function excludesEveryScalar(t: Type): boolean {
  * use then broadcasts inside the body, as it does in the substituted body.
  *
  * A use is WHOLE only when all of these hold:
- * - The operand REACHES the parameter: it is the parameter itself, a local
- *   of the body assigned the parameter (`let ys = xs; mean(ys)`), or an
+ * - The operand REACHES the parameter: it is the parameter itself, or an
  *   application of an element-wise (`broadcastable`) operator with such an
  *   operand (`mean(xs^2)`, `variance(xs - c)`): with the list bound whole,
  *   the element-wise operator maps over it and the reducer reads the
@@ -1106,9 +1105,10 @@ function excludesEveryScalar(t: Type): boolean {
  * returns `undefined` for it and the declaration is the slot.
  *
  * Limitations:
- * - A parameter that reaches the operator through a destructuring, or
- *   through a local assigned AFTER the use that reads it, is not seen, and
- *   the function stays element-wise. A call to another user function is a
+ * - A copy of the parameter into a local is not a use of the parameter:
+ *   `function h(xs) { let ys = xs; mean(ys) }` is applied to each element of
+ *   a list (user decision 2026-11-14); `h(xs: list)` takes it whole. A
+ *   call to another user function is a
  *   use like any other: `k(xs) = h(xs)` is lifted when the slot of `h` is lifted, because
  *   that slot then has a collection arm. It is the only way the lift reaches
  *   through a function, and it reads the signature of `h` as it is when the
@@ -1157,21 +1157,6 @@ export function wholeCollectionParameterType(
   const binding = param.valueDefinition;
   if (binding === undefined) return undefined;
 
-  // The bindings that hold the parameter's value: the parameter itself and
-  // each local of the body assigned an expression that reaches it
-  // (`let ys = xs`), in the order the body is walked; a local assigned an
-  // expression that does NOT reach it stops holding it (`ys = 0`). A bound
-  // symbol is matched by its binding. A local is also recorded by NAME
-  // (`aliasNames`): the operands of a canonical `Declare` are held raw
-  // (unbound), so neither the declared symbol nor the value expression
-  // carries a binding there, and the body's later read of the local is a
-  // bound symbol of that name. A RAW symbol (one with no binding, inside a
-  // `Declare`) is matched by name against the parameter and the aliases; a
-  // bound symbol is matched by name against the aliases only, so an index
-  // of a `Sum` or a parameter of an inner function with the parameter's
-  // name is not taken for it.
-  const holders = new Set<unknown>([binding]);
-  const aliasNames = new Set<string>();
   // The locals of the body assigned a function literal whose first slot
   // has a collection arm, with that arm. When the body is boxed, the call
   // `h(xs)` is bound to the body-local placeholder of `h`, which has no
@@ -1179,24 +1164,20 @@ export function wholeCollectionParameterType(
   // The record is copied from `localFunctions`: the locals of an enclosing
   // body that are visible here (the chain `let q = (a) => h(a)`).
   const localFunctionArms = new Map<string, Type>(localFunctions);
-  // The alias names and the local function names that an enclosing inner
-  // function literal binds as its own parameters: inside it, that name is
-  // the inner parameter, not the alias (`map(ys => mean(ys), …)` after
-  // `let ys = xs`) or the local function.
+  // The local function names that an enclosing inner function literal binds
+  // as its own parameters: inside it, that name is the inner parameter, not
+  // the local function.
   let shadowed = new Set<string>();
-  const holderByName = (e: Expression & { symbol: string }): boolean =>
-    e.valueDefinition === undefined
-      ? e.symbol === param.symbol || aliasNames.has(e.symbol)
-      : aliasNames.has(e.symbol) && !shadowed.has(e.symbol);
-  // Whether `e` reaches the parameter: it is a holder, or an element-wise
-  // (`broadcastable`) application with an operand that does (`xs^2`,
-  // `xs - c`, `sin(ys)`).
+  // Whether `e` reaches the parameter: it is the parameter, or an
+  // element-wise (`broadcastable`) application with an operand that does
+  // (`xs^2`, `xs - c`). A bound symbol is matched by its binding. A RAW
+  // symbol (one with no binding: the operands of a canonical `Declare` are
+  // held raw) is matched by name.
   const reaches = (e: Expression): boolean => {
     if (isSymbol(e))
-      return (
-        (e.valueDefinition !== undefined && holders.has(e.valueDefinition)) ||
-        holderByName(e)
-      );
+      return e.valueDefinition === undefined
+        ? e.symbol === param.symbol
+        : e.valueDefinition === binding;
     if (!isFunction(e)) return false;
     const def = e.operatorDefinition;
     if (def === undefined || !def.broadcastable) return false;
@@ -1235,9 +1216,9 @@ export function wholeCollectionParameterType(
   const visitNode = (expr: Expression): void => {
     if (!isFunction(expr) || seen.has(expr)) return;
     seen.add(expr);
-    // `ys := xs` is an `Assign`; the canonical `let ys = xs` of a block is
-    // a `Declare` whose second operand is a dictionary with the entry
-    // `value: xs`.
+    // `h := …` is an `Assign`; the canonical `let h = …` of a block is a
+    // `Declare` whose second operand is a dictionary with the entry
+    // `value: …`.
     if (
       (expr.operator === 'Assign' || expr.operator === 'Declare') &&
       expr.nops === 2 &&
@@ -1255,15 +1236,6 @@ export function wholeCollectionParameterType(
       if (isFunction(value, 'Function')) {
         const arm = literalFirstSlotCollectionArm(value, localFunctionArms);
         if (arm !== undefined) localFunctionArms.set(local.symbol, arm);
-      }
-      if (value !== undefined && reaches(value)) {
-        if (local.valueDefinition !== undefined)
-          holders.add(local.valueDefinition);
-        aliasNames.add(local.symbol);
-      } else if (local.symbol !== param.symbol) {
-        if (local.valueDefinition !== undefined)
-          holders.delete(local.valueDefinition);
-        aliasNames.delete(local.symbol);
       }
     }
     if (expr.nops === 1 && reaches(expr.op1)) {
@@ -1288,7 +1260,7 @@ export function wholeCollectionParameterType(
       const names = expr.ops
         .slice(1)
         .flatMap((p) => functionLiteralParameterNames(p))
-        .filter((n) => aliasNames.has(n) || localFunctionArms.has(n));
+        .filter((n) => localFunctionArms.has(n));
       if (names.length > 0) {
         const outer = shadowed;
         shadowed = new Set([...outer, ...names]);

@@ -237,10 +237,10 @@ function solveTypeAt(op: SolveActual, param: Type | undefined): Type {
  * requirement on its result to its operands (`inferOperandTypes`, such as
  * `At`). Like a symbol whose inferred type is still `unknown`, it
  * contributes no bound to a type variable, and the narrowing after the
- * solve reaches its operands: with `let q = (s, 0)`, `Take(q[1], 2)`
- * narrows `s` to a collection (CE-35). Read as a bound, its `unknown`
- * solved the `T: string` arm of `Take` to `T = unknown`, and the join of
- * the viable arms then wrote nothing on `q[1]`.
+ * solve reaches its operands: `Take(s[1], 2)` types the parameter `s` as
+ * `tuple<indexed_collection<any>>`. Read as a bound, its `unknown` solved
+ * the `T: string` arm of `Take` to `T = unknown`, and the join of the
+ * viable arms then wrote nothing on `s[1]`.
  */
 function forwardsRequirementWhileUnknown(op: Expression): boolean {
   if (!op.type.isUnknown) return false;

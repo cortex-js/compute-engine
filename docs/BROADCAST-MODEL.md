@@ -98,6 +98,22 @@ wrote**, not by the operand shapes:
    parameter declared `any`, `expression` or `value`. Compiled code
    computes the same tuple (user decision 2026-10-03).
 
+   A parameter declared as a point (a tuple type) maps over a list of
+   points, one call per point: with `h2 := (v: tuple<number, number>) ↦
+   v[1] + v[2]`, `h2([(1, 2), (3, 4)])` is `[3, 7]`
+   (`pointListParamSlots()`, `boxed-expression/boxed-function.ts`). A
+   parameter with no declared type that the body reads by index takes its
+   argument whole, on every route (user decision 2026-11-14): `h := v ↦
+   v[1] + v[2]` is typed `(v: tuple<number, number>) -> number`, and
+   `h([(1, 2), (3, 4)])` and `Apply(h, [(1, 2), (3, 4)])` are both
+   `(4, 6)`, the first point plus the second. A list at a scalar sibling
+   parameter is still mapped on the named route: with `h(a, t) := a[1] +
+   a[2] + t`, `h((1, 2), [10, 20])` is `[13, 23]`. The tuple that the index
+   reads give does not map over a list of points (`mapsOverPoints()`,
+   `collection-utils.ts`); it is the printed signature, the type of the
+   parameter in a static error of the body, and the type that compilation
+   reads.
+
    A function that passes a collection to itself at a parameter position (a
    list literal, a range, a comprehension, any collection-typed argument)
    makes that parameter a collection, so a list argument is passed whole, not
