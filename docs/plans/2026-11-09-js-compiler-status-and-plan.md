@@ -1963,6 +1963,32 @@ wrong, in six groups:
 
 The next batch fixes D1, D2, D3 and D6, and lands the switch.
 
+Tycho's run of the build of `bc382309d8b9f6052bf6e12757ec18637a917020` (G11
+and G12; session `tycho-desk`, 2026-11-15):
+
+- JavaScript over every Desmos state: 9,824 of 11,617 admitted (9,655
+  before); GLSL 3,927 of 4,376 (3,904 before). No internal error, every
+  admitted shader valid, 43,803 JavaScript runs and 402 colour runs with no
+  difference, a render audit of CORE with no change.
+- An integer sampler of `tycho-desk` for the defect D2 (each JavaScript row
+  with `Floor`, `Ceil`, `Round`, `Mod`, `Remainder` or `Fract`, each real
+  input in turn from 1 to 200): it catches `Floor(x/49)` at 49 on this
+  build, and over 932 rows and 663,078 runs no row of the corpus differs:
+  the corpus has no such quotient at these inputs.
+- What the switch still loses, without Tycho's handlers and the colour
+  values that read other names (records in
+  `_TASKS/2026-11-14-ir-batches/tycho-t10-declines.json`). JavaScript: 337
+  calls decline (546 before), and the existing compiler compiles 318 of
+  them. GLSL: 46 (82 before), of which the existing target compiles 33. The
+  JavaScript causes by size: an input that is a list of tuples 62 and a
+  function that returns one 20; `RandomChoice` 29 and `RandomShuffle` 13; a
+  `Comprehension` of several clauses 29; `ListJoin` 25 and `Zip` 10; a name
+  whose value is not a number about 36; a list or tuple argument of `Apply`
+  24; a write to a list local 7; `Choose` 7; `If` with arms of two types 6;
+  `Break` 5; a scalar times a point 5; `Apply` of a derivative 5. GLSL: a
+  function 10, the pass bound 6, a name with a value that is not a number 5,
+  `Break` 3. Batch G14 takes the lists of tuples as inputs.
+
 Tycho's run of the build of `511a446b8c4dc43b50c9fac75c6735861b6be580` (G5
 and G6; session `tycho-desk`, 2026-11-14), the profile on both seams:
 

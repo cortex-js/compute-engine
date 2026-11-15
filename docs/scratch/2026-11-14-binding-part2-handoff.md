@@ -73,6 +73,18 @@ Delete this file when parts 2 and 3 are done or have their own record.
     `boxed-expression/definition-restore-point.ts`, which records a
     definition or a scope entry before its first write during a check;
     source +591 −843. Tycho's gates passed.
+- STAGED on main 2026-11-15 by session `compute-engine-3f`, not committed
+  (the worktree commit is `f9bdd5e95a3c9c63dcf55eb4bf963bf94e9b8e56`, the
+  patch `~/dev/compute-engine-recovery/closure-capture/land-closure-capture-f9bdd5e95-on-7a4096fec.patch`):
+  the end of a call no longer rebuilds the closures of its result (part 2,
+  item 6, first step); source +126 −415. `captureClosures` has one caller
+  left, `captureNestedLocals`. The 162 failures of the earlier attempt came
+  from the record of the closures of other calls, which the rebuild also
+  made; `recordNodesOfOtherCalls` makes it now. Two results change, both
+  for a function literal that the call did not evaluate (`issues/CE-1330.md`
+  and the CHANGELOG entry). Tycho's gates passed on the builds in
+  `~/dev/compute-engine-recovery/closure-capture/` (no value, type or
+  code difference; timings equal within noise).
 - CE-1317 is closed by the user's decision (documented; `issues/CLOSED.md`).
 - `src/api.md` still lists `TypeProvenanceEntry.epoch` and is regenerated at
   release.
@@ -137,11 +149,26 @@ not confirmed it item by item.
 5. **Held arguments** (ROADMAP CE-1258), the `Program` operator (ROADMAP
    CE-1255.1) and the requirements-as-data API that Tycho asked for.
 6. **Still in the code and expected to go** (bound-once spec, "State: step
-   1 is on main"): the rebuild of closures at the end of a call
-   (`captureClosures`; disabling it broke 162 tests, cause not known) and
-   the automatic listing of a finite lazy list at an assignment
-   (`listedAssignedValue()`). CE-1259 and CE-1260 (regressions of hold
-   functions) are open.
+   1 is on main"): the rebuild of closures at the end of a call is removed
+   (state above). Left: the rebuild of the body of a function literal when
+   it is evaluated (`captureClosures` from `captureNestedLocals`), which
+   goes when a function value keeps its activation on the
+   scope of its own body block and shares everything nested in the body.
+   A record on the `Function` node was built and REJECTED by the dual
+   review (worktree commit `f7d6ff7fa455b72f476d5bb385d71bac73583ee6`,
+   source +142 −393, full suite green): a rebuild of the value (`subs`,
+   `map`, `simplify`) drops the record with no error, and the lowered
+   `Map` drain reads the parent of the body scope;
+   and the automatic listing of a finite lazy list at an assignment
+   (`listedAssignedValue()`). Measured 2026-11-15 with the listing
+   switched off: 31 tests of 9 files move
+   (`~/dev/compute-engine-recovery/closure-capture/listing-at-assignment-measure.md`).
+   12 of them compare the interpreter with compiled code, which makes the
+   list at the assignment (`let t = map(x => x + k, 1..4); k = 10; t`), and
+   a comprehension over its own variable (`xs = [2x for x in xs]`) runs out
+   of stack. Recommended to the user: keep the listing, and take it off
+   this list. Waiting for the user's answer. CE-1259 and CE-1260
+   (regressions of hold functions) are open.
 
 Ask the user before starting:
 
@@ -175,6 +202,9 @@ Open:
 - CE-1277 (P4): `Map` over a `Composition` reads the current scope (still
   `[100, 100]` after leftover 2: the step `f` has a definition at boxing).
 - CE-1290 (P4): one signature line left.
+- CE-1330 (P3): an unevaluated result of a call or a block names a local
+  of it, which has no value afterwards (`if t > 0 { k + 1 }` with `t`
+  free). Parameters are replaced at the end of a call, locals are not.
 
 Seen and NOT filed. No program reaches them yet: file each with its witness,
 or write a known-limitations line, as `docs/ISSUE_TRACKING.md` says.
