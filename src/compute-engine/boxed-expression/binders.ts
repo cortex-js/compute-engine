@@ -173,8 +173,8 @@ export function markCallableFrame(frame: Scope, template: Scope): void {
  * (`registerScopeActivation`), or a scope that a closure captured in place
  * of a nested block scope (`captureNestedLocals`, `function-utils.ts`).
  * A copy can stand for another copy (a closure captures the call frame of
- * the function that creates it, and a closure returned again is re-rooted on
- * a copy of its captured scopes), so the links are followed to their end.
+ * the function that creates it, and that frame stands for the body scope
+ * of a closure), so the links are followed to their end.
  * Each link goes from a new scope to a scope that exists already, so they
  * do not make a cycle; the set of visited scopes is a guard only.
  */

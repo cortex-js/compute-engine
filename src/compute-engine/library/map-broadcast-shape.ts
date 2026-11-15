@@ -75,8 +75,8 @@ export interface LoweredLevel {
    * resolves while its defining frame is still current. A lazy `Map` returned
    * from a function outlives that frame: `f(k) = Map(x ↦ x + k, [1,2])` drained
    * by the caller resolved `k` to nothing and produced `[k+1, k+2]`. The
-   * closure chain itself is intact (`captureClosures` rebinds the literal), so
-   * the fix is for the drain to evaluate INSIDE it.
+   * closure chain itself is intact (the callback keeps the activation it
+   * was made in), so the fix is for the drain to evaluate INSIDE it.
    *
    * The drain pushes this scope's **parent**, not the scope itself, and reads
    * it at drain time rather than here — see `makeSpineRunner`. Both halves are

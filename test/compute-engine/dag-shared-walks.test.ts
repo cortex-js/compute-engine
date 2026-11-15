@@ -203,8 +203,8 @@ describe('walks over a shared tower are linear in distinct nodes', () => {
   });
 
   test('applying a function literal whose body holds the tower', () => {
-    // Application captures the literal's closures (`captureClosures`) and
-    // substitutes its parameters (`rewriteWithBinders`), walking the body.
+    // Application substitutes the parameters of the literal
+    // (`rewriteWithBinders`), walking the body.
     const e = sharedTower(30);
     const r = ce.box(['Apply', ['Function', ['Hold', e], 't'], 1]).evaluate();
     expect(r.operator).toBe('Hold');

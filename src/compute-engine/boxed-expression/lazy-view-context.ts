@@ -324,15 +324,14 @@ export function canHoldLazyView(expr: Expression): boolean {
 
 /**
  * Give the views of `after` the records of the views of `before`, when
- * `after` is a rebuild of `before` made by a function call: the re-rooting
- * of the closures of the result (`captureClosures`) and the substitution of
- * the parameter values (`bindingKeyedSubs`), in `function-utils.ts`. These
- * rebuilds keep the operator and the number of operands of each node they
- * rebuild, and the keys of a dictionary, so the two trees are walked in
- * step. The walk goes into the body of a function literal, which these
- * rebuilds make again with new nodes. A node of `after` that already has a
- * record keeps it. A subtree that the rebuild left as it is (the same
- * object) is not walked, and a pair of nodes is walked once.
+ * `after` is a rebuild of `before` made by a function call: the
+ * substitution of the parameter values (`bindingKeyedSubs`, in
+ * `function-utils.ts`). This rebuild keeps the operator and the number of
+ * operands of each node it rebuilds, and the keys of a dictionary, so the
+ * two trees are walked in step. The walk goes into the body of a function
+ * literal, which the rebuild makes again with new nodes. A node of `after`
+ * that already has a record keeps it. A subtree that the rebuild left as it
+ * is (the same object) is not walked, and a pair of nodes is walked once.
  *
  * Other rebuilds of a view (`subs()` of the host, `ce.function()` with new
  * operands, a serialization parsed again) make a new view that has no

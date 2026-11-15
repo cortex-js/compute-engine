@@ -12,7 +12,7 @@
  *   being applied re-roots the literal on the call frame
  *   (`captureAtCreation`, `function-utils.ts`).
  * - A returned literal whose body declares a local function (`g := z ↦ 3`)
- *   and calls it is rebuilt on a new body scope when the call ends
+ *   and calls it is rebuilt on a new body scope when it is evaluated
  *   (`captureClosures`). The call `g(0)` finds its callee by the scope that
  *   holds its binding, and the frame of a later application stood for the
  *   new scope only, not for the scope the call was bound in. Now the new
@@ -336,7 +336,7 @@ const declaredInBranch = (value: unknown, body: unknown) => [
 
 describe('a returned closure that declares a local function in a nested block', () => {
   // A nested block of the returned literal is rebuilt on a new scope when
-  // the call ends (`captureClosures`). The call `g(0)` is bound to the `g`
+  // the literal is evaluated (`captureClosures`). The call `g(0)` is bound to the `g`
   // that the `Declare` makes, whose home is the old scope: the new scope must
   // stand for it. (CE-794.)
   const witness = declaredInBranch(['Function', 3, 'z'], [

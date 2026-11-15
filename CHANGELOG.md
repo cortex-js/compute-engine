@@ -169,6 +169,23 @@
 
 ### Behavior Changes
 
+- **The end of a function call no longer rebuilds the function literals of
+  its result.** A function literal becomes a function value when it is
+  evaluated, and that value keeps the variables of the call that made it;
+  the result of a call was walked a second time, to rebuild each function
+  literal on the call, and it is not any more. Two results change, both for
+  a function literal that the call did not evaluate, such as a branch of an
+  `If` or a `Which` whose condition has no value yet. With
+  `mk := n ↦ If(c > 0, () ↦ Block(n := n + 1, n), 0)` and `c` with no
+  value, `mk(5)` stays `mk(5)`, where it gave the `If`; evaluated once `c`
+  has a value, it gives the counter, as before. With
+  `f := a ↦ Block(Declare(k, "unknown", a), If(c, x ↦ k + x, x ↦ 0))`, the
+  function of the branch of `f(5)` no longer reads the local `k` once `c`
+  has a value: applied to `1` it gives `k + 1`, where it gave `6`, as the
+  same branch written as an expression (`k + 1`) already did (CE-1330). A
+  parameter of the call in the same place is replaced with its value, as
+  before.
+
 - **A function parameter that a collection operator reads is a collection,
   also when an arithmetic use comes first.** `x ↦ (x + x, Length(x))` was
   typed `(x: unknown) -> tuple<number, …>` and called once per element of a

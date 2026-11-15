@@ -266,16 +266,12 @@ function holdsOperator(e: Expression, operator: string): boolean {
   return e.ops.some((op) => holdsOperator(op, operator));
 }
 
-describe('the closure capture of a call result keeps its sharing', () => {
-  // A call's result is walked by the closure capture (`captureClosures`,
-  // `function-utils.ts`) so that a function literal inside it closes over the
-  // call frame. The walk rebuilds every node above such a literal, and it
-  // memoizes the rebuild of each node per frame so that a node the result
-  // mentions twice is rebuilt once. The memo lost its entries as the
-  // recursion unwound (the per-frame map read before the recursion was
-  // replaced by a fresh one after it, found 2026-10-17 by the chain of
-  // Tycho ledger row 380): a node reached through two mentions of a
-  // parameter was rebuilt once per mention, and a chain `f^k(P)` whose
+describe('the result of a call keeps its sharing', () => {
+  // The end of a call does not rebuild the result, so a node that the
+  // result mentions twice stays one node. When the end of a call rebuilt
+  // each function literal of the result on the call frame, a node reached
+  // through two mentions of a parameter was once rebuilt once per mention
+  // (Tycho ledger row 380), and a chain `f^k(P)` whose
   // value holds a lazy `Map` (a function literal) doubled its distinct nodes
   // at every level although the inert memo above walked each level once:
   // 864, 954, 1236, 1938, 3515, 6875 at depths 1 to 6 of the Tycho

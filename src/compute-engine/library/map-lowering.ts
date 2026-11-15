@@ -32,7 +32,7 @@ export type { Slot, LoweredLevel } from './map-broadcast-shape.js';
  * item-103 witness `1 + Mod(Range(0,899) + 29, 900)` canonicalizes to THREE
  * nested `Map`s, so a 900-element drain performs 2,700 full `makeLambda`
  * applications. None of the invoke machinery (fresh `Scope`,
- * `declareParameterActivation`, `holdBodyLocals`, `captureClosures`,
+ * `declareParameterActivation`, `holdBodyLocals`,
  * binding-keyed substitution, own-bindings numeric pass) is needed when the
  * mapping function is the shape `lazyBroadcastMap` builds: ONE operator
  * application whose operands are the parameters and closed scalars.
