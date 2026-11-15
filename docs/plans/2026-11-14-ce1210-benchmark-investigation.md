@@ -110,3 +110,86 @@ source file, 0.186.0 to main before the four fixes (+2,069 ms in all):
 
 Neither brings the cases back to 0.186.0: about 45% of the added time has
 no function above about 60 ms.
+
+## Findings of 2026-11-15
+
+Ratios are to 0.186.0 (`c4856e003557e367d4a2272d37d1567e9dd7a9b3`) on the
+same cases. The reports of the agents are outside the repository, in
+`~/dev/compute-engine-recovery/ce1210/` (`design-probe-report.md`,
+`rest-report.md`, `ic-report.md`, `retreat-costing-report.md`).
+
+**Landed.** `6d4667949bf4c3fc48b165b896d003d5e019cb31`: the type read of an
+activation-held definition no longer resolves in the static view (source
++16 −84). `a56ceaa265cbd9e3aeb66af8ba46b5cc3742b192`: one hidden class for
+a symbol, a call and a value definition; the key of the limit probe memo
+(source +36 −12). Main after them: 1.245 (rounds 1.216 to 1.250).
+
+**Ruled out by measurement.** Builds of 0.186.0 padded to main's object
+size (1.005, 1.001) and code size (0.996); hidden classes after the commit
+above; the inline-cache census; the tier profile (no shift between tiers;
+the garbage collector 3.0% to 3.9% of the time).
+
+**Unsafe ceilings on main** (switches that give wrong types, for
+measurement only): no recorded reads and cached types trusted, −0.08 to
+−0.12; the shortest symbol read, about 0; no unit environment at boxing,
+small; all three, about 1.12. A cached type that is trusted on one
+engine-wide number as the code stands is not sound: a validation of a
+cached type fails 29,926 times in the test suite.
+
+**Call counts do not explain the time.** V8 precise coverage
+(`scripts/repros/2026-11-15-ce1210-call-counts.mjs`) counts 47,039 calls
+per evaluation on 0.186.0 and 61,501 on main. A branch that removes the
+extra calls (47,922 per evaluation; source +272 −136; full suite and the
+stale-type check clean; not landed; patch
+`~/dev/compute-engine-recovery/ce1210/calls-3ed1234c3-on-a56ceaa26.patch`)
+takes 1.202 (rounds 1.177 to 1.211) against main's 1.245 in the same run,
+with the same one-entry esbuild of each tree. The coverage does not count
+builtins (`Map` and `WeakMap` operations, array operations, allocation).
+
+**A memo of environment reads** (P2, an engine-wide epoch; about +80
+lines; patch `probe-5df82d922-on-40ccf484f.patch`) was measured before the
+call-removal branch and is not landed.
+
+**Who reads an entry.** On the cases, of 309 entry reads per evaluation 52
+are by a free name, about 147 by a parameter of a function literal and
+about 110 by another definition that a boxing made (a binder variable or a
+block local; the split of the last two is an estimate). A return to the
+definition store of 0.186.0 for free names would therefore touch under 20%
+of the reads.
+
+**Options costed, not built** (`retreat-costing-report.md`; every figure
+is an estimate):
+
+| Option | Source lines | Reaches |
+|---|---|---|
+| (a) one counter that moves at every environment write; no recorded reads | about −300 | 1.13 to 1.15 |
+| (b) each occurrence points at a shared cell of its unit | −150 to +50 | as (a) |
+| (c) requirements on a definition again, hidden from the host | thousands moved | unknown |
+| (d) a parameter, binder variable or block local reads its definition once its construct is boxed | −60 to −130 | 1.14 to 1.16; 1.12 to 1.14 with (a) |
+
+(a) loses the memo of a derivative across operations and needs a new key
+in about ten cache families. (d) reverses item (d) of D18
+(`docs/plans/2026-11-11-bound-once-spec.md`): a host that builds an
+expression from a piece of a function body gets the parameter's own type.
+(c) brings back the dependence on the order of expressions and the host's
+scratch scopes.
+
+**The floor.** No option on the type-read path goes under about 1.12. On
+0.187.0 the same build ran at 0.93 of 0.186.0 with the units flag off, so
+the whole cost is behind the sites that the flag gated. A split of that
+flag by mechanism on 0.187.0 was started on 2026-11-15 to find the group
+that carries the part no repair has removed.
+
+**Not evidence.** The row "0.188.1 units off 1.25, on 1.24" of the issue:
+the flag does not exist in 0.188.1.
+
+**Defect found.** CE-1342: a cached type that a recorded read does not
+invalidate, and the case that `CE_TYPE_PARANOID` does not see.
+
+## The `turing-patterns` prelude (moved from the issue, 2026-11-15)
+
+CPU profiles of the `turing-patterns` prelude (tycho-desk, the same day):
+the compiled body takes the same time on both releases (1,883 / 1,894 ms);
+the difference is in run-time helpers (`floorMod` 239 / 396 ms,
+`countLoopPass` 62 / 101, two minified functions). The source of `floorMod`
+is the same at both tags. Cause not determined.
