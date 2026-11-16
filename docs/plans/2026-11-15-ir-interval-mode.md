@@ -1356,3 +1356,102 @@ plus this batch (`sweep-t12-rec-on-69c88b4e2`): the mode admits 4,840 of
 5,155 programs, the existing target 4,828; 13 programs compile only on the
 existing target and 25 only in the mode; 28,426 boxes equal, 295 tighter,
 124 wider; 51 containment misses in 5 programs, the same on both targets.
+
+### 18.4 The afternoon of 2026-11-16: recursion, Tycho's run of a joint build, and the replay
+
+On main after section 18.3, newest last (each with the Claude reviewer;
+the Codex reviews are owed, Codex being out until 2026-11-18):
+
+- `fe117a62f5fc8b3479a39a47a88c2f2f2b4a6f6b`: the recursion batch of
+  section 18.3.
+- `30dac31b16badf5198facdd2772ae3fa504f5864`: a function that calls itself
+  in its own body can read an input of the program (`tdyz9z5uxb` #2 to #6).
+  A cycle through another function that reads an input still declines.
+- `9d5784648353afb82086cbb277d47505050c38aa`: the result of a function
+  whose body has a list length known at compile time carries that length
+  as a number (`62urmx2dcm` #1).
+- `1a936864861229e8faae33498e3b51de17f39444`: an integral whose bound draws
+  has no closed form (a defect of the mode: the closed form held one draw
+  made at compile time); nothing is computed before an integral with a
+  literal infinite bound (`thpezd39zq` #0 and #1: 3 to 6 times the existing
+  target, now 0.86 to 0.90); the result has `freeSymbols`,
+  `freeSymbolTypes`, `unsupported` and `mode`.
+- `301cd2e888f06157a60bf30061a43e611c453bc5`: a list of a constant length
+  of at most 16 is written out (`MAX_UNROLLED_LIST`, the field
+  `unrollBuilds`; 0 on JavaScript and GLSL): builds, reductions,
+  element-wise operations, and a call whose result is such a list is
+  copied into its caller. Seven of the eight programs at 1.2 to 2.4 times
+  the existing target are under 1.1.
+- `d6e29c7e9cdb0bf726415b78b7809f0d21f5e510`: a function declared with the
+  bare type `function` whose body is a list takes the shape of its body
+  (below).
+
+By `ce-compiler` in the same period, with an effect on this seam:
+`69c88b4e2` (`Break` and `Continue`), `0203570bf` (the closed form of an
+integral on JavaScript; the antiderivative budget of nested compilations),
+`3783bedeb` (a closed constant `Range` in a value position is a literal
+list of the interpreter's elements: `rwhqbsp4wq` #2 and #4, a `Range` of a
+real step, compile; `1d8vyqtvoj` #0 goes from 1.58 to 1.04).
+
+**Tycho's run of a joint build** (a local tarball of `1a9368648`, requested
+by `ce-compiler` after the user's approval; results in
+`~/dev/compute-engine-recovery/interval-dump/t13-results.json`, the dump of
+the interval calls with Tycho's outcome per program in
+`t13-interval-js-document-definitions.json`). On the interval seam: 4,697
+of 5,213 distinct programs admitted (calls: 5,957 of 6,474); no run-time
+throw of a compiled interval function; no new failure of Tycho's tests with
+the interval seam alone; 0 changed pixels in the 32 rendered states. Of
+the 517 calls that fell back, 477 are Tycho's own definitions of `Which`
+(348) and `At` (129): the pipeline declines a definition that has a
+handler of its own (the user's decision of 2026-11-14), and on this seam
+the `Which` handler returns `undefined` and the `At` handler only rewrites
+the index. `ce-compiler` reported three options to the user; the decision
+is pending, and the mode as the public default waits for it.
+
+**The replay was not faithful for functions held as values.** Tycho
+declares a document function as a value of the bare type `function`; the
+replay scripts of both sessions assigned it, and the engine then infers
+`(unknown, …) -> list<unknown>`. The rule of `15f8c6ca4` (section 18.3, D)
+applies to that inferred type only, so 17 interval programs compiled in the
+replay and fell back in Tycho ("a body of V that is not a scalar or a point
+of numbers (a result of no stated type)"). The corpus counts of D and of
+the later commits are therefore replay counts, higher than Tycho's for
+these functions. Two corrections: `d6e29c7e9` gives a function of no
+stated result the same rule, and the scripts declare a value whose dumped
+type is the bare `function` (a full signature in the dump is what the
+engine inferred: declaring it made three programs decline that Tycho
+compiles). With both, the replay of `t13` agrees with Tycho's recorded
+outcome on 4,560 of 5,213 programs; the others are Tycho's `Which` and `At`
+definitions (424), host operators that the dump does not hold (216), the
+two fixes that landed after the build (10), and 3 programs not explained
+(Tycho declines them on the complex lane: there the dumped signature is a
+declaration, which the dump does not tell from an inferred one). To ask of
+Tycho at its next run: a `declared` flag per definition.
+
+Known differences of the result fields against the existing target, over
+the 4,815 programs both compiled at `1a9368648`: `freeSymbols` holds the
+same names in another order in 302 (Tycho reads the order in two places,
+neither of which changes a value: a GLSL preamble's text and a cache key),
+and an entry of `freeSymbolTypes` differs in 14.
+
+**The baseline on main `d6e29c7e9`** (`sweep-t12-at-d6e29c7e9`, the
+corrected replay of the older dump; `retime-slow-at-d6e29c7e9.json`): the
+mode admits 4,848 of 5,155 programs, the existing target 4,835; 5 programs
+compile only on the existing target, each a decline by a rule of the
+compilation model (arms of two types 2, an input typed
+`indexed_collection<number>` 2, a list of no single length 1); 25 compile
+only in the mode. Boxes: 28,515 equal, 295 tighter, 124 wider (sums); 51
+containment misses in 5 programs, the same on both targets. The quiet
+re-timing of the 501 programs that the sweep put above 1.05: 84 above 1.1
+times the existing target (99 on `87f8cf3e7`), 12 above 1.25 (20), 4 above
+1.5 (10), 2 above 3 (3). Of the 84, 71 hold a run-time exponent (the
+accepted class; two of them are above its usual range: `3qkygakl9m` #1 at
+2.19, whose boolean `If(c, b)` is also evaluated eagerly, and `jdnefd99lw`
+#0 at 1.89 for 0.16 µs). The other 13: `nbbj88wunw` #1 (153: a comparison
+that the existing target decides at compile time; recommended as an
+exception), `buddhabrot` #0 (4.9: an artefact of the sweep's list input),
+`g2vyb7i2oi` #4 (1.46: a fourth derivative), `zrklhsz34x` #4 and
+`n3nirm8khz` #4 (1.44 and 1.39: sums of 15 µs), `pvzphgx1eo` #1 (1.25),
+`3mhkarzpoz` #3 (1.21), `3mssd5t0lj` #2 and #4 (1.15), `ccoc40kfhj` #9
+(1.12: no `_IA.scale` spelling of a point constant times an interval), and
+three at 1.10. Their causes are not diagnosed yet, except where stated.
