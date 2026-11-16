@@ -1,0 +1,6 @@
+
+Test Suites: 18 passed, 18 total
+Tests:       15 skipped, 5593 passed, 5608 total
+Snapshots:   1368 passed, 1368 total
+Time:        8.489 s
+Ran all test suites within paths "test/compute-engine/arithmetic.test.ts", "test/compute-engine/exactness-regressions.test.ts", "test/compute-engine/simplify.test.ts", "test/compute-engine/collections.test.ts", "test/compute-engine/linear-algebra.test.ts", "test/compute-engine/calculus.test.ts", "test/compute-engine/solve.test.ts", "test/compute-engine/functions.test.ts", "test/compute-engine/relational-operators.test.ts", "test/compute-engine/error-model.test.ts", "test/compute-engine/type-variables.test.ts", "test/common/types.test.ts", "test/compute-engine/latex-syntax/parsing.test.ts", "test/compute-engine/latex-syntax/operators.test.ts", "test/compute-engine/compile.test.ts", "test/compute-engine/interval-arithmetic.test.ts", "test/epsil/execute.test.ts", "test/epsil/declare-type.test.ts".

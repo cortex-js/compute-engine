@@ -1,0 +1,62 @@
+[
+  {
+    "name": "control-notebook-refined",
+    "arm": "diagnostic",
+    "request": {
+      "root": "/private/tmp/program-type-work-20261116/diagnostic",
+      "workload": "notebook",
+      "mode": "controls",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/control-notebook-refined.request.json",
+      "/private/tmp/program-type-work-20261116/control-notebook-refined.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-type-work-20261116/diagnostic/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.29659605026245117
+  },
+  {
+    "name": "trace-notebook-refined",
+    "arm": "diagnostic",
+    "request": {
+      "root": "/private/tmp/program-type-work-20261116/diagnostic",
+      "workload": "notebook",
+      "mode": "trace",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/trace-notebook-refined.request.json",
+      "/private/tmp/program-type-work-20261116/trace-notebook-refined.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-type-work-20261116/diagnostic/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.3431880474090576
+  }
+]

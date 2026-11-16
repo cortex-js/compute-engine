@@ -1,0 +1,27 @@
+[
+  {
+    "file": "src/compute-engine/boxed-expression/boxed-function.ts",
+    "sha256": "7c24aa65c7d2c458863bf8c5ddffbaf66e15980a6a74fb42c35e3ea33f07dc1a",
+    "worktreeEqual": true
+  },
+  {
+    "file": "src/compute-engine/boxed-expression/broadcast-lift-type.ts",
+    "sha256": "6618c5248f4e9e53397fb7bfc3d892a883e5dd374c89228844cfe56c862d14f3",
+    "worktreeEqual": true
+  },
+  {
+    "file": "src/compute-engine/boxed-expression/derive-application-type.ts",
+    "sha256": "4f935b60936e53adc5320e09e6f640b61686e85827ba5942ec2592e93f25b5da",
+    "worktreeEqual": true
+  },
+  {
+    "file": "src/compute-engine/boxed-expression/effects-inference.ts",
+    "sha256": "48014f89983b3c3e0daca4c190aa6e573ebf18f33c03d5e27271be883c125800",
+    "worktreeEqual": true
+  },
+  {
+    "file": "src/compute-engine/collection-utils.ts",
+    "sha256": "72d5a590c960e0bf03787ab7d3298acd03984447daea26d082f1f039b6bfaf20",
+    "worktreeEqual": true
+  }
+]

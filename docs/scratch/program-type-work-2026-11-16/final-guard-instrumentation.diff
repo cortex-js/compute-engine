@@ -1,0 +1,465 @@
+--- a/src/compute-engine/boxed-expression/boxed-function.ts
++++ b/src/compute-engine/boxed-expression/boxed-function.ts
+@@ -4566,10 +4566,10 @@
+     return isOperatorDef(this._def) ? this._def.operator : this._def.value;
+   }
+ 
+-  get operatorDefinition(): BoxedOperatorDefinition | undefined {
++  get operatorDefinition(): BoxedOperatorDefinition | undefined {return (globalThis as any).__programTypeTrace.span("expression-read",{expr:this,ce:this.engine,read:"operatorDefinition",proposed:undefined},()=>{
+     if (!this._def) return undefined;
+     return isOperatorDef(this._def) ? this._def.operator : undefined;
+-  }
++  });}
+ 
+   get valueDefinition(): BoxedValueDefinition | undefined {
+     if (!this._def) return undefined;
+@@ -4715,7 +4715,7 @@
+   }
+ 
+   /** The type of the value of the function */
+-  get type(): BoxedType {
++  get type(): BoxedType {return (globalThis as any).__programTypeTrace.span("expression-read",{expr:this,ce:this.engine,read:"type",proposed:undefined},()=>{
+     // Keyed on `_typeCacheGeneration()`, which only a declaration, a
+     // retype, an assumption or the revert of one moves (`typeVersion` in
+     // `engine-configuration-lifecycle.ts`): the declarations of a call of a
+@@ -4923,7 +4923,7 @@
+         this._checkServedType(result);
+     }
+     return result;
+-  }
++  });}
+ 
+   /** The cached type read an answer that depends on the computations in
+    * progress, and is kept under `_typeCacheFallbackGeneration()`, not under
+@@ -16500,7 +16500,7 @@
+ /** The type of the bound application `expr` read from its definition, its
+  * signature and its type handler, after `type()` has handled an invalid
+  * tree. */
+-function boundCallType(expr: BoxedFunction): Type | BoxedType {
++function boundCallType(expr: BoxedFunction): Type | BoxedType {return (globalThis as any).__programTypeTrace.span("boundCallType",{expr,ce:expr.engine},()=>{
+   // A call that its callee accepted has the type of the same call boxed
+   // against the definition that the name holds now, when that definition
+   // changed after the call was boxed (`_reboxedForCallee()`).
+@@ -16570,7 +16570,7 @@
+       appliesToListCoordinateTuple(
+         expr.operator,
+         broadcastsOverTuples(expr.operator, def),
+-        expr.ops.map((x) => x.type.type)
++        (globalThis as any).__programTypeTrace.span('operand-map',{expr,ce:expr.engine,reason:"appliesToListCoordinateTuple"},()=> (expr.ops.map((x) => x.type.type)))
+       )
+     )
+       return 'error';
+@@ -16585,7 +16585,7 @@
+       runsLibraryCanonicalForm(expr.engine, expr.operator, def) &&
+       addsPointToNumberCollection(
+         expr.operator,
+-        expr.ops.map((x) => x.type.type)
++        (globalThis as any).__programTypeTrace.span('operand-map',{expr,ce:expr.engine,reason:"addsPointToNumberCollection"},()=> (expr.ops.map((x) => x.type.type)))
+       )
+     )
+       return 'error';
+@@ -16742,9 +16742,9 @@
+     const absentTerm = (x: Expression): boolean =>
+       isAbsentScalarSymbol(x) ||
+       (expr.operator === 'Add' && isFunction(x) && isAbsentScalarTerm(x));
+-    const passedThrough = expr.ops.map((x) =>
++    const passedThrough = (globalThis as any).__programTypeTrace.span('operand-map',{expr,ce:expr.engine,reason:'passedThrough'},()=> (expr.ops.map((x) =>
+       passesAbsentCellsThrough(expr.operator, x.type.type)
+-    );
++    )));
+     // A position that does not strip `missing` (`missingStrip`) takes no
+     // part in the absorption: the handler answers for an absent operand
+     // there (the searched value of `Contains` is not found).
+@@ -17063,7 +17063,7 @@
+           withCodomainForAbsentAnswer(
+             BoxedType.forResult(calculatedType, expr.engine._typeResolver).type,
+             def,
+-            expr.ops.map((x) => x.type.type)
++            (globalThis as any).__programTypeTrace.span('operand-map',{expr,ce:expr.engine,reason:"withCodomainForAbsentAnswer"},()=> (expr.ops.map((x) => x.type.type)))
+           ),
+           expr.engine._typeResolver
+         );
+@@ -17177,7 +17177,7 @@
+         return withCodomainForAbsentAnswer(
+           BoxedType.forResult(t, expr.engine._typeResolver).type,
+           def,
+-          expr.ops.map((x) => x.type.type)
++          (globalThis as any).__programTypeTrace.span('operand-map',{expr,ce:expr.engine,reason:"withCodomainForAbsentAnswer"},()=> (expr.ops.map((x) => x.type.type)))
+         );
+       };
+       // The lift itself is shared with the descriptor route
+@@ -17696,7 +17696,7 @@
+   // we don't know (somehow?) we return 'unknown', not 'function', which
+   // is the type of the function itself, not of its result.
+   return 'unknown';
+-}
++});}
+ 
+ /**
+  * The type of the call `expr` with a free head (`isFreeCallHead()`) whose
+--- a/src/compute-engine/boxed-expression/effects-inference.ts
++++ b/src/compute-engine/boxed-expression/effects-inference.ts
+@@ -1930,17 +1930,17 @@
+  * are read from the scope the literal was boxed in, wherever they are
+  * computed (`walkHome`).
+  */
+-export function functionLiteralCallSignatureType(expr: Expression): Type {
++export function functionLiteralCallSignatureType(expr: Expression): Type {return (globalThis as any).__programTypeTrace.span("functionLiteralCallSignatureType",{expr,ce:expr.engine},()=>{
+   const ce = expr.engine;
+-  if (!isFunction(expr)) return functionLiteralSignatureType(expr);
++  if (!isFunction(expr)) return (globalThis as any).__programTypeTrace.span('signature-demand',{expr,ce:expr.engine,reason:"single/full"},()=> (functionLiteralSignatureType(expr)));
+   const body = expr.ops[0];
+   const written = body?.isScoped ? body.localScope?.parent : undefined;
+   if (!written || written === ce.context?.lexicalScope)
+-    return functionLiteralSignatureType(expr);
++    return (globalThis as any).__programTypeTrace.span('signature-demand',{expr,ce:expr.engine,reason:"single/full"},()=> (functionLiteralSignatureType(expr)));
+   // The scope of the literal first: the types that its derivation caches on
+   // the body are those of that scope.
+-  const there = ce._inScope(written, () => functionLiteralSignatureType(expr));
+-  const here = functionLiteralSignatureType(expr);
++  const there = ce._inScope(written, () => (globalThis as any).__programTypeTrace.span('signature-demand',{expr,ce:expr.engine,reason:"written/full"},()=> (functionLiteralSignatureType(expr))));
++  const here = (globalThis as any).__programTypeTrace.span('signature-demand',{expr,ce:expr.engine,reason:"current/full"},()=> (functionLiteralSignatureType(expr)));
+   if (
+     typeof here !== 'object' ||
+     here.kind !== 'signature' ||
+@@ -1952,7 +1952,7 @@
+   return here.effects === undefined
+     ? shape
+     : { ...shape, effects: here.effects };
+-}
++});}
+ 
+ /**
+  * The parameters of the signature that `functionLiteralCallSignatureType()`
+@@ -2051,7 +2051,7 @@
+   });
+ }
+ 
+-export function functionLiteralSignatureType(expr: Expression): Type {
++export function functionLiteralSignatureType(expr: Expression): Type {return (globalThis as any).__programTypeTrace.span("functionLiteralSignatureType",{expr,ce:expr.engine},()=>{
+   const body = functionLiteralBody(expr);
+   // A `Function` with no body (raw input held unbound by `Hold`) has no
+   // signature to build: it is an error value, not a throw (CE-106).
+@@ -2179,7 +2179,7 @@
+     ...(effects !== undefined ? { effects } : {}),
+     result: bodyType,
+   };
+-}
++});}
+ 
+ /**
+  * The effects on the arrow of the function literal `expr`: the effect slot
+@@ -2206,7 +2206,7 @@
+  */
+ export function functionLiteralArrowEffects(
+   expr: Expression
+-): EffectSet | undefined {
++): EffectSet | undefined {return (globalThis as any).__programTypeTrace.span("functionLiteralArrowEffects",{expr,ce:expr.engine},()=>{
+   if (functionLiteralBody(expr) === undefined) return undefined;
+   const declaredEffects = functionLiteralDeclaredEffects(expr);
+   const inferredEffects = inferFunctionLiteralEffects(
+@@ -2216,7 +2216,7 @@
+   return declaredEffects === undefined
+     ? inferredEffects
+     : unionEffectSets(declaredEffects, inferredEffects);
+-}
++});}
+ 
+ /**
+  * The result type of a function whose body is `body`, whose positional
+--- a/src/compute-engine/library/assignment-evidence.ts
++++ b/src/compute-engine/library/assignment-evidence.ts
+@@ -157,10 +157,10 @@
+  * block canonicalization (a lone `Assign` boxed at the top level) there is
+  * no later statement that could widen a read, and nothing is registered.
+  */
+-export function registerEvidenceSite(engine: object, site: EvidenceSite): void {
++export function registerEvidenceSite(engine: object, site: EvidenceSite): void {return (globalThis as any).__programTypeTrace.span("registerEvidenceSite",{ce:engine,site},()=>{
+   const session = SESSIONS.get(engine);
+   if (session !== undefined && session.depth > 0) session.sites.push(site);
+-}
++});}
+ 
+ /** Whether a block canonicalization is in progress, so that an assignment
+  * canonicalized now records evidence that the block joins again at its end
+@@ -194,7 +194,7 @@
+  * session. When the outermost session ends, re-run every registered site to
+  * a fixpoint.
+  */
+-export function withEvidenceSession<T>(engine: object, fn: () => T): T {
++export function withEvidenceSession<T>(engine: object, fn: () => T): T {return (globalThis as any).__programTypeTrace.span("withEvidenceSession",{ce:engine},()=>{
+   let session = SESSIONS.get(engine);
+   if (session === undefined) {
+     session = { depth: 0, sites: [], lost: new WeakSet() };
+@@ -223,7 +223,7 @@
+         const budget = evidencePassBudget(sites);
+         while (changed && passes < budget) {
+           changed = false;
+-          for (const site of sites) if (site.rejoin(coarse)) changed = true;
++          for (const site of sites) if ((globalThis as any).__programTypeTrace.span('evidence-rejoin',{ce:engine,site,pass:passes,coarse},()=>site.rejoin(coarse))) changed = true;
+           passes += 1;
+         }
+         return changed;
+@@ -236,7 +236,7 @@
+     }
+   }
+   return result;
+-}
++});}
+ 
+ /**
+  * The join of two evidence types, taken STRUCTURALLY: the lists among the
+--- a/src/compute-engine/library/core.ts
++++ b/src/compute-engine/library/core.ts
+@@ -4195,7 +4195,7 @@
+   name: string,
+   assignedType: () => Type | undefined,
+   options?: { currentScopeOnly?: boolean }
+-): void {
++): void {return (globalThis as any).__programTypeTrace.span("joinAssignmentEvidence",{ce,name,target:undefined},()=>{
+   const def = options?.currentScopeOnly
+     ? ce.context.lexicalScope.bindings.get(name)
+     : ce.lookupDefinition(name);
+@@ -4207,7 +4207,7 @@
+     def.value.value !== undefined
+   )
+     return;
+-  const target = def.value;
++  const target = def.value;(globalThis as any).__programTypeTrace.note('evidence-target',{ce,target,name});
+   // A block local whose first value has the type `unknown` keeps the type
+   // `unknown`: no later value narrows it (`markOpenLocal()`).
+   if (isOpenLocal(target)) return;
+@@ -4264,7 +4264,7 @@
+     },
+     reset: () => writeEvidenceType(ce, target, 'unknown'),
+   });
+-}
++});}
+ 
+ /**
+  * Type the variable `name`, which a statement gives a function literal, as a
+@@ -4530,7 +4530,7 @@
+   target: BoxedValueDefinition,
+   assignedType: Type,
+   coarse = false
+-): boolean {
++): boolean {return (globalThis as any).__programTypeTrace.span("joinEvidenceOnBinding",{ce,target,assignedType,coarse},()=>{
+   // A binding whose evidence was lost in this session stays `unknown`.
+   if (isEvidenceLost(ce, target)) return false;
+   // A value typed `never` claims no value, so it is no evidence. `never` is
+@@ -4564,14 +4564,14 @@
+     return false;
+   writeEvidenceType(ce, target, next);
+   return true;
+-}
++});}
+ 
+ /** Write the type `next` on the binding `target`. */
+ function writeEvidenceType(
+   ce: ComputeEngine,
+   target: BoxedValueDefinition,
+   next: Type
+-): void {
++): void {return (globalThis as any).__programTypeTrace.span("writeEvidenceType",{ce,target,proposed:next},()=>{
+   const wasCallable = containsSignatureArm(target.type.type);
+   target._setType(() => ce.type(next));
+   // From now on, the type of the binding is the join of its assignment
+@@ -4587,7 +4587,7 @@
+     callableBefore: wasCallable,
+     callableAfter: containsSignatureArm(target.type.type),
+   });
+-}
++});}
+ 
+ /**
+  * The static type of each leaf of the destructuring pattern `pattern` (a
+--- a/src/compute-engine/boxed-expression/boxed-value-definition.ts
++++ b/src/compute-engine/boxed-expression/boxed-value-definition.ts
+@@ -741,7 +741,7 @@
+    * defined, and a value an `assume(x = …)` put in force is not stored here
+    * at all (it lives in the context's assumed-value overlay, which the scope
+    * that assumed it discards on its pop). */
+-  get storedValue(): Expression | undefined {
++  get storedValue(): Expression | undefined {return (globalThis as any).__programTypeTrace.span("binding-read",{ce:this._engine,target:this,read:"storedValue",proposed:undefined},()=>{
+     // In a type computation, a definition whose value an activation holds
+     // (a parameter, a local of a block) has no value, also a constant: its
+     // value is the value of one run, and a type computed in the run would
+@@ -763,7 +763,7 @@
+     )
+       return undefined;
+     return v;
+-  }
++  });}
+ 
+   /** The value stored on this definition, as {@link storedValue} gives it
+    * outside a type computation. */
+@@ -833,13 +833,13 @@
+     return this.storedValue;
+   }
+ 
+-  get value(): Expression | undefined {
++  get value(): Expression | undefined {return (globalThis as any).__programTypeTrace.span("binding-read",{ce:this._engine,target:this,read:"value",proposed:undefined},()=>{
+     // A value shield hides the value, not the type (`withHiddenValues()`).
+     if (valueIsHidden(this)) return undefined;
+     return this._effectiveValue();
+-  }
++  });}
+ 
+-  set value(v: Expression | undefined) {
++  set value(v: Expression | undefined) {return (globalThis as any).__programTypeTrace.span("binding-write",{ce:this._engine,target:this,read:"value",proposed:undefined},()=>{
+     // The value of a definition of a scope that has activations is written
+     // in the activation of the evaluation in progress, when there is one. A
+     // constant local of a block is written once in each activation.
+@@ -943,7 +943,7 @@
+     // `any` axis and this definition's `_writeVersion` but NOT `semantic` —
+     // they must not invalidate mutation-keyed caches of expressions that
+     // don't reference the index (the event's `ephemeral` flag carries this).
+-  }
++  });}
+ 
+   /** Snapshot the coupled type/value slots for an exact later restore —
+    * see `_restoreTypeSlots`. The result is OPAQUE to callers (typed
+@@ -1138,7 +1138,7 @@
+    * This is the read for the write path, for provenance and for a hover: use
+    * {@link type} for what is known in the current state.
+    */
+-  get declaredType(): BoxedType {
++  get declaredType(): BoxedType {return (globalThis as any).__programTypeTrace.span("binding-read",{ce:this._engine,target:this,read:"declaredType",proposed:undefined},()=>{
+     const t = this._type;
+     // A static type does not depend on a value: a variable with no type is
+     // `unknown`, whatever it holds.
+@@ -1182,7 +1182,7 @@
+       }
+     }
+     return t;
+-  }
++  });}
+ 
+   /** The signature skeleton refined from the stored value's CURRENT type.
+    * Nothing is written. The value is a function literal, or a symbol that
+@@ -1586,9 +1586,9 @@
+    * (`narrow()`) would answer `never` for `real & !2`, which is exactly the
+    * shape a disequality fact contributes.
+    */
+-  get type(): BoxedType {
++  get type(): BoxedType {return (globalThis as any).__programTypeTrace.span("binding-read",{ce:this._engine,target:this,read:"type",proposed:undefined},()=>{
+     return this._typeWithFacts(this.declaredType, true);
+-  }
++  });}
+ 
+   /** The type `declared` with the facts of the current context merged in,
+    * as {@link type} merges them into the declared type. `memoize` is false
+@@ -1751,12 +1751,12 @@
+    * whose decision phase reads the incumbent type must read `declaredType`,
+    * and must do so inside its own bracket or inside this thunk.
+    * @internal */
+-  _setType(thunk: () => Type | TypeString | BoxedType): void {
++  _setType(thunk: () => Type | TypeString | BoxedType): void {return (globalThis as any).__programTypeTrace.span("binding-write",{ce:this._engine,target:this,read:"_setType",proposed:undefined},()=>{
+     beforeDefinitionWrite(this);
+     this._engine._withoutFacts(() => this._writeType(thunk()));
+-  }
++  });}
+ 
+-  private _writeType(t: Type | TypeString | BoxedType): void {
++  private _writeType(t: Type | TypeString | BoxedType): void {return (globalThis as any).__programTypeTrace.span("binding-write",{ce:this._engine,target:this,read:"_writeType",proposed:t},()=>{
+     if (this._isConstant && !(this._programVariable && this.inferredType && this._value === undefined))
+       throw new Error(
+         `The type of the constant "${this.name}" cannot be changed`
+@@ -1792,7 +1792,7 @@
+       this._defValue = undefined;
+       this._value = undefined;
+     }
+-  }
++  });}
+ 
+   /** Install an element REFINEMENT of the placeholder skeleton
+    * (`refineConstructorPlaceholder`) — a type write that must NOT disturb
+--- a/src/compute-engine/index.ts
++++ b/src/compute-engine/index.ts
+@@ -3123,9 +3123,9 @@
+    * Return definition matching the symbol, starting with the current
+    * lexical scope and going up the scope chain.
+    */
+-  lookupDefinition(id: MathJsonSymbol): undefined | BoxedDefinition {
++  lookupDefinition(id: MathJsonSymbol): undefined | BoxedDefinition {return (globalThis as any).__programTypeTrace.span("lookup",{ce:this,name:id},()=>{
+     return lookupDefinitionImpl(this, id);
+-  }
++  });}
+ 
+   normalizeIdentifier(latex: string): string {
+     if (!latex) return '';
+--- a/src/compute-engine/collection-utils.ts
++++ b/src/compute-engine/collection-utils.ts
+@@ -6508,13 +6508,13 @@
+   operator: string,
+   overTuples: boolean,
+   operandTypes: ReadonlyArray<Type>
+-): boolean {
++): boolean {return (globalThis as any).__programTypeTrace.span("appliesToListCoordinateTuple",{operator,overTuples},()=>{
+   if (!overTuples && !LIST_COORDINATE_TUPLE_ARITHMETIC.has(operator))
+     return false;
+   return operandTypes.some(
+     (t) => t === 'error' || isListCoordinateTupleType(t)
+   );
+-}
++});}
+ 
+ /**
+  * Whether a sum (`Add`, `Subtract`) of operands of the types `operandTypes`
+@@ -6543,7 +6543,7 @@
+ export function addsPointToNumberCollection(
+   operator: string,
+   operandTypes: ReadonlyArray<Type>
+-): boolean {
++): boolean {return (globalThis as any).__programTypeTrace.span("addsPointToNumberCollection",{operator},()=>{
+   if (operator !== 'Add' && operator !== 'Subtract') return false;
+   let point = false;
+   let numbers = false;
+@@ -6553,7 +6553,7 @@
+     else if (isNumberCollectionType(t)) numbers = true;
+   }
+   return point && numbers;
+-}
++});}
+ 
+ /**
+  * Whether an application of `operator` to operands of `operandTypes` is one
+--- a/src/compute-engine/boxed-expression/derive-application-type.ts
++++ b/src/compute-engine/boxed-expression/derive-application-type.ts
+@@ -1527,7 +1527,7 @@
+   answered: Type,
+   def: { signature: { type: Type } },
+   operandTypes: ReadonlyArray<Type>
+-): Type {
++): Type {return (globalThis as any).__programTypeTrace.span("withCodomainForAbsentAnswer",{answer:answered},()=>{
+   if (stripMissingFromType(answered) !== 'never') return answered;
+   // Only when an operand IS absent (typed `missing`, or `never` as a symbol
+   // assigned `Missing` is): a handler may answer `never` for a reason of its
+@@ -1550,7 +1550,7 @@
+   )
+     return answered;
+   return reduceType({ kind: 'union', types: ['missing', declared] });
+-}
++});}
+ 
+ /**
+  * The result type of a call of the operator `def`, named `operator`, over
+--- a/src/compute-engine/boxed-expression/broadcast-lift-type.ts
++++ b/src/compute-engine/boxed-expression/broadcast-lift-type.ts
+@@ -790,14 +790,14 @@
+  * arm is not stripped before the type variables are bound, and it does not
+  * start the absorption of `absorbOperandAbsence`.
+  */
+-export function passesAbsentCellsThrough(operator: string, t: Type): boolean {
++export function passesAbsentCellsThrough(operator: string, t: Type): boolean {return (globalThis as any).__programTypeTrace.span("passesAbsentCellsThrough",{operator},()=>{
+   return (
+     (ABSENT_CELLS_PASS_THROUGH.has(operator) ||
+       ABSENT_CELLS_READ_BY_HANDLER.has(operator)) &&
+     typeContainsMissing(t) &&
+     !hasTopLevelMissing(t)
+   );
+-}
++});}
+ 
+ /**
+  * The present type of an operand of type `t` that can be absent as a whole,

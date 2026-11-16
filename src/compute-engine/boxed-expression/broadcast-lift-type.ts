@@ -790,13 +790,11 @@ const ABSENT_CELLS_READ_BY_HANDLER: ReadonlySet<string> = new Set([
  * arm is not stripped before the type variables are bound, and it does not
  * start the absorption of `absorbOperandAbsence`.
  */
-export function passesAbsentCellsThrough(operator: string, t: Type): boolean {
-  return (
-    (ABSENT_CELLS_PASS_THROUGH.has(operator) ||
-      ABSENT_CELLS_READ_BY_HANDLER.has(operator)) &&
-    typeContainsMissing(t) &&
-    !hasTopLevelMissing(t)
-  );
+export function passesAbsentCellsThrough(operator: string, operandType: Type | (() => Type)): boolean {
+  if (!ABSENT_CELLS_PASS_THROUGH.has(operator) &&
+      !ABSENT_CELLS_READ_BY_HANDLER.has(operator)) return false;
+  const t = typeof operandType === 'function' ? operandType() : operandType;
+  return typeContainsMissing(t) && !hasTopLevelMissing(t);
 }
 
 /**

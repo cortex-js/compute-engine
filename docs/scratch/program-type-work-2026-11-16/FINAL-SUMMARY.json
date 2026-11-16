@@ -1,0 +1,4278 @@
+{
+  "timing": {
+    "box": {
+      "arms": {
+        "original": [
+          {
+            "name": "timing-box-original-6",
+            "arm": "original",
+            "case": "box",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 3200,
+            "samplesUs": [
+              43.14132812499999,
+              41.40356781250002,
+              52.906666875,
+              40.16458343749996,
+              40.91770843749998,
+              39.78088562499998,
+              40.50546875000002
+            ],
+            "medianUs": 40.91770843749998,
+            "maxLoad": 4.93798828125,
+            "rejectionIntervals": []
+          },
+          {
+            "name": "timing-box-original-repair1",
+            "arm": "original",
+            "case": "box",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 3200,
+            "samplesUs": [
+              43.890924375000004,
+              41.615833124999995,
+              53.72230468750001,
+              40.564791875000026,
+              41.8573959375,
+              39.66632812499995,
+              40.01941406250005
+            ],
+            "medianUs": 41.615833124999995,
+            "maxLoad": 5.02294921875,
+            "rejectionIntervals": []
+          }
+        ],
+        "guard": [
+          {
+            "name": "timing-box-guard-5",
+            "arm": "guard",
+            "case": "box",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 1600,
+            "samplesUs": [
+              81.20505250000001,
+              76.24986999999997,
+              83.31453125000003,
+              79.08963499999999,
+              76.23005250000006,
+              73.866145625,
+              71.62768249999999
+            ],
+            "medianUs": 76.24986999999997,
+            "maxLoad": 4.845703125,
+            "rejectionIntervals": []
+          },
+          {
+            "name": "timing-box-guard-repair1",
+            "arm": "guard",
+            "case": "box",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 1600,
+            "samplesUs": [
+              88.05601562500001,
+              91.05145812500005,
+              89.67302125000003,
+              81.72278625000004,
+              79.35867187499994,
+              73.14653687499998,
+              71.88096375
+            ],
+            "medianUs": 81.72278625000004,
+            "maxLoad": 5.02294921875,
+            "rejectionIntervals": []
+          }
+        ],
+        "revision": [
+          {
+            "name": "timing-box-revision-repair1",
+            "arm": "revision",
+            "case": "box",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 1600,
+            "samplesUs": [
+              85.40322874999994,
+              75.69104187500002,
+              81.21374999999993,
+              78.05161499999997,
+              73.63747375000003,
+              70.54070312500002,
+              68.33783875000009
+            ],
+            "medianUs": 75.69104187500002,
+            "maxLoad": 4.93798828125,
+            "rejectionIntervals": []
+          },
+          {
+            "name": "timing-box-revision-repair2",
+            "arm": "revision",
+            "case": "box",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 1600,
+            "samplesUs": [
+              79.18096374999998,
+              74.30682249999997,
+              81.12104187500002,
+              78.37697937500003,
+              74.48171875,
+              71.90138000000005,
+              70.5994274999999
+            ],
+            "medianUs": 74.48171875,
+            "maxLoad": 5.02294921875,
+            "rejectionIntervals": []
+          }
+        ]
+      },
+      "counts": {
+        "original": 2,
+        "guard": 2,
+        "revision": 2
+      },
+      "ratios": {
+        "guard/original": 1.9140418944747746,
+        "revision/guard": 0.9506250270764819,
+        "revision/original": 1.8195361277606033
+      }
+    },
+    "parse-box": {
+      "arms": {
+        "original": [
+          {
+            "name": "timing-parse-box-original-repair1",
+            "arm": "original",
+            "case": "parse-box",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 1600,
+            "samplesUs": [
+              64.533333125,
+              58.93229187500005,
+              59.46591124999998,
+              71.92104125,
+              61.23351562499998,
+              56.67130187500007,
+              57.11067687500005
+            ],
+            "medianUs": 59.46591124999998,
+            "maxLoad": 4.7373046875,
+            "rejectionIntervals": []
+          },
+          {
+            "name": "timing-parse-box-original-repair2",
+            "arm": "original",
+            "case": "parse-box",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 1600,
+            "samplesUs": [
+              65.26216187500005,
+              61.17950499999999,
+              59.67497375000001,
+              70.99010437499999,
+              58.730208749999946,
+              55.908125000000126,
+              56.91479125000001
+            ],
+            "medianUs": 59.67497375000001,
+            "maxLoad": 4.7373046875,
+            "rejectionIntervals": []
+          }
+        ],
+        "guard": [
+          {
+            "name": "timing-parse-box-guard-repair1",
+            "arm": "guard",
+            "case": "parse-box",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 1600,
+            "samplesUs": [
+              100.57976562500002,
+              103.98210937499996,
+              104.92880187500006,
+              97.01132812500006,
+              89.33609374999989,
+              95.26216125000005,
+              91.59080750000001
+            ],
+            "medianUs": 97.01132812500006,
+            "maxLoad": 4.8017578125,
+            "rejectionIntervals": []
+          },
+          {
+            "name": "timing-parse-box-guard-repair2",
+            "arm": "guard",
+            "case": "parse-box",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 1600,
+            "samplesUs": [
+              118.36554687499998,
+              101.77239624999999,
+              103.83671875000005,
+              96.12031250000001,
+              89.69135375000008,
+              96.38395875,
+              87.82403687500008
+            ],
+            "medianUs": 96.38395875,
+            "maxLoad": 5.31884765625,
+            "rejectionIntervals": []
+          }
+        ],
+        "revision": [
+          {
+            "name": "timing-parse-box-revision-repair1",
+            "arm": "revision",
+            "case": "parse-box",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 1600,
+            "samplesUs": [
+              89.53130187500001,
+              94.071198125,
+              95.69143249999996,
+              92.90221312499995,
+              86.39661500000003,
+              84.51341124999999,
+              83.18791687499996
+            ],
+            "medianUs": 89.53130187500001,
+            "maxLoad": 4.8017578125,
+            "rejectionIntervals": []
+          },
+          {
+            "name": "timing-parse-box-revision-repair2",
+            "arm": "revision",
+            "case": "parse-box",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 1600,
+            "samplesUs": [
+              98.24841125000006,
+              87.97093749999995,
+              89.13390625000005,
+              97.38010437499995,
+              88.60117187499995,
+              93.13453124999995,
+              87.28197937499999
+            ],
+            "medianUs": 89.13390625000005,
+            "maxLoad": 5.31884765625,
+            "rejectionIntervals": []
+          }
+        ]
+      },
+      "counts": {
+        "original": 2,
+        "guard": 2,
+        "revision": 2
+      },
+      "ratios": {
+        "guard/original": 1.623248701526769,
+        "revision/guard": 0.9238343447349846,
+        "revision/original": 1.499612900516897
+      }
+    },
+    "check": {
+      "arms": {
+        "original": [
+          {
+            "name": "timing-check-original-1",
+            "arm": "original",
+            "case": "check",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 800,
+            "samplesUs": [
+              144.07567749999998,
+              143.67364624999993,
+              133.78625,
+              133.77510375000014,
+              149.47156250000006,
+              135.09135375,
+              126.99020875000002
+            ],
+            "medianUs": 135.09135375,
+            "maxLoad": 5.453125,
+            "rejectionIntervals": []
+          },
+          {
+            "name": "timing-check-original-6",
+            "arm": "original",
+            "case": "check",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 800,
+            "samplesUs": [
+              157.5111975,
+              144.66020749999998,
+              134.25515624999989,
+              135.98489624999985,
+              149.44515625000008,
+              135.84411500000016,
+              124.70645875000002
+            ],
+            "medianUs": 135.98489624999985,
+            "maxLoad": 5.8857421875,
+            "rejectionIntervals": []
+          }
+        ],
+        "guard": [
+          {
+            "name": "timing-check-guard-5",
+            "arm": "guard",
+            "case": "check",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 800,
+            "samplesUs": [
+              190.38812500000006,
+              176.10776124999987,
+              165.79593749999987,
+              154.6223950000001,
+              145.27145875000002,
+              137.82031250000017,
+              143.51718750000003
+            ],
+            "medianUs": 154.6223950000001,
+            "maxLoad": 6.13720703125,
+            "rejectionIntervals": []
+          },
+          {
+            "name": "timing-check-guard-repair1",
+            "arm": "guard",
+            "case": "check",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 800,
+            "samplesUs": [
+              161.52479125,
+              146.66400999999993,
+              150.04869749999997,
+              142.95604124999983,
+              142.63093749999996,
+              134.60177000000016,
+              132.9936975000001
+            ],
+            "medianUs": 142.95604124999983,
+            "maxLoad": 5.8857421875,
+            "rejectionIntervals": []
+          }
+        ],
+        "revision": [
+          {
+            "name": "timing-check-revision-4",
+            "arm": "revision",
+            "case": "check",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 800,
+            "samplesUs": [
+              175.18395874999996,
+              157.23864500000005,
+              151.44875000000013,
+              149.44526124999982,
+              141.1527074999998,
+              136.0250524999998,
+              138.17025999999998
+            ],
+            "medianUs": 149.44526124999982,
+            "maxLoad": 6.13720703125,
+            "rejectionIntervals": []
+          },
+          {
+            "name": "timing-check-revision-repair1",
+            "arm": "revision",
+            "case": "check",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 800,
+            "samplesUs": [
+              172.28885375000004,
+              148.7805212500001,
+              156.44390624999986,
+              149.68104124999996,
+              143.1584375,
+              136.32687500000003,
+              132.76942624999975
+            ],
+            "medianUs": 148.7805212500001,
+            "maxLoad": 5.8857421875,
+            "rejectionIntervals": []
+          }
+        ]
+      },
+      "counts": {
+        "original": 2,
+        "guard": 2,
+        "revision": 2
+      },
+      "ratios": {
+        "guard/original": 1.0977665370905791,
+        "revision/guard": 1.0021753802397704,
+        "revision/original": 1.1001545967232471
+      }
+    },
+    "notebook": {
+      "arms": {
+        "original": [
+          {
+            "name": "timing-notebook-original-1",
+            "arm": "original",
+            "case": "notebook",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 1600,
+            "samplesUs": [
+              118.89536437499999,
+              104.74518187499996,
+              117.6454425,
+              104.94971374999992,
+              97.67986937499998,
+              92.87973999999991,
+              92.81877625000007
+            ],
+            "medianUs": 104.74518187499996,
+            "maxLoad": 5.654296875,
+            "rejectionIntervals": []
+          },
+          {
+            "name": "timing-notebook-original-6",
+            "arm": "original",
+            "case": "notebook",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 1600,
+            "samplesUs": [
+              107.54474000000002,
+              106.45666687500004,
+              107.87697875000006,
+              100.68231812500002,
+              107.87257812499988,
+              120.60927125000006,
+              109.20643187500005
+            ],
+            "medianUs": 107.87257812499988,
+            "maxLoad": 5.33203125,
+            "rejectionIntervals": []
+          }
+        ],
+        "guard": [
+          {
+            "name": "timing-notebook-guard-2",
+            "arm": "guard",
+            "case": "notebook",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 800,
+            "samplesUs": [
+              156.45255250000005,
+              155.2306250000001,
+              156.02562500000005,
+              144.61692625000012,
+              143.7944787500001,
+              133.35307375000014,
+              128.23604125000003
+            ],
+            "medianUs": 144.61692625000012,
+            "maxLoad": 5.654296875,
+            "rejectionIntervals": []
+          },
+          {
+            "name": "timing-notebook-guard-5",
+            "arm": "guard",
+            "case": "notebook",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 800,
+            "samplesUs": [
+              163.17572999999996,
+              139.55536374999994,
+              137.83051999999998,
+              127.20859375000005,
+              129.67390625000007,
+              122.51499999999993,
+              121.11895874999988
+            ],
+            "medianUs": 129.67390625000007,
+            "maxLoad": 5.361328125,
+            "rejectionIntervals": []
+          }
+        ],
+        "revision": [
+          {
+            "name": "timing-notebook-revision-3",
+            "arm": "revision",
+            "case": "notebook",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 800,
+            "samplesUs": [
+              150.20661375000003,
+              136.47708250000008,
+              139.37911499999998,
+              129.34328125000008,
+              128.1946875,
+              120.36755249999999,
+              118.06041749999991
+            ],
+            "medianUs": 129.34328125000008,
+            "maxLoad": 5.361328125,
+            "rejectionIntervals": []
+          },
+          {
+            "name": "timing-notebook-revision-4",
+            "arm": "revision",
+            "case": "notebook",
+            "exitCode": 0,
+            "accepted": true,
+            "warmup": 1000,
+            "iterationsPerSample": 800,
+            "samplesUs": [
+              149.22713625,
+              136.44317625,
+              140.8795825,
+              141.97468749999985,
+              157.4778649999999,
+              157.14380249999977,
+              119.24765624999992
+            ],
+            "medianUs": 141.97468749999985,
+            "maxLoad": 5.361328125,
+            "rejectionIntervals": []
+          }
+        ]
+      },
+      "counts": {
+        "original": 2,
+        "guard": 2,
+        "revision": 2
+      },
+      "ratios": {
+        "guard/original": 1.290065479478292,
+        "revision/guard": 0.9891616364903473,
+        "revision/original": 1.2760832808604519
+      }
+    }
+  },
+  "rejections": [
+    {
+      "name": "timing-box-original-1",
+      "arm": "original",
+      "case": "box",
+      "exitCode": 0,
+      "accepted": false,
+      "warmup": 1000,
+      "iterationsPerSample": 3200,
+      "samplesUs": [
+        45.98924468749999,
+        44.654114374999985,
+        54.97761718750002,
+        43.29951812499999,
+        44.37598937500006,
+        41.48923187500003,
+        43.26218749999995
+      ],
+      "medianUs": 44.37598937500006,
+      "maxLoad": 4.83251953125,
+      "rejectionIntervals": [
+        {
+          "seconds": 0.4071922302246094,
+          "load": [
+            4.83251953125,
+            4.27880859375,
+            3.91552734375
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 3.9,
+              "cpu": 176.8,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 189.09987540166568
+            }
+          ]
+        },
+        {
+          "seconds": 0.8945951461791992,
+          "load": [
+            4.83251953125,
+            4.27880859375,
+            3.91552734375
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 4.62,
+              "cpu": 157.6,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 147.72172599539408
+            }
+          ]
+        },
+        {
+          "seconds": 1.381946086883545,
+          "load": [
+            4.83251953125,
+            4.27880859375,
+            3.91552734375
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 5.33,
+              "cpu": 150.6,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 145.68557084836442
+            }
+          ]
+        },
+        {
+          "seconds": 1.8689851760864258,
+          "load": [
+            4.83251953125,
+            4.27880859375,
+            3.91552734375
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 6.08,
+              "cpu": 162.1,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 153.99174658188068
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "timing-box-guard-2",
+      "arm": "guard",
+      "case": "box",
+      "exitCode": 0,
+      "accepted": false,
+      "warmup": 1000,
+      "iterationsPerSample": 1600,
+      "samplesUs": [
+        85.96067687500003,
+        82.83903625,
+        86.81783874999994,
+        84.38877625000003,
+        78.86533875000012,
+        78.00453125000004,
+        76.49385374999994
+      ],
+      "medianUs": 82.83903625,
+      "maxLoad": 4.83251953125,
+      "rejectionIntervals": [
+        {
+          "seconds": 0.40261101722717285,
+          "load": [
+            4.83251953125,
+            4.27880859375,
+            3.91552734375
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 6.96,
+              "cpu": 135.7,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 139.09207051927746
+            }
+          ]
+        },
+        {
+          "seconds": 0.8909690380096436,
+          "load": [
+            4.83251953125,
+            4.27880859375,
+            3.91552734375
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 7.62,
+              "cpu": 134.3,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 135.14675134085365
+            }
+          ]
+        },
+        {
+          "seconds": 1.380985975265503,
+          "load": [
+            4.83251953125,
+            4.27880859375,
+            3.91552734375
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 8.26,
+              "cpu": 124.4,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 130.60773033357978
+            }
+          ]
+        },
+        {
+          "seconds": 1.8698511123657227,
+          "load": [
+            4.83251953125,
+            4.27880859375,
+            3.91552734375
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 8.85,
+              "cpu": 121.4,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 120.68768157608403
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "timing-box-revision-3",
+      "arm": "revision",
+      "case": "box",
+      "exitCode": 0,
+      "accepted": false,
+      "warmup": 1000,
+      "iterationsPerSample": 1600,
+      "samplesUs": [
+        85.91234374999999,
+        81.48031250000003,
+        84.83083312499993,
+        81.942291875,
+        75.73671875000002,
+        76.18757812500007,
+        71.01567687500008
+      ],
+      "medianUs": 81.48031250000003,
+      "maxLoad": 4.845703125,
+      "rejectionIntervals": [
+        {
+          "seconds": 0.40294981002807617,
+          "load": [
+            4.83251953125,
+            4.27880859375,
+            3.91552734375
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 9.65,
+              "cpu": 120.4,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 126.56663120512819
+            }
+          ]
+        },
+        {
+          "seconds": 0.8912937641143799,
+          "load": [
+            4.83251953125,
+            4.27880859375,
+            3.91552734375
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 10.22,
+              "cpu": 115.6,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 116.72101092486665
+            }
+          ]
+        },
+        {
+          "seconds": 1.379274845123291,
+          "load": [
+            4.845703125,
+            4.29052734375,
+            3.921875
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 10.79,
+              "cpu": 117.0,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 116.80780714316046
+            }
+          ]
+        },
+        {
+          "seconds": 1.8672370910644531,
+          "load": [
+            4.845703125,
+            4.29052734375,
+            3.921875
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 11.37,
+              "cpu": 114.3,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 118.86165473341471
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "timing-box-revision-4",
+      "arm": "revision",
+      "case": "box",
+      "exitCode": 0,
+      "accepted": false,
+      "warmup": 1000,
+      "iterationsPerSample": 1600,
+      "samplesUs": [
+        83.16427062500004,
+        78.53109375000003,
+        84.81671874999996,
+        81.64200500000007,
+        76.40523437500008,
+        75.17786437499993,
+        77.79195312499994
+      ],
+      "medianUs": 78.53109375000003,
+      "maxLoad": 4.845703125,
+      "rejectionIntervals": [
+        {
+          "seconds": 0.40702223777770996,
+          "load": [
+            4.845703125,
+            4.29052734375,
+            3.921875
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 12.11,
+              "cpu": 111.6,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 117.92967446219599
+            }
+          ]
+        },
+        {
+          "seconds": 0.893646240234375,
+          "load": [
+            4.845703125,
+            4.29052734375,
+            3.921875
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 12.64,
+              "cpu": 109.6,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 108.9136576338934
+            }
+          ]
+        },
+        {
+          "seconds": 1.3834021091461182,
+          "load": [
+            4.845703125,
+            4.29052734375,
+            3.921875
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 13.18,
+              "cpu": 110.2,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 110.25901561933304
+            }
+          ]
+        },
+        {
+          "seconds": 1.8732450008392334,
+          "load": [
+            4.845703125,
+            4.29052734375,
+            3.921875
+          ],
+          "contenders": [
+            {
+              "pid": 20215,
+              "ppid": 20212,
+              "seconds": 13.85,
+              "cpu": 129.6,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 136.77854907400646
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "timing-parse-box-original-1",
+      "arm": "original",
+      "case": "parse-box",
+      "exitCode": 0,
+      "accepted": false,
+      "warmup": 1000,
+      "iterationsPerSample": 1600,
+      "samplesUs": [
+        64.59484374999995,
+        58.27377624999997,
+        64.61447937500004,
+        76.782943125,
+        64.75148437500003,
+        58.901692499999996,
+        59.091120000000075
+      ],
+      "medianUs": 64.59484374999995,
+      "maxLoad": 4.86083984375,
+      "rejectionIntervals": [
+        {
+          "seconds": 1.721318006515503,
+          "load": [
+            4.86083984375,
+            4.32421875,
+            3.939453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 0.91,
+              "cpu": 127.6,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 145.94245277069183
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "timing-parse-box-guard-2",
+      "arm": "guard",
+      "case": "parse-box",
+      "exitCode": 0,
+      "accepted": false,
+      "warmup": 1000,
+      "iterationsPerSample": 1600,
+      "samplesUs": [
+        105.14005187499997,
+        96.10570312499995,
+        102.77377625,
+        103.1495831250001,
+        94.66862000000006,
+        103.21799499999997,
+        97.53606812499996
+      ],
+      "medianUs": 102.77377625,
+      "maxLoad": 4.86083984375,
+      "rejectionIntervals": [
+        {
+          "seconds": 0.40700411796569824,
+          "load": [
+            4.86083984375,
+            4.32421875,
+            3.939453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 2.15,
+              "cpu": 181.3,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 208.84309580170802
+            }
+          ]
+        },
+        {
+          "seconds": 0.899806022644043,
+          "load": [
+            4.86083984375,
+            4.32421875,
+            3.939453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 3.07,
+              "cpu": 187.6,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 186.68759013837223
+            }
+          ]
+        },
+        {
+          "seconds": 1.388585090637207,
+          "load": [
+            4.86083984375,
+            4.32421875,
+            3.939453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 3.92,
+              "cpu": 170.0,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 173.90270076211365
+            }
+          ]
+        },
+        {
+          "seconds": 1.8759369850158691,
+          "load": [
+            4.86083984375,
+            4.32421875,
+            3.939453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 4.63,
+              "cpu": 154.6,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 145.68528576362627
+            }
+          ]
+        },
+        {
+          "seconds": 2.362365245819092,
+          "load": [
+            4.86083984375,
+            4.32421875,
+            3.939453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 5.42,
+              "cpu": 171.9,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 162.40832691248232
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "timing-parse-box-revision-3",
+      "arm": "revision",
+      "case": "parse-box",
+      "exitCode": 0,
+      "accepted": false,
+      "warmup": 1000,
+      "iterationsPerSample": 1600,
+      "samplesUs": [
+        104.97658874999999,
+        95.17153624999992,
+        94.86911437500012,
+        105.25036437499992,
+        94.69947937499995,
+        101.78690125000003,
+        95.0552606250001
+      ],
+      "medianUs": 95.17153624999992,
+      "maxLoad": 4.87158203125,
+      "rejectionIntervals": [
+        {
+          "seconds": 0.4052731990814209,
+          "load": [
+            4.86083984375,
+            4.32421875,
+            3.939453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 6.31,
+              "cpu": 144.9,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 148.0482798665049
+            }
+          ]
+        },
+        {
+          "seconds": 0.8941183090209961,
+          "load": [
+            4.87158203125,
+            4.3349609375,
+            3.9453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 6.95,
+              "cpu": 135.6,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 130.92081458667127
+            }
+          ]
+        },
+        {
+          "seconds": 1.3822212219238281,
+          "load": [
+            4.87158203125,
+            4.3349609375,
+            3.9453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 7.61,
+              "cpu": 128.4,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 135.21738603747855
+            }
+          ]
+        },
+        {
+          "seconds": 1.8749260902404785,
+          "load": [
+            4.87158203125,
+            4.3349609375,
+            3.9453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 8.2,
+              "cpu": 118.8,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 119.74714234421147
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "timing-parse-box-revision-4",
+      "arm": "revision",
+      "case": "parse-box",
+      "exitCode": 0,
+      "accepted": false,
+      "warmup": 1000,
+      "iterationsPerSample": 1600,
+      "samplesUs": [
+        105.01075499999999,
+        93.92273437500009,
+        94.68317687500004,
+        100.810885625,
+        106.46726562499992,
+        91.82247437499996,
+        93.12786500000001
+      ],
+      "medianUs": 94.68317687500004,
+      "maxLoad": 4.87158203125,
+      "rejectionIntervals": [
+        {
+          "seconds": 0.4068260192871094,
+          "load": [
+            4.87158203125,
+            4.3349609375,
+            3.9453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 9.03,
+              "cpu": 118.9,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 132.73487299220773
+            }
+          ]
+        },
+        {
+          "seconds": 0.8960800170898438,
+          "load": [
+            4.87158203125,
+            4.3349609375,
+            3.9453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 9.6,
+              "cpu": 121.9,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 116.50390238197348
+            }
+          ]
+        },
+        {
+          "seconds": 1.3849420547485352,
+          "load": [
+            4.87158203125,
+            4.3349609375,
+            3.9453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 10.17,
+              "cpu": 117.3,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 116.59731296173112
+            }
+          ]
+        },
+        {
+          "seconds": 1.8718628883361816,
+          "load": [
+            4.87158203125,
+            4.3349609375,
+            3.9453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 10.77,
+              "cpu": 114.7,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 123.22331652543652
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "timing-parse-box-guard-5",
+      "arm": "guard",
+      "case": "parse-box",
+      "exitCode": 0,
+      "accepted": false,
+      "warmup": 1000,
+      "iterationsPerSample": 1600,
+      "samplesUs": [
+        103.98512999999994,
+        95.96476562499994,
+        110.07403687500002,
+        102.48778625,
+        94.17854187500012,
+        99.49692687500004,
+        94.34325562500007
+      ],
+      "medianUs": 99.49692687500004,
+      "maxLoad": 4.87158203125,
+      "rejectionIntervals": [
+        {
+          "seconds": 0.403656005859375,
+          "load": [
+            4.87158203125,
+            4.3349609375,
+            3.9453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 11.53,
+              "cpu": 111.5,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 121.3904891509791
+            }
+          ]
+        },
+        {
+          "seconds": 0.8918042182922363,
+          "load": [
+            4.87158203125,
+            4.3349609375,
+            3.9453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 12.06,
+              "cpu": 111.2,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 108.57358205995602
+            }
+          ]
+        },
+        {
+          "seconds": 1.3802540302276611,
+          "load": [
+            4.87158203125,
+            4.3349609375,
+            3.9453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 12.73,
+              "cpu": 149.1,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 137.16864734683875
+            }
+          ]
+        },
+        {
+          "seconds": 1.8658921718597412,
+          "load": [
+            4.8017578125,
+            4.3291015625,
+            3.9453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 13.29,
+              "cpu": 119.9,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 115.31219482020325
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "timing-parse-box-original-6",
+      "arm": "original",
+      "case": "parse-box",
+      "exitCode": 0,
+      "accepted": false,
+      "warmup": 1000,
+      "iterationsPerSample": 1600,
+      "samplesUs": [
+        67.47039062500001,
+        65.36237,
+        61.845624999999984,
+        69.60783875000004,
+        59.24416687499999,
+        54.79072875,
+        55.402213124999946
+      ],
+      "medianUs": 61.845624999999984,
+      "maxLoad": 4.8017578125,
+      "rejectionIntervals": [
+        {
+          "seconds": 0.4032759666442871,
+          "load": [
+            4.8017578125,
+            4.3291015625,
+            3.9453125
+          ],
+          "contenders": [
+            {
+              "pid": 24836,
+              "ppid": 24835,
+              "seconds": 14.05,
+              "cpu": 118.9,
+              "command": "/Users/arno/.nvm/versions/node/v26.13.0/bin/node",
+              "intervalCpu": 126.46426818929461
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "timing-check-guard-2",
+      "arm": "guard",
+      "case": "check",
+      "exitCode": 0,
+      "accepted": false,
+      "warmup": 1000,
+      "iterationsPerSample": 800,
+      "samplesUs": [
+        220.7022387500001,
+        153.20666750000015,
+        202.2265625,
+        166.78770750000012,
+        167.47546874999983,
+        170.68650999999988,
+        150.80948000000006
+      ],
+      "medianUs": 167.47546874999983,
+      "maxLoad": 5.453125,
+      "rejectionIntervals": [
+        {
+          "seconds": 1.2855939865112305,
+          "load": [
+            5.453125,
+            4.49267578125,
+            4.009765625
+          ],
+          "contenders": [
+            {
+              "pid": 30218,
+              "ppid": 30217,
+              "seconds": 0.78,
+              "cpu": 178.4,
+              "command": "/Users/arno/dev/tycho/node_modules/@oxlint-tsgolint/darwin-arm64/tsgolint",
+              "intervalCpu": 178.4
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "timing-check-revision-3",
+      "arm": "revision",
+      "case": "check",
+      "exitCode": 0,
+      "accepted": false,
+      "warmup": 1000,
+      "iterationsPerSample": 800,
+      "samplesUs": [
+        186.22130250000012,
+        186.6236975000001,
+        167.12953124999984,
+        188.42395875000022,
+        149.76781249999988,
+        162.46526000000017,
+        161.48890625000007
+      ],
+      "medianUs": 167.12953124999984,
+      "maxLoad": 6.13720703125,
+      "rejectionIntervals": [
+        {
+          "seconds": 0.8399219512939453,
+          "load": [
+            5.453125,
+            4.49267578125,
+            4.009765625
+          ],
+          "contenders": [
+            {
+              "pid": 30833,
+              "ppid": 30832,
+              "seconds": 1.07,
+              "cpu": 317.6,
+              "command": "/Users/arno/dev/tycho/node_modules/@oxlint-tsgolint/darwin-arm64/tsgolint",
+              "intervalCpu": 317.6
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "allocation": {
+    "box": {
+      "original": {
+        "estimatedBytesPerOperation": 140052.092,
+        "warmup": 1000,
+        "iterations": 20000,
+        "sampleIntervalBytes": 32768,
+        "samples": 84818,
+        "controlSamples": 112,
+        "cpuTimingAcceptance": "diagnostic, external monitor not attached; not a duration ratio"
+      },
+      "guard": {
+        "estimatedBytesPerOperation": 230482.1236,
+        "warmup": 1000,
+        "iterations": 20000,
+        "sampleIntervalBytes": 32768,
+        "samples": 140177,
+        "controlSamples": 118,
+        "cpuTimingAcceptance": "diagnostic, external monitor not attached; not a duration ratio"
+      },
+      "revision": {
+        "estimatedBytesPerOperation": 229074.4912,
+        "warmup": 1000,
+        "iterations": 20000,
+        "sampleIntervalBytes": 32768,
+        "samples": 139336,
+        "controlSamples": 143,
+        "cpuTimingAcceptance": "diagnostic, external monitor not attached; not a duration ratio"
+      }
+    },
+    "parse-box": {
+      "original": {
+        "estimatedBytesPerOperation": 189647.3988,
+        "warmup": 1000,
+        "iterations": 20000,
+        "sampleIntervalBytes": 32768,
+        "samples": 115018,
+        "controlSamples": 120,
+        "cpuTimingAcceptance": "diagnostic, external monitor not attached; not a duration ratio"
+      },
+      "guard": {
+        "estimatedBytesPerOperation": 281475.818,
+        "warmup": 1000,
+        "iterations": 20000,
+        "sampleIntervalBytes": 32768,
+        "samples": 171233,
+        "controlSamples": 117,
+        "cpuTimingAcceptance": "diagnostic, external monitor not attached; not a duration ratio"
+      },
+      "revision": {
+        "estimatedBytesPerOperation": 279183.348,
+        "warmup": 1000,
+        "iterations": 20000,
+        "sampleIntervalBytes": 32768,
+        "samples": 169845,
+        "controlSamples": 119,
+        "cpuTimingAcceptance": "diagnostic, external monitor not attached; not a duration ratio"
+      }
+    },
+    "check": {
+      "original": {
+        "estimatedBytesPerOperation": 385821.6068,
+        "warmup": 1000,
+        "iterations": 20000,
+        "sampleIntervalBytes": 32768,
+        "samples": 234609,
+        "controlSamples": 107,
+        "cpuTimingAcceptance": "diagnostic, external monitor not attached; not a duration ratio"
+      },
+      "guard": {
+        "estimatedBytesPerOperation": 444099.3904,
+        "warmup": 1000,
+        "iterations": 20000,
+        "sampleIntervalBytes": 32768,
+        "samples": 270137,
+        "controlSamples": 99,
+        "cpuTimingAcceptance": "diagnostic, external monitor not attached; not a duration ratio"
+      },
+      "revision": {
+        "estimatedBytesPerOperation": 435664.8772,
+        "warmup": 1000,
+        "iterations": 20000,
+        "sampleIntervalBytes": 32768,
+        "samples": 264977,
+        "controlSamples": 113,
+        "cpuTimingAcceptance": "diagnostic, external monitor not attached; not a duration ratio"
+      }
+    },
+    "notebook": {
+      "original": {
+        "estimatedBytesPerOperation": 332151.2364,
+        "warmup": 1000,
+        "iterations": 20000,
+        "sampleIntervalBytes": 32768,
+        "samples": 201997,
+        "controlSamples": 107,
+        "cpuTimingAcceptance": "diagnostic, external monitor not attached; not a duration ratio"
+      },
+      "guard": {
+        "estimatedBytesPerOperation": 429062.6028,
+        "warmup": 1000,
+        "iterations": 20000,
+        "sampleIntervalBytes": 32768,
+        "samples": 261232,
+        "controlSamples": 136,
+        "cpuTimingAcceptance": "diagnostic, external monitor not attached; not a duration ratio"
+      },
+      "revision": {
+        "estimatedBytesPerOperation": 429470.0952,
+        "warmup": 1000,
+        "iterations": 20000,
+        "sampleIntervalBytes": 32768,
+        "samples": 261483,
+        "controlSamples": 124,
+        "cpuTimingAcceptance": "diagnostic, external monitor not attached; not a duration ratio"
+      }
+    }
+  },
+  "traces": {
+    "box": {
+      "guard": {
+        "operations": 3,
+        "dropped": 0,
+        "counts": {
+          "binding-read": 1479,
+          "withEvidenceSession": 6,
+          "lookup": 84,
+          "binding-write": 24,
+          "expression-read": 222,
+          "boundCallType": 24,
+          "functionLiteralCallSignatureType": 6,
+          "signature-demand": 6,
+          "functionLiteralSignatureType": 6,
+          "operand-map": 66,
+          "appliesToListCoordinateTuple": 18,
+          "addsPointToNumberCollection": 18,
+          "passesAbsentCellsThrough": 24,
+          "withCodomainForAbsentAnswer": 12,
+          "functionLiteralArrowEffects": 6,
+          "joinAssignmentEvidence": 6,
+          "evidence-target": 3,
+          "joinEvidenceOnBinding": 6,
+          "writeEvidenceType": 3,
+          "registerEvidenceSite": 3,
+          "evidence-rejoin": 3
+        },
+        "reads": {
+          "('binding-read', 'type')": 423,
+          "('binding-read', 'declaredType')": 588,
+          "('binding-read', 'value')": 75,
+          "('binding-read', 'storedValue')": 393,
+          "('expression-read', 'type')": 78,
+          "('expression-read', 'operatorDefinition')": 144
+        },
+        "signatureDemandReasons": {
+          "single/full": 6
+        },
+        "boundHeads": {
+          "Function": 6,
+          "Block": 6,
+          "Multiply": 6,
+          "square": 6
+        },
+        "maps": {
+          "appliesToListCoordinateTuple": {
+            "executions": 18,
+            "heads": {
+              "Block": 6,
+              "Multiply": 6,
+              "square": 6
+            },
+            "functionTypeQueries": 6,
+            "bindingTypeReads": 282,
+            "boundCallType": 6,
+            "fullSignature": 0
+          },
+          "addsPointToNumberCollection": {
+            "executions": 18,
+            "heads": {
+              "Multiply": 6,
+              "Block": 6,
+              "square": 6
+            },
+            "functionTypeQueries": 6,
+            "bindingTypeReads": 42,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "passedThrough": {
+            "executions": 18,
+            "heads": {
+              "Multiply": 6,
+              "Block": 6,
+              "square": 6
+            },
+            "functionTypeQueries": 6,
+            "bindingTypeReads": 42,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "withCodomainForAbsentAnswer": {
+            "executions": 12,
+            "heads": {
+              "Multiply": 6,
+              "Block": 6
+            },
+            "functionTypeQueries": 6,
+            "bindingTypeReads": 24,
+            "boundCallType": 0,
+            "fullSignature": 0
+          }
+        },
+        "evidencePasses": {
+          "(0, False, False)": 3
+        },
+        "repeats": {
+          "boundCallType": {
+            "pairs": 3,
+            "changedObserved": 3,
+            "unknownObservedMatch": 0,
+            "examples": [
+              {
+                "operator": "square",
+                "expr": 86,
+                "first": 446,
+                "second": 576,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              },
+              {
+                "operator": "square",
+                "expr": 158,
+                "first": 1121,
+                "second": 1251,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              }
+            ]
+          },
+          "functionLiteralSignatureType": {
+            "pairs": 0,
+            "changedObserved": 0,
+            "unknownObservedMatch": 0,
+            "examples": []
+          }
+        },
+        "notebookTimeline": []
+      },
+      "revision": {
+        "operations": 3,
+        "dropped": 0,
+        "counts": {
+          "binding-read": 1317,
+          "withEvidenceSession": 6,
+          "lookup": 84,
+          "binding-write": 24,
+          "expression-read": 198,
+          "boundCallType": 24,
+          "functionLiteralCallSignatureType": 6,
+          "signature-demand": 6,
+          "functionLiteralSignatureType": 6,
+          "appliesToListCoordinateTuple": 18,
+          "addsPointToNumberCollection": 18,
+          "operand-map": 24,
+          "passesAbsentCellsThrough": 24,
+          "withCodomainForAbsentAnswer": 12,
+          "functionLiteralArrowEffects": 6,
+          "joinAssignmentEvidence": 6,
+          "evidence-target": 3,
+          "joinEvidenceOnBinding": 6,
+          "writeEvidenceType": 3,
+          "registerEvidenceSite": 3,
+          "evidence-rejoin": 3
+        },
+        "reads": {
+          "('binding-read', 'type')": 369,
+          "('binding-read', 'declaredType')": 516,
+          "('binding-read', 'value')": 75,
+          "('binding-read', 'storedValue')": 357,
+          "('expression-read', 'type')": 54,
+          "('expression-read', 'operatorDefinition')": 144
+        },
+        "signatureDemandReasons": {
+          "single/full": 6
+        },
+        "boundHeads": {
+          "Function": 6,
+          "Block": 6,
+          "Multiply": 6,
+          "square": 6
+        },
+        "maps": {
+          "appliesToListCoordinateTuple": {
+            "executions": 6,
+            "heads": {
+              "Multiply": 6
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 24,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "passedThrough": {
+            "executions": 18,
+            "heads": {
+              "Multiply": 6,
+              "Block": 6,
+              "square": 6
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 0,
+            "boundCallType": 0,
+            "fullSignature": 0
+          }
+        },
+        "evidencePasses": {
+          "(0, False, False)": 3
+        },
+        "repeats": {
+          "boundCallType": {
+            "pairs": 3,
+            "changedObserved": 3,
+            "unknownObservedMatch": 0,
+            "examples": [
+              {
+                "operator": "square",
+                "expr": 76,
+                "first": 392,
+                "second": 511,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              },
+              {
+                "operator": "square",
+                "expr": 134,
+                "first": 991,
+                "second": 1110,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              }
+            ]
+          },
+          "functionLiteralSignatureType": {
+            "pairs": 0,
+            "changedObserved": 0,
+            "unknownObservedMatch": 0,
+            "examples": []
+          }
+        },
+        "notebookTimeline": []
+      }
+    },
+    "parse-box": {
+      "guard": {
+        "operations": 3,
+        "dropped": 0,
+        "counts": {
+          "lookup": 108,
+          "binding-read": 1479,
+          "withEvidenceSession": 6,
+          "binding-write": 24,
+          "expression-read": 222,
+          "boundCallType": 24,
+          "functionLiteralCallSignatureType": 6,
+          "signature-demand": 6,
+          "functionLiteralSignatureType": 6,
+          "operand-map": 66,
+          "appliesToListCoordinateTuple": 18,
+          "addsPointToNumberCollection": 18,
+          "passesAbsentCellsThrough": 24,
+          "withCodomainForAbsentAnswer": 12,
+          "functionLiteralArrowEffects": 6,
+          "joinAssignmentEvidence": 6,
+          "evidence-target": 3,
+          "joinEvidenceOnBinding": 6,
+          "writeEvidenceType": 3,
+          "registerEvidenceSite": 3,
+          "evidence-rejoin": 3
+        },
+        "reads": {
+          "('binding-read', 'type')": 423,
+          "('binding-read', 'declaredType')": 588,
+          "('binding-read', 'value')": 75,
+          "('binding-read', 'storedValue')": 393,
+          "('expression-read', 'type')": 78,
+          "('expression-read', 'operatorDefinition')": 144
+        },
+        "signatureDemandReasons": {
+          "single/full": 6
+        },
+        "boundHeads": {
+          "Function": 6,
+          "Block": 6,
+          "Multiply": 6,
+          "square": 6
+        },
+        "maps": {
+          "appliesToListCoordinateTuple": {
+            "executions": 18,
+            "heads": {
+              "Block": 6,
+              "Multiply": 6,
+              "square": 6
+            },
+            "functionTypeQueries": 6,
+            "bindingTypeReads": 282,
+            "boundCallType": 6,
+            "fullSignature": 0
+          },
+          "addsPointToNumberCollection": {
+            "executions": 18,
+            "heads": {
+              "Multiply": 6,
+              "Block": 6,
+              "square": 6
+            },
+            "functionTypeQueries": 6,
+            "bindingTypeReads": 42,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "passedThrough": {
+            "executions": 18,
+            "heads": {
+              "Multiply": 6,
+              "Block": 6,
+              "square": 6
+            },
+            "functionTypeQueries": 6,
+            "bindingTypeReads": 42,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "withCodomainForAbsentAnswer": {
+            "executions": 12,
+            "heads": {
+              "Multiply": 6,
+              "Block": 6
+            },
+            "functionTypeQueries": 6,
+            "bindingTypeReads": 24,
+            "boundCallType": 0,
+            "fullSignature": 0
+          }
+        },
+        "evidencePasses": {
+          "(0, False, False)": 3
+        },
+        "repeats": {
+          "boundCallType": {
+            "pairs": 3,
+            "changedObserved": 3,
+            "unknownObservedMatch": 0,
+            "examples": [
+              {
+                "operator": "square",
+                "expr": 90,
+                "first": 454,
+                "second": 584,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              },
+              {
+                "operator": "square",
+                "expr": 160,
+                "first": 1137,
+                "second": 1267,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              }
+            ]
+          },
+          "functionLiteralSignatureType": {
+            "pairs": 0,
+            "changedObserved": 0,
+            "unknownObservedMatch": 0,
+            "examples": []
+          }
+        },
+        "notebookTimeline": []
+      },
+      "revision": {
+        "operations": 3,
+        "dropped": 0,
+        "counts": {
+          "lookup": 108,
+          "binding-read": 1317,
+          "withEvidenceSession": 6,
+          "binding-write": 24,
+          "expression-read": 198,
+          "boundCallType": 24,
+          "functionLiteralCallSignatureType": 6,
+          "signature-demand": 6,
+          "functionLiteralSignatureType": 6,
+          "appliesToListCoordinateTuple": 18,
+          "addsPointToNumberCollection": 18,
+          "operand-map": 24,
+          "passesAbsentCellsThrough": 24,
+          "withCodomainForAbsentAnswer": 12,
+          "functionLiteralArrowEffects": 6,
+          "joinAssignmentEvidence": 6,
+          "evidence-target": 3,
+          "joinEvidenceOnBinding": 6,
+          "writeEvidenceType": 3,
+          "registerEvidenceSite": 3,
+          "evidence-rejoin": 3
+        },
+        "reads": {
+          "('binding-read', 'type')": 369,
+          "('binding-read', 'declaredType')": 516,
+          "('binding-read', 'value')": 75,
+          "('binding-read', 'storedValue')": 357,
+          "('expression-read', 'type')": 54,
+          "('expression-read', 'operatorDefinition')": 144
+        },
+        "signatureDemandReasons": {
+          "single/full": 6
+        },
+        "boundHeads": {
+          "Function": 6,
+          "Block": 6,
+          "Multiply": 6,
+          "square": 6
+        },
+        "maps": {
+          "appliesToListCoordinateTuple": {
+            "executions": 6,
+            "heads": {
+              "Multiply": 6
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 24,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "passedThrough": {
+            "executions": 18,
+            "heads": {
+              "Multiply": 6,
+              "Block": 6,
+              "square": 6
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 0,
+            "boundCallType": 0,
+            "fullSignature": 0
+          }
+        },
+        "evidencePasses": {
+          "(0, False, False)": 3
+        },
+        "repeats": {
+          "boundCallType": {
+            "pairs": 3,
+            "changedObserved": 3,
+            "unknownObservedMatch": 0,
+            "examples": [
+              {
+                "operator": "square",
+                "expr": 80,
+                "first": 400,
+                "second": 519,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              },
+              {
+                "operator": "square",
+                "expr": 136,
+                "first": 1007,
+                "second": 1126,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              }
+            ]
+          },
+          "functionLiteralSignatureType": {
+            "pairs": 0,
+            "changedObserved": 0,
+            "unknownObservedMatch": 0,
+            "examples": []
+          }
+        },
+        "notebookTimeline": []
+      }
+    },
+    "check": {
+      "guard": {
+        "operations": 3,
+        "dropped": 0,
+        "counts": {
+          "lookup": 150,
+          "binding-read": 1731,
+          "withEvidenceSession": 6,
+          "binding-write": 24,
+          "expression-read": 411,
+          "boundCallType": 33,
+          "functionLiteralCallSignatureType": 9,
+          "signature-demand": 12,
+          "functionLiteralSignatureType": 12,
+          "operand-map": 90,
+          "appliesToListCoordinateTuple": 24,
+          "addsPointToNumberCollection": 24,
+          "passesAbsentCellsThrough": 33,
+          "withCodomainForAbsentAnswer": 18,
+          "functionLiteralArrowEffects": 12,
+          "joinAssignmentEvidence": 6,
+          "evidence-target": 3,
+          "joinEvidenceOnBinding": 6,
+          "writeEvidenceType": 3,
+          "registerEvidenceSite": 3,
+          "evidence-rejoin": 3
+        },
+        "reads": {
+          "('binding-read', 'type')": 507,
+          "('binding-read', 'declaredType')": 672,
+          "('binding-read', 'value')": 81,
+          "('binding-read', 'storedValue')": 471,
+          "('expression-read', 'type')": 108,
+          "('expression-read', 'operatorDefinition')": 303
+        },
+        "signatureDemandReasons": {
+          "single/full": 6,
+          "written/full": 3,
+          "current/full": 3
+        },
+        "boundHeads": {
+          "Function": 9,
+          "Block": 9,
+          "Multiply": 9,
+          "square": 6
+        },
+        "maps": {
+          "appliesToListCoordinateTuple": {
+            "executions": 24,
+            "heads": {
+              "Block": 9,
+              "Multiply": 9,
+              "square": 6
+            },
+            "functionTypeQueries": 9,
+            "bindingTypeReads": 414,
+            "boundCallType": 9,
+            "fullSignature": 0
+          },
+          "addsPointToNumberCollection": {
+            "executions": 24,
+            "heads": {
+              "Multiply": 9,
+              "Block": 9,
+              "square": 6
+            },
+            "functionTypeQueries": 9,
+            "bindingTypeReads": 54,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "passedThrough": {
+            "executions": 24,
+            "heads": {
+              "Multiply": 9,
+              "Block": 9,
+              "square": 6
+            },
+            "functionTypeQueries": 9,
+            "bindingTypeReads": 54,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "withCodomainForAbsentAnswer": {
+            "executions": 18,
+            "heads": {
+              "Multiply": 9,
+              "Block": 9
+            },
+            "functionTypeQueries": 9,
+            "bindingTypeReads": 36,
+            "boundCallType": 0,
+            "fullSignature": 0
+          }
+        },
+        "evidencePasses": {
+          "(0, False, False)": 3
+        },
+        "repeats": {
+          "boundCallType": {
+            "pairs": 12,
+            "changedObserved": 12,
+            "unknownObservedMatch": 0,
+            "examples": [
+              {
+                "operator": "square",
+                "expr": 101,
+                "first": 466,
+                "second": 596,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              },
+              {
+                "operator": "Function",
+                "expr": 57,
+                "first": 198,
+                "second": 756,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_semanticVersion",
+                  "_worldVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              }
+            ]
+          },
+          "functionLiteralSignatureType": {
+            "pairs": 6,
+            "changedObserved": 6,
+            "unknownObservedMatch": 0,
+            "examples": [
+              {
+                "operator": "Function",
+                "expr": 73,
+                "first": 314,
+                "second": 425,
+                "observedChanges": [
+                  "scope",
+                  "context",
+                  "stack"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              },
+              {
+                "operator": "Function",
+                "expr": 57,
+                "first": 201,
+                "second": 759,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_semanticVersion",
+                  "_worldVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              }
+            ]
+          }
+        },
+        "notebookTimeline": []
+      },
+      "revision": {
+        "operations": 3,
+        "dropped": 0,
+        "counts": {
+          "lookup": 150,
+          "binding-read": 1506,
+          "withEvidenceSession": 6,
+          "binding-write": 24,
+          "expression-read": 357,
+          "boundCallType": 33,
+          "functionLiteralCallSignatureType": 9,
+          "signature-demand": 12,
+          "functionLiteralSignatureType": 9,
+          "appliesToListCoordinateTuple": 24,
+          "addsPointToNumberCollection": 24,
+          "operand-map": 33,
+          "passesAbsentCellsThrough": 33,
+          "withCodomainForAbsentAnswer": 18,
+          "functionLiteralArrowEffects": 12,
+          "joinAssignmentEvidence": 6,
+          "evidence-target": 3,
+          "joinEvidenceOnBinding": 6,
+          "writeEvidenceType": 3,
+          "registerEvidenceSite": 3,
+          "evidence-rejoin": 3
+        },
+        "reads": {
+          "('binding-read', 'type')": 432,
+          "('binding-read', 'declaredType')": 579,
+          "('binding-read', 'value')": 81,
+          "('binding-read', 'storedValue')": 414,
+          "('expression-read', 'type')": 69,
+          "('expression-read', 'operatorDefinition')": 288
+        },
+        "signatureDemandReasons": {
+          "single/full": 6,
+          "written/full": 3,
+          "current/effects-only": 3
+        },
+        "boundHeads": {
+          "Function": 9,
+          "Block": 9,
+          "Multiply": 9,
+          "square": 6
+        },
+        "maps": {
+          "appliesToListCoordinateTuple": {
+            "executions": 9,
+            "heads": {
+              "Multiply": 9
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 36,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "passedThrough": {
+            "executions": 24,
+            "heads": {
+              "Multiply": 9,
+              "Block": 9,
+              "square": 6
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 0,
+            "boundCallType": 0,
+            "fullSignature": 0
+          }
+        },
+        "evidencePasses": {
+          "(0, False, False)": 3
+        },
+        "repeats": {
+          "boundCallType": {
+            "pairs": 12,
+            "changedObserved": 12,
+            "unknownObservedMatch": 0,
+            "examples": [
+              {
+                "operator": "square",
+                "expr": 90,
+                "first": 402,
+                "second": 521,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              },
+              {
+                "operator": "Function",
+                "expr": 57,
+                "first": 198,
+                "second": 670,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_semanticVersion",
+                  "_worldVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              }
+            ]
+          },
+          "functionLiteralSignatureType": {
+            "pairs": 3,
+            "changedObserved": 3,
+            "unknownObservedMatch": 0,
+            "examples": [
+              {
+                "operator": "Function",
+                "expr": 57,
+                "first": 201,
+                "second": 673,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_semanticVersion",
+                  "_worldVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              },
+              {
+                "operator": "Function",
+                "expr": 140,
+                "first": 959,
+                "second": 1431,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_semanticVersion",
+                  "_worldVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              }
+            ]
+          }
+        },
+        "notebookTimeline": []
+      }
+    },
+    "notebook": {
+      "guard": {
+        "operations": 3,
+        "dropped": 0,
+        "counts": {
+          "lookup": 159,
+          "binding-read": 1266,
+          "withEvidenceSession": 6,
+          "joinAssignmentEvidence": 12,
+          "expression-read": 210,
+          "boundCallType": 12,
+          "operand-map": 48,
+          "appliesToListCoordinateTuple": 12,
+          "addsPointToNumberCollection": 12,
+          "passesAbsentCellsThrough": 24,
+          "withCodomainForAbsentAnswer": 12,
+          "evidence-target": 6,
+          "joinEvidenceOnBinding": 12,
+          "writeEvidenceType": 6,
+          "binding-write": 60,
+          "registerEvidenceSite": 6,
+          "evidence-rejoin": 6
+        },
+        "reads": {
+          "('binding-read', 'type')": 369,
+          "('binding-read', 'declaredType')": 555,
+          "('binding-read', 'storedValue')": 249,
+          "('binding-read', 'value')": 93,
+          "('expression-read', 'type')": 33,
+          "('expression-read', 'operatorDefinition')": 177
+        },
+        "signatureDemandReasons": {},
+        "boundHeads": {
+          "Add": 12
+        },
+        "maps": {
+          "appliesToListCoordinateTuple": {
+            "executions": 12,
+            "heads": {
+              "Add": 12
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 36,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "addsPointToNumberCollection": {
+            "executions": 12,
+            "heads": {
+              "Add": 12
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 36,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "passedThrough": {
+            "executions": 12,
+            "heads": {
+              "Add": 12
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 36,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "withCodomainForAbsentAnswer": {
+            "executions": 12,
+            "heads": {
+              "Add": 12
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 36,
+            "boundCallType": 0,
+            "fullSignature": 0
+          }
+        },
+        "evidencePasses": {
+          "(0, False, False)": 6
+        },
+        "repeats": {
+          "boundCallType": {
+            "pairs": 6,
+            "changedObserved": 6,
+            "unknownObservedMatch": 0,
+            "examples": [
+              {
+                "operator": "Add",
+                "expr": 51,
+                "first": 101,
+                "second": 171,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              },
+              {
+                "operator": "Add",
+                "expr": 89,
+                "first": 367,
+                "second": 437,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              }
+            ]
+          },
+          "functionLiteralSignatureType": {
+            "pairs": 0,
+            "changedObserved": 0,
+            "unknownObservedMatch": 0,
+            "examples": []
+          }
+        },
+        "notebookTimeline": [
+          {
+            "event": 101,
+            "kind": "boundCallType",
+            "expr": 51,
+            "operator": "Add",
+            "binding": null,
+            "name": null,
+            "assignedType": null,
+            "proposed": null,
+            "before": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "after": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "versionsBefore": {
+              "_typeVersion": 91,
+              "_anyVersion": 119
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": {
+              "identity": 56
+            }
+          },
+          {
+            "event": 154,
+            "kind": "joinEvidenceOnBinding",
+            "expr": null,
+            "operator": null,
+            "binding": 39,
+            "name": "b",
+            "assignedType": "number",
+            "proposed": null,
+            "before": {
+              "_type": {
+                "$id": 40,
+                "type": "unknown",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 0,
+              "_assignmentEvidence": false,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "after": {
+              "_type": {
+                "$id": 57,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "versionsBefore": {
+              "_typeVersion": 91,
+              "_anyVersion": 119
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": true
+          },
+          {
+            "event": 158,
+            "kind": "writeEvidenceType",
+            "expr": null,
+            "operator": null,
+            "binding": 39,
+            "name": "b",
+            "assignedType": null,
+            "proposed": "number",
+            "before": {
+              "_type": {
+                "$id": 40,
+                "type": "unknown",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 0,
+              "_assignmentEvidence": false,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "after": {
+              "_type": {
+                "$id": 57,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "versionsBefore": {
+              "_typeVersion": 91,
+              "_anyVersion": 119
+            },
+            "versionsAfter": {
+              "_typeVersion": 92,
+              "_anyVersion": 120
+            },
+            "result": {}
+          },
+          {
+            "event": 169,
+            "kind": "evidence-rejoin",
+            "expr": null,
+            "operator": null,
+            "binding": null,
+            "name": null,
+            "assignedType": null,
+            "proposed": null,
+            "before": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "after": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "versionsBefore": {
+              "_typeVersion": 92,
+              "_anyVersion": 120
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": false
+          },
+          {
+            "event": 171,
+            "kind": "boundCallType",
+            "expr": 51,
+            "operator": "Add",
+            "binding": null,
+            "name": null,
+            "assignedType": null,
+            "proposed": null,
+            "before": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "after": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "versionsBefore": {
+              "_typeVersion": 92,
+              "_anyVersion": 120
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": {
+              "identity": 56
+            }
+          },
+          {
+            "event": 219,
+            "kind": "joinEvidenceOnBinding",
+            "expr": null,
+            "operator": null,
+            "binding": 39,
+            "name": "b",
+            "assignedType": "number",
+            "proposed": null,
+            "before": {
+              "_type": {
+                "$id": 57,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "after": {
+              "_type": {
+                "$id": 57,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "versionsBefore": {
+              "_typeVersion": 92,
+              "_anyVersion": 120
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": false
+          },
+          {
+            "event": 367,
+            "kind": "boundCallType",
+            "expr": 89,
+            "operator": "Add",
+            "binding": null,
+            "name": null,
+            "assignedType": null,
+            "proposed": null,
+            "before": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "after": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "versionsBefore": {
+              "_typeVersion": 95,
+              "_anyVersion": 124
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": {
+              "identity": 56
+            }
+          },
+          {
+            "event": 420,
+            "kind": "joinEvidenceOnBinding",
+            "expr": null,
+            "operator": null,
+            "binding": 77,
+            "name": "b",
+            "assignedType": "number",
+            "proposed": null,
+            "before": {
+              "_type": {
+                "$id": 78,
+                "type": "unknown",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 0,
+              "_assignmentEvidence": false,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "after": {
+              "_type": {
+                "$id": 57,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "versionsBefore": {
+              "_typeVersion": 95,
+              "_anyVersion": 124
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": true
+          },
+          {
+            "event": 424,
+            "kind": "writeEvidenceType",
+            "expr": null,
+            "operator": null,
+            "binding": 77,
+            "name": "b",
+            "assignedType": null,
+            "proposed": "number",
+            "before": {
+              "_type": {
+                "$id": 78,
+                "type": "unknown",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 0,
+              "_assignmentEvidence": false,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "after": {
+              "_type": {
+                "$id": 57,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "versionsBefore": {
+              "_typeVersion": 95,
+              "_anyVersion": 124
+            },
+            "versionsAfter": {
+              "_typeVersion": 96,
+              "_anyVersion": 125
+            },
+            "result": {}
+          },
+          {
+            "event": 435,
+            "kind": "evidence-rejoin",
+            "expr": null,
+            "operator": null,
+            "binding": null,
+            "name": null,
+            "assignedType": null,
+            "proposed": null,
+            "before": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "after": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "versionsBefore": {
+              "_typeVersion": 96,
+              "_anyVersion": 125
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": false
+          },
+          {
+            "event": 437,
+            "kind": "boundCallType",
+            "expr": 89,
+            "operator": "Add",
+            "binding": null,
+            "name": null,
+            "assignedType": null,
+            "proposed": null,
+            "before": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "after": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "versionsBefore": {
+              "_typeVersion": 96,
+              "_anyVersion": 125
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": {
+              "identity": 56
+            }
+          },
+          {
+            "event": 485,
+            "kind": "joinEvidenceOnBinding",
+            "expr": null,
+            "operator": null,
+            "binding": 77,
+            "name": "b",
+            "assignedType": "number",
+            "proposed": null,
+            "before": {
+              "_type": {
+                "$id": 57,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "after": {
+              "_type": {
+                "$id": 57,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "versionsBefore": {
+              "_typeVersion": 96,
+              "_anyVersion": 125
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": false
+          }
+        ]
+      },
+      "revision": {
+        "operations": 3,
+        "dropped": 0,
+        "counts": {
+          "lookup": 159,
+          "binding-read": 1194,
+          "withEvidenceSession": 6,
+          "joinAssignmentEvidence": 12,
+          "expression-read": 210,
+          "boundCallType": 12,
+          "appliesToListCoordinateTuple": 12,
+          "operand-map": 36,
+          "addsPointToNumberCollection": 12,
+          "passesAbsentCellsThrough": 24,
+          "withCodomainForAbsentAnswer": 12,
+          "evidence-target": 6,
+          "joinEvidenceOnBinding": 12,
+          "writeEvidenceType": 6,
+          "binding-write": 60,
+          "registerEvidenceSite": 6,
+          "evidence-rejoin": 6
+        },
+        "reads": {
+          "('binding-read', 'type')": 345,
+          "('binding-read', 'declaredType')": 507,
+          "('binding-read', 'storedValue')": 249,
+          "('binding-read', 'value')": 93,
+          "('expression-read', 'type')": 33,
+          "('expression-read', 'operatorDefinition')": 177
+        },
+        "signatureDemandReasons": {},
+        "boundHeads": {
+          "Add": 12
+        },
+        "maps": {
+          "appliesToListCoordinateTuple": {
+            "executions": 12,
+            "heads": {
+              "Add": 12
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 36,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "addsPointToNumberCollection": {
+            "executions": 12,
+            "heads": {
+              "Add": 12
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 36,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "passedThrough": {
+            "executions": 12,
+            "heads": {
+              "Add": 12
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 0,
+            "boundCallType": 0,
+            "fullSignature": 0
+          }
+        },
+        "evidencePasses": {
+          "(0, False, False)": 6
+        },
+        "repeats": {
+          "boundCallType": {
+            "pairs": 6,
+            "changedObserved": 6,
+            "unknownObservedMatch": 0,
+            "examples": [
+              {
+                "operator": "Add",
+                "expr": 51,
+                "first": 101,
+                "second": 164,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              },
+              {
+                "operator": "Add",
+                "expr": 87,
+                "first": 353,
+                "second": 416,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              }
+            ]
+          },
+          "functionLiteralSignatureType": {
+            "pairs": 0,
+            "changedObserved": 0,
+            "unknownObservedMatch": 0,
+            "examples": []
+          }
+        },
+        "notebookTimeline": [
+          {
+            "event": 101,
+            "kind": "boundCallType",
+            "expr": 51,
+            "operator": "Add",
+            "binding": null,
+            "name": null,
+            "assignedType": null,
+            "proposed": null,
+            "before": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "after": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "versionsBefore": {
+              "_typeVersion": 91,
+              "_anyVersion": 119
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": {
+              "identity": 55
+            }
+          },
+          {
+            "event": 147,
+            "kind": "joinEvidenceOnBinding",
+            "expr": null,
+            "operator": null,
+            "binding": 39,
+            "name": "b",
+            "assignedType": "number",
+            "proposed": null,
+            "before": {
+              "_type": {
+                "$id": 40,
+                "type": "unknown",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 0,
+              "_assignmentEvidence": false,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "after": {
+              "_type": {
+                "$id": 56,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "versionsBefore": {
+              "_typeVersion": 91,
+              "_anyVersion": 119
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": true
+          },
+          {
+            "event": 151,
+            "kind": "writeEvidenceType",
+            "expr": null,
+            "operator": null,
+            "binding": 39,
+            "name": "b",
+            "assignedType": null,
+            "proposed": "number",
+            "before": {
+              "_type": {
+                "$id": 40,
+                "type": "unknown",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 0,
+              "_assignmentEvidence": false,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "after": {
+              "_type": {
+                "$id": 56,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "versionsBefore": {
+              "_typeVersion": 91,
+              "_anyVersion": 119
+            },
+            "versionsAfter": {
+              "_typeVersion": 92,
+              "_anyVersion": 120
+            },
+            "result": {}
+          },
+          {
+            "event": 162,
+            "kind": "evidence-rejoin",
+            "expr": null,
+            "operator": null,
+            "binding": null,
+            "name": null,
+            "assignedType": null,
+            "proposed": null,
+            "before": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "after": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "versionsBefore": {
+              "_typeVersion": 92,
+              "_anyVersion": 120
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": false
+          },
+          {
+            "event": 164,
+            "kind": "boundCallType",
+            "expr": 51,
+            "operator": "Add",
+            "binding": null,
+            "name": null,
+            "assignedType": null,
+            "proposed": null,
+            "before": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "after": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "versionsBefore": {
+              "_typeVersion": 92,
+              "_anyVersion": 120
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": {
+              "identity": 55
+            }
+          },
+          {
+            "event": 205,
+            "kind": "joinEvidenceOnBinding",
+            "expr": null,
+            "operator": null,
+            "binding": 39,
+            "name": "b",
+            "assignedType": "number",
+            "proposed": null,
+            "before": {
+              "_type": {
+                "$id": 56,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "after": {
+              "_type": {
+                "$id": 56,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "versionsBefore": {
+              "_typeVersion": 92,
+              "_anyVersion": 120
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": false
+          },
+          {
+            "event": 353,
+            "kind": "boundCallType",
+            "expr": 87,
+            "operator": "Add",
+            "binding": null,
+            "name": null,
+            "assignedType": null,
+            "proposed": null,
+            "before": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "after": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "versionsBefore": {
+              "_typeVersion": 95,
+              "_anyVersion": 124
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": {
+              "identity": 55
+            }
+          },
+          {
+            "event": 399,
+            "kind": "joinEvidenceOnBinding",
+            "expr": null,
+            "operator": null,
+            "binding": 75,
+            "name": "b",
+            "assignedType": "number",
+            "proposed": null,
+            "before": {
+              "_type": {
+                "$id": 76,
+                "type": "unknown",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 0,
+              "_assignmentEvidence": false,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "after": {
+              "_type": {
+                "$id": 56,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "versionsBefore": {
+              "_typeVersion": 95,
+              "_anyVersion": 124
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": true
+          },
+          {
+            "event": 403,
+            "kind": "writeEvidenceType",
+            "expr": null,
+            "operator": null,
+            "binding": 75,
+            "name": "b",
+            "assignedType": null,
+            "proposed": "number",
+            "before": {
+              "_type": {
+                "$id": 76,
+                "type": "unknown",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 0,
+              "_assignmentEvidence": false,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "after": {
+              "_type": {
+                "$id": 56,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "versionsBefore": {
+              "_typeVersion": 95,
+              "_anyVersion": 124
+            },
+            "versionsAfter": {
+              "_typeVersion": 96,
+              "_anyVersion": 125
+            },
+            "result": {}
+          },
+          {
+            "event": 414,
+            "kind": "evidence-rejoin",
+            "expr": null,
+            "operator": null,
+            "binding": null,
+            "name": null,
+            "assignedType": null,
+            "proposed": null,
+            "before": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "after": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "versionsBefore": {
+              "_typeVersion": 96,
+              "_anyVersion": 125
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": false
+          },
+          {
+            "event": 416,
+            "kind": "boundCallType",
+            "expr": 87,
+            "operator": "Add",
+            "binding": null,
+            "name": null,
+            "assignedType": null,
+            "proposed": null,
+            "before": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "after": {
+              "_type": null,
+              "_writeVersion": null,
+              "_assignmentEvidence": null,
+              "_value": null,
+              "_placeholderSkeleton": null,
+              "_signatureSkeleton": null
+            },
+            "versionsBefore": {
+              "_typeVersion": 96,
+              "_anyVersion": 125
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": {
+              "identity": 55
+            }
+          },
+          {
+            "event": 457,
+            "kind": "joinEvidenceOnBinding",
+            "expr": null,
+            "operator": null,
+            "binding": 75,
+            "name": "b",
+            "assignedType": "number",
+            "proposed": null,
+            "before": {
+              "_type": {
+                "$id": 56,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "after": {
+              "_type": {
+                "$id": 56,
+                "type": "number",
+                "isPolymorphic": false,
+                "_typeResolver": {
+                  "$id": 24,
+                  "resolve": "<function>",
+                  "forward": "<function>",
+                  "conformsTo": "<function>"
+                }
+              },
+              "_writeVersion": 1,
+              "_assignmentEvidence": true,
+              "_value": null,
+              "_placeholderSkeleton": "<undefined>",
+              "_signatureSkeleton": "<undefined>"
+            },
+            "versionsBefore": {
+              "_typeVersion": 96,
+              "_anyVersion": 125
+            },
+            "versionsAfter": {
+              "_typeVersion": null,
+              "_anyVersion": null
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    "notebook-edit": {
+      "guard": {
+        "operations": 3,
+        "dropped": 0,
+        "counts": {
+          "lookup": 159,
+          "binding-read": 1266,
+          "withEvidenceSession": 6,
+          "joinAssignmentEvidence": 12,
+          "expression-read": 210,
+          "boundCallType": 12,
+          "operand-map": 48,
+          "appliesToListCoordinateTuple": 12,
+          "addsPointToNumberCollection": 12,
+          "passesAbsentCellsThrough": 24,
+          "withCodomainForAbsentAnswer": 12,
+          "evidence-target": 6,
+          "joinEvidenceOnBinding": 12,
+          "writeEvidenceType": 6,
+          "binding-write": 60,
+          "registerEvidenceSite": 6,
+          "evidence-rejoin": 6
+        },
+        "reads": {
+          "('binding-read', 'type')": 369,
+          "('binding-read', 'declaredType')": 555,
+          "('binding-read', 'storedValue')": 249,
+          "('binding-read', 'value')": 93,
+          "('expression-read', 'type')": 33,
+          "('expression-read', 'operatorDefinition')": 177
+        },
+        "signatureDemandReasons": {},
+        "boundHeads": {
+          "Add": 12
+        },
+        "maps": {
+          "appliesToListCoordinateTuple": {
+            "executions": 12,
+            "heads": {
+              "Add": 12
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 36,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "addsPointToNumberCollection": {
+            "executions": 12,
+            "heads": {
+              "Add": 12
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 36,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "passedThrough": {
+            "executions": 12,
+            "heads": {
+              "Add": 12
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 36,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "withCodomainForAbsentAnswer": {
+            "executions": 12,
+            "heads": {
+              "Add": 12
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 36,
+            "boundCallType": 0,
+            "fullSignature": 0
+          }
+        },
+        "evidencePasses": {
+          "(0, False, False)": 6
+        },
+        "repeats": {
+          "boundCallType": {
+            "pairs": 6,
+            "changedObserved": 6,
+            "unknownObservedMatch": 0,
+            "examples": [
+              {
+                "operator": "Add",
+                "expr": 51,
+                "first": 101,
+                "second": 171,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              },
+              {
+                "operator": "Add",
+                "expr": 89,
+                "first": 367,
+                "second": 437,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              }
+            ]
+          },
+          "functionLiteralSignatureType": {
+            "pairs": 0,
+            "changedObserved": 0,
+            "unknownObservedMatch": 0,
+            "examples": []
+          }
+        },
+        "notebookTimeline": []
+      },
+      "revision": {
+        "operations": 3,
+        "dropped": 0,
+        "counts": {
+          "lookup": 159,
+          "binding-read": 1194,
+          "withEvidenceSession": 6,
+          "joinAssignmentEvidence": 12,
+          "expression-read": 210,
+          "boundCallType": 12,
+          "appliesToListCoordinateTuple": 12,
+          "operand-map": 36,
+          "addsPointToNumberCollection": 12,
+          "passesAbsentCellsThrough": 24,
+          "withCodomainForAbsentAnswer": 12,
+          "evidence-target": 6,
+          "joinEvidenceOnBinding": 12,
+          "writeEvidenceType": 6,
+          "binding-write": 60,
+          "registerEvidenceSite": 6,
+          "evidence-rejoin": 6
+        },
+        "reads": {
+          "('binding-read', 'type')": 345,
+          "('binding-read', 'declaredType')": 507,
+          "('binding-read', 'storedValue')": 249,
+          "('binding-read', 'value')": 93,
+          "('expression-read', 'type')": 33,
+          "('expression-read', 'operatorDefinition')": 177
+        },
+        "signatureDemandReasons": {},
+        "boundHeads": {
+          "Add": 12
+        },
+        "maps": {
+          "appliesToListCoordinateTuple": {
+            "executions": 12,
+            "heads": {
+              "Add": 12
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 36,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "addsPointToNumberCollection": {
+            "executions": 12,
+            "heads": {
+              "Add": 12
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 36,
+            "boundCallType": 0,
+            "fullSignature": 0
+          },
+          "passedThrough": {
+            "executions": 12,
+            "heads": {
+              "Add": 12
+            },
+            "functionTypeQueries": 0,
+            "bindingTypeReads": 0,
+            "boundCallType": 0,
+            "fullSignature": 0
+          }
+        },
+        "evidencePasses": {
+          "(0, False, False)": 6
+        },
+        "repeats": {
+          "boundCallType": {
+            "pairs": 6,
+            "changedObserved": 6,
+            "unknownObservedMatch": 0,
+            "examples": [
+              {
+                "operator": "Add",
+                "expr": 51,
+                "first": 101,
+                "second": 164,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              },
+              {
+                "operator": "Add",
+                "expr": 87,
+                "first": 353,
+                "second": 416,
+                "observedChanges": [
+                  "context",
+                  "stack",
+                  "_anyVersion",
+                  "_typeVersion",
+                  "_callableVersion",
+                  "_definitionVersion",
+                  "_evaluationVersion"
+                ],
+                "classification": "changed observation; unchanged-input equivalence unproved"
+              }
+            ]
+          },
+          "functionLiteralSignatureType": {
+            "pairs": 0,
+            "changedObserved": 0,
+            "unknownObservedMatch": 0,
+            "examples": []
+          }
+        },
+        "notebookTimeline": []
+      }
+    }
+  },
+  "controls": [
+    {
+      "name": "controls-box-original",
+      "exitCode": 0,
+      "precision": 21,
+      "jit": "auto",
+      "controls": {
+        "program": {
+          "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+          "result": 10,
+          "checkDiagnostics": 0
+        }
+      }
+    },
+    {
+      "name": "controls-box-guard",
+      "exitCode": 0,
+      "precision": 21,
+      "jit": "auto",
+      "controls": {
+        "program": {
+          "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+          "result": 10,
+          "checkDiagnostics": 0
+        }
+      }
+    },
+    {
+      "name": "controls-box-revision",
+      "exitCode": 0,
+      "precision": 21,
+      "jit": "auto",
+      "controls": {
+        "program": {
+          "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+          "result": 10,
+          "checkDiagnostics": 0
+        }
+      }
+    },
+    {
+      "name": "controls-parse-box-original",
+      "exitCode": 0,
+      "precision": 21,
+      "jit": "auto",
+      "controls": {
+        "program": {
+          "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+          "result": 10,
+          "checkDiagnostics": 0
+        }
+      }
+    },
+    {
+      "name": "controls-parse-box-guard",
+      "exitCode": 0,
+      "precision": 21,
+      "jit": "auto",
+      "controls": {
+        "program": {
+          "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+          "result": 10,
+          "checkDiagnostics": 0
+        }
+      }
+    },
+    {
+      "name": "controls-parse-box-revision",
+      "exitCode": 0,
+      "precision": 21,
+      "jit": "auto",
+      "controls": {
+        "program": {
+          "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+          "result": 10,
+          "checkDiagnostics": 0
+        }
+      }
+    },
+    {
+      "name": "controls-check-original",
+      "exitCode": 0,
+      "precision": 21,
+      "jit": "auto",
+      "controls": {
+        "program": {
+          "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+          "result": 10,
+          "checkDiagnostics": 0
+        }
+      }
+    },
+    {
+      "name": "controls-check-guard",
+      "exitCode": 0,
+      "precision": 21,
+      "jit": "auto",
+      "controls": {
+        "program": {
+          "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+          "result": 10,
+          "checkDiagnostics": 0
+        }
+      }
+    },
+    {
+      "name": "controls-check-revision",
+      "exitCode": 0,
+      "precision": 21,
+      "jit": "auto",
+      "controls": {
+        "program": {
+          "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+          "result": 10,
+          "checkDiagnostics": 0
+        }
+      }
+    },
+    {
+      "name": "controls-notebook-original",
+      "exitCode": 0,
+      "precision": 15,
+      "jit": "auto",
+      "controls": {
+        "notebook": {
+          "source": "let a = 3\nlet b = a+1\nb",
+          "rerun": "4",
+          "edit": "5",
+          "route": "real analyze/executeCortexCell/bindCortexPublications; persistent scope",
+          "excludes": [
+            "graph scheduling",
+            "UI"
+          ]
+        }
+      }
+    },
+    {
+      "name": "controls-notebook-guard",
+      "exitCode": 0,
+      "precision": 15,
+      "jit": "auto",
+      "controls": {
+        "notebook": {
+          "source": "let a = 3\nlet b = a+1\nb",
+          "rerun": "4",
+          "edit": "5",
+          "route": "real analyze/executeCortexCell/bindCortexPublications; persistent scope",
+          "excludes": [
+            "graph scheduling",
+            "UI"
+          ]
+        }
+      }
+    },
+    {
+      "name": "controls-notebook-revision",
+      "exitCode": 0,
+      "precision": 15,
+      "jit": "auto",
+      "controls": {
+        "notebook": {
+          "source": "let a = 3\nlet b = a+1\nb",
+          "rerun": "4",
+          "edit": "5",
+          "route": "real analyze/executeCortexCell/bindCortexPublications; persistent scope",
+          "excludes": [
+            "graph scheduling",
+            "UI"
+          ]
+        }
+      }
+    }
+  ]
+}

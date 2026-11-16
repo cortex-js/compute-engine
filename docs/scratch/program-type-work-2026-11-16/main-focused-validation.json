@@ -1,0 +1,85 @@
+{
+  "mainBefore": "1e77eb450d86654b803c5dfae60617131a45a556df98e1a0523bbdf2637fdede",
+  "mainAfter": "1e77eb450d86654b803c5dfae60617131a45a556df98e1a0523bbdf2637fdede",
+  "untorn": true,
+  "checks": [
+    {
+      "name": "typecheck-isolated",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "cwd": "/tmp/wt-program-type-work-validation",
+      "exitCode": 0,
+      "validRun": true,
+      "tail": [
+        "PASS types",
+        "",
+        "Checking CLI and type-level assertions...",
+        "PASS typecheck"
+      ]
+    },
+    {
+      "name": "targeted",
+      "command": [
+        "node_modules/.bin/jest",
+        "-w",
+        "4",
+        "--watchman=false",
+        "--runTestsByPath",
+        "test/epsil/program.test.ts",
+        "test/epsil/check-epsil.test.ts",
+        "test/epsil/function-declaration-hoisting.test.ts",
+        "test/epsil/compiled-declared-function-type.test.ts",
+        "test/epsil/static-lambda-callee-arguments.test.ts",
+        "test/epsil/parameter-default-values.test.ts",
+        "test/epsil/nested-statement-diagnostics.test.ts",
+        "test/compute-engine/effects-read-from-literal-scope.test.ts",
+        "test/compute-engine/effects-seam.test.ts",
+        "test/compute-engine/tycho-item-336-nested-signature-derivation.test.ts",
+        "test/compute-engine/absent-cell-arithmetic-type.test.ts",
+        "test/compute-engine/absent-collection-operand.test.ts",
+        "test/compute-engine/absent-point-arithmetic.test.ts",
+        "test/compute-engine/point-union-arithmetic-type.test.ts",
+        "test/compute-engine/tycho-item-332-compiled-program-parity.test.ts",
+        "test/compute-engine/tycho-item-332-block-let-literal-type.test.ts",
+        "test/compute-engine/type-inference.test.ts",
+        "test/compute-engine/recursive-function-result-type.test.ts",
+        "test/compute-engine/ce-582-recursive-type-facts-hidden.test.ts"
+      ],
+      "cwd": "/Users/arno/dev/compute-engine",
+      "exitCode": 0,
+      "validRun": true,
+      "tail": [
+        "",
+        "Test Suites: 19 passed, 19 total",
+        "Tests:       972 passed, 972 total",
+        "Snapshots:   0 total",
+        "Time:        3.024 s, estimated 6 s",
+        "Ran all test suites within paths \"test/epsil/program.test.ts\", \"test/epsil/check-epsil.test.ts\", \"test/epsil/function-declaration-hoisting.test.ts\", \"test/epsil/compiled-declared-function-type.test.ts\", \"test/epsil/static-lambda-callee-arguments.test.ts\", \"test/epsil/parameter-default-values.test.ts\", \"test/epsil/nested-statement-diagnostics.test.ts\", \"test/compute-engine/effects-read-from-literal-scope.test.ts\", \"test/compute-engine/effects-seam.test.ts\", \"test/compute-engine/tycho-item-336-nested-signature-derivation.test.ts\", \"test/compute-engine/absent-cell-arithmetic-type.test.ts\", \"test/compute-engine/absent-collection-operand.test.ts\", \"test/compute-engine/absent-point-arithmetic.test.ts\", \"test/compute-engine/point-union-arithmetic-type.test.ts\", \"test/compute-engine/tycho-item-332-compiled-program-parity.test.ts\", \"test/compute-engine/tycho-item-332-block-let-literal-type.test.ts\", \"test/compute-engine/type-inference.test.ts\", \"test/compute-engine/recursive-function-result-type.test.ts\", \"test/compute-engine/ce-582-recursive-type-facts-hidden.test.ts\"."
+      ]
+    },
+    {
+      "name": "core",
+      "command": [
+        "npm",
+        "run",
+        "test:core",
+        "--",
+        "--watchman=false"
+      ],
+      "cwd": "/Users/arno/dev/compute-engine",
+      "exitCode": 0,
+      "validRun": true,
+      "tail": [
+        "",
+        "Test Suites: 18 passed, 18 total",
+        "Tests:       15 skipped, 5593 passed, 5608 total",
+        "Snapshots:   1368 passed, 1368 total",
+        "Time:        8.489 s",
+        "Ran all test suites within paths \"test/compute-engine/arithmetic.test.ts\", \"test/compute-engine/exactness-regressions.test.ts\", \"test/compute-engine/simplify.test.ts\", \"test/compute-engine/collections.test.ts\", \"test/compute-engine/linear-algebra.test.ts\", \"test/compute-engine/calculus.test.ts\", \"test/compute-engine/solve.test.ts\", \"test/compute-engine/functions.test.ts\", \"test/compute-engine/relational-operators.test.ts\", \"test/compute-engine/error-model.test.ts\", \"test/compute-engine/type-variables.test.ts\", \"test/common/types.test.ts\", \"test/compute-engine/latex-syntax/parsing.test.ts\", \"test/compute-engine/latex-syntax/operators.test.ts\", \"test/compute-engine/compile.test.ts\", \"test/compute-engine/interval-arithmetic.test.ts\", \"test/epsil/execute.test.ts\", \"test/epsil/declare-type.test.ts\"."
+      ]
+    }
+  ]
+}

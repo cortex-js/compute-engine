@@ -1,0 +1,62 @@
+{
+  "epochSeconds": 1794838886.2704508,
+  "from": "/private/tmp/program-only-profile-revision-20261116",
+  "to": "/private/tmp/program-only-type-work-revision-20261116",
+  "copy": "shutil.copytree symlinks=True",
+  "patch": "/private/tmp/program-type-work-sol.patch",
+  "patchSha256": "92e7f35426d8edd7ba7e0651bf974304cbdb21ea0e2db4f481e4224059922955",
+  "commands": [
+    {
+      "command": [
+        "git",
+        "apply",
+        "--check",
+        "/private/tmp/program-type-work-sol.patch"
+      ],
+      "cwd": "/private/tmp/program-only-type-work-revision-20261116/ce",
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "apply",
+        "/private/tmp/program-type-work-sol.patch"
+      ],
+      "cwd": "/private/tmp/program-only-type-work-revision-20261116/ce",
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "changed": [
+    {
+      "path": "compute-engine/boxed-expression/boxed-function.ts",
+      "before": "1f1ccc6bef5a9309cdf956c0b17d7b87be79dc8cec5489b4cb2cda9f5d36d093",
+      "after": "7c24aa65c7d2c458863bf8c5ddffbaf66e15980a6a74fb42c35e3ea33f07dc1a"
+    },
+    {
+      "path": "compute-engine/boxed-expression/broadcast-lift-type.ts",
+      "before": "4c46d11e2edddedbfd10f9dc219eb6ff8ba6e1d91daf4535c70f2884bd691bff",
+      "after": "6618c5248f4e9e53397fb7bfc3d892a883e5dd374c89228844cfe56c862d14f3"
+    },
+    {
+      "path": "compute-engine/boxed-expression/derive-application-type.ts",
+      "before": "e424e526261541740c60b580a7214f74a4f080b2f4a60bd1846192e00eedab3b",
+      "after": "4f935b60936e53adc5320e09e6f640b61686e85827ba5942ec2592e93f25b5da"
+    },
+    {
+      "path": "compute-engine/boxed-expression/effects-inference.ts",
+      "before": "6662c15e7c69f170e4c47f8a7d4e07094e01bf20fda8c5cbd1794a7f1883c7eb",
+      "after": "48014f89983b3c3e0daca4c190aa6e573ebf18f33c03d5e27271be883c125800"
+    },
+    {
+      "path": "compute-engine/collection-utils.ts",
+      "before": "33ffd4c3c0e7f1198afb056d0859b9c1fd028d4a6c5a2e72ccdfbf6466d863fb",
+      "after": "72d5a590c960e0bf03787ab7d3298acd03984447daea26d082f1f039b6bfaf20"
+    }
+  ],
+  "guardSourceManifestSha256": "e15512199eb7578a8fd3ac00b811322d365c52ea472fcc87519c6df52662f291",
+  "revisionSourceManifestSha256": "c87898b81bc0d370d68cf9253a62f67ebadb1b8d4a4638ee053890e202e2ecdb"
+}

@@ -1,0 +1,454 @@
+[
+  {
+    "name": "control-box-guard",
+    "arm": "guard",
+    "request": {
+      "root": "/private/tmp/program-only-profile-revision-20261116",
+      "workload": "box",
+      "mode": "controls",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/control-box-guard.request.json",
+      "/private/tmp/program-type-work-20261116/control-box-guard.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.2576560974121094
+  },
+  {
+    "name": "control-box-diagnostic",
+    "arm": "diagnostic",
+    "request": {
+      "root": "/private/tmp/program-type-work-20261116/diagnostic",
+      "workload": "box",
+      "mode": "controls",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/control-box-diagnostic.request.json",
+      "/private/tmp/program-type-work-20261116/control-box-diagnostic.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-type-work-20261116/diagnostic/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.2613368034362793
+  },
+  {
+    "name": "control-parse-box-guard",
+    "arm": "guard",
+    "request": {
+      "root": "/private/tmp/program-only-profile-revision-20261116",
+      "workload": "parse-box",
+      "mode": "controls",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/control-parse-box-guard.request.json",
+      "/private/tmp/program-type-work-20261116/control-parse-box-guard.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.27086591720581055
+  },
+  {
+    "name": "control-parse-box-diagnostic",
+    "arm": "diagnostic",
+    "request": {
+      "root": "/private/tmp/program-type-work-20261116/diagnostic",
+      "workload": "parse-box",
+      "mode": "controls",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/control-parse-box-diagnostic.request.json",
+      "/private/tmp/program-type-work-20261116/control-parse-box-diagnostic.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-type-work-20261116/diagnostic/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.2735328674316406
+  },
+  {
+    "name": "control-check-guard",
+    "arm": "guard",
+    "request": {
+      "root": "/private/tmp/program-only-profile-revision-20261116",
+      "workload": "check",
+      "mode": "controls",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/control-check-guard.request.json",
+      "/private/tmp/program-type-work-20261116/control-check-guard.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.2598001956939697
+  },
+  {
+    "name": "control-check-diagnostic",
+    "arm": "diagnostic",
+    "request": {
+      "root": "/private/tmp/program-type-work-20261116/diagnostic",
+      "workload": "check",
+      "mode": "controls",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/control-check-diagnostic.request.json",
+      "/private/tmp/program-type-work-20261116/control-check-diagnostic.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-type-work-20261116/diagnostic/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.26406073570251465
+  },
+  {
+    "name": "control-notebook-guard",
+    "arm": "guard",
+    "request": {
+      "root": "/private/tmp/program-only-profile-revision-20261116",
+      "workload": "notebook",
+      "mode": "controls",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/control-notebook-guard.request.json",
+      "/private/tmp/program-type-work-20261116/control-notebook-guard.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.28540492057800293
+  },
+  {
+    "name": "control-notebook-diagnostic",
+    "arm": "diagnostic",
+    "request": {
+      "root": "/private/tmp/program-type-work-20261116/diagnostic",
+      "workload": "notebook",
+      "mode": "controls",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/control-notebook-diagnostic.request.json",
+      "/private/tmp/program-type-work-20261116/control-notebook-diagnostic.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-type-work-20261116/diagnostic/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.5922849178314209
+  },
+  {
+    "name": "control-source-box",
+    "arm": "diagnostic",
+    "request": {
+      "root": "/private/tmp/program-type-work-20261116/diagnostic",
+      "workload": "box",
+      "mode": "controls",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false,
+      "entry": "/private/tmp/program-type-work-20261116/diagnostic/ce/src/epsil.ts"
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/control-source-box.request.json",
+      "/private/tmp/program-type-work-20261116/control-source-box.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-type-work-20261116/diagnostic/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 2.021368980407715
+  },
+  {
+    "name": "control-source-check",
+    "arm": "diagnostic",
+    "request": {
+      "root": "/private/tmp/program-type-work-20261116/diagnostic",
+      "workload": "check",
+      "mode": "controls",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false,
+      "entry": "/private/tmp/program-type-work-20261116/diagnostic/ce/src/epsil.ts"
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/control-source-check.request.json",
+      "/private/tmp/program-type-work-20261116/control-source-check.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-type-work-20261116/diagnostic/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.6012129783630371
+  },
+  {
+    "name": "trace-box",
+    "arm": "diagnostic",
+    "request": {
+      "root": "/private/tmp/program-type-work-20261116/diagnostic",
+      "workload": "box",
+      "mode": "trace",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/trace-box.request.json",
+      "/private/tmp/program-type-work-20261116/trace-box.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-type-work-20261116/diagnostic/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.3389008045196533
+  },
+  {
+    "name": "trace-parse-box",
+    "arm": "diagnostic",
+    "request": {
+      "root": "/private/tmp/program-type-work-20261116/diagnostic",
+      "workload": "parse-box",
+      "mode": "trace",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/trace-parse-box.request.json",
+      "/private/tmp/program-type-work-20261116/trace-parse-box.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-type-work-20261116/diagnostic/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.3506951332092285
+  },
+  {
+    "name": "trace-check",
+    "arm": "diagnostic",
+    "request": {
+      "root": "/private/tmp/program-type-work-20261116/diagnostic",
+      "workload": "check",
+      "mode": "trace",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/trace-check.request.json",
+      "/private/tmp/program-type-work-20261116/trace-check.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-type-work-20261116/diagnostic/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.3557450771331787
+  },
+  {
+    "name": "trace-notebook",
+    "arm": "diagnostic",
+    "request": {
+      "root": "/private/tmp/program-type-work-20261116/diagnostic",
+      "workload": "notebook",
+      "mode": "trace",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": false
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/trace-notebook.request.json",
+      "/private/tmp/program-type-work-20261116/trace-notebook.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-type-work-20261116/diagnostic/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.3776857852935791
+  },
+  {
+    "name": "trace-notebook-edit",
+    "arm": "diagnostic",
+    "request": {
+      "root": "/private/tmp/program-type-work-20261116/diagnostic",
+      "workload": "notebook",
+      "mode": "trace",
+      "warmup": 3,
+      "iterations": 3,
+      "edit": true
+    },
+    "command": [
+      "node",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-type-work-20261116/diagnostic/tycho/scripts/repros/ce-alt-hook.mjs",
+      "--import",
+      "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs",
+      "/private/tmp/program-type-work-20261116/child.mjs",
+      "/private/tmp/program-type-work-20261116/trace-notebook-edit.request.json",
+      "/private/tmp/program-type-work-20261116/trace-notebook-edit.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-type-work-20261116/diagnostic/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "exitCode": 0,
+    "seconds": 0.3637049198150635
+  }
+]

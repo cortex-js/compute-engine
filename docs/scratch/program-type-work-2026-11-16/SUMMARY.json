@@ -1,0 +1,2596 @@
+{
+  "box": {
+    "operations": 3,
+    "dropped": 0,
+    "counts": {
+      "binding-read": 1479,
+      "withEvidenceSession": 6,
+      "lookup": 84,
+      "binding-write": 24,
+      "expression-read": 222,
+      "boundCallType": 24,
+      "functionLiteralCallSignatureType": 6,
+      "signature-demand": 6,
+      "functionLiteralSignatureType": 6,
+      "operand-map": 66,
+      "appliesToListCoordinateTuple": 18,
+      "addsPointToNumberCollection": 18,
+      "passesAbsentCellsThrough": 24,
+      "withCodomainForAbsentAnswer": 12,
+      "joinAssignmentEvidence": 6,
+      "evidence-target": 3,
+      "registerEvidenceSite": 3,
+      "evidence-rejoin": 3
+    },
+    "boundHeads": {
+      "Function": 6,
+      "Block": 6,
+      "Multiply": 6,
+      "square": 6
+    },
+    "signatureDemandReasons": {
+      "single/full": 6
+    },
+    "maps": {
+      "appliesToListCoordinateTuple": {
+        "calls": 18,
+        "heads": {
+          "Block": 6,
+          "Multiply": 6,
+          "square": 6
+        },
+        "functionTypeQueries": 6,
+        "bindingTypeReads": 282,
+        "boundCallType": 6,
+        "fullSignature": 0
+      },
+      "addsPointToNumberCollection": {
+        "calls": 18,
+        "heads": {
+          "Multiply": 6,
+          "Block": 6,
+          "square": 6
+        },
+        "functionTypeQueries": 6,
+        "bindingTypeReads": 42,
+        "boundCallType": 0,
+        "fullSignature": 0
+      },
+      "passedThrough": {
+        "calls": 18,
+        "heads": {
+          "Multiply": 6,
+          "Block": 6,
+          "square": 6
+        },
+        "functionTypeQueries": 6,
+        "bindingTypeReads": 42,
+        "boundCallType": 0,
+        "fullSignature": 0
+      },
+      "withCodomainForAbsentAnswer": {
+        "calls": 12,
+        "heads": {
+          "Multiply": 6,
+          "Block": 6
+        },
+        "functionTypeQueries": 6,
+        "bindingTypeReads": 24,
+        "boundCallType": 0,
+        "fullSignature": 0
+      }
+    },
+    "evidencePasses": {
+      "(0, False, False)": 3
+    },
+    "repeats": {
+      "boundCallType": {
+        "pairs": 3,
+        "changedObserved": 3,
+        "unknownSameObserved": 0,
+        "examples": [
+          {
+            "operation": 0,
+            "operator": "square",
+            "expr": 86,
+            "first": 444,
+            "second": 572,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          },
+          {
+            "operation": 1,
+            "operator": "square",
+            "expr": 158,
+            "first": 1114,
+            "second": 1242,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          },
+          {
+            "operation": 2,
+            "operator": "square",
+            "expr": 227,
+            "first": 1784,
+            "second": 1912,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          }
+        ]
+      },
+      "functionLiteralSignatureType": {
+        "pairs": 0,
+        "changedObserved": 0,
+        "unknownSameObserved": 0,
+        "examples": []
+      }
+    },
+    "notebookOperation0Timeline": []
+  },
+  "parse-box": {
+    "operations": 3,
+    "dropped": 0,
+    "counts": {
+      "lookup": 108,
+      "binding-read": 1479,
+      "withEvidenceSession": 6,
+      "binding-write": 24,
+      "expression-read": 222,
+      "boundCallType": 24,
+      "functionLiteralCallSignatureType": 6,
+      "signature-demand": 6,
+      "functionLiteralSignatureType": 6,
+      "operand-map": 66,
+      "appliesToListCoordinateTuple": 18,
+      "addsPointToNumberCollection": 18,
+      "passesAbsentCellsThrough": 24,
+      "withCodomainForAbsentAnswer": 12,
+      "joinAssignmentEvidence": 6,
+      "evidence-target": 3,
+      "registerEvidenceSite": 3,
+      "evidence-rejoin": 3
+    },
+    "boundHeads": {
+      "Function": 6,
+      "Block": 6,
+      "Multiply": 6,
+      "square": 6
+    },
+    "signatureDemandReasons": {
+      "single/full": 6
+    },
+    "maps": {
+      "appliesToListCoordinateTuple": {
+        "calls": 18,
+        "heads": {
+          "Block": 6,
+          "Multiply": 6,
+          "square": 6
+        },
+        "functionTypeQueries": 6,
+        "bindingTypeReads": 282,
+        "boundCallType": 6,
+        "fullSignature": 0
+      },
+      "addsPointToNumberCollection": {
+        "calls": 18,
+        "heads": {
+          "Multiply": 6,
+          "Block": 6,
+          "square": 6
+        },
+        "functionTypeQueries": 6,
+        "bindingTypeReads": 42,
+        "boundCallType": 0,
+        "fullSignature": 0
+      },
+      "passedThrough": {
+        "calls": 18,
+        "heads": {
+          "Multiply": 6,
+          "Block": 6,
+          "square": 6
+        },
+        "functionTypeQueries": 6,
+        "bindingTypeReads": 42,
+        "boundCallType": 0,
+        "fullSignature": 0
+      },
+      "withCodomainForAbsentAnswer": {
+        "calls": 12,
+        "heads": {
+          "Multiply": 6,
+          "Block": 6
+        },
+        "functionTypeQueries": 6,
+        "bindingTypeReads": 24,
+        "boundCallType": 0,
+        "fullSignature": 0
+      }
+    },
+    "evidencePasses": {
+      "(0, False, False)": 3
+    },
+    "repeats": {
+      "boundCallType": {
+        "pairs": 3,
+        "changedObserved": 3,
+        "unknownSameObserved": 0,
+        "examples": [
+          {
+            "operation": 0,
+            "operator": "square",
+            "expr": 90,
+            "first": 452,
+            "second": 580,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          },
+          {
+            "operation": 1,
+            "operator": "square",
+            "expr": 160,
+            "first": 1130,
+            "second": 1258,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          },
+          {
+            "operation": 2,
+            "operator": "square",
+            "expr": 229,
+            "first": 1808,
+            "second": 1936,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          }
+        ]
+      },
+      "functionLiteralSignatureType": {
+        "pairs": 0,
+        "changedObserved": 0,
+        "unknownSameObserved": 0,
+        "examples": []
+      }
+    },
+    "notebookOperation0Timeline": []
+  },
+  "check": {
+    "operations": 3,
+    "dropped": 0,
+    "counts": {
+      "lookup": 150,
+      "binding-read": 1731,
+      "withEvidenceSession": 6,
+      "binding-write": 24,
+      "expression-read": 411,
+      "boundCallType": 33,
+      "functionLiteralCallSignatureType": 9,
+      "signature-demand": 12,
+      "functionLiteralSignatureType": 12,
+      "operand-map": 90,
+      "appliesToListCoordinateTuple": 24,
+      "addsPointToNumberCollection": 24,
+      "passesAbsentCellsThrough": 33,
+      "withCodomainForAbsentAnswer": 18,
+      "joinAssignmentEvidence": 6,
+      "evidence-target": 3,
+      "registerEvidenceSite": 3,
+      "evidence-rejoin": 3
+    },
+    "boundHeads": {
+      "Function": 9,
+      "Block": 9,
+      "Multiply": 9,
+      "square": 6
+    },
+    "signatureDemandReasons": {
+      "single/full": 6,
+      "written/full": 3,
+      "current/full": 3
+    },
+    "maps": {
+      "appliesToListCoordinateTuple": {
+        "calls": 24,
+        "heads": {
+          "Block": 9,
+          "Multiply": 9,
+          "square": 6
+        },
+        "functionTypeQueries": 9,
+        "bindingTypeReads": 414,
+        "boundCallType": 9,
+        "fullSignature": 0
+      },
+      "addsPointToNumberCollection": {
+        "calls": 24,
+        "heads": {
+          "Multiply": 9,
+          "Block": 9,
+          "square": 6
+        },
+        "functionTypeQueries": 9,
+        "bindingTypeReads": 54,
+        "boundCallType": 0,
+        "fullSignature": 0
+      },
+      "passedThrough": {
+        "calls": 24,
+        "heads": {
+          "Multiply": 9,
+          "Block": 9,
+          "square": 6
+        },
+        "functionTypeQueries": 9,
+        "bindingTypeReads": 54,
+        "boundCallType": 0,
+        "fullSignature": 0
+      },
+      "withCodomainForAbsentAnswer": {
+        "calls": 18,
+        "heads": {
+          "Multiply": 9,
+          "Block": 9
+        },
+        "functionTypeQueries": 9,
+        "bindingTypeReads": 36,
+        "boundCallType": 0,
+        "fullSignature": 0
+      }
+    },
+    "evidencePasses": {
+      "(0, False, False)": 3
+    },
+    "repeats": {
+      "boundCallType": {
+        "pairs": 12,
+        "changedObserved": 12,
+        "unknownSameObserved": 0,
+        "examples": [
+          {
+            "operation": 0,
+            "operator": "square",
+            "expr": 101,
+            "first": 463,
+            "second": 591,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          },
+          {
+            "operation": 0,
+            "operator": "Function",
+            "expr": 57,
+            "first": 198,
+            "second": 750,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_semanticVersion",
+              "_worldVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          },
+          {
+            "operation": 0,
+            "operator": "Block",
+            "expr": 58,
+            "first": 203,
+            "second": 755,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_semanticVersion",
+              "_worldVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          }
+        ]
+      },
+      "functionLiteralSignatureType": {
+        "pairs": 6,
+        "changedObserved": 6,
+        "unknownSameObserved": 0,
+        "examples": [
+          {
+            "operation": 0,
+            "operator": "Function",
+            "expr": 73,
+            "first": 313,
+            "second": 423,
+            "observedChanges": [
+              "scope",
+              "context",
+              "stack"
+            ],
+            "classification": "changed observed context/versions"
+          },
+          {
+            "operation": 0,
+            "operator": "Function",
+            "expr": 57,
+            "first": 201,
+            "second": 753,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_semanticVersion",
+              "_worldVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          },
+          {
+            "operation": 1,
+            "operator": "Function",
+            "expr": 73,
+            "first": 1177,
+            "second": 1287,
+            "observedChanges": [
+              "scope",
+              "context",
+              "stack"
+            ],
+            "classification": "changed observed context/versions"
+          }
+        ]
+      }
+    },
+    "notebookOperation0Timeline": []
+  },
+  "notebook": {
+    "operations": 3,
+    "dropped": 0,
+    "counts": {
+      "lookup": 159,
+      "binding-read": 1266,
+      "withEvidenceSession": 6,
+      "joinAssignmentEvidence": 12,
+      "expression-read": 210,
+      "boundCallType": 12,
+      "operand-map": 48,
+      "appliesToListCoordinateTuple": 12,
+      "addsPointToNumberCollection": 12,
+      "passesAbsentCellsThrough": 24,
+      "withCodomainForAbsentAnswer": 12,
+      "evidence-target": 6,
+      "binding-write": 60,
+      "registerEvidenceSite": 6,
+      "evidence-rejoin": 6
+    },
+    "boundHeads": {
+      "Add": 12
+    },
+    "signatureDemandReasons": {},
+    "maps": {
+      "appliesToListCoordinateTuple": {
+        "calls": 12,
+        "heads": {
+          "Add": 12
+        },
+        "functionTypeQueries": 0,
+        "bindingTypeReads": 36,
+        "boundCallType": 0,
+        "fullSignature": 0
+      },
+      "addsPointToNumberCollection": {
+        "calls": 12,
+        "heads": {
+          "Add": 12
+        },
+        "functionTypeQueries": 0,
+        "bindingTypeReads": 36,
+        "boundCallType": 0,
+        "fullSignature": 0
+      },
+      "passedThrough": {
+        "calls": 12,
+        "heads": {
+          "Add": 12
+        },
+        "functionTypeQueries": 0,
+        "bindingTypeReads": 36,
+        "boundCallType": 0,
+        "fullSignature": 0
+      },
+      "withCodomainForAbsentAnswer": {
+        "calls": 12,
+        "heads": {
+          "Add": 12
+        },
+        "functionTypeQueries": 0,
+        "bindingTypeReads": 36,
+        "boundCallType": 0,
+        "fullSignature": 0
+      }
+    },
+    "evidencePasses": {
+      "(0, False, False)": 6
+    },
+    "repeats": {
+      "boundCallType": {
+        "pairs": 6,
+        "changedObserved": 6,
+        "unknownSameObserved": 0,
+        "examples": [
+          {
+            "operation": 0,
+            "operator": "Add",
+            "expr": 51,
+            "first": 101,
+            "second": 169,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          },
+          {
+            "operation": 0,
+            "operator": "Add",
+            "expr": 89,
+            "first": 364,
+            "second": 432,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          },
+          {
+            "operation": 1,
+            "operator": "Add",
+            "expr": 140,
+            "first": 718,
+            "second": 786,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          }
+        ]
+      },
+      "functionLiteralSignatureType": {
+        "pairs": 0,
+        "changedObserved": 0,
+        "unknownSameObserved": 0,
+        "examples": []
+      }
+    },
+    "notebookOperation0Timeline": []
+  },
+  "notebook-edit": {
+    "operations": 3,
+    "dropped": 0,
+    "counts": {
+      "lookup": 159,
+      "binding-read": 1266,
+      "withEvidenceSession": 6,
+      "joinAssignmentEvidence": 12,
+      "expression-read": 210,
+      "boundCallType": 12,
+      "operand-map": 48,
+      "appliesToListCoordinateTuple": 12,
+      "addsPointToNumberCollection": 12,
+      "passesAbsentCellsThrough": 24,
+      "withCodomainForAbsentAnswer": 12,
+      "evidence-target": 6,
+      "binding-write": 60,
+      "registerEvidenceSite": 6,
+      "evidence-rejoin": 6
+    },
+    "boundHeads": {
+      "Add": 12
+    },
+    "signatureDemandReasons": {},
+    "maps": {
+      "appliesToListCoordinateTuple": {
+        "calls": 12,
+        "heads": {
+          "Add": 12
+        },
+        "functionTypeQueries": 0,
+        "bindingTypeReads": 36,
+        "boundCallType": 0,
+        "fullSignature": 0
+      },
+      "addsPointToNumberCollection": {
+        "calls": 12,
+        "heads": {
+          "Add": 12
+        },
+        "functionTypeQueries": 0,
+        "bindingTypeReads": 36,
+        "boundCallType": 0,
+        "fullSignature": 0
+      },
+      "passedThrough": {
+        "calls": 12,
+        "heads": {
+          "Add": 12
+        },
+        "functionTypeQueries": 0,
+        "bindingTypeReads": 36,
+        "boundCallType": 0,
+        "fullSignature": 0
+      },
+      "withCodomainForAbsentAnswer": {
+        "calls": 12,
+        "heads": {
+          "Add": 12
+        },
+        "functionTypeQueries": 0,
+        "bindingTypeReads": 36,
+        "boundCallType": 0,
+        "fullSignature": 0
+      }
+    },
+    "evidencePasses": {
+      "(0, False, False)": 6
+    },
+    "repeats": {
+      "boundCallType": {
+        "pairs": 6,
+        "changedObserved": 6,
+        "unknownSameObserved": 0,
+        "examples": [
+          {
+            "operation": 0,
+            "operator": "Add",
+            "expr": 51,
+            "first": 101,
+            "second": 169,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          },
+          {
+            "operation": 0,
+            "operator": "Add",
+            "expr": 89,
+            "first": 364,
+            "second": 432,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          },
+          {
+            "operation": 1,
+            "operator": "Add",
+            "expr": 140,
+            "first": 718,
+            "second": 786,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          }
+        ]
+      },
+      "functionLiteralSignatureType": {
+        "pairs": 0,
+        "changedObserved": 0,
+        "unknownSameObserved": 0,
+        "examples": []
+      }
+    },
+    "notebookOperation0Timeline": []
+  },
+  "notebook-refined": {
+    "operations": 3,
+    "dropped": 0,
+    "counts": {
+      "lookup": 159,
+      "binding-read": 1266,
+      "withEvidenceSession": 6,
+      "joinAssignmentEvidence": 12,
+      "expression-read": 210,
+      "boundCallType": 12,
+      "operand-map": 48,
+      "appliesToListCoordinateTuple": 12,
+      "addsPointToNumberCollection": 12,
+      "passesAbsentCellsThrough": 24,
+      "withCodomainForAbsentAnswer": 12,
+      "evidence-target": 6,
+      "joinEvidenceOnBinding": 12,
+      "writeEvidenceType": 6,
+      "binding-write": 60,
+      "registerEvidenceSite": 6,
+      "evidence-rejoin": 6
+    },
+    "boundHeads": {
+      "Add": 12
+    },
+    "signatureDemandReasons": {},
+    "maps": {
+      "appliesToListCoordinateTuple": {
+        "calls": 12,
+        "heads": {
+          "Add": 12
+        },
+        "functionTypeQueries": 0,
+        "bindingTypeReads": 36,
+        "boundCallType": 0,
+        "fullSignature": 0
+      },
+      "addsPointToNumberCollection": {
+        "calls": 12,
+        "heads": {
+          "Add": 12
+        },
+        "functionTypeQueries": 0,
+        "bindingTypeReads": 36,
+        "boundCallType": 0,
+        "fullSignature": 0
+      },
+      "passedThrough": {
+        "calls": 12,
+        "heads": {
+          "Add": 12
+        },
+        "functionTypeQueries": 0,
+        "bindingTypeReads": 36,
+        "boundCallType": 0,
+        "fullSignature": 0
+      },
+      "withCodomainForAbsentAnswer": {
+        "calls": 12,
+        "heads": {
+          "Add": 12
+        },
+        "functionTypeQueries": 0,
+        "bindingTypeReads": 36,
+        "boundCallType": 0,
+        "fullSignature": 0
+      }
+    },
+    "evidencePasses": {
+      "(0, False, False)": 6
+    },
+    "repeats": {
+      "boundCallType": {
+        "pairs": 6,
+        "changedObserved": 6,
+        "unknownSameObserved": 0,
+        "examples": [
+          {
+            "operation": 0,
+            "operator": "Add",
+            "expr": 51,
+            "first": 101,
+            "second": 171,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          },
+          {
+            "operation": 0,
+            "operator": "Add",
+            "expr": 89,
+            "first": 367,
+            "second": 437,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          },
+          {
+            "operation": 1,
+            "operator": "Add",
+            "expr": 140,
+            "first": 724,
+            "second": 794,
+            "observedChanges": [
+              "context",
+              "stack",
+              "_anyVersion",
+              "_typeVersion",
+              "_callableVersion",
+              "_definitionVersion",
+              "_evaluationVersion"
+            ],
+            "classification": "changed observed context/versions"
+          }
+        ]
+      },
+      "functionLiteralSignatureType": {
+        "pairs": 0,
+        "changedObserved": 0,
+        "unknownSameObserved": 0,
+        "examples": []
+      }
+    },
+    "notebookOperation0Timeline": [
+      {
+        "id": 101,
+        "parent": 100,
+        "kind": "boundCallType",
+        "expr": 51,
+        "operator": "Add",
+        "result": {
+          "identity": 56
+        },
+        "context": {
+          "engine": 1,
+          "context": 41,
+          "scope": 27,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            },
+            {
+              "context": 26,
+              "scope": 27
+            },
+            {
+              "context": 41,
+              "scope": 27
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 119,
+            "_typeVersion": 91,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 72,
+            "_definitionVersion": 28,
+            "_evaluationVersion": 82,
+            "_persistentEvaluationVersion": 82,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 1,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 42,
+            "_items": {
+              "$id": 43,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 44,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        }
+      },
+      {
+        "id": 151,
+        "parent": 148,
+        "kind": "evidence-target",
+        "target": {
+          "identity": 39,
+          "targetIdentity": 39,
+          "name": "b",
+          "_writeVersion": 0,
+          "inferredType": true,
+          "_isConstant": false,
+          "_programVariable": true,
+          "_blockLocal": true,
+          "_type": {
+            "$id": 40,
+            "type": "unknown",
+            "isPolymorphic": false,
+            "_typeResolver": {
+              "$id": 24,
+              "resolve": "<function>",
+              "forward": "<function>",
+              "conformsTo": "<function>"
+            }
+          },
+          "_placeholderSkeleton": "<undefined>",
+          "_signatureSkeleton": "<undefined>",
+          "_assignmentEvidence": false
+        },
+        "context": {
+          "engine": 1,
+          "context": 41,
+          "scope": 27,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            },
+            {
+              "context": 26,
+              "scope": 27
+            },
+            {
+              "context": 41,
+              "scope": 27
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 119,
+            "_typeVersion": 91,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 72,
+            "_definitionVersion": 28,
+            "_evaluationVersion": 82,
+            "_persistentEvaluationVersion": 82,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 1,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 42,
+            "_items": {
+              "$id": 43,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 44,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        }
+      },
+      {
+        "id": 154,
+        "parent": 148,
+        "kind": "joinEvidenceOnBinding",
+        "before": {
+          "identity": 39,
+          "targetIdentity": 39,
+          "name": "b",
+          "_writeVersion": 0,
+          "inferredType": true,
+          "_isConstant": false,
+          "_programVariable": true,
+          "_blockLocal": true,
+          "_type": {
+            "$id": 40,
+            "type": "unknown",
+            "isPolymorphic": false,
+            "_typeResolver": {
+              "$id": 24,
+              "resolve": "<function>",
+              "forward": "<function>",
+              "conformsTo": "<function>"
+            }
+          },
+          "_placeholderSkeleton": "<undefined>",
+          "_signatureSkeleton": "<undefined>",
+          "_assignmentEvidence": false
+        },
+        "after": {
+          "identity": 39,
+          "targetIdentity": 39,
+          "name": "b",
+          "_writeVersion": 1,
+          "inferredType": true,
+          "_isConstant": false,
+          "_programVariable": true,
+          "_blockLocal": true,
+          "_type": {
+            "$id": 57,
+            "type": "number",
+            "isPolymorphic": false,
+            "_typeResolver": {
+              "$id": 24,
+              "resolve": "<function>",
+              "forward": "<function>",
+              "conformsTo": "<function>"
+            }
+          },
+          "_placeholderSkeleton": "<undefined>",
+          "_signatureSkeleton": "<undefined>",
+          "_assignmentEvidence": true
+        },
+        "assignedType": "number",
+        "result": true,
+        "coarse": false,
+        "context": {
+          "engine": 1,
+          "context": 41,
+          "scope": 27,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            },
+            {
+              "context": 26,
+              "scope": 27
+            },
+            {
+              "context": 41,
+              "scope": 27
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 119,
+            "_typeVersion": 91,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 72,
+            "_definitionVersion": 28,
+            "_evaluationVersion": 82,
+            "_persistentEvaluationVersion": 82,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 1,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 42,
+            "_items": {
+              "$id": 43,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 44,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        }
+      },
+      {
+        "id": 158,
+        "parent": 154,
+        "kind": "writeEvidenceType",
+        "before": {
+          "identity": 39,
+          "targetIdentity": 39,
+          "name": "b",
+          "_writeVersion": 0,
+          "inferredType": true,
+          "_isConstant": false,
+          "_programVariable": true,
+          "_blockLocal": true,
+          "_type": {
+            "$id": 40,
+            "type": "unknown",
+            "isPolymorphic": false,
+            "_typeResolver": {
+              "$id": 24,
+              "resolve": "<function>",
+              "forward": "<function>",
+              "conformsTo": "<function>"
+            }
+          },
+          "_placeholderSkeleton": "<undefined>",
+          "_signatureSkeleton": "<undefined>",
+          "_assignmentEvidence": false
+        },
+        "after": {
+          "identity": 39,
+          "targetIdentity": 39,
+          "name": "b",
+          "_writeVersion": 1,
+          "inferredType": true,
+          "_isConstant": false,
+          "_programVariable": true,
+          "_blockLocal": true,
+          "_type": {
+            "$id": 57,
+            "type": "number",
+            "isPolymorphic": false,
+            "_typeResolver": {
+              "$id": 24,
+              "resolve": "<function>",
+              "forward": "<function>",
+              "conformsTo": "<function>"
+            }
+          },
+          "_placeholderSkeleton": "<undefined>",
+          "_signatureSkeleton": "<undefined>",
+          "_assignmentEvidence": true
+        },
+        "proposed": "number",
+        "result": {},
+        "context": {
+          "engine": 1,
+          "context": 41,
+          "scope": 27,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            },
+            {
+              "context": 26,
+              "scope": 27
+            },
+            {
+              "context": 41,
+              "scope": 27
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 119,
+            "_typeVersion": 91,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 72,
+            "_definitionVersion": 28,
+            "_evaluationVersion": 82,
+            "_persistentEvaluationVersion": 82,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 1,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 42,
+            "_items": {
+              "$id": 43,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 44,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        },
+        "contextAfter": {
+          "engine": 1,
+          "context": 41,
+          "scope": 27,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            },
+            {
+              "context": 26,
+              "scope": 27
+            },
+            {
+              "context": 41,
+              "scope": 27
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 120,
+            "_typeVersion": 92,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 73,
+            "_definitionVersion": 29,
+            "_evaluationVersion": 83,
+            "_persistentEvaluationVersion": 83,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 1,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 42,
+            "_items": {
+              "$id": 43,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 44,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        }
+      },
+      {
+        "id": 169,
+        "parent": 62,
+        "kind": "evidence-rejoin",
+        "result": false,
+        "pass": 0,
+        "coarse": false,
+        "context": {
+          "engine": 1,
+          "context": 26,
+          "scope": 27,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            },
+            {
+              "context": 26,
+              "scope": 27
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 120,
+            "_typeVersion": 92,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 73,
+            "_definitionVersion": 29,
+            "_evaluationVersion": 83,
+            "_persistentEvaluationVersion": 83,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 1,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 28,
+            "_items": {
+              "$id": 29,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 30,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        }
+      },
+      {
+        "id": 171,
+        "parent": 170,
+        "kind": "boundCallType",
+        "expr": 51,
+        "operator": "Add",
+        "result": {
+          "identity": 56
+        },
+        "context": {
+          "engine": 1,
+          "context": 26,
+          "scope": 27,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            },
+            {
+              "context": 26,
+              "scope": 27
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 120,
+            "_typeVersion": 92,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 73,
+            "_definitionVersion": 29,
+            "_evaluationVersion": 83,
+            "_persistentEvaluationVersion": 83,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 1,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 28,
+            "_items": {
+              "$id": 29,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 30,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        }
+      },
+      {
+        "id": 219,
+        "parent": 169,
+        "kind": "joinEvidenceOnBinding",
+        "before": {
+          "identity": 39,
+          "targetIdentity": 39,
+          "name": "b",
+          "_writeVersion": 1,
+          "inferredType": true,
+          "_isConstant": false,
+          "_programVariable": true,
+          "_blockLocal": true,
+          "_type": {
+            "$id": 57,
+            "type": "number",
+            "isPolymorphic": false,
+            "_typeResolver": {
+              "$id": 24,
+              "resolve": "<function>",
+              "forward": "<function>",
+              "conformsTo": "<function>"
+            }
+          },
+          "_placeholderSkeleton": "<undefined>",
+          "_signatureSkeleton": "<undefined>",
+          "_assignmentEvidence": true
+        },
+        "after": {
+          "identity": 39,
+          "targetIdentity": 39,
+          "name": "b",
+          "_writeVersion": 1,
+          "inferredType": true,
+          "_isConstant": false,
+          "_programVariable": true,
+          "_blockLocal": true,
+          "_type": {
+            "$id": 57,
+            "type": "number",
+            "isPolymorphic": false,
+            "_typeResolver": {
+              "$id": 24,
+              "resolve": "<function>",
+              "forward": "<function>",
+              "conformsTo": "<function>"
+            }
+          },
+          "_placeholderSkeleton": "<undefined>",
+          "_signatureSkeleton": "<undefined>",
+          "_assignmentEvidence": true
+        },
+        "assignedType": "number",
+        "result": false,
+        "coarse": false,
+        "context": {
+          "engine": 1,
+          "context": 26,
+          "scope": 27,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            },
+            {
+              "context": 26,
+              "scope": 27
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 120,
+            "_typeVersion": 92,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 73,
+            "_definitionVersion": 29,
+            "_evaluationVersion": 83,
+            "_persistentEvaluationVersion": 83,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 1,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 28,
+            "_items": {
+              "$id": 29,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 30,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        }
+      },
+      {
+        "id": 367,
+        "parent": 366,
+        "kind": "boundCallType",
+        "expr": 89,
+        "operator": "Add",
+        "result": {
+          "identity": 56
+        },
+        "context": {
+          "engine": 1,
+          "context": 79,
+          "scope": 3,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            },
+            {
+              "context": 79,
+              "scope": 3
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 124,
+            "_typeVersion": 95,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 74,
+            "_definitionVersion": 29,
+            "_evaluationVersion": 85,
+            "_persistentEvaluationVersion": 85,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 0,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 80,
+            "_items": {
+              "$id": 81,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 82,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        }
+      },
+      {
+        "id": 417,
+        "parent": 414,
+        "kind": "evidence-target",
+        "target": {
+          "identity": 77,
+          "targetIdentity": 77,
+          "name": "b",
+          "_writeVersion": 0,
+          "inferredType": true,
+          "_isConstant": false,
+          "_programVariable": true,
+          "_blockLocal": true,
+          "_type": {
+            "$id": 78,
+            "type": "unknown",
+            "isPolymorphic": false,
+            "_typeResolver": {
+              "$id": 24,
+              "resolve": "<function>",
+              "forward": "<function>",
+              "conformsTo": "<function>"
+            }
+          },
+          "_placeholderSkeleton": "<undefined>",
+          "_signatureSkeleton": "<undefined>",
+          "_assignmentEvidence": false
+        },
+        "context": {
+          "engine": 1,
+          "context": 79,
+          "scope": 3,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            },
+            {
+              "context": 79,
+              "scope": 3
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 124,
+            "_typeVersion": 95,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 74,
+            "_definitionVersion": 29,
+            "_evaluationVersion": 85,
+            "_persistentEvaluationVersion": 85,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 0,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 80,
+            "_items": {
+              "$id": 81,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 82,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        }
+      },
+      {
+        "id": 420,
+        "parent": 414,
+        "kind": "joinEvidenceOnBinding",
+        "before": {
+          "identity": 77,
+          "targetIdentity": 77,
+          "name": "b",
+          "_writeVersion": 0,
+          "inferredType": true,
+          "_isConstant": false,
+          "_programVariable": true,
+          "_blockLocal": true,
+          "_type": {
+            "$id": 78,
+            "type": "unknown",
+            "isPolymorphic": false,
+            "_typeResolver": {
+              "$id": 24,
+              "resolve": "<function>",
+              "forward": "<function>",
+              "conformsTo": "<function>"
+            }
+          },
+          "_placeholderSkeleton": "<undefined>",
+          "_signatureSkeleton": "<undefined>",
+          "_assignmentEvidence": false
+        },
+        "after": {
+          "identity": 77,
+          "targetIdentity": 77,
+          "name": "b",
+          "_writeVersion": 1,
+          "inferredType": true,
+          "_isConstant": false,
+          "_programVariable": true,
+          "_blockLocal": true,
+          "_type": {
+            "$id": 57,
+            "type": "number",
+            "isPolymorphic": false,
+            "_typeResolver": {
+              "$id": 24,
+              "resolve": "<function>",
+              "forward": "<function>",
+              "conformsTo": "<function>"
+            }
+          },
+          "_placeholderSkeleton": "<undefined>",
+          "_signatureSkeleton": "<undefined>",
+          "_assignmentEvidence": true
+        },
+        "assignedType": "number",
+        "result": true,
+        "coarse": false,
+        "context": {
+          "engine": 1,
+          "context": 79,
+          "scope": 3,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            },
+            {
+              "context": 79,
+              "scope": 3
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 124,
+            "_typeVersion": 95,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 74,
+            "_definitionVersion": 29,
+            "_evaluationVersion": 85,
+            "_persistentEvaluationVersion": 85,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 0,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 80,
+            "_items": {
+              "$id": 81,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 82,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        }
+      },
+      {
+        "id": 424,
+        "parent": 420,
+        "kind": "writeEvidenceType",
+        "before": {
+          "identity": 77,
+          "targetIdentity": 77,
+          "name": "b",
+          "_writeVersion": 0,
+          "inferredType": true,
+          "_isConstant": false,
+          "_programVariable": true,
+          "_blockLocal": true,
+          "_type": {
+            "$id": 78,
+            "type": "unknown",
+            "isPolymorphic": false,
+            "_typeResolver": {
+              "$id": 24,
+              "resolve": "<function>",
+              "forward": "<function>",
+              "conformsTo": "<function>"
+            }
+          },
+          "_placeholderSkeleton": "<undefined>",
+          "_signatureSkeleton": "<undefined>",
+          "_assignmentEvidence": false
+        },
+        "after": {
+          "identity": 77,
+          "targetIdentity": 77,
+          "name": "b",
+          "_writeVersion": 1,
+          "inferredType": true,
+          "_isConstant": false,
+          "_programVariable": true,
+          "_blockLocal": true,
+          "_type": {
+            "$id": 57,
+            "type": "number",
+            "isPolymorphic": false,
+            "_typeResolver": {
+              "$id": 24,
+              "resolve": "<function>",
+              "forward": "<function>",
+              "conformsTo": "<function>"
+            }
+          },
+          "_placeholderSkeleton": "<undefined>",
+          "_signatureSkeleton": "<undefined>",
+          "_assignmentEvidence": true
+        },
+        "proposed": "number",
+        "result": {},
+        "context": {
+          "engine": 1,
+          "context": 79,
+          "scope": 3,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            },
+            {
+              "context": 79,
+              "scope": 3
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 124,
+            "_typeVersion": 95,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 74,
+            "_definitionVersion": 29,
+            "_evaluationVersion": 85,
+            "_persistentEvaluationVersion": 85,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 0,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 80,
+            "_items": {
+              "$id": 81,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 82,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        },
+        "contextAfter": {
+          "engine": 1,
+          "context": 79,
+          "scope": 3,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            },
+            {
+              "context": 79,
+              "scope": 3
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 125,
+            "_typeVersion": 96,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 75,
+            "_definitionVersion": 30,
+            "_evaluationVersion": 86,
+            "_persistentEvaluationVersion": 86,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 0,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 80,
+            "_items": {
+              "$id": 81,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 82,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        }
+      },
+      {
+        "id": 435,
+        "parent": 328,
+        "kind": "evidence-rejoin",
+        "result": false,
+        "pass": 0,
+        "coarse": false,
+        "context": {
+          "engine": 1,
+          "context": 2,
+          "scope": 3,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 125,
+            "_typeVersion": 96,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 75,
+            "_definitionVersion": 30,
+            "_evaluationVersion": 86,
+            "_persistentEvaluationVersion": 86,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 0,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 15,
+            "_items": {
+              "$id": 16,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 17,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        }
+      },
+      {
+        "id": 437,
+        "parent": 436,
+        "kind": "boundCallType",
+        "expr": 89,
+        "operator": "Add",
+        "result": {
+          "identity": 56
+        },
+        "context": {
+          "engine": 1,
+          "context": 2,
+          "scope": 3,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 125,
+            "_typeVersion": 96,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 75,
+            "_definitionVersion": 30,
+            "_evaluationVersion": 86,
+            "_persistentEvaluationVersion": 86,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 0,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 15,
+            "_items": {
+              "$id": 16,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 17,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        }
+      },
+      {
+        "id": 485,
+        "parent": 435,
+        "kind": "joinEvidenceOnBinding",
+        "before": {
+          "identity": 77,
+          "targetIdentity": 77,
+          "name": "b",
+          "_writeVersion": 1,
+          "inferredType": true,
+          "_isConstant": false,
+          "_programVariable": true,
+          "_blockLocal": true,
+          "_type": {
+            "$id": 57,
+            "type": "number",
+            "isPolymorphic": false,
+            "_typeResolver": {
+              "$id": 24,
+              "resolve": "<function>",
+              "forward": "<function>",
+              "conformsTo": "<function>"
+            }
+          },
+          "_placeholderSkeleton": "<undefined>",
+          "_signatureSkeleton": "<undefined>",
+          "_assignmentEvidence": true
+        },
+        "after": {
+          "identity": 77,
+          "targetIdentity": 77,
+          "name": "b",
+          "_writeVersion": 1,
+          "inferredType": true,
+          "_isConstant": false,
+          "_programVariable": true,
+          "_blockLocal": true,
+          "_type": {
+            "$id": 57,
+            "type": "number",
+            "isPolymorphic": false,
+            "_typeResolver": {
+              "$id": 24,
+              "resolve": "<function>",
+              "forward": "<function>",
+              "conformsTo": "<function>"
+            }
+          },
+          "_placeholderSkeleton": "<undefined>",
+          "_signatureSkeleton": "<undefined>",
+          "_assignmentEvidence": true
+        },
+        "assignedType": "number",
+        "result": false,
+        "coarse": false,
+        "context": {
+          "engine": 1,
+          "context": 2,
+          "scope": 3,
+          "stack": [
+            {
+              "context": 4,
+              "scope": 5
+            },
+            {
+              "context": 6,
+              "scope": 7
+            },
+            {
+              "context": 8,
+              "scope": 9
+            },
+            {
+              "context": 2,
+              "scope": 3
+            }
+          ],
+          "lifecycle": {
+            "$id": 10,
+            "_anyVersion": 125,
+            "_typeVersion": 96,
+            "_semanticVersion": 31,
+            "_worldVersion": 15,
+            "_callableVersion": 75,
+            "_definitionVersion": 30,
+            "_evaluationVersion": 86,
+            "_persistentEvaluationVersion": 86,
+            "_ephemeralWriteDepth": 0,
+            "_factSuppressionDepth": 0,
+            "_scratchDeclarationScopes": {
+              "$id": 11,
+              "length": 0
+            },
+            "_scratchAnyAdvances": 0,
+            "_scratchCallableAdvances": 0,
+            "_inferencePending": false,
+            "_startsAtInference": 0,
+            "_tracker": {
+              "$id": 12,
+              "_listeners": {
+                "$id": 13,
+                "truncated": true
+              },
+              "_registered": {
+                "$id": 14,
+                "truncated": true
+              },
+              "_pending": false,
+              "_version": 2
+            }
+          },
+          "assumptions": {
+            "$id": 15,
+            "_items": {
+              "$id": 16,
+              "map": [],
+              "truncated": false
+            },
+            "_version": 0
+          },
+          "assumedValues": {
+            "$id": 17,
+            "map": [],
+            "truncated": false
+          },
+          "coverage": "passive fields only; module-local overlays/static view and arbitrary host state not fully proven"
+        }
+      }
+    ]
+  }
+}

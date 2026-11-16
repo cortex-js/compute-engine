@@ -1940,6 +1940,13 @@ export function functionLiteralCallSignatureType(expr: Expression): Type {
   // The scope of the literal first: the types that its derivation caches on
   // the body are those of that scope.
   const there = ce._inScope(written, () => functionLiteralSignatureType(expr));
+  if (typeof there === 'object' && there.kind === 'signature' &&
+      there.typeParams === undefined) {
+    // The shape comes from the written scope; only effects are needed here.
+    const effects = functionLiteralArrowEffects(expr);
+    const { effects: _effects, ...shape } = there;
+    return effects === undefined ? shape : { ...shape, effects };
+  }
   const here = functionLiteralSignatureType(expr);
   if (
     typeof here !== 'object' ||

@@ -1,0 +1,737 @@
+ WARNING parseColor: unrecognized color "bogus"
+ 
+  ASSERTION FAILURE  "parse-diagnostics: bound-only "S" in canonical result — either missing _pruneUndeclared wiring in a binder parselet, or a canonicalization-synthesized binder reusing a free source name (diagnostic retained either way)"
+   > ComputeEngine.parse ../src/compute-engine/index.ts:4701:25
+   > diags ../test/compute-engine/parse-diagnostics.test.ts:24:16
+   > undeclaredNames ../test/compute-engine/parse-diagnostics.test.ts:208:12
+   > ../test/compute-engine/parse-diagnostics.test.ts:414:12
+   > Promise.finally.completed /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1834:28
+   > new Promise (<anonymous>)
+   > callAsyncCircusFn /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1774:10
+   > _callCircusTest /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1167:40
+   > _runTestInContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1103:3
+   > runTestWithContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:996:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1008:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1003:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > run /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:789:3
+   > runAndTransformResultsToJestFormat /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:2300:21
+   > jestAdapter /Users/arno/dev/compute-engine/node_modules/jest-circus/build/runner.js:111:19
+   > runTestInternal /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:247:16
+   > runTest /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:315:7
+   > Object.worker /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:479:12
+ 
+ 
+  ASSERTION FAILURE  "parse-diagnostics: bound-only "S" in canonical result — either missing _pruneUndeclared wiring in a binder parselet, or a canonicalization-synthesized binder reusing a free source name (diagnostic retained either way)"
+   > ComputeEngine.parse ../src/compute-engine/index.ts:4701:25
+   > diags ../test/compute-engine/parse-diagnostics.test.ts:24:16
+   > undeclaredNames ../test/compute-engine/parse-diagnostics.test.ts:208:12
+   > ../test/compute-engine/parse-diagnostics.test.ts:414:12
+   > Promise.finally.completed /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1834:28
+   > new Promise (<anonymous>)
+   > callAsyncCircusFn /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1774:10
+   > _callCircusTest /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1167:40
+   > _runTestInContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1103:3
+   > runTestWithContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:996:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1008:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1003:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > run /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:789:3
+   > runAndTransformResultsToJestFormat /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:2300:21
+   > jestAdapter /Users/arno/dev/compute-engine/node_modules/jest-circus/build/runner.js:111:19
+   > runTestInternal /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:247:16
+   > runTest /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:315:7
+   > Object.worker /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:479:12
+ 
+ 
+  ASSERTION FAILURE  "parse-diagnostics: bound-only "S" in canonical result — either missing _pruneUndeclared wiring in a binder parselet, or a canonicalization-synthesized binder reusing a free source name (diagnostic retained either way)"
+   > ComputeEngine.parse ../src/compute-engine/index.ts:4701:25
+   > diags ../test/compute-engine/parse-diagnostics.test.ts:24:16
+   > undeclaredNames ../test/compute-engine/parse-diagnostics.test.ts:208:12
+   > ../test/compute-engine/parse-diagnostics.test.ts:414:12
+   > Promise.finally.completed /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1834:28
+   > new Promise (<anonymous>)
+   > callAsyncCircusFn /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1774:10
+   > _callCircusTest /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1167:40
+   > _runTestInContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1103:3
+   > runTestWithContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:996:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1008:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1003:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > run /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:789:3
+   > runAndTransformResultsToJestFormat /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:2300:21
+   > jestAdapter /Users/arno/dev/compute-engine/node_modules/jest-circus/build/runner.js:111:19
+   > runTestInternal /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:247:16
+   > runTest /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:315:7
+   > Object.worker /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:479:12
+ 
+ "34752 containment checks, 4 within the 2-ulp slack
+ ["Arccot","x"] {"x":3.2811225170811413}: 0.29583060322651206 in {"kind":"interval","value":{"lo":0.2958305182341869,"hi":0.29583060322651195}}
+ ["Arcoth","x"] {"x":-1.0206039969419838}: -2.2928333354017574 in {"kind":"interval","value":{"lo":-2.292833335401757,"hi":-2.292809316305137}}
+ ["Power","x","a"] {"a":2.2,"x":-7}: -72.31288491813305 in {"kind":"interval","value":{"lo":-125.6994914871442,"hi":-72.31288491813307}}
+ machine ["Power","x","a"] {"a":-0.2,"x":0.000001}: 15.848931924611135 in {"kind":"partial","value":{"lo":15.848931924611136,"hi":null},"domainClipped":"hi"}"
+   > ../test/compute-engine/ir-interval-containment.test.ts:562:13
+   > Promise.finally.completed /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1834:28
+   > new Promise (<anonymous>)
+   > callAsyncCircusFn /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1774:10
+   > _callCircusTest /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1167:40
+   > _runTestInContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1103:3
+   > runTestWithContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:996:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1008:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1003:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > run /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:789:3
+   > runAndTransformResultsToJestFormat /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:2300:21
+   > jestAdapter /Users/arno/dev/compute-engine/node_modules/jest-circus/build/runner.js:111:19
+   > runTestInternal /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:247:16
+   > runTest /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:315:7
+   > Object.worker /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:479:12
+ 
+ "["Add",["Mod",1,["Rational",1,10]],"x"]
+   {"x":{"lo":-0.000001,"hi":0}}: mode {"kind":"interval","value":{"lo":-0.000001,"hi":0}}, existing {"kind":"singular","value":{"lo":-0.000001,"hi":0.10000000000000002}}
+ ["Block",["Declare","t","'real'",0],["If",["Greater","x",0],["Assign","t",["Multiply",2,"x"]],["Assign","t",-1]],"t"]
+   {"x":{"lo":-1.710873506963253,"hi":0.289126493036747}}: mode {"kind":"interval","value":{"lo":-1,"hi":0.578252986073494}}, existing {"kind":"interval","value":{"lo":-1,"hi":-1}}
+ ["Sum",["Sin",["Multiply","k","x"]],["Limits","k",1,3]]
+   {"x":{"lo":1.2417233789339661,"hi":1.5417233789339662}}: mode {"kind":"interval","value":{"lo":0.008256631087536492,"hi":1.0602156280090813}}, existing {"kind":"interval","value":{"lo":0.008256631087536603,"hi":1.0602156280090809}}
+ ["Sum",["Multiply",["Power",-1,"k"],["Divide",["Power","x","k"],"k"]],["Limits","k",1,6]]
+   {"x":{"lo":0.85,"hi":1.15}}: mode {"kind":"interval","value":{"lo":-1.5046199557291682,"hi":0.3405622942708333}}, existing {"kind":"interval","value":{"lo":-1.504619955729167,"hi":0.3405622942708336}}
+ ["Sum",["Multiply",["Divide",["Power",-1,"i"],"i"],["Sin",["Multiply","i","x"]]],["Limits","i",1,100]]
+   {"x":{"lo":1.67196514736861,"hi":3.67196514736861}}: mode {"kind":"interval","value":{"lo":-5.182264315934785,"hi":4.629591935955453}}, existing {"kind":"interval","value":{"lo":-5.182264315934728,"hi":4.629591935955405}}
+ ["Sum",["Multiply",["Cos",["Divide",["Multiply","Pi","n"],6]],["Sin",["Add",["Multiply","n","x"],["Sin",["Multiply",1000,"n"]]]]],["Limits","n",0,12]]
+   {"x":{"lo":1.9804743996431828,"hi":1.9804753996431828}}: mode {"kind":"interval","value":{"lo":-0.2766281901404739,"hi":-0.2766022949832657}}, existing {"kind":"interval","value":{"lo":-0.2766281901404736,"hi":-0.2766022949832662}}
+ ["Power","x",2.2]
+   {"x":{"lo":-1000004,"hi":-999996}}: mode {"kind":"interval","value":{"lo":-15849071395546.842,"hi":-15848792454344.965}}, existing {"kind":"interval","value":{"lo":-15849071395546.826,"hi":-15848792454344.873}}
+ ["Power","x",0.2]
+   {"x":{"lo":1e+300,"hi":1e+300}}: mode {"kind":"interval","value":{"lo":1.0000000000000074e+60,"hi":1.0000000000000078e+60}}, existing {"kind":"interval","value":{"lo":9.999999999999998e+59,"hi":1.0000000000000001e+60}}
+ ["Power","x","a"]
+   {"a":{"lo":-0.2,"hi":-0.2},"x":{"lo":-4,"hi":4}}: mode {"kind":"singular","at":0}, existing {"kind":"partial","value":{"lo":0.7578582832551989,"hi":null},"domainClipped":"lo"}
+ ["Add",["Multiply",["Divide",2,"Pi"],["Sum",["Multiply",["Divide",1,"i"],["Sin",["Multiply","i","x"]]],["Limits","i",1,100]]],3]
+   {"x":{"lo":0.85,"hi":1.15}}: mode {"kind":"interval","value":{"lo":1.7150619763789774,"hi":5.643067300252755}}, existing {"kind":"interval","value":{"lo":1.7150619763789778,"hi":5.643067300252738}}
+ machine ["Sum",["Multiply",["Power",-1,"k"],["Divide",["Power","x","k"],"k"]],["Limits","k",1,6]]
+   {"x":{"lo":-0.457684057764709,"hi":-0.457683057764709}}: mode {"kind":"interval","value":{"lo":0.6108957834818953,"hi":0.6108976104749712}}, existing {"kind":"interval","value":{"lo":0.610895783481896,"hi":0.6108976104749706}}
+ machine ["Sum",["Multiply",["Divide",["Power",-1,"i"],"i"],["Sin",["Multiply","i","x"]]],["Limits","i",1,100]]
+   {"x":{"lo":-4.419609145261347,"hi":-2.4196091452613473}}: mode {"kind":"interval","value":{"lo":-5.144822791732814,"hi":4.844236073683711}}, existing {"kind":"interval","value":{"lo":-5.144822791732756,"hi":4.844236073683661}}
+ machine ["Power","x",2.2]
+   {"x":{"lo":-1000000,"hi":-1000000}}: mode {"kind":"interval","value":{"lo":-15848931924611.176,"hi":-15848931924611.172}}, existing {"kind":"interval","value":{"lo":-15848931924611.154,"hi":-15848931924611.111}}
+ machine ["Power","x",0.2]
+   {"x":{"lo":1e+300,"hi":1e+300}}: mode {"kind":"interval","value":{"lo":1.0000000000000074e+60,"hi":1.0000000000000078e+60}}, existing {"kind":"interval","value":{"lo":9.999999999999998e+59,"hi":1.0000000000000001e+60}}
+ machine ["Power","x","a"]
+   {"a":{"lo":0.6000000000000001,"hi":0.6000000000000001},"x":{"lo":-0.979619175195694,"hi":7.020380824804306}}: mode {"kind":"interval","value":{"lo":-0.9877211797943681,"hi":3.219707378125808}}, existing {"kind":"partial","value":{"lo":0,"hi":3.219707378125808},"domainClipped":"lo"}
+ machine ["Add",["Multiply",["Divide",2,"Pi"],["Sum",["Multiply",["Divide",1,"i"],["Sin",["Multiply","i","x"]]],["Limits","i",1,100]]],3]
+   {"x":{"lo":-5,"hi":3}}: mode {"kind":"interval","value":{"lo":-0.3023870944644922,"hi":6.3023870944644935}}, existing {"kind":"interval","value":{"lo":-0.30238709446445533,"hi":6.302387094464455}}"
+   > ../test/compute-engine/ir-interval-containment.test.ts:574:13
+   > Promise.finally.completed /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1834:28
+   > new Promise (<anonymous>)
+   > callAsyncCircusFn /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1774:10
+   > _callCircusTest /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1167:40
+   > _runTestInContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1103:3
+   > runTestWithContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:996:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1008:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1003:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > run /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:789:3
+   > runAndTransformResultsToJestFormat /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:2300:21
+   > jestAdapter /Users/arno/dev/compute-engine/node_modules/jest-circus/build/runner.js:111:19
+   > runTestInternal /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:247:16
+   > runTest /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:315:7
+   > Object.worker /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:479:12
+ 
+ "3195 containment checks, 0 skipped (an error of the quadrature above 1e-8), 34 within the error of the quadrature (largest 3.064582266276271e-11), 0 within the 2-ulp slack; exact references: 20
+ ["Integrate",["Function",["Sin","t"],"t"],["Limits","t",0,"x"]]
+ ["Integrate",["Function",["Multiply",["Cos",["Multiply","t","x"]],["Exp","t"]],"t"],["Limits","t",-1,1]]
+ ["Integrate",["Function",["Integrate",["Function",["Multiply","s","t"],"s"],["Limits","s",0,"t"]],"t"],["Limits","t",0,"x"]]
+ ["Integrate",["Function",["Sqrt",["Add",["Power","t",2],1]],"t"],["Limits","t","x",["Add","x","y"]]]
+ ["Integrate",["Function",["Sin","t"],"t"],["Limits","t","x",0]]
+ ["Integrate",["Function",["Sin","t"],"t"],["Limits","t","x","x"]]
+ ["Integrate",["Function",["Exp",["Multiply",["Rational",-1,2],["Power","t",2]]],"t"],["Limits","t","NegativeInfinity","x"]]
+ ["Integrate",["Function",["g","t"],"t"],["Limits","t",0,"x"]]
+ ["Integrate",["Function",["G","t"],"t"],["Limits","t",0,"x"]]
+ ["Integrate",["Function",["Sum",["Divide",["Power","t","k"],["Factorial","k"]],["Limits","k",0,4]],"t"],["Limits","t",0,"x"]]
+ ["Integrate",["Function",3,"t"],["Limits","t",0,"x"]]
+ ["Integrate",["Function",["Cos","y"],"t"],["Limits","t",["Negate","x"],"x"]]
+ ["Integrate",["Function",["Multiply",["Gamma",["Add",["Power","y",2],1]],["Sin","t"]],"t"],["Limits","t",0,"x"]]
+ ["Integrate",["Function",["Ln","t"],"t"],["Limits","t",1,"x"]]
+ ["Integrate",["Function",["Multiply",0.1,["Sqrt",["Add",["Power","t",2],1]]],"t"],["Limits","t",0,"x"]]
+ ["Add","y",["Negate",["Integrate",["Function",["Cos","x"],"n"],["Limits","n",["Negate","x"],"x"]]]]
+ ["Multiply",["Divide",1,["Multiply","y",["Sqrt",["Multiply",2,"Pi"]]]],["Integrate",["Function",["Power","ExponentialE",["Multiply",["Rational",-1,2],["Divide",["Power","Z",2],["Power","y",2]]]],"Z"],["Limits","Z","NegativeInfinity","x"]]]
+ ["Integrate",["Function",["Power","t","x"],"t"],["Limits","t",0,1]]
+ ["Integrate",["Function",["Divide",["Sin","t"],"t"],"t"],["Limits","t",0,"x"]]
+ ["Integrate",["Function",["Sin",["Multiply","t","t"]],"t"],["Limits","t",0,1]]"
+   > ../test/compute-engine/ir-interval-integrals.test.ts:304:13
+   > Promise.finally.completed /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1834:28
+   > new Promise (<anonymous>)
+   > callAsyncCircusFn /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1774:10
+   > _callCircusTest /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1167:40
+   > _runTestInContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1103:3
+   > runTestWithContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:996:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1008:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1003:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > run /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:789:3
+   > runAndTransformResultsToJestFormat /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:2300:21
+   > jestAdapter /Users/arno/dev/compute-engine/node_modules/jest-circus/build/runner.js:111:19
+   > runTestInternal /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:247:16
+   > runTest /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:315:7
+   > Object.worker /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:479:12
+ 
+ "["Integrate",["Function",["Sin",["Multiply","t","t"]],"t"],["Limits","t",0,1]]
+   {}: mode {"kind":"interval","value":{"lo":0.3086261777706039,"hi":0.31191317380512296}}, existing {"kind":"interval","value":{"lo":0.3102683017233804,"hi":0.31026830172338193}}"
+   > ../test/compute-engine/ir-interval-integrals.test.ts:313:13
+   > Promise.finally.completed /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1834:28
+   > new Promise (<anonymous>)
+   > callAsyncCircusFn /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1774:10
+   > _callCircusTest /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1167:40
+   > _runTestInContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1103:3
+   > runTestWithContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:996:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1008:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1003:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > run /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:789:3
+   > runAndTransformResultsToJestFormat /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:2300:21
+   > jestAdapter /Users/arno/dev/compute-engine/node_modules/jest-circus/build/runner.js:111:19
+   > runTestInternal /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:247:16
+   > runTest /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:315:7
+   > Object.worker /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:479:12
+ 
+ "28169 containment checks, 0 within the 2-ulp slack
+ "
+   > ../test/compute-engine/ir-interval-lists.test.ts:407:13
+   > Promise.finally.completed /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1834:28
+   > new Promise (<anonymous>)
+   > callAsyncCircusFn /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1774:10
+   > _callCircusTest /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1167:40
+   > _runTestInContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1103:3
+   > runTestWithContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:996:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1008:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1003:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > run /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:789:3
+   > runAndTransformResultsToJestFormat /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:2300:21
+   > jestAdapter /Users/arno/dev/compute-engine/node_modules/jest-circus/build/runner.js:111:19
+   > runTestInternal /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:247:16
+   > runTest /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:315:7
+   > Object.worker /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:479:12
+ 
+ "["Block",["Declare","t","'real'",0],["Loop",["If",["Greater","x",0],["Assign","t",["Add","t",["Multiply",2,"x"]]],["Assign","t",["Add","t",-1]]],["Element","k",["Range",1,3]]],"t"]
+   {"x":{"lo":-3,"hi":5}}: mode {"kind":"interval","value":{"lo":-3,"hi":30}}, existing {"kind":"entire"}
+ ["Block",["Declare","t","'real'",1],["Loop",["If",["Greater","x","k"],["Assign","t",["Multiply","t","x"]]],["Element","k",["Range",1,3]]],"t"]
+   {"x":{"lo":0,"hi":2}}: mode {"kind":"interval","value":{"lo":0,"hi":2}}, existing {"kind":"entire"}"
+   > ../test/compute-engine/ir-interval-lists.test.ts:414:13
+   > Promise.finally.completed /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1834:28
+   > new Promise (<anonymous>)
+   > callAsyncCircusFn /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1774:10
+   > _callCircusTest /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1167:40
+   > _runTestInContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1103:3
+   > runTestWithContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:996:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1008:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1003:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > run /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:789:3
+   > runAndTransformResultsToJestFormat /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:2300:21
+   > jestAdapter /Users/arno/dev/compute-engine/node_modules/jest-circus/build/runner.js:111:19
+   > runTestInternal /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:247:16
+   > runTest /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:315:7
+   > Object.worker /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:479:12
+ 
+ "{
+  "generated": 1000,
+  "boxErrors": 0,
+  "boxErrorSample": [],
+  "compiled": 954,
+  "warned": 23,
+  "declined": 46,
+  "compared": 4525,
+  "reached": {
+   "Map": 66,
+   "Filter": 38,
+   "Range": 34,
+   "Length": 16,
+   "Product": 112,
+   "Max": 158,
+   "WithRandomSeed": 98,
+   "Random": 29,
+   "f": 14,
+   "g": 10,
+   "h2": 16,
+   "fact": 3,
+   "rnd": 21,
+   "ev": 5,
+   "\"D\"": 135,
+   "\"J\"": 80,
+   "\"Q\"": 20,
+   "\"E\"": 11
+  },
+  "interpreterErrors": 401,
+  "interpreterErrorClasses": {
+   "an input outside its type": 401
+  },
+  "interpreterErrorSamples": [],
+  "bitDifferences": 0,
+  "bitDifferenceSample": [],
+  "declines": {
+   "Map of a function that is not a literal of one parameter": 5,
+   "the operator LambertW is not in the slice": 5,
+   "arms of two types": 4,
+   "Equal of a list": 4,
+   "a recursive call of rec2, which has no declared result type (declare it, as (real) -> real)": 4,
+   "lists of different lengths or ranks": 3,
+   "the function cap reads hc, which is not a parameter (a capture)": 3,
+   "a sub-expression of the static type error (an error of the canonical form)": 3,
+   "the input a has no type": 2,
+   "Less of complex, integer": 2,
+   "a bound that is not a real number": 2,
+   "a list argument of g that is not a flat list (the interpreter maps the function to the leaves of a nested list)": 2,
+   "a value that is not integer": 1,
+   "a Range of an operand that is not a real number": 1,
+   "a symbol with a value that is not a number or a list of numbers (or a tuple of numbers), or a colour of three numbers": 1,
+   "a write in a loop to a local declared outside it": 1,
+   "an index that can be out of range, of a list of booleans, of complex numbers or of lists": 1,
+   "the operator Digamma is not in the slice": 1,
+   "Ceil of complex": 1
+  },
+  "expectedDeclines": {
+   "not integer": 1,
+   "no type": 2,
+   "different lengths": 3,
+   "Less of complex": 2,
+   "not a literal": 5,
+   "LambertW": 5,
+   "a capture": 3,
+   "Range of an operand that is not a real": 1,
+   "symbol with a value that is not": 1,
+   "in a loop": 1,
+   "two types": 4,
+   "canonical form": 3,
+   "of a list of booleans": 1,
+   "bound that is not a real number": 2,
+   "Equal of a list": 4,
+   "not a flat list": 2,
+   "declared result type": 4,
+   "not in the slice": 1
+  },
+  "disagreements": {
+   "precision": 20,
+   "nan-from-complex": 4,
+   "pole": 3,
+   "local-outside-its-type": 7,
+   "computed-from-a-caveat-value": 2,
+   "tolerance": 1
+  },
+  "samples": {
+   "precision": [
+    {
+     "kind": "precision",
+     "program": "[\"Add\",[\"Tan\",\"x\"],[\"If\",\"p\",[\"Cos\",[\"Cos\",0.5]],[\"Round\",[\"Max\",-1.25,\"Pi\"]]]]",
+     "point": "{\"p\":false,\"x\":1e+300}",
+     "value": "4.421448823874725",
+     "expected": "8.860081925944899"
+    },
+    {
+     "kind": "precision",
+     "program": "[\"Max\",[\"Add\",[\"Power\",[\"Mod\",\"ExponentialE\",\"y\"],[\"Round\",\"y\"]],[\"Block\",[\"Declare\",\"t82\",\"real\",-1.25],[\"If\",[\"Not\",\"p\"],[\"Assign\",\"t82\",[\"At\",\"M\",2]],\"Nothing\"],\"t82\"],[\"Add\",[\"Max\",\"D\",0.5],[\"Divide\",\"n\",\"Pi\"],\"Pi\"]],\"n\"]",
+     "point": "{\"D\":[1e+300,-1e+300,5e-324],\"M\":[3,2,1],\"n\":9007199254740991,\"p\":false,\"y\":-1e-300}",
+     "value": "1e+300",
+     "expected": "null"
+    },
+    {
+     "kind": "precision",
+     "program": "[\"List\",[\"Block\",[\"Declare\",\"t85\",\"real\",0.5],[\"Assign\",\"t85\",[\"g\",[\"Floor\",-1.25]]],[\"Exp\",[\"Sin\",2]],\"t85\"],[\"WithRandomSeed\",7,\"y\"],[\"Add\",[\"Product\",\"y\",[\"Limits\",\"k86\",\"m\",\"n\"]],[\"Block\",[\"Declare\",\"t87\",\"real\",\"x\"],[\"Assign\",\"t87\",[\"Tan\",\"ExponentialE\"]],[\"Assign\",\"t87\",[\"Block\",[\"Declare\",\"t88\",\"real\",\"t87\"],\"t88\",\"t88\"]],\"t87\"]]]",
+     "point": "{\"m\":2,\"n\":3,\"x\":0.5,\"y\":2}",
+     "value": "-4,2,3.5494504659301924",
+     "expected": "[-4,2,\"none\"]"
+    }
+   ],
+   "nan-from-complex": [
+    {
+     "kind": "nan-from-complex",
+     "program": "[\"Add\",[\"Ln\",\"x\"],[\"Power\",-1.25,\"Pi\"],[\"Block\",[\"Declare\",\"t17\",\"real\",0.5],[\"Assign\",\"t17\",\"ExponentialE\"],[\"If\",[\"Not\",\"p\"],[\"Assign\",\"t17\",-1.25],\"Nothing\"],\"t17\"]]",
+     "point": "{\"p\":false,\"x\":-1.25}",
+     "value": "[object Object]",
+     "expected": "{\"re\":-2.8465078023622414,\"im\":2.2741827840799163}"
+    },
+    {
+     "kind": "nan-from-complex",
+     "program": "[\"WithRandomSeed\",7,[\"Product\",[\"Abs\",[\"Ln\",\"x\"]],[\"Limits\",\"k216\",1,3]]]",
+     "point": "{\"x\":-1.25}",
+     "value": "NaN",
+     "expected": "31.241216576370725"
+    },
+    {
+     "kind": "nan-from-complex",
+     "program": "[\"Add\",[\"Add\",-1.25,[\"Add\",2,\"y\",2],-1.25],[\"Power\",[\"If\",\"p\",0.5,-1.25],\"y\"],[\"Exp\",[\"Min\",\"x\",-1.25]]]",
+     "point": "{\"p\":false,\"x\":1e+300,\"y\":-1e-300}",
+     "value": "NaN",
+     "expected": "2.78650479686019"
+    }
+   ],
+   "pole": [
+    {
+     "kind": "pole",
+     "program": "[\"GreaterEqual\",[\"Exp\",0.5],[\"Divide\",\"Pi\",\"y\"]]",
+     "point": "{\"y\":0}",
+     "value": "true",
+     "expected": "false"
+    },
+    {
+     "kind": "pole",
+     "program": "[\"If\",[\"Greater\",2,[\"Divide\",\"x\",\"n\"]],\"L\",[\"Add\",[\"List\",\"ExponentialE\",\"ExponentialE\",\"n\"],[\"Subtract\",\"L\",\"L\"]]]",
+     "point": "{\"L\":[0,2.5,-1],\"n\":0,\"x\":-1.25}",
+     "value": "0,2.5,-1",
+     "expected": "[2.718281828459045,2.718281828459045,0]"
+    },
+    {
+     "kind": "pole",
+     "program": "[\"Less\",[\"Min\",\"y\",2],[\"Divide\",\"Pi\",\"n\"]]",
+     "point": "{\"n\":0,\"y\":0.75}",
+     "value": "true",
+     "expected": "false"
+    }
+   ],
+   "local-outside-its-type": [
+    {
+     "kind": "local-outside-its-type",
+     "program": "[\"Block\",[\"Declare\",\"t93\",\"real\",0.5],[\"If\",[\"Equal\",[\"Power\",\"m\",2],7],[\"Assign\",\"t93\",\"t93\"],[\"Assign\",\"t93\",[\"Which\",[\"Greater\",[\"Abs\",0.5],[\"Block\",[\"Declare\",\"t94\",\"real\",0.5],\"x\",[\"If\",[\"Not\",\"p\"],[\"Assign\",\"t94\",\"Pi\"],\"Nothing\"],\"n\"]],\"n\",[\"GreaterEqual\",[\"Multiply\",\"x\",-1.25],[\"Sqrt\",0.5]],[\"Product\",[\"Add\",\"n\",0.5,-1.25],[\"Limits\",\"k95\",2,\"n\"]],\"True\",[\"Which\",[\"GreaterEqual\",\"t93\",2],\"y\",[\"LessEqual\",0.5,\"x\"],[\"At\",\"D\",\"n\"],\"True\",[\"Sin\",\"Pi\"]]]]],[\"If\",[\"LessEqual\",[\"Add\",[\"Add\",2,\"y\"],\"Pi\",[\"Max\",2,\"n\"]],[\"Subtract\",[\"Floor\",0.5],-1.25]],[\"Assign\",\"t93\",[\"Min\",[\"At\",[\"Floor\",\"L\"],-2],[\"Divide\",\"Pi\",[\"WithRandomSeed\",42,[\"Random\"]]]]],\"Nothing\"],[\"Assign\",\"t93\",0.5],\"t93\"]",
+     "point": "{\"D\":[-0.5],\"L\":[-0.5,0.125,10],\"m\":4,\"n\":5,\"p\":true,\"x\":2,\"y\":-3.5}",
+     "value": "0.5",
+     "expected": "\"none\""
+    },
+    {
+     "kind": "local-outside-its-type",
+     "program": "[\"Block\",[\"Declare\",\"t122\",\"real\",-1.25],[\"Sum\",\"x\",[\"Limits\",\"k123\",0,3]],[\"Sin\",-1.25],[\"Assign\",\"t122\",[\"Ln\",\"x\"]],[\"Add\",\"n\",\"Pi\"]]",
+     "point": "{\"n\":0,\"x\":-1.25}",
+     "value": "3.141592653589793",
+     "expected": "\"none\""
+    },
+    {
+     "kind": "local-outside-its-type",
+     "program": "[\"Block\",[\"Declare\",\"t286\",\"real\",0.5],[\"Assign\",\"t286\",[\"At\",[\"If\",\"p\",\"L\",\"L\"],2]],[\"If\",[\"Not\",[\"LessEqual\",\"ExponentialE\",\"t286\"]],[\"Assign\",\"t286\",[\"At\",\"J\",[\"Length\",\"D\"]]],\"Nothing\"],[\"Assign\",\"t286\",[\"Abs\",[\"At\",\"D\",\"n\"]]],\"t286\"]",
+     "point": "{\"D\":[1.5,-2,3,0.25],\"J\":[4,-5,6],\"L\":[1.5,-2,3],\"n\":3,\"p\":true}",
+     "value": "3",
+     "expected": "\"none\""
+    }
+   ],
+   "computed-from-a-caveat-value": [
+    {
+     "kind": "computed-from-a-caveat-value",
+     "program": "[\"NotEqual\",[\"Sum\",\"ExponentialE\",[\"Limits\",\"k125\",0,3]],[\"Max\",[\"Ln\",[\"Add\",2,\"y\"]],\"Pi\"]]",
+     "point": "{\"y\":-3.5}",
+     "value": "true",
+     "expected": "\"none\""
+    },
+    {
+     "kind": "computed-from-a-caveat-value",
+     "program": "[\"GreaterEqual\",[\"Product\",[\"Add\",\"n\",-1.25,\"n\"],[\"Limits\",\"k297\",1,5]],[\"Min\",[\"Sqrt\",\"x\"],[\"Product\",\"n\",[\"Limits\",\"k298\",0,\"n\"]]]]",
+     "point": "{\"n\":0,\"x\":-1.25}",
+     "value": "false",
+     "expected": "\"none\""
+    }
+   ],
+   "tolerance": [
+    {
+     "kind": "tolerance",
+     "program": "[\"Less\",[\"Min\",\"y\",2],[\"Divide\",\"Pi\",\"n\"]]",
+     "point": "{\"n\":9007199254740991,\"y\":-1e-300}",
+     "value": "true",
+     "expected": "false"
+    }
+   ]
+  },
+  "unclassified": []
+ }"
+   > ../test/compute-engine/ir-slice-random.test.ts:418:13
+   > Promise.finally.completed /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1834:28
+   > new Promise (<anonymous>)
+   > callAsyncCircusFn /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1774:10
+   > _callCircusTest /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1167:40
+   > _runTestInContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1103:3
+   > runTestWithContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:996:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1008:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1003:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > run /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:789:3
+   > runAndTransformResultsToJestFormat /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:2300:21
+   > jestAdapter /Users/arno/dev/compute-engine/node_modules/jest-circus/build/runner.js:111:19
+   > runTestInternal /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:247:16
+   > runTest /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:315:7
+   > Object.worker /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:479:12
+ 
+ "shared nodes: 351 comparisons"
+   > ../test/compute-engine/ir-slice-random.test.ts:617:13
+   > Promise.finally.completed /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1834:28
+   > new Promise (<anonymous>)
+   > callAsyncCircusFn /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1774:10
+   > _callCircusTest /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1167:40
+   > _runTestInContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1103:3
+   > runTestWithContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:996:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1008:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1003:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > run /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:789:3
+   > runAndTransformResultsToJestFormat /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:2300:21
+   > jestAdapter /Users/arno/dev/compute-engine/node_modules/jest-circus/build/runner.js:111:19
+   > runTestInternal /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:247:16
+   > runTest /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:315:7
+   > Object.worker /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:479:12
+ 
+ "ir bigint random: 300 compiled, 0 declined, 900 compared"
+   > ../test/compute-engine/ir-bigint.test.ts:456:13
+   > Promise.finally.completed /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1834:28
+   > new Promise (<anonymous>)
+   > callAsyncCircusFn /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1774:10
+   > _callCircusTest /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1167:40
+   > _runTestInContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1103:3
+   > runTestWithContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:996:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1008:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1003:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > run /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:789:3
+   > runAndTransformResultsToJestFormat /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:2300:21
+   > jestAdapter /Users/arno/dev/compute-engine/node_modules/jest-circus/build/runner.js:111:19
+   > runTestInternal /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:247:16
+   > runTest /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:315:7
+   > Object.worker /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:479:12
+ 
+ "GLSL: 193 programs at 964 points, 0 failures"
+   > ../test/compute-engine/ir-slice-glsl.test.ts:337:15
+ 
+  ERROR  "ComputeEngine: error canonicalizing `Write`:" "The symbol "f" is already declared in this scope"
+   > applyOperatorDefinition ../src/compute-engine/boxed-expression/box.ts:5536:15
+   > makeCanonicalFunctionCore ../src/compute-engine/boxed-expression/box.ts:4696:18
+   > makeCanonicalFunction ../src/compute-engine/boxed-expression/box.ts:3732:12
+   > boxFunctionInternal ../src/compute-engine/boxed-expression/box.ts:1135:12
+   > boxFunction ../src/compute-engine/boxed-expression/box.ts:480:12
+   > ComputeEngine.function ../src/compute-engine/index.ts:4863:23
+   > ../src/compute-engine/boxed-expression/boxed-function.ts:2875:36
+   > BoxedFunction._withParseScope ../src/compute-engine/boxed-expression/abstract-boxed-expression.ts:405:27
+   > BoxedFunction.get canonical [as canonical] ../src/compute-engine/boxed-expression/boxed-function.ts:2845:27
+   > canonicalStatement ../src/compute-engine/statement-position.ts:207:13
+   > canonicalize ../src/compute-engine/library/control-structures.ts:4358:27
+   > canonicalizeStatement ../src/compute-engine/library/control-structures.ts:4368:24
+   > ../src/compute-engine/library/control-structures.ts:4633:47
+   > Array.map (<anonymous>)
+   > ../src/compute-engine/library/control-structures.ts:4621:13
+   > inScope ../src/compute-engine/engine-scope.ts:323:12
+   > ComputeEngine._inScope ../src/compute-engine/index.ts:3399:23
+   > ../src/compute-engine/library/control-structures.ts:4620:10
+   > withEvidenceSession ../src/compute-engine/library/assignment-evidence.ts:206:14
+   > canonicalSequence ../src/compute-engine/library/control-structures.ts:4619:37
+   > _BoxedOperatorDefinition.canonicalBlock [as canonical] ../src/compute-engine/library/control-structures.ts:4300:10
+   > applyOperatorDefinition ../src/compute-engine/boxed-expression/box.ts:5162:24
+   > makeCanonicalFunctionCore ../src/compute-engine/boxed-expression/box.ts:4687:12
+   > makeCanonicalFunction ../src/compute-engine/boxed-expression/box.ts:3732:12
+   > boxFunctionInternal ../src/compute-engine/boxed-expression/box.ts:1135:12
+   > boxFunction ../src/compute-engine/boxed-expression/box.ts:480:12
+   > ComputeEngine.function ../src/compute-engine/index.ts:4863:23
+   > canonicalize ../src/compute-engine/library/control-structures.ts:4357:20
+   > withPairedFunctionNames ../src/compute-engine/statement-position.ts:152:12
+   > ../src/compute-engine/library/control-structures.ts:4367:196
+   > withProgramStatement ../src/compute-engine/statement-position.ts:116:16
+   > ../src/compute-engine/library/control-structures.ts:4367:166
+   > withProgramInitializerOuters ../src/compute-engine/statement-position.ts:218:16
+   > ../src/compute-engine/library/control-structures.ts:4367:120
+   > withEarlierConstantDeclarations ../src/compute-engine/boxed-expression/parameter-defaults.ts:376:39
+   > canonicalizeStatement ../src/compute-engine/library/control-structures.ts:4367:50
+   > ../src/compute-engine/library/control-structures.ts:4633:47
+   > Array.map (<anonymous>)
+   > ../src/compute-engine/library/control-structures.ts:4621:13
+   > inScope ../src/compute-engine/engine-scope.ts:323:12
+   > ComputeEngine._inScope ../src/compute-engine/index.ts:3399:23
+   > ../src/compute-engine/library/control-structures.ts:4620:10
+   > withEvidenceSession ../src/compute-engine/library/assignment-evidence.ts:206:14
+   > canonicalSequence ../src/compute-engine/library/control-structures.ts:4619:37
+   > _BoxedOperatorDefinition.canonicalProgram [as canonical] ../src/compute-engine/library/control-structures.ts:4310:20
+   > applyOperatorDefinition ../src/compute-engine/boxed-expression/box.ts:5162:24
+   > makeCanonicalFunctionCore ../src/compute-engine/boxed-expression/box.ts:4696:18
+   > makeCanonicalFunction ../src/compute-engine/boxed-expression/box.ts:3732:12
+   > boxFunctionInternal ../src/compute-engine/boxed-expression/box.ts:1135:12
+   > boxInternal ../src/compute-engine/boxed-expression/box.ts:2373:6
+   > ../src/compute-engine/boxed-expression/box.ts:1805:7
+   > EngineBoxingState.withRootRepair ../src/compute-engine/engine-boxing-state.ts:252:22
+   > withDevolveRepair ../src/compute-engine/boxed-expression/box.ts:1750:26
+   > box ../src/compute-engine/boxed-expression/box.ts:1804:12
+   > ../src/compute-engine/index.ts:4236:10
+   > inScope ../src/compute-engine/engine-scope.ts:307:22
+   > ComputeEngine._inScope ../src/compute-engine/index.ts:3399:23
+   > inHarvestScope ../src/compute-engine/engine-inspectable-scope.ts:228:45
+   > ComputeEngine.expr ../src/compute-engine/index.ts:4235:26
+   > ComputeEngine.box ../src/compute-engine/index.ts:4250:17
+   > canonicalizationDiagnostics ../src/epsil/static-diagnostics.ts:646:18
+   > ../src/epsil/static-diagnostics.ts:576:9
+   > ComputeEngine._withBoxingPassWindow ../src/compute-engine/index.ts:1036:14
+   > ../src/epsil/static-diagnostics.ts:575:10
+   > EngineBoxingState.withOperation ../src/compute-engine/engine-boxing-state.ts:86:14
+   > ComputeEngine._withProgramEnvironment ../src/compute-engine/index.ts:1602:30
+   > staticDiagnostics ../src/epsil/static-diagnostics.ts:574:15
+   > ../test/epsil/static-check-leaves-engine.test.ts:332:22
+   > /Users/arno/dev/compute-engine/node_modules/jest-each/build/index.js:80:140
+   > Promise.finally.completed /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1834:28
+   > new Promise (<anonymous>)
+   > callAsyncCircusFn /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1774:10
+   > _callCircusTest /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1167:40
+   > _runTestInContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1103:3
+   > runTestWithContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:996:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1008:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1003:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > run /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:789:3
+   > runAndTransformResultsToJestFormat /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:2300:21
+   > jestAdapter /Users/arno/dev/compute-engine/node_modules/jest-circus/build/runner.js:111:19
+   > runTestInternal /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:247:16
+   > runTest /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:315:7
+   > Object.worker /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:479:12
+ 
+  ERROR  "ComputeEngine: error canonicalizing `Write`:" "The symbol "y" is already declared in this scope"
+   > applyOperatorDefinition ../src/compute-engine/boxed-expression/box.ts:5536:15
+   > makeCanonicalFunctionCore ../src/compute-engine/boxed-expression/box.ts:4696:18
+   > makeCanonicalFunction ../src/compute-engine/boxed-expression/box.ts:3732:12
+   > boxFunctionInternal ../src/compute-engine/boxed-expression/box.ts:1135:12
+   > boxFunction ../src/compute-engine/boxed-expression/box.ts:480:12
+   > ComputeEngine.function ../src/compute-engine/index.ts:4863:23
+   > ../src/compute-engine/boxed-expression/boxed-function.ts:2875:36
+   > BoxedFunction._withParseScope ../src/compute-engine/boxed-expression/abstract-boxed-expression.ts:405:27
+   > BoxedFunction.get canonical [as canonical] ../src/compute-engine/boxed-expression/boxed-function.ts:2845:27
+   > canonicalStatement ../src/compute-engine/statement-position.ts:207:13
+   > canonicalize ../src/compute-engine/library/control-structures.ts:4358:27
+   > canonicalizeStatement ../src/compute-engine/library/control-structures.ts:4368:24
+   > ../src/compute-engine/library/control-structures.ts:4633:47
+   > Array.map (<anonymous>)
+   > ../src/compute-engine/library/control-structures.ts:4621:13
+   > inScope ../src/compute-engine/engine-scope.ts:323:12
+   > ComputeEngine._inScope ../src/compute-engine/index.ts:3399:23
+   > ../src/compute-engine/library/control-structures.ts:4620:10
+   > withEvidenceSession ../src/compute-engine/library/assignment-evidence.ts:206:14
+   > canonicalSequence ../src/compute-engine/library/control-structures.ts:4619:37
+   > _BoxedOperatorDefinition.canonicalBlock [as canonical] ../src/compute-engine/library/control-structures.ts:4300:10
+   > applyOperatorDefinition ../src/compute-engine/boxed-expression/box.ts:5162:24
+   > makeCanonicalFunctionCore ../src/compute-engine/boxed-expression/box.ts:4687:12
+   > makeCanonicalFunction ../src/compute-engine/boxed-expression/box.ts:3732:12
+   > boxFunctionInternal ../src/compute-engine/boxed-expression/box.ts:1135:12
+   > boxFunction ../src/compute-engine/boxed-expression/box.ts:480:12
+   > ComputeEngine.function ../src/compute-engine/index.ts:4863:23
+   > canonicalize ../src/compute-engine/library/control-structures.ts:4357:20
+   > withPairedFunctionNames ../src/compute-engine/statement-position.ts:152:12
+   > ../src/compute-engine/library/control-structures.ts:4367:196
+   > withProgramStatement ../src/compute-engine/statement-position.ts:116:16
+   > ../src/compute-engine/library/control-structures.ts:4367:166
+   > withProgramInitializerOuters ../src/compute-engine/statement-position.ts:218:16
+   > ../src/compute-engine/library/control-structures.ts:4367:120
+   > withEarlierConstantDeclarations ../src/compute-engine/boxed-expression/parameter-defaults.ts:376:39
+   > canonicalizeStatement ../src/compute-engine/library/control-structures.ts:4367:50
+   > ../src/compute-engine/library/control-structures.ts:4633:47
+   > Array.map (<anonymous>)
+   > ../src/compute-engine/library/control-structures.ts:4621:13
+   > inScope ../src/compute-engine/engine-scope.ts:323:12
+   > ComputeEngine._inScope ../src/compute-engine/index.ts:3399:23
+   > ../src/compute-engine/library/control-structures.ts:4620:10
+   > withEvidenceSession ../src/compute-engine/library/assignment-evidence.ts:206:14
+   > canonicalSequence ../src/compute-engine/library/control-structures.ts:4619:37
+   > _BoxedOperatorDefinition.canonicalProgram [as canonical] ../src/compute-engine/library/control-structures.ts:4310:20
+   > applyOperatorDefinition ../src/compute-engine/boxed-expression/box.ts:5162:24
+   > makeCanonicalFunctionCore ../src/compute-engine/boxed-expression/box.ts:4696:18
+   > makeCanonicalFunction ../src/compute-engine/boxed-expression/box.ts:3732:12
+   > boxFunctionInternal ../src/compute-engine/boxed-expression/box.ts:1135:12
+   > boxInternal ../src/compute-engine/boxed-expression/box.ts:2373:6
+   > ../src/compute-engine/boxed-expression/box.ts:1805:7
+   > EngineBoxingState.withRootRepair ../src/compute-engine/engine-boxing-state.ts:252:22
+   > withDevolveRepair ../src/compute-engine/boxed-expression/box.ts:1750:26
+   > box ../src/compute-engine/boxed-expression/box.ts:1804:12
+   > ../src/compute-engine/index.ts:4236:10
+   > inScope ../src/compute-engine/engine-scope.ts:307:22
+   > ComputeEngine._inScope ../src/compute-engine/index.ts:3399:23
+   > inHarvestScope ../src/compute-engine/engine-inspectable-scope.ts:228:45
+   > ComputeEngine.expr ../src/compute-engine/index.ts:4235:26
+   > ComputeEngine.box ../src/compute-engine/index.ts:4250:17
+   > canonicalizationDiagnostics ../src/epsil/static-diagnostics.ts:646:18
+   > ../src/epsil/static-diagnostics.ts:576:9
+   > ComputeEngine._withBoxingPassWindow ../src/compute-engine/index.ts:1036:14
+   > ../src/epsil/static-diagnostics.ts:575:10
+   > EngineBoxingState.withOperation ../src/compute-engine/engine-boxing-state.ts:86:14
+   > ComputeEngine._withProgramEnvironment ../src/compute-engine/index.ts:1602:30
+   > staticDiagnostics ../src/epsil/static-diagnostics.ts:574:15
+   > ../test/epsil/static-check-leaves-engine.test.ts:332:22
+   > /Users/arno/dev/compute-engine/node_modules/jest-each/build/index.js:80:140
+   > Promise.finally.completed /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1834:28
+   > new Promise (<anonymous>)
+   > callAsyncCircusFn /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1774:10
+   > _callCircusTest /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1167:40
+   > _runTestInContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1103:3
+   > runTestWithContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:996:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1008:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1003:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > run /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:789:3
+   > runAndTransformResultsToJestFormat /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:2300:21
+   > jestAdapter /Users/arno/dev/compute-engine/node_modules/jest-circus/build/runner.js:111:19
+   > runTestInternal /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:247:16
+   > runTest /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:315:7
+   > Object.worker /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:479:12
+ 
+ ""False""
+   > Object.log ../src/compute-engine/effects-registry.ts:48:40
+   > _BoxedOperatorDefinition.evaluate ../src/compute-engine/library/core.ts:12466:18
+   > ../src/compute-engine/boxed-expression/boxed-function.ts:10495:44
+   > BoxedFunction._inOwnBinding ../src/compute-engine/boxed-expression/boxed-function.ts:3159:14
+   > ../src/compute-engine/boxed-expression/boxed-function.ts:10494:31
+   > ../src/compute-engine/boxed-expression/boxed-function.ts:9112:24
+   > BoxedFunction._memoizedLazyCollectionValue ../src/compute-engine/boxed-expression/boxed-function.ts:6049:43
+   > evaluateHere ../src/compute-engine/boxed-expression/boxed-function.ts:5240:22
+   > inLazyViewContext ../src/compute-engine/boxed-expression/lazy-view-context.ts:403:37
+   > BoxedFunction.evaluate ../src/compute-engine/boxed-expression/boxed-function.ts:5246:39
+   > ../src/compute-engine/function-utils.ts:3620:74
+   > EngineBoxingState.asProgramStatement ../src/compute-engine/engine-boxing-state.ts:117:14
+   > evaluate ../src/compute-engine/function-utils.ts:3620:46
+   > evaluateStatements ../src/compute-engine/function-utils.ts:3623:21
+   > _BoxedOperatorDefinition.evaluate ../src/compute-engine/library/control-structures.ts:402:36
+   > ../src/compute-engine/boxed-expression/boxed-function.ts:10495:44
+   > BoxedFunction._inOwnBinding ../src/compute-engine/boxed-expression/boxed-function.ts:3159:14
+   > ../src/compute-engine/boxed-expression/boxed-function.ts:10494:31
+   > evaluateHere ../src/compute-engine/boxed-expression/boxed-function.ts:5241:44
+   > inLazyViewContext ../src/compute-engine/boxed-expression/lazy-view-context.ts:403:37
+   > BoxedFunction.evaluate ../src/compute-engine/boxed-expression/boxed-function.ts:5246:39
+   > ../src/epsil/execute-epsil.ts:181:63
+   > EngineBoxingState.asProgramStatement ../src/compute-engine/engine-boxing-state.ts:117:14
+   > ../src/epsil/execute-epsil.ts:181:33
+   > EngineBoxingState.withOperation ../src/compute-engine/engine-boxing-state.ts:86:14
+   > ComputeEngine._withProgramEnvironment ../src/compute-engine/index.ts:1602:30
+   > executeEpsil ../src/epsil/execute-epsil.ts:171:13
+   > run ../test/epsil/equation-body.test.ts:18:30
+   > codes ../test/epsil/equation-body.test.ts:36:20
+   > ../test/epsil/equation-body.test.ts:207:12
+   > /Users/arno/dev/compute-engine/node_modules/jest-each/build/index.js:80:140
+   > Promise.finally.completed /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1834:28
+   > new Promise (<anonymous>)
+   > callAsyncCircusFn /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1774:10
+   > _callCircusTest /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1167:40
+   > _runTestInContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1103:3
+   > runTestWithContext /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:996:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1008:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > _runTestsForDescribeBlockOnce /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:1003:11
+   > _runTestsForDescribeBlock /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:824:5
+   > run /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:789:3
+   > runAndTransformResultsToJestFormat /Users/arno/dev/compute-engine/node_modules/jest-circus/build/jestAdapterInit.js:2300:21
+   > jestAdapter /Users/arno/dev/compute-engine/node_modules/jest-circus/build/runner.js:111:19
+   > runTestInternal /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:247:16
+   > runTest /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:315:7
+   > Object.worker /Users/arno/dev/compute-engine/node_modules/jest-runner/build/testWorker.js:479:12
+ 
+
+Test Suites: 11 skipped, 2056 passed, 2056 of 2067 total
+Tests:       780 skipped, 2 todo, 85827 passed, 86609 total
+Snapshots:   4264 passed, 4264 total
+Time:        177.62 s
+Ran all test suites.

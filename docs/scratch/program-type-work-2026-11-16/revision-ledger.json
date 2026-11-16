@@ -1,0 +1,645 @@
+{
+  "accepted": "050a140880e56a9698fa61b99ef7205a53b651c9",
+  "baseline": "ffff1d44fc566ef01fb52a0ce67b6797797f4dcf",
+  "capturedAt": "2026-11-16T14:38:56.543Z",
+  "metric": "Changed physical lines intersecting nontrivia TypeScript AST leaf-token ranges; skip JSDoc AST nodes/EOF; multiline literals intersect each physical line. Non-JS/TS files have physical counts only, code count 0 means not measured.",
+  "delta": [
+    {
+      "file": "src/compute-engine/boxed-expression/boxed-function.ts",
+      "beforeHash": "1f1ccc6bef5a9309cdf956c0b17d7b87be79dc8cec5489b4cb2cda9f5d36d093",
+      "afterHash": "7c24aa65c7d2c458863bf8c5ddffbaf66e15980a6a74fb42c35e3ea33f07dc1a",
+      "physicalAdded": 6,
+      "physicalDeleted": 6,
+      "codeAdded": 6,
+      "codeDeleted": 6
+    },
+    {
+      "file": "src/compute-engine/boxed-expression/broadcast-lift-type.ts",
+      "beforeHash": "4c46d11e2edddedbfd10f9dc219eb6ff8ba6e1d91daf4535c70f2884bd691bff",
+      "afterHash": "6618c5248f4e9e53397fb7bfc3d892a883e5dd374c89228844cfe56c862d14f3",
+      "physicalAdded": 5,
+      "physicalDeleted": 7,
+      "codeAdded": 5,
+      "codeDeleted": 7
+    },
+    {
+      "file": "src/compute-engine/boxed-expression/derive-application-type.ts",
+      "beforeHash": "e424e526261541740c60b580a7214f74a4f080b2f4a60bd1846192e00eedab3b",
+      "afterHash": "4f935b60936e53adc5320e09e6f640b61686e85827ba5942ec2592e93f25b5da",
+      "physicalAdded": 3,
+      "physicalDeleted": 2,
+      "codeAdded": 3,
+      "codeDeleted": 2
+    },
+    {
+      "file": "src/compute-engine/boxed-expression/effects-inference.ts",
+      "beforeHash": "6662c15e7c69f170e4c47f8a7d4e07094e01bf20fda8c5cbd1794a7f1883c7eb",
+      "afterHash": "48014f89983b3c3e0daca4c190aa6e573ebf18f33c03d5e27271be883c125800",
+      "physicalAdded": 7,
+      "physicalDeleted": 0,
+      "codeAdded": 6,
+      "codeDeleted": 0
+    },
+    {
+      "file": "src/compute-engine/collection-utils.ts",
+      "beforeHash": "33ffd4c3c0e7f1198afb056d0859b9c1fd028d4a6c5a2e72ccdfbf6466d863fb",
+      "afterHash": "72d5a590c960e0bf03787ab7d3298acd03984447daea26d082f1f039b6bfaf20",
+      "physicalAdded": 6,
+      "physicalDeleted": 4,
+      "codeAdded": 6,
+      "codeDeleted": 4
+    }
+  ],
+  "deltaTotals": {
+    "physicalAdded": 27,
+    "physicalDeleted": 19,
+    "codeAdded": 26,
+    "codeDeleted": 19
+  },
+  "cumulative": [
+    {
+      "project": "CE",
+      "file": "src/cli/compile.ts",
+      "beforeHash": "18e7c393dbaeac3ba296a3ebadab10e4feaf68a81dfa53c6d8d0e5ff917224e6",
+      "afterHash": "746f47e14636586d4ad00611855b85b12b29c5e788191e8c3a6f0197a4e27a6a",
+      "physicalAdded": 4,
+      "physicalDeleted": 4,
+      "codeAdded": 3,
+      "codeDeleted": 1
+    },
+    {
+      "project": "CE",
+      "file": "src/common/debug-hook.ts",
+      "beforeHash": "31b33e7fb16f2fcd925cca18a181d1e40178d68c0c2a23e27b64ff86f3d62ee0",
+      "afterHash": "be6ec92a8a1be37f909bf6dc6d267ee6f66428d30a3f4fe0cea86f9c3999f48e",
+      "physicalAdded": 14,
+      "physicalDeleted": 0,
+      "codeAdded": 11,
+      "codeDeleted": 0
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/boxed-expression/ambient-chain.ts",
+      "beforeHash": "36cf2cf49af3cb07b3486662273098d4a2ed59fcdc5a7041011b65165115c2cd",
+      "afterHash": "151fddba0c3e252e19d3c23056b80a52f500bf338e1d68db349c10575391a234",
+      "physicalAdded": 2,
+      "physicalDeleted": 1,
+      "codeAdded": 2,
+      "codeDeleted": 1
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/boxed-expression/arithmetic-mul-div.ts",
+      "beforeHash": "e769fd75e5de525369e04a5c0fa2b484647f2bdb92fe3e2313b4765b2065c31b",
+      "afterHash": "fffd55614949d7e05546eaa4fb6db10be848fe94fe2b12829cce25e28250fa98",
+      "physicalAdded": 8,
+      "physicalDeleted": 2,
+      "codeAdded": 8,
+      "codeDeleted": 2
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/boxed-expression/binders.ts",
+      "beforeHash": "09e4a6c397154b6cb55cf0356f7816ab6d41058e1e0fca64b46594e18b6c7279",
+      "afterHash": "a1eda9a2627cf117d7cec9727c6aa2d4e378e948102149e58001c9712d0be583",
+      "physicalAdded": 3,
+      "physicalDeleted": 1,
+      "codeAdded": 3,
+      "codeDeleted": 1
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/boxed-expression/box.ts",
+      "beforeHash": "5444c37cc50db8fbe976a62d654779d6d5738825e5eb9bcfac21a3056c5c756c",
+      "afterHash": "8baa90a4e5a4c8ab7cede140f200a79fd3044fb95dcd3a2a0b1f54f79a2dc77f",
+      "physicalAdded": 36,
+      "physicalDeleted": 59,
+      "codeAdded": 34,
+      "codeDeleted": 26
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/boxed-expression/boxed-function.ts",
+      "beforeHash": "e77ad0ff57c93fe94777723e7ebd680280423b1f5294fa8b274a946955b6adfe",
+      "afterHash": "7c24aa65c7d2c458863bf8c5ddffbaf66e15980a6a74fb42c35e3ea33f07dc1a",
+      "physicalAdded": 19,
+      "physicalDeleted": 58,
+      "codeAdded": 16,
+      "codeDeleted": 12
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/boxed-expression/boxed-value-definition.ts",
+      "beforeHash": "9739e97c9834d6a8ee28d22c42e252c20f87efad1b5c9be94c72fe590b0e97b7",
+      "afterHash": "eda55d92c3d8fa3a81981e8f83bd2e7bd6a17f7d5d04de7cc1dbfb4cb1d67b87",
+      "physicalAdded": 70,
+      "physicalDeleted": 2,
+      "codeAdded": 44,
+      "codeDeleted": 1
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/boxed-expression/effects-inference.ts",
+      "beforeHash": "19c66c1899615f5e6853edb9a6c02de543e695d0e96ffe19b161a3b2c8c0b36c",
+      "afterHash": "48014f89983b3c3e0daca4c190aa6e573ebf18f33c03d5e27271be883c125800",
+      "physicalAdded": 9,
+      "physicalDeleted": 2,
+      "codeAdded": 8,
+      "codeDeleted": 2
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/boxed-expression/function-literal.ts",
+      "beforeHash": "27cbb930e868b3ff2da6ca1b4c8c71f801a9f43d5447528efda9ecd848ce095d",
+      "afterHash": "4bcaae72731b85d796f2984465c3496685876c948ca59d7b0eff22136e2a1f2c",
+      "physicalAdded": 2,
+      "physicalDeleted": 2,
+      "codeAdded": 2,
+      "codeDeleted": 2
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/boxed-expression/lazy-view-context.ts",
+      "beforeHash": "14f93b26fb1bd4b7dceb9c200756950dac6a8814d6af0b1dcdf0643216b06396",
+      "afterHash": "12e5638ac3812df142cd3bb9248b98ae01960b252296d9e0ba73e2c7c0c99478",
+      "physicalAdded": 2,
+      "physicalDeleted": 2,
+      "codeAdded": 2,
+      "codeDeleted": 2
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/boxed-expression/named-arguments.ts",
+      "beforeHash": "bf1d27856e51c2117b98d505d0e87d45e5f82f98b29469e22402fa12d52a6031",
+      "afterHash": "a9a5b02fcffa549f2faa2b5e44221f2e0cb7320d621f4f8e42d81b4e1ae962ce",
+      "physicalAdded": 1,
+      "physicalDeleted": 1,
+      "codeAdded": 1,
+      "codeDeleted": 1
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/boxed-expression/parameter-defaults.ts",
+      "beforeHash": "d3be74c6c1c8ee90a638be54966050f7e3475864340a84743ed56aa0bc984965",
+      "afterHash": "bb21dedb5ceb95a5581a4d72926a0903b48139b30f943c130e400258c3d286be",
+      "physicalAdded": 22,
+      "physicalDeleted": 0,
+      "codeAdded": 19,
+      "codeDeleted": 0
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/boxed-expression/type-compatibility-error.ts",
+      "beforeHash": "dd2c1dd0c0ad3258bc92e7f3d2c7c4f0e2d3b3bebceac8b2379bbaf0d293d19e",
+      "afterHash": "41067031e85652eee1758076e78c4296ae3a0957441cf207205aba281396c462",
+      "physicalAdded": 16,
+      "physicalDeleted": 17,
+      "codeAdded": 13,
+      "codeDeleted": 14
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/boxed-expression/validate.ts",
+      "beforeHash": "8a4a7642f615e3d85505f08162d5c87d37aa8ac92d4f3dbe3020722aac9f4af4",
+      "afterHash": "dfd9157481316b3cc0f8c9b72c58b9b93330ad1c0c840e208c339306621e99a2",
+      "physicalAdded": 7,
+      "physicalDeleted": 88,
+      "codeAdded": 5,
+      "codeDeleted": 16
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/compilation/compile-expression.ts",
+      "beforeHash": "7993cb42f17b0a3d007d8c2b92d1122954dce2e519ca84779c89ca5a475439db",
+      "afterHash": "c75c1ec803775563e592a0517e7d04357b97bd84c7340cfa8b04dc94aad83e93",
+      "physicalAdded": 4,
+      "physicalDeleted": 0,
+      "codeAdded": 2,
+      "codeDeleted": 0
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/declaration-origin.ts",
+      "beforeHash": "b13c92e9d52d0353f6837e6047e12d99fdaee750b3d6f4e73e1e87cf73aed476",
+      "afterHash": "cec1ea3a3657c6e6d2c292466bcbf463d8ad8426a2b063ed7c49bb799ea5e68a",
+      "physicalAdded": 7,
+      "physicalDeleted": 1,
+      "codeAdded": 5,
+      "codeDeleted": 1
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/engine-declarations.ts",
+      "beforeHash": "762c802fa61eb5dff33b43ccc87efa5642d50ffbb6101eacdef61ad38ab893b5",
+      "afterHash": "6b71279bdb5993ebaf8fa29d8cba27a5182557ef761143669827a811c9d6b6a0",
+      "physicalAdded": 29,
+      "physicalDeleted": 44,
+      "codeAdded": 25,
+      "codeDeleted": 20
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/function-utils.ts",
+      "beforeHash": "0930319f2aab6d7ea10e24ad3009843ddba130e867894da8b449a10fd24c78d0",
+      "afterHash": "8b6d9a3a87802847aa75199ad7d9f6e1c0b21a96571f3bc2d50942439f3df106",
+      "physicalAdded": 80,
+      "physicalDeleted": 28,
+      "codeAdded": 73,
+      "codeDeleted": 21
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/index.ts",
+      "beforeHash": "2ccd91beb4c6392f4bf3e063779a75b04516708a81dc407038204f184b27711e",
+      "afterHash": "e3cdece1e6b2a375eb4cc424ca979eeb9028fe52299e35565a31f240734959f6",
+      "physicalAdded": 4,
+      "physicalDeleted": 7,
+      "codeAdded": 2,
+      "codeDeleted": 5
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/library/calculus.ts",
+      "beforeHash": "f1ad810cd6b53a952798027b0bbaa349b8a2bd2056481742f5bc7cc53bac6a84",
+      "afterHash": "73a156b46bf95d930b0568abf6c47151440cd70c483cd827d634584dc7f28fd4",
+      "physicalAdded": 2,
+      "physicalDeleted": 1,
+      "codeAdded": 2,
+      "codeDeleted": 1
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/library/collections.ts",
+      "beforeHash": "9ead02a1eff8c4a5409a59e081b284affc91608a07a470928447db526cbad147",
+      "afterHash": "216ba55e2b9ed362cf332fc5f4b7e218f21c2b66cbcb6c7b1f8bf9519c5d965c",
+      "physicalAdded": 6,
+      "physicalDeleted": 0,
+      "codeAdded": 3,
+      "codeDeleted": 0
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/library/control-structures.ts",
+      "beforeHash": "3ae6de53c5c97676712c7c24279e88aaf32d056824ee673588fa1eb1191589bc",
+      "afterHash": "cce59270c20ad00e5b1ff90f28f9641fad1107d1c89e64f38e4171e49ce08d55",
+      "physicalAdded": 277,
+      "physicalDeleted": 251,
+      "codeAdded": 263,
+      "codeDeleted": 111
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/library/core.ts",
+      "beforeHash": "6472afe4a05282665d2a5537ab70e1cacf87aa3b94f85de39e3a3784f9c8df96",
+      "afterHash": "e277cbd6d16a8d09c701f872980f8c2e3d0bbf1311a7913aa04194446c2226a0",
+      "physicalAdded": 114,
+      "physicalDeleted": 158,
+      "codeAdded": 102,
+      "codeDeleted": 93
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/multi-clause.ts",
+      "beforeHash": "c7e2c55f8c87dd233dc479a24c813cd211b586987380f63c0daaa099423201c2",
+      "afterHash": "aa31206e90fba69e545672ad595f99741d43229b62f23f61133630acf71b1616",
+      "physicalAdded": 9,
+      "physicalDeleted": 2,
+      "codeAdded": 6,
+      "codeDeleted": 2
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/statement-position.ts",
+      "beforeHash": "c19def14b1ee810cf55e954c07453e7a241d0bd89f5bcfbc985a7059524b693a",
+      "afterHash": "c91cf9dee96ffafe8aabd112874e09d86a3034cf3fe65e4000850e4fb43e3689",
+      "physicalAdded": 46,
+      "physicalDeleted": 1,
+      "codeAdded": 37,
+      "codeDeleted": 1
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/types-definitions.ts",
+      "beforeHash": "9102d0222583ea73e345ee9ab82c3499b54a46b628c8c9c4b2b594d562238dae",
+      "afterHash": "f986c72253679dbce5024aba0823e1b6216160127f8f71547c098c08a21f499f",
+      "physicalAdded": 1,
+      "physicalDeleted": 0,
+      "codeAdded": 1,
+      "codeDeleted": 0
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/types-engine.ts",
+      "beforeHash": "76615f7cacb09d86dde9ba4f77353fcb8b209705442764eec20f89ad8125b952",
+      "afterHash": "4065c7c276815e9608481a0051f23fa8b0192058ee36e32622dc3daed23a3abd",
+      "physicalAdded": 12,
+      "physicalDeleted": 32,
+      "codeAdded": 2,
+      "codeDeleted": 3
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/types-expression.ts",
+      "beforeHash": "ca763f5c9963e4a959cfc874c442fc85a3cf0e9605ffff12d5c87b1a8c5ce7d4",
+      "afterHash": "7a90729346070cf8aa5b997656b5d82e583f9d209ae3a4ebe524e61bfc396a7f",
+      "physicalAdded": 1,
+      "physicalDeleted": 0,
+      "codeAdded": 1,
+      "codeDeleted": 0
+    },
+    {
+      "project": "CE",
+      "file": "src/epsil/diagnostic-flow.ts",
+      "beforeHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterHash": "84894361eb86994997cba812e3bc14f01e881a79e1755643d570bf679f861cf1",
+      "physicalAdded": 185,
+      "physicalDeleted": 0,
+      "codeAdded": 172,
+      "codeDeleted": 0
+    },
+    {
+      "project": "CE",
+      "file": "src/epsil/error-explanations.ts",
+      "beforeHash": "c19f47a073e5bd7ceb17d90a713e44366ee5981a1e2f8cd50d00bd4eea12f018",
+      "afterHash": "e0693f0661f46ef62cf1dbe537a9d1dead2434248dce5e433ff285d600137b0d",
+      "physicalAdded": 7,
+      "physicalDeleted": 7,
+      "codeAdded": 7,
+      "codeDeleted": 7
+    },
+    {
+      "project": "CE",
+      "file": "src/epsil/error-location.ts",
+      "beforeHash": "b4c75dfd5c59a971b596b73d2cadcb778f0101de1d92a8ab94c06e4bbca73a06",
+      "afterHash": "643bcca806d6ec280a3a95bbb68dd6f420bbd8d8c1d0c55261f827b840e974d6",
+      "physicalAdded": 2,
+      "physicalDeleted": 2,
+      "codeAdded": 2,
+      "codeDeleted": 2
+    },
+    {
+      "project": "CE",
+      "file": "src/epsil/execute-epsil.ts",
+      "beforeHash": "891212a4b6c71ce58b02452f6fbc5fb083c4bce0fbcd52f9b4e70005c389c552",
+      "afterHash": "dccc3fadf1d011c041a0cdfd9b6fe5bb186c6891abf53ccf18e159adb84d9848",
+      "physicalAdded": 111,
+      "physicalDeleted": 1021,
+      "codeAdded": 100,
+      "codeDeleted": 544
+    },
+    {
+      "project": "CE",
+      "file": "src/epsil/occurrences.ts",
+      "beforeHash": "b73df1caf9e3418a02921191b5bd45d88950ee51f9b926085ae4e85288381078",
+      "afterHash": "5ebc60232cec61afae8eef11f7411775875496895237f0a7fabb5572be3bab23",
+      "physicalAdded": 6,
+      "physicalDeleted": 102,
+      "codeAdded": 3,
+      "codeDeleted": 69
+    },
+    {
+      "project": "CE",
+      "file": "src/epsil/parse-epsil.ts",
+      "beforeHash": "b2777da14837d959b80dc2907b5586fdefdaab925b30726c2fa4daf7cd444757",
+      "afterHash": "164da8be2c0bf1fb19ffe89608651bb04b36e3b89f494865627d1206e44bcdf7",
+      "physicalAdded": 4,
+      "physicalDeleted": 4,
+      "codeAdded": 4,
+      "codeDeleted": 4
+    },
+    {
+      "project": "CE",
+      "file": "src/epsil/parser.ts",
+      "beforeHash": "2a5a833ecd68c488fbf5960e2d622715b80936a37a3d3b8b687057acb75fef77",
+      "afterHash": "e78fef709a6e06717bd86f5a83be7fb71a50efcb6c5f86f4a0242938ec44c4ab",
+      "physicalAdded": 5,
+      "physicalDeleted": 5,
+      "codeAdded": 5,
+      "codeDeleted": 5
+    },
+    {
+      "project": "CE",
+      "file": "src/epsil/resolve-library-names.ts",
+      "beforeHash": "f74cae0c983549d9e6e748a2643fd30f7cb9c3144f4d5000d7aac4eb0e81a8e9",
+      "afterHash": "3c9db548fc8eb31e3aa04e101797abe772a4a5f03f573511be9ea0925c1fc17b",
+      "physicalAdded": 6,
+      "physicalDeleted": 14,
+      "codeAdded": 1,
+      "codeDeleted": 1
+    },
+    {
+      "project": "CE",
+      "file": "src/epsil/serialize-epsil.ts",
+      "beforeHash": "4bf7e4f33667739e547cc8fc71a4f601783513c6444f7a7589d1fc3a23abae17",
+      "afterHash": "d4a8f0f388b0ad3ffcd69a918f9d9bfdba7a3f7d6a4c4a55301861149aa8faa0",
+      "physicalAdded": 2,
+      "physicalDeleted": 10,
+      "codeAdded": 2,
+      "codeDeleted": 10
+    },
+    {
+      "project": "CE",
+      "file": "src/epsil/signature-notes.ts",
+      "beforeHash": "8df80516e9bf4027746a9c2559609079d1977890a3d5ed86c7d18708fea2769e",
+      "afterHash": "13df2848c3d7c244e71904fa49c6fbdf500605d7567f806ad028f8eb400e2d38",
+      "physicalAdded": 3,
+      "physicalDeleted": 1,
+      "codeAdded": 2,
+      "codeDeleted": 1
+    },
+    {
+      "project": "CE",
+      "file": "src/epsil/static-diagnostics.ts",
+      "beforeHash": "82fc5645c72c0e6b5324346beddc1f70da05c6ce742f1762f54bbbbbf7a88fe6",
+      "afterHash": "a31adf1a83355e34f89c57fb177d110c94e739e286ba3ad8155bfc2a7e61255e",
+      "physicalAdded": 78,
+      "physicalDeleted": 1293,
+      "codeAdded": 57,
+      "codeDeleted": 630
+    },
+    {
+      "project": "CE",
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeHash": "411e30d3474748ea13c5fa923d6a2c1b93ae2ef9b9fc70ceb8c87e8131884181",
+      "afterHash": "f44cf0de893c2c59f99961125970c87fce650ea6b3a5dc77727e995da1d51e97",
+      "physicalAdded": 68,
+      "physicalDeleted": 70,
+      "codeAdded": 65,
+      "codeDeleted": 58
+    },
+    {
+      "project": "CE",
+      "file": "vscode-epsil/src/inline-runner.ts",
+      "beforeHash": "c2abc6dd9bbd751edcdfa7ccdd5795159b0b240fd590020bfc302043597d2c90",
+      "afterHash": "284d51ded2fd8f6cd228929deffd7b664b8731a7eca06ad96a89f864f1d00f42",
+      "physicalAdded": 29,
+      "physicalDeleted": 41,
+      "codeAdded": 28,
+      "codeDeleted": 36
+    },
+    {
+      "project": "CE",
+      "file": "vscode-epsil/src/server.ts",
+      "beforeHash": "54463b17e5113f12c933aecd1e50e75b6d11ea043cc643e5d5e4a5fbaf114826",
+      "afterHash": "d1fd359671300386f1770e5ee34a9b870f2636131387e911ee65ff9e4a1a0a4b",
+      "physicalAdded": 5,
+      "physicalDeleted": 39,
+      "codeAdded": 4,
+      "codeDeleted": 23
+    },
+    {
+      "project": "Tycho",
+      "file": "src/graph-paper/notebook/ce-notebook-evaluator.ts",
+      "beforeHash": "bf344a4456b1ba1551ccf27a5802598befa4737fe509c0bd75e88ca26e2fa819",
+      "afterHash": "3217d888fbfdd3542df5884512d378474bb215e4e850508c0fedaa64daaa351e",
+      "physicalAdded": 2,
+      "physicalDeleted": 2,
+      "codeAdded": 1,
+      "codeDeleted": 1
+    },
+    {
+      "project": "Tycho",
+      "file": "src/graph-paper/notebook/cortex-analysis.ts",
+      "beforeHash": "b71ae79e0350156320ae493223c4fdbde0acf6342ac20fa776f6bdea257f28c3",
+      "afterHash": "635df46888bdfe1e53a7dc677b2c7f1de8713b619683481efca7d5dc4b4d95a5",
+      "physicalAdded": 3,
+      "physicalDeleted": 2,
+      "codeAdded": 2,
+      "codeDeleted": 1
+    },
+    {
+      "project": "Tycho",
+      "file": "src/plot-core/prelude-runner.ts",
+      "beforeHash": "84c144dd3c421575acd7f3a9f49c0296c8c8eb9a41ee326934a7aa5f1cb512e0",
+      "afterHash": "b170fe1b4fb66e22e935fdb7f0163b3f00a5fc9ff701614b386b8873d9ab85da",
+      "physicalAdded": 3,
+      "physicalDeleted": 3,
+      "codeAdded": 2,
+      "codeDeleted": 1
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/boxed-expression/broadcast-lift-type.ts",
+      "beforeHash": "4c46d11e2edddedbfd10f9dc219eb6ff8ba6e1d91daf4535c70f2884bd691bff",
+      "afterHash": "6618c5248f4e9e53397fb7bfc3d892a883e5dd374c89228844cfe56c862d14f3",
+      "physicalAdded": 5,
+      "physicalDeleted": 7,
+      "codeAdded": 5,
+      "codeDeleted": 7
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/boxed-expression/derive-application-type.ts",
+      "beforeHash": "e424e526261541740c60b580a7214f74a4f080b2f4a60bd1846192e00eedab3b",
+      "afterHash": "4f935b60936e53adc5320e09e6f640b61686e85827ba5942ec2592e93f25b5da",
+      "physicalAdded": 3,
+      "physicalDeleted": 2,
+      "codeAdded": 3,
+      "codeDeleted": 2
+    },
+    {
+      "project": "CE",
+      "file": "src/compute-engine/collection-utils.ts",
+      "beforeHash": "33ffd4c3c0e7f1198afb056d0859b9c1fd028d4a6c5a2e72ccdfbf6466d863fb",
+      "afterHash": "72d5a590c960e0bf03787ab7d3298acd03984447daea26d082f1f039b6bfaf20",
+      "physicalAdded": 6,
+      "physicalDeleted": 4,
+      "codeAdded": 6,
+      "codeDeleted": 4
+    }
+  ],
+  "cumulativeRaw": {
+    "physicalAdded": 1340,
+    "physicalDeleted": 3393,
+    "codeAdded": 1166,
+    "codeDeleted": 1745
+  },
+  "neutral": {
+    "added": 79,
+    "deleted": 102
+  },
+  "neutralPolicy": "Prior reviewed neutral fragments remain byte-identical in unchanged files; no new neutral credit.",
+  "charged": {
+    "added": 1087,
+    "deleted": 1643,
+    "net": -556
+  },
+  "tests": {
+    "added": 0,
+    "deleted": 0,
+    "snapshots": 0
+  },
+  "instruments": [
+    {
+      "file": "docs/scratch/program-type-work-2026-11-16/revision-ledger.mjs",
+      "physicalAdded": 82,
+      "physicalDeleted": 0,
+      "javascriptCodeAdded": 79
+    },
+    {
+      "file": "docs/scratch/program-type-work-2026-11-16/run-notebook-refined.py",
+      "physicalAdded": 13,
+      "physicalDeleted": 0,
+      "javascriptCodeAdded": null
+    },
+    {
+      "file": "docs/scratch/program-type-work-2026-11-16/run-validation.py",
+      "physicalAdded": 15,
+      "physicalDeleted": 0,
+      "javascriptCodeAdded": null
+    },
+    {
+      "file": "docs/scratch/program-type-work-2026-11-16/run.py",
+      "physicalAdded": 15,
+      "physicalDeleted": 0,
+      "javascriptCodeAdded": null
+    },
+    {
+      "file": "docs/scratch/program-type-work-2026-11-16/summarize.py",
+      "physicalAdded": 57,
+      "physicalDeleted": 0,
+      "javascriptCodeAdded": null
+    },
+    {
+      "file": "docs/scratch/program-type-work-2026-11-16/three-arm-monitor.py",
+      "physicalAdded": 45,
+      "physicalDeleted": 0,
+      "javascriptCodeAdded": null
+    },
+    {
+      "file": "docs/scratch/program-type-work-2026-11-16/three-arm-run.py",
+      "physicalAdded": 55,
+      "physicalDeleted": 0,
+      "javascriptCodeAdded": null
+    },
+    {
+      "file": "docs/scratch/program-type-work-2026-11-16/three-arm-summarize.py",
+      "physicalAdded": 60,
+      "physicalDeleted": 0,
+      "javascriptCodeAdded": null
+    },
+    {
+      "file": "benchmarks/program-type-work-instrument.mjs",
+      "physicalAdded": 75,
+      "physicalDeleted": 0,
+      "javascriptCodeAdded": 72
+    },
+    {
+      "file": "benchmarks/program-type-work-trace.mjs",
+      "physicalAdded": 17,
+      "physicalDeleted": 0,
+      "javascriptCodeAdded": 16
+    }
+  ],
+  "instrumentTotals": {
+    "files": 10,
+    "physicalAdded": 434,
+    "physicalDeleted": 0,
+    "javascriptCodeAdded": 167,
+    "pythonPhysicalAdded": 260
+  },
+  "measurementData": {
+    "files": 19,
+    "bytes": 360710
+  }
+}

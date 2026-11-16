@@ -33,6 +33,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Tycho document open** | `tycho-document-open/evaluate.ts`, `rebind.ts` | CE (self; replays the `evaluate` and `rebind` calls Tycho makes when it opens `art/2ki2hjsouf`, from `2ki2hjsouf.fixture.json.gz`; ROADMAP CE-535, CE-536) | stdout |
 | **Scalar arithmetic profile** | `scalar-arithmetic.mjs` | CE source or production bundle; timings, cache counts, inspector profiles | `scalar-arithmetic-2026-11-03.json`; evaluation-cache architecture §11 |
 | **Program regression diagnostics** | `program-regression-child.mjs`, `program-regression-symbolize.mjs` | Exact frozen production baseline/candidate; focused boxing, checking, real notebook reruns; separate CPU/allocation and calibrated scalar controls | Raw profiles and source-map proof; diagnostic wall times are not benchmark timings |
+| **Program type-work trace** | `program-type-work-instrument.mjs`, `program-type-work-trace.mjs` | Private diagnostic copies only; actual type/signature derivations, guarded operand demands and evidence passes | Passive state observations; raw events private, compact findings in `docs/scratch/program-type-work-2026-11-16` |
 | **Stable batch baseline** | `stable-batch.mjs`, `stable-batch-tycho.mjs`, `stable-batch-document.mjs` | Pinned pre-binding/current CE; contract specifications, controls, timings and V8 diagnostics | [Phase 0 report](../docs/plans/2026-11-15-stable-batch-phase0-report.md) |
 | **Stable batch revision diagnostics** | `stable-batch-revision-child.mjs`, `stable-batch-revision-attribution.mjs` | Exact 5,000 warmup / 100,000 execution CPU or allocation calls; separate time and compiler-route controls; mapped self/inclusive rows; warmed fixed-live-document retention (private phase-1 subset) | Raw JSON and inspector profiles; diagnostic processes only |
 | **Caches of evaluated values** | `evaluation-caches.ts` | CE (self; each cache on and off with `CE_CACHE_OFF`) | stdout |
@@ -1015,3 +1016,14 @@ Inclusive stack rows overlap and must not be summed. Sampling estimates allocati
 bytes, including collected objects; it does not count exact object allocations.
 The real notebook route includes analysis, child execution and publication in a
 persistent scope, excluding graph scheduling and UI rendering.
+
+`program-type-work-instrument.mjs PRIVATE_CE_ROOT` injects a bounded observer into
+a private source copy. It rejects this repository, its descendants, and probe
+files escaping the private copy. Never run it against production sources. The
+observer preload `program-type-work-trace.mjs` counts actual derivations and
+natural reads, with reason labels for eager/deferred operand queries and
+signature output demands. It records passive binding slots and context versions;
+it never calls `.type`, `.value` or `.json` to discover state. It is a diagnostic
+instrument, not a latency harness or production dependency tracker. Changed
+observed context precludes an unchanged-input equivalence claim; matching
+observations alone do not prove all hidden inputs unchanged.

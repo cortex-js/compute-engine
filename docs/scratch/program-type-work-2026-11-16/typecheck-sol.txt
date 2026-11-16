@@ -1,0 +1,4 @@
+PASS types
+
+Checking CLI and type-level assertions...
+PASS typecheck

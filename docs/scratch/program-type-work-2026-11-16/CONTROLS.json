@@ -1,0 +1,160 @@
+[
+  {
+    "file": "control-box-diagnostic.json",
+    "status": "ok",
+    "precision": 21,
+    "jit": "auto",
+    "controls": {
+      "program": {
+        "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+        "result": 10,
+        "checkDiagnostics": 0
+      }
+    }
+  },
+  {
+    "file": "control-box-guard.json",
+    "status": "ok",
+    "precision": 21,
+    "jit": "auto",
+    "controls": {
+      "program": {
+        "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+        "result": 10,
+        "checkDiagnostics": 0
+      }
+    }
+  },
+  {
+    "file": "control-check-diagnostic.json",
+    "status": "ok",
+    "precision": 21,
+    "jit": "auto",
+    "controls": {
+      "program": {
+        "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+        "result": 10,
+        "checkDiagnostics": 0
+      }
+    }
+  },
+  {
+    "file": "control-check-guard.json",
+    "status": "ok",
+    "precision": 21,
+    "jit": "auto",
+    "controls": {
+      "program": {
+        "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+        "result": 10,
+        "checkDiagnostics": 0
+      }
+    }
+  },
+  {
+    "file": "control-notebook-diagnostic.json",
+    "status": "ok",
+    "precision": 15,
+    "jit": "auto",
+    "controls": {
+      "notebook": {
+        "source": "let a = 3\nlet b = a+1\nb",
+        "rerun": "4",
+        "edit": "5",
+        "route": "real analyze/executeCortexCell/bindCortexPublications; persistent scope",
+        "excludes": [
+          "graph scheduling",
+          "UI"
+        ]
+      }
+    }
+  },
+  {
+    "file": "control-notebook-guard.json",
+    "status": "ok",
+    "precision": 15,
+    "jit": "auto",
+    "controls": {
+      "notebook": {
+        "source": "let a = 3\nlet b = a+1\nb",
+        "rerun": "4",
+        "edit": "5",
+        "route": "real analyze/executeCortexCell/bindCortexPublications; persistent scope",
+        "excludes": [
+          "graph scheduling",
+          "UI"
+        ]
+      }
+    }
+  },
+  {
+    "file": "control-notebook-refined.json",
+    "status": "ok",
+    "precision": 15,
+    "jit": "auto",
+    "controls": {
+      "notebook": {
+        "source": "let a = 3\nlet b = a+1\nb",
+        "rerun": "4",
+        "edit": "5",
+        "route": "real analyze/executeCortexCell/bindCortexPublications; persistent scope",
+        "excludes": [
+          "graph scheduling",
+          "UI"
+        ]
+      }
+    }
+  },
+  {
+    "file": "control-parse-box-diagnostic.json",
+    "status": "ok",
+    "precision": 21,
+    "jit": "auto",
+    "controls": {
+      "program": {
+        "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+        "result": 10,
+        "checkDiagnostics": 0
+      }
+    }
+  },
+  {
+    "file": "control-parse-box-guard.json",
+    "status": "ok",
+    "precision": 21,
+    "jit": "auto",
+    "controls": {
+      "program": {
+        "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+        "result": 10,
+        "checkDiagnostics": 0
+      }
+    }
+  },
+  {
+    "file": "control-source-box.json",
+    "status": "ok",
+    "precision": 21,
+    "jit": "auto",
+    "controls": {
+      "program": {
+        "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+        "result": 10,
+        "checkDiagnostics": 0
+      }
+    }
+  },
+  {
+    "file": "control-source-check.json",
+    "status": "ok",
+    "precision": 21,
+    "jit": "auto",
+    "controls": {
+      "program": {
+        "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+        "result": 10,
+        "checkDiagnostics": 0
+      }
+    }
+  }
+]

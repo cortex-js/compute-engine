@@ -16570,7 +16570,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       appliesToListCoordinateTuple(
         expr.operator,
         broadcastsOverTuples(expr.operator, def),
-        expr.ops.map((x) => x.type.type)
+        () => expr.ops.map((x) => x.type.type)
       )
     )
       return 'error';
@@ -16585,7 +16585,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       runsLibraryCanonicalForm(expr.engine, expr.operator, def) &&
       addsPointToNumberCollection(
         expr.operator,
-        expr.ops.map((x) => x.type.type)
+        () => expr.ops.map((x) => x.type.type)
       )
     )
       return 'error';
@@ -16691,7 +16691,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
         stripMissing: (i) =>
           def.stripsMissingAt(i) &&
           cellsPresent?.[i] === undefined &&
-          !passesAbsentCellsThrough(expr.operator, expr.ops[i].type.type),
+          !passesAbsentCellsThrough(expr.operator, () => expr.ops[i].type.type),
         lazy: def.lazy,
       };
       const instantiated = hasCellsPresent
@@ -16743,7 +16743,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       isAbsentScalarSymbol(x) ||
       (expr.operator === 'Add' && isFunction(x) && isAbsentScalarTerm(x));
     const passedThrough = expr.ops.map((x) =>
-      passesAbsentCellsThrough(expr.operator, x.type.type)
+      passesAbsentCellsThrough(expr.operator, () => x.type.type)
     );
     // A position that does not strip `missing` (`missingStrip`) takes no
     // part in the absorption: the handler answers for an absent operand
@@ -17063,7 +17063,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
           withCodomainForAbsentAnswer(
             BoxedType.forResult(calculatedType, expr.engine._typeResolver).type,
             def,
-            expr.ops.map((x) => x.type.type)
+            () => expr.ops.map((x) => x.type.type)
           ),
           expr.engine._typeResolver
         );
@@ -17177,7 +17177,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
         return withCodomainForAbsentAnswer(
           BoxedType.forResult(t, expr.engine._typeResolver).type,
           def,
-          expr.ops.map((x) => x.type.type)
+          () => expr.ops.map((x) => x.type.type)
         );
       };
       // The lift itself is shared with the descriptor route

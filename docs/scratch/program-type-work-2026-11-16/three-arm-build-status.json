@@ -1,0 +1,12 @@
+{
+  "command": [
+    "node",
+    "scripts/build.mjs"
+  ],
+  "cwd": "/private/tmp/program-only-type-work-revision-20261116/ce",
+  "environment": {
+    "BUILD": "production"
+  },
+  "exitCode": 0,
+  "seconds": 0.45605921745300293
+}

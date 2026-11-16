@@ -1,0 +1,139 @@
+{
+  "privateRoot": "/private/tmp/program-type-work-20261116/three-arm",
+  "sourceBuildDependencyUnchangedStartEnd": true,
+  "startIdentitySha256": "0ffcc6be6c13ee999bf13e51e4e738d9971fc539998c8959c5a48c553369da89",
+  "endIdentitySha256": "2fb737e3fba544e4500b84f2ed35a064b8e9df547a8208d8933f3a10643eb39f",
+  "runtime": {
+    "node": "v26.13.0",
+    "v8": "14.6.202.34-node.40",
+    "platform": "darwin-arm64"
+  },
+  "arms": {
+    "original": {
+      "root": "/private/tmp/program-only-accepted-baseline-20261115",
+      "sourceManifestsSha256": {
+        "ce": "6ca75206b27820c4149bf81697cc218e6dcd506708fdee7f14d888a02e754874",
+        "tycho": "22189dacff3fe5dddb7fc0ee3991f7eb8f26e7c32da125b10bcfa9fa8366e51f"
+      },
+      "buildManifestSha256": "93370cd422c9b1198ecc08545b8a141d4385b63f7867abbbe588aab6cc11063f",
+      "configuration": {
+        "scripts/build.mjs": "c7f1062c731cf37787c2722143a98e405626d147d310b42189fa0b80279b82a5",
+        "package.json": "0eeda116da423b61bae9bf82da64363a6ce8022ecc958a514ed0dd03e7c53352",
+        "package-lock.json": "e2af01be11b2287013fc3f3aa6a3378edf04d3bff2019acd69e73fe8088147b3",
+        "tsconfig.json": "f89122e6213996f2646fa2d49e08c12286bceb8e375a5c3bcc2f9ef2ee6ce642"
+      },
+      "dependencies": {
+        "ce": {
+          "tsx": {
+            "sha256": "ab5f14c4251638844ade3905d3cfc52fc1c833644694d655a05f6d0ca746b83c",
+            "realpath": "/Users/arno/dev/compute-engine/node_modules/tsx/package.json"
+          },
+          "esbuild": {
+            "sha256": "9d0bc453f4e791553c4cc2298ba023b409241fd9801e494741666eb0f6051490",
+            "realpath": "/Users/arno/dev/compute-engine/node_modules/esbuild/package.json"
+          },
+          "typescript": {
+            "sha256": "d9b8fb53c67c947fece83bcb73fa8512227ea6a12b110e096fdab8ecdc02b655",
+            "realpath": "/Users/arno/dev/compute-engine/node_modules/typescript/package.json"
+          }
+        },
+        "tycho": {
+          "tsx": {
+            "sha256": "ab5f14c4251638844ade3905d3cfc52fc1c833644694d655a05f6d0ca746b83c",
+            "realpath": "/Users/arno/dev/tycho/node_modules/tsx/package.json"
+          },
+          "esbuild": {
+            "sha256": "9d0bc453f4e791553c4cc2298ba023b409241fd9801e494741666eb0f6051490",
+            "realpath": "/Users/arno/dev/tycho/node_modules/esbuild/package.json"
+          }
+        }
+      }
+    },
+    "guard": {
+      "root": "/private/tmp/program-only-profile-revision-20261116",
+      "sourceManifestsSha256": {
+        "ce": "414be01850d53a4de75beec1ec13872dcca45bf703f354e5e4edb5bb44e3b7ce",
+        "tycho": "5728e5e2f9a4356ce736a6f84a87274e178aebeef211857bf175392a4417ef6a"
+      },
+      "buildManifestSha256": "f681583a2f7d3593d2ec22e09f0fddadd395195dab0fa7341c49041b6bf48420",
+      "configuration": {
+        "scripts/build.mjs": "c7f1062c731cf37787c2722143a98e405626d147d310b42189fa0b80279b82a5",
+        "package.json": "0eeda116da423b61bae9bf82da64363a6ce8022ecc958a514ed0dd03e7c53352",
+        "package-lock.json": "e2af01be11b2287013fc3f3aa6a3378edf04d3bff2019acd69e73fe8088147b3",
+        "tsconfig.json": "f89122e6213996f2646fa2d49e08c12286bceb8e375a5c3bcc2f9ef2ee6ce642"
+      },
+      "dependencies": {
+        "ce": {
+          "tsx": {
+            "sha256": "ab5f14c4251638844ade3905d3cfc52fc1c833644694d655a05f6d0ca746b83c",
+            "realpath": "/Users/arno/dev/compute-engine/node_modules/tsx/package.json"
+          },
+          "esbuild": {
+            "sha256": "9d0bc453f4e791553c4cc2298ba023b409241fd9801e494741666eb0f6051490",
+            "realpath": "/Users/arno/dev/compute-engine/node_modules/esbuild/package.json"
+          },
+          "typescript": {
+            "sha256": "d9b8fb53c67c947fece83bcb73fa8512227ea6a12b110e096fdab8ecdc02b655",
+            "realpath": "/Users/arno/dev/compute-engine/node_modules/typescript/package.json"
+          }
+        },
+        "tycho": {
+          "tsx": {
+            "sha256": "ab5f14c4251638844ade3905d3cfc52fc1c833644694d655a05f6d0ca746b83c",
+            "realpath": "/Users/arno/dev/tycho/node_modules/tsx/package.json"
+          },
+          "esbuild": {
+            "sha256": "9d0bc453f4e791553c4cc2298ba023b409241fd9801e494741666eb0f6051490",
+            "realpath": "/Users/arno/dev/tycho/node_modules/esbuild/package.json"
+          }
+        }
+      }
+    },
+    "revision": {
+      "root": "/private/tmp/program-only-type-work-revision-20261116",
+      "sourceManifestsSha256": {
+        "ce": "d2be0e8f8ca128f3d84f62442a3a0a8a4b7ae6e03521c26aa1aeeb6f7e5dc2d8",
+        "tycho": "5728e5e2f9a4356ce736a6f84a87274e178aebeef211857bf175392a4417ef6a"
+      },
+      "buildManifestSha256": "1e28ad700e641f933bfc6d3323a8e508bffee5639a479b3741828c8feb5b7692",
+      "configuration": {
+        "scripts/build.mjs": "c7f1062c731cf37787c2722143a98e405626d147d310b42189fa0b80279b82a5",
+        "package.json": "0eeda116da423b61bae9bf82da64363a6ce8022ecc958a514ed0dd03e7c53352",
+        "package-lock.json": "e2af01be11b2287013fc3f3aa6a3378edf04d3bff2019acd69e73fe8088147b3",
+        "tsconfig.json": "f89122e6213996f2646fa2d49e08c12286bceb8e375a5c3bcc2f9ef2ee6ce642"
+      },
+      "dependencies": {
+        "ce": {
+          "tsx": {
+            "sha256": "ab5f14c4251638844ade3905d3cfc52fc1c833644694d655a05f6d0ca746b83c",
+            "realpath": "/Users/arno/dev/compute-engine/node_modules/tsx/package.json"
+          },
+          "esbuild": {
+            "sha256": "9d0bc453f4e791553c4cc2298ba023b409241fd9801e494741666eb0f6051490",
+            "realpath": "/Users/arno/dev/compute-engine/node_modules/esbuild/package.json"
+          },
+          "typescript": {
+            "sha256": "d9b8fb53c67c947fece83bcb73fa8512227ea6a12b110e096fdab8ecdc02b655",
+            "realpath": "/Users/arno/dev/compute-engine/node_modules/typescript/package.json"
+          }
+        },
+        "tycho": {
+          "tsx": {
+            "sha256": "ab5f14c4251638844ade3905d3cfc52fc1c833644694d655a05f6d0ca746b83c",
+            "realpath": "/Users/arno/dev/tycho/node_modules/tsx/package.json"
+          },
+          "esbuild": {
+            "sha256": "9d0bc453f4e791553c4cc2298ba023b409241fd9801e494741666eb0f6051490",
+            "realpath": "/Users/arno/dev/tycho/node_modules/esbuild/package.json"
+          }
+        }
+      }
+    }
+  },
+  "instruments": {
+    "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs": "1128b6ff7404e97682478cbc7a1f58230207e373672843a1d8ac067e863a94eb",
+    "/Users/arno/dev/compute-engine/benchmarks/program-type-work-instrument.mjs": "6a99529e8df5030347bde00350e309f0955ba5be077c17ebe53778dc35c1ac6c",
+    "/Users/arno/dev/compute-engine/benchmarks/program-type-work-trace.mjs": "28bd92a38cdc20772b9f6b1b63364cb907392e6cd72142d14c3d89452bc48b3e",
+    "/private/tmp/program-type-work-20261116/child.mjs": "e84ad2c0955eec00fdc2c788171b0a6daca12c8c974c46c7b39951bad48ad51f"
+  }
+}

@@ -1,0 +1,156 @@
+diff --git a/src/compute-engine/boxed-expression/boxed-function.ts b/src/compute-engine/boxed-expression/boxed-function.ts
+index d6b08e6b1..bd4917045 100644
+--- a/src/compute-engine/boxed-expression/boxed-function.ts
++++ b/src/compute-engine/boxed-expression/boxed-function.ts
+@@ -16570,7 +16570,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
+       appliesToListCoordinateTuple(
+         expr.operator,
+         broadcastsOverTuples(expr.operator, def),
+-        expr.ops.map((x) => x.type.type)
++        () => expr.ops.map((x) => x.type.type)
+       )
+     )
+       return 'error';
+@@ -16585,7 +16585,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
+       runsLibraryCanonicalForm(expr.engine, expr.operator, def) &&
+       addsPointToNumberCollection(
+         expr.operator,
+-        expr.ops.map((x) => x.type.type)
++        () => expr.ops.map((x) => x.type.type)
+       )
+     )
+       return 'error';
+@@ -16691,7 +16691,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
+         stripMissing: (i) =>
+           def.stripsMissingAt(i) &&
+           cellsPresent?.[i] === undefined &&
+-          !passesAbsentCellsThrough(expr.operator, expr.ops[i].type.type),
++          !passesAbsentCellsThrough(expr.operator, () => expr.ops[i].type.type),
+         lazy: def.lazy,
+       };
+       const instantiated = hasCellsPresent
+@@ -16743,7 +16743,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
+       isAbsentScalarSymbol(x) ||
+       (expr.operator === 'Add' && isFunction(x) && isAbsentScalarTerm(x));
+     const passedThrough = expr.ops.map((x) =>
+-      passesAbsentCellsThrough(expr.operator, x.type.type)
++      passesAbsentCellsThrough(expr.operator, () => x.type.type)
+     );
+     // A position that does not strip `missing` (`missingStrip`) takes no
+     // part in the absorption: the handler answers for an absent operand
+@@ -17063,7 +17063,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
+           withCodomainForAbsentAnswer(
+             BoxedType.forResult(calculatedType, expr.engine._typeResolver).type,
+             def,
+-            expr.ops.map((x) => x.type.type)
++            () => expr.ops.map((x) => x.type.type)
+           ),
+           expr.engine._typeResolver
+         );
+@@ -17177,7 +17177,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
+         return withCodomainForAbsentAnswer(
+           BoxedType.forResult(t, expr.engine._typeResolver).type,
+           def,
+-          expr.ops.map((x) => x.type.type)
++          () => expr.ops.map((x) => x.type.type)
+         );
+       };
+       // The lift itself is shared with the descriptor route
+diff --git a/src/compute-engine/boxed-expression/broadcast-lift-type.ts b/src/compute-engine/boxed-expression/broadcast-lift-type.ts
+index 4bcb7a357..62f95f4e0 100644
+--- a/src/compute-engine/boxed-expression/broadcast-lift-type.ts
++++ b/src/compute-engine/boxed-expression/broadcast-lift-type.ts
+@@ -790,13 +790,11 @@ const ABSENT_CELLS_READ_BY_HANDLER: ReadonlySet<string> = new Set([
+  * arm is not stripped before the type variables are bound, and it does not
+  * start the absorption of `absorbOperandAbsence`.
+  */
+-export function passesAbsentCellsThrough(operator: string, t: Type): boolean {
+-  return (
+-    (ABSENT_CELLS_PASS_THROUGH.has(operator) ||
+-      ABSENT_CELLS_READ_BY_HANDLER.has(operator)) &&
+-    typeContainsMissing(t) &&
+-    !hasTopLevelMissing(t)
+-  );
++export function passesAbsentCellsThrough(operator: string, operandType: Type | (() => Type)): boolean {
++  if (!ABSENT_CELLS_PASS_THROUGH.has(operator) &&
++      !ABSENT_CELLS_READ_BY_HANDLER.has(operator)) return false;
++  const t = typeof operandType === 'function' ? operandType() : operandType;
++  return typeContainsMissing(t) && !hasTopLevelMissing(t);
+ }
+ 
+ /**
+diff --git a/src/compute-engine/boxed-expression/derive-application-type.ts b/src/compute-engine/boxed-expression/derive-application-type.ts
+index 4bdba9828..4615d4a12 100644
+--- a/src/compute-engine/boxed-expression/derive-application-type.ts
++++ b/src/compute-engine/boxed-expression/derive-application-type.ts
+@@ -1526,14 +1526,15 @@ export function actualOfDescriptor(d: OperandDescriptor): SolveActual {
+ export function withCodomainForAbsentAnswer(
+   answered: Type,
+   def: { signature: { type: Type } },
+-  operandTypes: ReadonlyArray<Type>
++  operandTypes: ReadonlyArray<Type> | (() => ReadonlyArray<Type>)
+ ): Type {
+   if (stripMissingFromType(answered) !== 'never') return answered;
++  const types = typeof operandTypes === 'function' ? operandTypes() : operandTypes;
+   // Only when an operand IS absent (typed `missing`, or `never` as a symbol
+   // assigned `Missing` is): a handler may answer `never` for a reason of its
+   // own — a contradiction it wants surfaced — and that answer is left alone.
+   if (
+-    !operandTypes.some(
++    !types.some(
+       (t) => t === 'never' || stripMissingFromType(t) === 'never'
+     )
+   )
+diff --git a/src/compute-engine/boxed-expression/effects-inference.ts b/src/compute-engine/boxed-expression/effects-inference.ts
+index d5a4dbad9..bff438419 100644
+--- a/src/compute-engine/boxed-expression/effects-inference.ts
++++ b/src/compute-engine/boxed-expression/effects-inference.ts
+@@ -1940,6 +1940,13 @@ export function functionLiteralCallSignatureType(expr: Expression): Type {
+   // The scope of the literal first: the types that its derivation caches on
+   // the body are those of that scope.
+   const there = ce._inScope(written, () => functionLiteralSignatureType(expr));
++  if (typeof there === 'object' && there.kind === 'signature' &&
++      there.typeParams === undefined) {
++    // The shape comes from the written scope; only effects are needed here.
++    const effects = functionLiteralArrowEffects(expr);
++    const { effects: _effects, ...shape } = there;
++    return effects === undefined ? shape : { ...shape, effects };
++  }
+   const here = functionLiteralSignatureType(expr);
+   if (
+     typeof here !== 'object' ||
+diff --git a/src/compute-engine/collection-utils.ts b/src/compute-engine/collection-utils.ts
+index fe515ab62..4c57e792d 100644
+--- a/src/compute-engine/collection-utils.ts
++++ b/src/compute-engine/collection-utils.ts
+@@ -6507,11 +6507,12 @@ const LIST_COORDINATE_TUPLE_ARITHMETIC = new Set([
+ export function appliesToListCoordinateTuple(
+   operator: string,
+   overTuples: boolean,
+-  operandTypes: ReadonlyArray<Type>
++  operandTypes: ReadonlyArray<Type> | (() => ReadonlyArray<Type>)
+ ): boolean {
+   if (!overTuples && !LIST_COORDINATE_TUPLE_ARITHMETIC.has(operator))
+     return false;
+-  return operandTypes.some(
++  const types = typeof operandTypes === 'function' ? operandTypes() : operandTypes;
++  return types.some(
+     (t) => t === 'error' || isListCoordinateTupleType(t)
+   );
+ }
+@@ -6542,12 +6543,13 @@ export function appliesToListCoordinateTuple(
+  */
+ export function addsPointToNumberCollection(
+   operator: string,
+-  operandTypes: ReadonlyArray<Type>
++  operandTypes: ReadonlyArray<Type> | (() => ReadonlyArray<Type>)
+ ): boolean {
+   if (operator !== 'Add' && operator !== 'Subtract') return false;
++  const types = typeof operandTypes === 'function' ? operandTypes() : operandTypes;
+   let point = false;
+   let numbers = false;
+-  for (const t of operandTypes) {
++  for (const t of types) {
+     if (tupleCarrierType(t) || pointListElementType(t) !== undefined)
+       point = true;
+     else if (isNumberCollectionType(t)) numbers = true;
