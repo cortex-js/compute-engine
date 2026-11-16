@@ -84,8 +84,8 @@ export type Profile = {
   readonly recursion: boolean;
   /** Element-wise operations on lists; without, `scalarize` runs first. */
   readonly elementwise: boolean;
-  /** The lanes of which no list is held: a list of colours, and on GLSL
-   *  of complex numbers (a `vec2` has no array of its own here). */
+  /** The lanes of which no list is held: on GLSL, a list of colours or of
+   *  complex numbers (a `vec3` or a `vec2` has no array of its own here). */
   readonly scalarLanes: readonly Lane[];
   /** The operations whose value is admitted only as the result of the
    *  entry: on GLSL a colour is an OKLCh `vec3` with no tag of its space,
@@ -104,7 +104,7 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
     frames: true,
     recursion: true,
     elementwise: true,
-    scalarLanes: ['color'],
+    scalarLanes: [],
     syntax: JS,
   },
   glsl: {
@@ -182,6 +182,13 @@ export function admits(
         };
       if (spellingOf(profile.syntax, i.op) === undefined)
         return { head, cause: `${head ?? i.op} (the operation ${i.op})` };
+      // An `at` that the passes left: its index can be out of range, where
+      // the interpreter gives `Missing` and `_at` the number NaN.
+      if (i.op === 'at' && p.types[i.args[0]].lane === 'color')
+        return {
+          head,
+          cause: 'an index that can be out of range, of a list of colours',
+        };
       if (
         profile.resultOnly?.includes(i.op) === true &&
         !(entry.body.yields.includes(i.out) && uses?.get(i.out) === 1)

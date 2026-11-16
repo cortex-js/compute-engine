@@ -68,6 +68,15 @@
   constant.** `function f() { let L = [1, 2]; limit(sum(L), 1) }; f()`
   returned `1`; it now returns `3`.
 
+- **In the experimental profile `'ir'`, a colour constructor of a list
+  compiles on JavaScript, and a constant colour is computed once.**
+  `Hsv(210, Range(1, 10)/40, 1)` and `AsOklab(Hsv(0, 0, D))` of a list `D`
+  give the array of colours that the default compiler gives, where they
+  declined; a list of colours declines on GLSL. A colour that reads no input
+  (`AsOklab(C)` of a name `C = Hsv(270, 0.4, 0.95)`) is computed when the code
+  is loaded, and every call returns that one object. Measured on the programs
+  of a host's documents: such a colour took 1.7 to 3.5 times the default
+  compiler's time and now takes at most 1.1 times.
 - **In the experimental profile `'ir'`, a list or tuple result on JavaScript
   is no longer a copy.** `run()` returns the value as the code built it, as
   the default compiler does and as the contract of `run()` states (results

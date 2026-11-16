@@ -379,8 +379,33 @@ decline there. No space is tracked at compile time and no code tests one.
 
 The rows take three real channels (`Rgb(x, 0.4, 0.6)`) or one colour; a fourth
 operand (alpha) declines on both targets (GLSL has no alpha channel, and a row
-has at most three operands), and so does a list operand, which the interpreter
-maps (`Rgb(List(1, 2), 0, 0)`). A conditional between colours joins on the lane
+has at most three operands). Every row threads, as the interpreter maps it: a
+list operand gives the list of the colours of its elements, a scalar operand is
+read at every element, and lists are zipped (`Hsv(210, Range(1, 10)/40, 1)`,
+`Rgb(D, D, 0.5)`, `AsOklab(Hsv(0, 0, D))`, also of a nested list), by the
+element-wise operation of the lists of numbers ("Lists"): lists of two stated
+lengths decline (the interpreter gives `incompatible-dimensions`); lists of
+run-time lengths that differ give an unspecified result, a list as long as the
+first one whose colours past the end of a shorter list have NaN channels
+(`Rgb(D, E, 0.5)` with 3 and 1 elements); a tuple operand declines, also of a
+conversion (`Hsv(Tuple(1, 2), 0, 0.5)`, `AsOklab(Tuple(Cv, Cr))`, an error of
+the interpreter). On JavaScript a list of colours is an array of the objects,
+also as the result of the program (`List(Cv, Cr)` of two colour names), and
+`Length` reads it; an `At` of it that the passes do not make an element (an
+index that is not a constant in range of a stated length after `fold`) declines
+in `admits()` (the interpreter gives `Missing` out of range), and a `Sum` of it
+declines (an `incompatible-type` error of the interpreter). On GLSL a list of
+colours declines (`admits()`); `At` of a constant index of an operation of a
+stated length is the colour of that element (`At(Hsv(0, 0, L), 2)` of
+`L: list<real^3>`), since the `scalarize` and `fold` passes leave no list. On
+JavaScript a colour operation whose operands are constants, or such colours or
+lists of constants, reads no input and has no effect: it is computed once, when
+the code is loaded, in `preambleOnce` (`onceLists()` of `print-js.ts`), by the
+same member of `_SYS`, and every call shares the object (`AsOklab(C)` of a name
+`C = Hsv(270, 0.4, 0.95)`, a constant arm of a `Which`); one that reads an
+input, a local, an index or a draw is computed at each call. GLSL writes the
+operation of constants in the shader text, as the existing target does; the
+interval mode has no colour. A conditional between colours joins on the lane
 (`If`, `Which` with a `True` clause; with none, its value can be `Missing` and
 it declines), and a `Block` local, also one that a `Loop` assigns, holds a
 colour (a local declared with the type `color` declines; one of no stated type,
@@ -388,9 +413,9 @@ or `unknown`, holds it). A name whose value is a constructor of three numbers is
 that colour (see the values of free names above). A user function may return a
 colour, declared (`(real) -> color`, also through `Typed(…, 'color')` in the
 body) or inferred from the body: an object on JavaScript, a `vec3` on GLSL.
-Declined: a list of colours (`admits()`), a colour input, a colour string, a
-tuple of components (`AsRgb((r, g, b))`), a parameter of a user function that is
-a colour, arithmetic on a colour (an `error` of the canonical form), every other
+Declined: a list of colours on GLSL, a colour input, a colour string, a tuple of
+components (`AsRgb((r, g, b))`), a parameter of a user function that is a
+colour, arithmetic on a colour (an `error` of the canonical form), every other
 colour operator (`ColorMix`, `ColorContrast`, …), and `mode: 'bigint'`. The
 colour of non-finite channels follows the existing JavaScript runtime (its `NaN`
 colour); on GLSL no fidelity is owed there (the existing target's

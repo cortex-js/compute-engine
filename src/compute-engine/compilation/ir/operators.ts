@@ -294,17 +294,17 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // The step of `Range(a, b)`: 1, or -1 when `b < a`.
   row(undefined,      2,          [[[R, R], I, 'rangestep']],    { ...list, fold: (a: number, b: number) => (b >= a ? 1 : -1) }),
   // Colours (README, "The colour lane"): a constructor of its channels, and
-  // a conversion to the space it names. A list operand declines.
-  row('Rgb',          3,          [[[R, R, R], K, 'rgb']],       list),
-  row('Hsl',          3,          [[[R, R, R], K, 'hsl']],       list),
-  row('Hsv',          3,          [[[R, R, R], K, 'hsv']],       list),
-  row('Oklab',        3,          [[[R, R, R], K, 'oklab']],     list),
-  row('Oklch',        3,          [[[R, R, R], K, 'oklch']],     list),
-  row('AsRgb',        1,          [[[K], K, 'asrgb']],           list),
-  row('AsHsl',        1,          [[[K], K, 'ashsl']],           list),
-  row('AsHsv',        1,          [[[K], K, 'ashsv']],           list),
-  row('AsOklab',      1,          [[[K], K, 'asoklab']],         list),
-  row('AsOklch',      1,          [[[K], K, 'asoklch']],         list),
+  // a conversion to the space it names; each threads over a list operand.
+  row('Rgb',          3,          [[[R, R, R], K, 'rgb']],       {}),
+  row('Hsl',          3,          [[[R, R, R], K, 'hsl']],       {}),
+  row('Hsv',          3,          [[[R, R, R], K, 'hsv']],       {}),
+  row('Oklab',        3,          [[[R, R, R], K, 'oklab']],     {}),
+  row('Oklch',        3,          [[[R, R, R], K, 'oklch']],     {}),
+  row('AsRgb',        1,          [[[K], K, 'asrgb']],           {}),
+  row('AsHsl',        1,          [[[K], K, 'ashsl']],           {}),
+  row('AsHsv',        1,          [[[K], K, 'ashsv']],           {}),
+  row('AsOklab',      1,          [[[K], K, 'asoklab']],         {}),
+  row('AsOklch',      1,          [[[K], K, 'asoklch']],         {}),
 ].map((r) => deepFreeze(r)));
 
 /**

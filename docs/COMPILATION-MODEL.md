@@ -2035,9 +2035,10 @@ throws, and a binding read as an array holds a number, the runner throws a
 `TypeError` that names the binding and keeps the error of the code as its
 `cause`: with `S: list<number>`, `Sum(S)` at `S = 5` throws
 ``"S" (type `list<number>`) received a number …``. A
-collection or a `{re, im}` result comes back as the code built it, with no
-copy: it may be a value the runner keeps for every later call (a hoisted
-constant list literal, a bound symbol value), so a caller that writes to a
+collection, a `{re, im}` or a colour result comes back as the code built it,
+with no copy: it may be a value the runner keeps for every later call (a
+hoisted constant list literal, a bound symbol value, a colour of constants,
+which is one object for every call), so a caller that writes to a
 result changes what the next call answers. The result convention is kept —
 a `{re, im: 0}` cell reads as a plain number — and a collection is copied
 only when such a cell has to be rewritten, never in place. That walk, one

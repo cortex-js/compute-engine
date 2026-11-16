@@ -548,11 +548,15 @@ export function lower(
       const tuple = given.find((v) => tuples.has(v));
       if (tuple !== undefined) {
         // `div.q`, the division by the denominator of a rational factor,
-        // reads a tuple dividend as `Divide` does.
+        // reads a tuple dividend as `Divide` does. A colour conversion of a
+        // tuple is an error of the interpreter.
         const rule =
           TUPLE_RULES[
             r.signatures[0][2] === 'div.q' ? 'Divide' : (r.head ?? '')
-          ] ?? (r.arity === 1 && r.threads ? 'each' : undefined);
+          ] ??
+          (r.arity === 1 && r.threads && r.signatures[0][0][0] !== 'color'
+            ? 'each'
+            : undefined);
         // A list of points with a point (`all`), scaled by a list of
         // numbers (`scale`), or under `norm`: point by point.
         if (
@@ -867,7 +871,7 @@ export function lower(
         // Out of range, the interpreter gives NaN for a number, `Missing`
         // for a boolean or a list, and `_at` gives the number NaN, which
         // is not a complex value; the `fold` pass makes a constant index
-        // in range an element.
+        // in range an element (of colours, `admits()` declines the rest).
         if (
           (t.lane === 'boolean' ||
             t.lane === 'complex' ||

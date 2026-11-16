@@ -477,7 +477,6 @@ function shader(r: ReturnType<typeof glsl>, k: number): string {
 const DECLINES: [label: string, json: Json, cause: RegExp][] = [
   ['a colour name with an alpha', ['AsOklab', 'Ca'], /Hsv with 4 operands/],
   ['a colour parameter', ['AsOklab', ['fk', ['Rgb', 'x', 0, 0]]], /the parameter q of fk is not a scalar \(color\)/],
-  ['a list of colour names', ['List', 'Cv', 'Cr'], /a list of colours/],
 ];
 
 describe('IR profile, batch G9: the declines', () => {
