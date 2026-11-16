@@ -649,9 +649,14 @@ A loop writes no deadline check, and the lowering writes no NaN test of the
 `iterationBudget` (NaN reads as `empty`): a loop of more passes than the
 budget (2^32 without one) throws the error of `_IA.decided()` before its
 first pass (`_IA.undecided()`), so the result is `entire`; so does a
-`build` or a `filter` of more elements, before its first element. A sum is a loop,
-which adds its terms in another order than the existing target's sum
-written out term by term: the ends can differ in the last digits.
+`build` or a `filter` of more elements, before its first element. A sum is
+a loop from the lower bound up, so that its result contains the value that
+the scalar code computes by adding upward in doubles (each `_IA.add` rounds
+outward). The existing target writes a sum of constant bounds out and adds
+from the last term: narrower (4.5 times for `Sum(x/i, i = 1..100)` at
+`x = -1.623107644263655`), but it misses that value at some points: at 169
+of 100,000 random points for `Sum(sin(i·x)/i, i = 1..100)` (by up to 5 ulps)
+and at 700 for `Sum(x^i/i, i = 1..20)` (by up to 4 ulps).
 
 Constants. An integer and a real literal whose double is its value are a
 point `{ lo: c, hi: c }`; NaN is `{ kind: 'empty' }`; a boolean is `'true'`
@@ -787,7 +792,12 @@ element in order: a `vecN` or a `float[n]` (`Map(f, L)` of `L: list<real^3>`,
 build declines on GLSL. `Max` and `Min` fold from -∞ and +∞ over all their
 operands, and give NaN when the total count of elements and scalars is 0;
 `Max(x)` and `Min(x)` of one real or integer scalar are `x` (of a boolean or a
-complex number they decline: the interpreter leaves them unevaluated);
+complex number they decline: the interpreter leaves them unevaluated). A
+reduction (`Sum`, `Max`, `Min`) of one literal `List` of at least one element,
+each of a number type, is the reduction of its elements, with no array and no
+loop: `Max(List(x, y, x·y))` is `Max(x, y, x·y)`, and `Sum(List(a, b))` is
+`(0 + a) + b`, the fold of the loop (`Product(List(…))` is `Reduce` in the
+canonical form and keeps the loop);
 `ElementMax` and `ElementMin` are rows that thread (`ElementMax(D, 0.3)` is a
 list). An element-wise operation of lists of rank 1 has the length of its first
 list and reads the others at the same index. Lengths that are numbers and differ

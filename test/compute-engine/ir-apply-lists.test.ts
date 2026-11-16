@@ -149,6 +149,26 @@ describe('IR profile, batch G18: Min and Max of one operand', () => {
     check(['Max', ['Tuple', 'x', 2]], POINTS);
   });
 
+  test('of a literal list of one element: the interpreter value, with no array', () => {
+    for (const json of [
+      ['Max', ['List', 'x']],
+      ['Min', ['List', ['Floor', 'x']]],
+      ['Sum', ['List', 'x']],
+    ]) {
+      const r = check(json, POINTS);
+      expect(r.code).not.toMatch(/\[|for \(/);
+      for (const p of POINTS)
+        expect(r.run!(p as never)).toBe(interpreted(json, p));
+      const interval = compile(box(json), { ...IR, to: 'interval-js' });
+      expect(interval.code).not.toMatch(/\[|for \(/);
+      const v = interval.run!({ x: 0.3 } as never) as {
+        value: { lo: number; hi: number };
+      };
+      const want = interpreted(json, { x: 0.3 }) as number;
+      expect(v.value.lo <= want && want <= v.value.hi).toBe(true);
+    }
+  });
+
   test('of a boolean or a complex number: a decline (the interpreter has no value)', () => {
     expect(failure(() => js(['Min', ['Less', 'x', 1]]))).toMatch(
       /Min with 1 operands/

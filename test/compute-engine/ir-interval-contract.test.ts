@@ -1114,3 +1114,87 @@ describe('the interval mode: values computed once', () => {
     expect(v.value.lo <= 1 && 1 <= v.value.hi).toBe(true);
   });
 });
+
+describe('the interval mode: batch 7, the order of a sum', () => {
+  const old = (json: unknown, engine = ce) =>
+    compile(engine.box(json as never), {
+      to: 'interval-js',
+      fallback: false,
+    } as never) as unknown as Result;
+  const ascending = /for \(let (v\d+) = \1_lo; \1 <= \1_hi; \1\+\+\) \{/;
+
+  // The README of `ir/`, "The interval mode": a sum is a loop from the
+  // lower bound up, which contains the value of the scalar code adding
+  // upward in doubles; the existing target adds from the last term.
+  describe('at machine precision', () => {
+    let machine: ComputeEngine;
+    beforeAll(() => {
+      machine = new ComputeEngine();
+      machine.precision = 'machine';
+      machine.declare('x', 'real');
+    });
+    afterAll(() => {
+      BigDecimal.precision = ce.precision;
+    });
+    test('a sum of constant bounds contains the value of the scalar code, where the existing target does not', () => {
+      const json = ['Sum', ['Divide', ['Sin', ['Multiply', 'i', 'x']], 'i'], ['Limits', 'i', 1, 100]];
+      const e = machine.box(json as never);
+      const x = -11.491009020837964;
+      const r = compile(e, { ...IR, fallback: false } as never) as unknown as Result;
+      expect(r.code).toMatch(ascending);
+      const want = machine.withValues({ x: machine.number(x) } as never, () =>
+        e.evaluate().N()
+      ).re;
+      const scalar = (
+        compile(e, { profile: 'ir', fallback: false } as never) as unknown as Result
+      ).run({ x }) as number;
+      expect(scalar).toBe(want);
+      const { value } = r.run({ x });
+      expect(value.lo <= want && want <= value.hi).toBe(true);
+      // The stated difference: the existing target's sum, added from the
+      // last term, is narrower and leaves the value out.
+      const was = old(json, machine).run({ x });
+      expect(was.kind).toBe('interval');
+      expect(was.value.lo <= want && want <= was.value.hi).toBe(false);
+    });
+  });
+
+  test('a sum of two constant bounds is a loop from the lower bound up', () => {
+    const r = mode(['Sum', ['Divide', 'x', 'i'], ['Limits', 'i', 1, 100]]);
+    expect(r.code).toMatch(ascending);
+    expect(r.code).not.toMatch(/--\)/);
+  });
+
+  test('a sum of a list is added from the first element, as the existing target', () => {
+    const r = mode(['Sum', 'L']);
+    expect(r.code).toMatch(ascending);
+    expect(r.run({ L: [0.1, 0.2, 0.3] })).toEqual(
+      old(['Sum', 'L']).run({ L: [0.1, 0.2, 0.3] })
+    );
+  });
+
+  test('a reduction of a literal list of scalars is the reduction of its elements, with no array', () => {
+    const json = ['Max', ['List', 'x', 'y', ['Multiply', 'x', 'y']]];
+    const r = mode(json);
+    expect(r.code).toBe('_IA.max(_IA.max(_.x, _.y), _IA.mul(_.x, _.y))');
+    const box = { x: { lo: -1, hi: 2 }, y: 0.5 };
+    expect(r.run(box)).toEqual({ kind: 'interval', value: { lo: 0.5, hi: 2 } });
+    expect(old(json).run(box)).toEqual(r.run(box));
+    const sum = mode(['Sum', ['List', 'x', 'y', ['Multiply', 'x', 'y']]]);
+    expect(inlined(sum)).toBe(
+      '_IA.add(_IA.add(_IA.add({ lo: 0, hi: 0 }, _.x), _.y), _IA.mul(_.x, _.y))'
+    );
+  });
+
+  test('a literal list of one element', () => {
+    expect(mode(['Max', ['List', 'x']]).code).toBe('_.x');
+    expect(mode(['Max', ['List', 'x']]).run({ x: 0.5 })).toEqual({
+      kind: 'interval',
+      value: { lo: 0.5, hi: 0.5 },
+    });
+    expect(mode(['Sum', ['List', 'x']]).run({ x: { lo: -1, hi: 2 } })).toEqual({
+      kind: 'interval',
+      value: { lo: -1, hi: 2 },
+    });
+  });
+});

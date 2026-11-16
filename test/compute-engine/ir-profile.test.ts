@@ -1368,6 +1368,36 @@ describe('a library operator whose definition the host changed in place', () => 
       /the definition of PointList has its own lowering/
     );
   });
+  test('a reduction of a List that is not the library one declines, not its elements', () => {
+    const make = () => {
+      const e = new ComputeEngine();
+      e.declare('x', 'real');
+      e.declare('y', 'real');
+      return e;
+    };
+    for (const json of [
+      ['Max', ['List', 'x', 'y']],
+      ['Sum', ['List', 'x', 'y']],
+    ]) {
+      expect('result' in outcome(box(json, make()))).toBe(true);
+      const host = make();
+      (host.lookupDefinition('List')!.operator as { compile?: unknown }).compile =
+        () => '0';
+      const o = outcome(box(json, host));
+      expect('message' in o && o.message).toMatch(
+        /the definition of List has its own lowering/
+      );
+      // A user function named `List` is called: `Max(List(1, 2))` is
+      // `Max(1 - 2)`, not the largest element.
+      const user = make();
+      user.assign(
+        'List',
+        user.box(['Function', ['Subtract', 'a', 'b'], 'a', 'b'] as never)
+      );
+      const u = outcome(box(json, user));
+      expect('result' in u && u.result.run!({ x: 1, y: 2 } as never)).toBe(-1);
+    }
+  });
   test('a host Range declines under Comprehension and PointList too', () => {
     for (const json of [
       [

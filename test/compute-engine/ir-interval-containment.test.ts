@@ -87,6 +87,9 @@ const C = (
 const x = 'x';
 const y = 'y';
 
+/** Tycho's Fourier series of a square wave, a sum of 100 terms. */
+const FOURIER = C(['Add', ['Multiply', ['Divide', 2, 'Pi'], ['Sum', ['Multiply', ['Divide', 1, 'i'], ['Sin', ['Multiply', 'i', x]]], ['Limits', 'i', 1, 100]]], 3]);
+
 // prettier-ignore
 const CASES: Case[] = [
   // Arithmetic
@@ -191,13 +194,15 @@ const CASES: Case[] = [
   C(['Binomial', x, y], [0, 2, -1]), C(['Binomial', x, 2.5], [0, 3, -1]), C(['Choose', x, 2], [0, 1]),
   C(['Choose', 'n', 'm']), C(['GCD', 'n', 0]), C(['GCD', ['Floor', x], ['Floor', y]], [0, -1]),
   C(['LCM', 'n', 0]), C(['LCM', ['Floor', x], ['Floor', y]], [0, -1]),
+  // Tycho's Fourier series, on both engines
+  FOURIER,
 ];
 
 /** The programs that also run on an engine at machine precision, where a
  *  literal is a machine number. */
 const MACHINE_CASES: Case[] = CASES.filter((c) => {
   const text = JSON.stringify(c.json);
-  return /\d\.\d|"Power"|Binomial|Choose|GCD|LCM/.test(text);
+  return c === FOURIER || /\d\.\d|"Power"|Binomial|Choose|GCD|LCM/.test(text);
 });
 
 /** The programs whose result differs from the existing target's at some
@@ -215,13 +220,15 @@ const EXCEPTIONS: string[] = [
   // over [-1.71, 0.29]), which excludes the value 2x at x > 0 (design
   // note, section 10).
   JSON.stringify(['Block', ['Declare', 't', "'real'", 0], ['If', ['Greater', x, 0], ['Assign', 't', ['Multiply', 2, x]], ['Assign', 't', -1]], 't']),
-  // A sum is a loop, which adds its terms in another order than the
-  // existing target's sum written out term by term: the ends differ in the
-  // last digits, by more than 4 ulps of an end near 0 (design note,
-  // section 9).
+  // A sum is a loop from the lower bound up, which contains the value of
+  // the scalar code adding upward in doubles; the existing target writes a
+  // sum of constant bounds out and adds from the last term: the ends differ
+  // in the last digits, by more than 4 ulps of an end near 0 (README of
+  // `ir/`, "The interval mode").
   JSON.stringify(['Sum', ['Sin', ['Multiply', 'k', x]], ['Limits', 'k', 1, 3]]),
   JSON.stringify(['Sum', ['Multiply', ['Power', -1, 'k'], ['Divide', ['Power', x, 'k'], 'k']], ['Limits', 'k', 1, 6]]),
   `machine ${JSON.stringify(['Sum', ['Multiply', ['Power', -1, 'k'], ['Divide', ['Power', x, 'k'], 'k']], ['Limits', 'k', 1, 6]])}`,
+  JSON.stringify(FOURIER.json), `machine ${JSON.stringify(FOURIER.json)}`,
   // The existing target computes x^(p/q); the mode x^e with the double e,
   // as the interpreter at machine precision and the JavaScript code: at
   // x = 1e300, x^0.2 is 1.0000000000000077e60, the existing target gives

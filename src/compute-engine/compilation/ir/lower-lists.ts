@@ -230,7 +230,21 @@ export function listLowering(cx: Lowering) {
     const red = REDUCTIONS.get(e.operator)!;
     if (red.indexed && e.nops === 2 && isFunction(e.ops[1], 'Limits'))
       return aggregate(e, r);
-    const items = e.ops.map((x) => source(x, true, true));
+    // A literal list of scalars is read as its elements, with no array:
+    // `Max(List(x, y))` is `Max(x, y)`, and `Sum(List(x, y))` is `Sum(x, y)`,
+    // whose fold from the identity is the loop's. Only the library's `List`
+    // (a user definition or a lowering of its own declines in `cx.value()`).
+    const [l] = e.ops;
+    const literal =
+      e.nops === 1 &&
+      isFunction(l, 'List') &&
+      cx.isLibrary(l) &&
+      !hasOwnLowering('List', l.operatorDefinition) &&
+      l.nops > 0 &&
+      l.ops.every((x) => x.type.matches('number'))
+        ? l.ops
+        : undefined;
+    const items = (literal ?? e.ops).map((x) => source(x, true, true));
     if (!red.indexed && items.every((x) => typeof x === 'number')) {
       // `Max(x)` of one real is `x`; of a boolean or a complex number the
       // interpreter leaves it unevaluated (a decline of `apply()`).
