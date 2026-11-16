@@ -487,6 +487,9 @@ export abstract class _BoxedExpression implements Expression {
 
   /** Object.toString() */
   toString(): string {
+    // A big float prints rounded to the working precision, which is the
+    // precision of this engine and not what another engine left.
+    const enclosing = this.engine._enterPrecision();
     try {
       // If this is a lazy collection, we need to force evaluation.
       // Exception: a symbol always serializes as its name — its spelling must
@@ -508,6 +511,8 @@ export abstract class _BoxedExpression implements Expression {
       }
       if (e instanceof Error && e.message) return e.message;
       return '<error>';
+    } finally {
+      this.engine._leavePrecision(enclosing);
     }
   }
 

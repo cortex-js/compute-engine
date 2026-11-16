@@ -450,17 +450,14 @@ describe('MACHINE FUNCTIONS AND SUMS OF EXACT VALUES OUTSIDE THE FLOAT64 RANGE',
   test('an engine below machine precision keeps its coarse precision', () => {
     // The quotient is computed at the 3 digits of the engine, not at the 25
     // digits that the machine precision uses to get a correct double.
-    // Constructing an engine writes the module-global `BigDecimal.precision`,
-    // so it is restored: the later blocks use the shared engine.
-    const saved = BigDecimal.precision;
-    try {
-      const p3 = new ComputeEngine({ precision: 3 });
+    // `NumericValue.div` is not an entry point of the engine: it reads the
+    // ambient precision of the big decimals, put in place by the engine.
+    const p3 = new ComputeEngine({ precision: 3 });
+    p3._withTransientPrecision(3, () => {
       const q = p3.parse('\\frac{1}{7\\cdot 10^{400}}').evaluate().numericValue;
       if (typeof q !== 'object') throw new Error('expected an exact value');
       expect(q.div(p3._numericValue(1e-300)).re).toBe(1.43e-101);
-    } finally {
-      BigDecimal.precision = saved;
-    }
+    });
   });
 });
 

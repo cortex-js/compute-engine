@@ -1812,73 +1812,82 @@ export class ComputeEngine implements IComputeEngine {
       tolerance: options?.tolerance,
       angularUnit: 'rad',
     });
+    this._boxingState.numericConfiguration = this._numericConfiguration;
 
-    const startup = new EngineStartupCoordinator(this);
-    const commonNumbers = startup.initializeCommonNumbers();
+    // The big decimals compute at this engine's precision while it is built;
+    // the static is put back as it was (`EngineNumericConfiguration`).
+    const enclosingPrecision = this._numericConfiguration.enterPrecision();
+    try {
+      const startup = new EngineStartupCoordinator(this);
+      const commonNumbers = startup.initializeCommonNumbers();
 
-    this.Zero = commonNumbers.Zero;
-    this.One = commonNumbers.One;
-    this.Half = commonNumbers.Half;
-    this.NegativeOne = commonNumbers.NegativeOne;
-    this.Two = commonNumbers.Two;
-    this.NaN = commonNumbers.NaN;
-    this.PositiveInfinity = commonNumbers.PositiveInfinity;
-    this.NegativeInfinity = commonNumbers.NegativeInfinity;
-    this.I = commonNumbers.I;
-    this.ComplexInfinity = commonNumbers.ComplexInfinity;
+      this.Zero = commonNumbers.Zero;
+      this.One = commonNumbers.One;
+      this.Half = commonNumbers.Half;
+      this.NegativeOne = commonNumbers.NegativeOne;
+      this.Two = commonNumbers.Two;
+      this.NaN = commonNumbers.NaN;
+      this.PositiveInfinity = commonNumbers.PositiveInfinity;
+      this.NegativeInfinity = commonNumbers.NegativeInfinity;
+      this.I = commonNumbers.I;
+      this.ComplexInfinity = commonNumbers.ComplexInfinity;
 
-    // Reset the caches/create (precision-dependent) numeric constants
-    this._reset();
+      // Reset the caches/create (precision-dependent) numeric constants
+      this._reset();
 
-    // Create the system scope (top-level scope)
-    this.pushScope(undefined, 'system');
+      // Create the system scope (top-level scope)
+      this.pushScope(undefined, 'system');
 
-    // Declare the standard types. A definition that a declaration makes is a
-    // definition of the standard library, not host code
-    // (`host-handler-changes.ts`).
-    withStandardLibraryInstall(() => {
-      this.declareType('limits', 'expression<Limits>');
-      // `alias: true` makes `distribution` a *structural* type: a value whose
-      // type is `expression<NormalDistribution>` (etc.) is a subtype of the
-      // union. A nominal reference (the default) would not match, so `PDF`/
-      // `CDF`/`Mean`(distribution)… would reject their distribution argument.
-      this.declareType(
-        'distribution',
-        'expression<NormalDistribution> | expression<BinomialDistribution> | expression<PoissonDistribution> | expression<UniformDistribution> | expression<ExponentialDistribution>',
-        { alias: true }
+      // Declare the standard types. A definition that a declaration makes is a
+      // definition of the standard library, not host code
+      // (`host-handler-changes.ts`).
+      withStandardLibraryInstall(() => {
+        this.declareType('limits', 'expression<Limits>');
+        // `alias: true` makes `distribution` a *structural* type: a value whose
+        // type is `expression<NormalDistribution>` (etc.) is a subtype of the
+        // union. A nominal reference (the default) would not match, so `PDF`/
+        // `CDF`/`Mean`(distribution)… would reject their distribution argument.
+        this.declareType(
+          'distribution',
+          'expression<NormalDistribution> | expression<BinomialDistribution> | expression<PoissonDistribution> | expression<UniformDistribution> | expression<ExponentialDistribution>',
+          { alias: true }
+        );
+      });
+
+      startup.bootstrapLibraries(options?.libraries);
+
+      const commonSymbols = startup.initializeCommonSymbolBindings(
+        this._commonSymbols
       );
-    });
+      this.True = commonSymbols.True;
+      this.False = commonSymbols.False;
+      this.Pi = commonSymbols.Pi;
+      this.E = commonSymbols.E;
+      this.Nothing = commonSymbols.Nothing;
+      this.Missing = commonSymbols.Missing;
 
-    startup.bootstrapLibraries(options?.libraries);
+      // Push a fresh scope to protect system definitions:
+      // this will be the "global" scope
+      this.pushScope(undefined, 'global');
 
-    const commonSymbols = startup.initializeCommonSymbolBindings(
-      this._commonSymbols
-    );
-    this.True = commonSymbols.True;
-    this.False = commonSymbols.False;
-    this.Pi = commonSymbols.Pi;
-    this.E = commonSymbols.E;
-    this.Nothing = commonSymbols.Nothing;
-    this.Missing = commonSymbols.Missing;
+      // Register default compilation targets
+      this._compilationTargets.registerDefaults();
 
-    // Push a fresh scope to protect system definitions:
-    // this will be the "global" scope
-    this.pushScope(undefined, 'global');
+      // Store the injected LatexSyntax instance (if any)
+      if (options?.latexSyntax) this._latexSyntax = options.latexSyntax;
 
-    // Register default compilation targets
-    this._compilationTargets.registerDefaults();
+      // Store engine-wide LaTeX options (merged into every parse/serialize call)
+      if (options?.latexOptions) {
+        validateStyleOptions(options.latexOptions);
+        validateDisplayDigits(options.latexOptions.digits);
+        this._latexOptions = { ...options.latexOptions };
+      }
 
-    // Store the injected LatexSyntax instance (if any)
-    if (options?.latexSyntax) this._latexSyntax = options.latexSyntax;
-
-    // Store engine-wide LaTeX options (merged into every parse/serialize call)
-    if (options?.latexOptions) {
-      validateStyleOptions(options.latexOptions);
-      validateDisplayDigits(options.latexOptions.digits);
-      this._latexOptions = { ...options.latexOptions };
+      hidePrivateProperties(this);
+    } finally {
+      this._numericConfiguration.leavePrecision(enclosingPrecision);
     }
-
-    hidePrivateProperties(this);
+    this._numericConfiguration.setAmbientPrecision(true);
   }
 
   toJSON() {
@@ -2002,16 +2011,23 @@ export class ComputeEngine implements IComputeEngine {
    *
    * If the precision is set to `auto`, the precision is set to a default value.
    *
-   * The precision of the arbitrary-precision arithmetic is shared by every
-   * engine in the program: creating an engine, or setting the precision of
-   * any engine, sets it for all of them. A program that sets different
-   * precisions on two engines computes in both at the precision set last,
-   * so use one engine per program.
+   * Each engine computes at its own precision: the arbitrary-precision
+   * arithmetic runs at the precision of the engine that is working, whatever
+   * other engines in the program are set to. Code that runs outside an engine
+   * entry point (`BigDecimal` and `NumericValue` used directly) reads the
+   * ambient `BigDecimal.precision`, the precision of the first engine made
+   * and then of the engine whose precision was set last.
    *
    */
   set precision(p: number | 'machine' | 'auto') {
     if (!this._numericConfiguration.setPrecision(p)) return;
-    this._reset();
+    const enclosing = this._numericConfiguration.enterPrecision();
+    try {
+      this._reset();
+    } finally {
+      this._numericConfiguration.leavePrecision(enclosing);
+    }
+    this._numericConfiguration.setAmbientPrecision(false);
   }
 
   /** Run `fn` at the precision `digits` (of the engine and of the big
@@ -2020,6 +2036,18 @@ export class ComputeEngine implements IComputeEngine {
    * @internal */
   _withTransientPrecision<T>(digits: number, fn: () => T): T {
     return this._numericConfiguration.withTransientPrecision(digits, fn);
+  }
+
+  /** Put this engine's precision in `BigDecimal.precision`; see
+   * `EngineNumericConfiguration.enterPrecision`.
+   * @internal */
+  _enterPrecision(): number | undefined {
+    return this._numericConfiguration.enterPrecision();
+  }
+
+  /** @internal */
+  _leavePrecision(enclosing: number | undefined): void {
+    this._numericConfiguration.leavePrecision(enclosing);
   }
 
   /** True while `_withTransientPrecision` runs a function.
@@ -2765,7 +2793,12 @@ export class ComputeEngine implements IComputeEngine {
   * 
   */
   bignum(a: string | number | bigint | BigDecimal): BigDecimal {
-    return this._numericConfiguration.bignum(a);
+    const enclosing = this._numericConfiguration.enterPrecision();
+    try {
+      return this._numericConfiguration.bignum(a);
+    } finally {
+      this._numericConfiguration.leavePrecision(enclosing);
+    }
   }
 
   /** Create a complex number whose parts are machine doubles.
@@ -4235,9 +4268,14 @@ export class ComputeEngine implements IComputeEngine {
     }
   ): Expression {
     const { canonical, structural } = optionsToInternal(options);
-    return inHarvestScope(this, options?.scope, () =>
-      box(this, expr, { canonical, structural, scope: options?.scope })
-    );
+    const enclosing = this._numericConfiguration.enterPrecision();
+    try {
+      return inHarvestScope(this, options?.scope, () =>
+        box(this, expr, { canonical, structural, scope: options?.scope })
+      );
+    } finally {
+      this._numericConfiguration.leavePrecision(enclosing);
+    }
   }
 
   /** @deprecated Use `expr()` instead. */
@@ -4257,9 +4295,14 @@ export class ComputeEngine implements IComputeEngine {
     expr: Expression,
     options?: { form?: FormOption; scope?: Scope | undefined }
   ): Expression {
-    return inHarvestScope(this, options?.scope, () =>
-      rebind(this, expr, options)
-    );
+    const enclosing = this._numericConfiguration.enterPrecision();
+    try {
+      return inHarvestScope(this, options?.scope, () =>
+        rebind(this, expr, options)
+      );
+    } finally {
+      this._numericConfiguration.leavePrecision(enclosing);
+    }
   }
 
   /** @internal LatexSyntax instance for parse/serialize. */
@@ -4389,6 +4432,24 @@ export class ComputeEngine implements IComputeEngine {
     }
   ): Expression | null;
   parse(
+    latex: string | null,
+    options?: Partial<ParseLatexOptions> & {
+      form?: FormOption;
+      canonical?: CanonicalOptions;
+      structural?: boolean;
+      scope?: Scope | undefined;
+      speculative?: boolean;
+    }
+  ): Expression | null {
+    const enclosing = this._numericConfiguration.enterPrecision();
+    try {
+      return this._parse(latex, options);
+    } finally {
+      this._numericConfiguration.leavePrecision(enclosing);
+    }
+  }
+
+  private _parse(
     latex: string | null,
     options?: Partial<ParseLatexOptions> & {
       form?: FormOption;
@@ -4863,12 +4924,17 @@ export class ComputeEngine implements IComputeEngine {
     }
   ): Expression {
     const { canonical, structural } = optionsToInternal(options);
-    return boxFunction(this, name, ops, {
-      metadata: options?.metadata,
-      canonical,
-      structural,
-      scope: options?.scope,
-    });
+    const enclosing = this._numericConfiguration.enterPrecision();
+    try {
+      return boxFunction(this, name, ops, {
+        metadata: options?.metadata,
+        canonical,
+        structural,
+        scope: options?.scope,
+      });
+    } finally {
+      this._numericConfiguration.leavePrecision(enclosing);
+    }
   }
 
   /**
@@ -5015,6 +5081,18 @@ export class ComputeEngine implements IComputeEngine {
       | Complex
       | Rational
       | { re: number | BigDecimal; im: number | BigDecimal },
+    options?: { metadata: Metadata; canonical: CanonicalOptions }
+  ): Expression {
+    const enclosing = this._numericConfiguration.enterPrecision();
+    try {
+      return this._number(value, options);
+    } finally {
+      this._numericConfiguration.leavePrecision(enclosing);
+    }
+  }
+
+  private _number(
+    value: Parameters<ComputeEngine['number']>[0],
     options?: { metadata: Metadata; canonical: CanonicalOptions }
   ): Expression {
     // A `{ re, im }` object (not a `Complex`, whose parts are doubles and

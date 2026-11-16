@@ -1,3 +1,21 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **Each engine computes at its own precision.** `BigDecimal.precision` is one
+  value for the whole program, and an engine wrote it when it was made or
+  when its `precision` changed, so a second engine changed the digits of the
+  first, and `a.precision = 30` did nothing when `a` already held 30. An engine
+  now puts its precision in place for each operation (`evaluate()`, `N()`,
+  `simplify()`, `parse()`, `expr()`, `compile()`, `toString()`, and each slice
+  of `evaluateAsync()`) and puts the previous value back when it stops, also
+  on a throw, so interleaved, nested and awaiting engines do not move each
+  other. Making an engine no longer changes another one. Code outside an
+  engine entry point (`BigDecimal` or `NumericValue` used directly) reads the
+  ambient `BigDecimal.precision`, which is the precision of the first engine
+  made and then of the engine whose precision was set last
+  (#556, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.191.0 _2026-11-15_
 
 ### Breaking Changes

@@ -3527,8 +3527,8 @@ describe('Factorial2 digit cap (review pins)', () => {
   });
   test('above the cap the numeric route is a big decimal, +oo at machine precision', () => {
     // mpmath.fac2(10**15) = 6.835170808228122422077323e+7282852759048381
-    expect(ce.box(['Factorial2', 1e15]).N().toString()).toBe(
-      '6.83517080822812242208e+7282852759048381'
+    expect(ce.box(['Factorial2', 1e15]).N().toString()).toMatch(
+      /^6\.835170808228122422077(32|33)\d*e\+7282852759048381$/
     );
     const machine = new ComputeEngine();
     machine.precision = 'machine';

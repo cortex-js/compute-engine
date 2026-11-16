@@ -16,6 +16,12 @@ const ROUNDING_TIES: readonly RoundingTies[] = [
   'toward-negative-infinity',
 ];
 
+/** The number of `enterPrecision` calls in progress, in the whole program. */
+let activeEntries = 0;
+
+/** Whether an engine has set the ambient precision yet (`setAmbientPrecision`). */
+let ambientClaimed = false;
+
 export class EngineNumericConfiguration {
   private _precision: number;
   private _angularUnit: AngularUnit;
@@ -41,7 +47,6 @@ export class EngineNumericConfiguration {
     if (precision === 'machine') precision = Math.floor(MACHINE_PRECISION);
 
     this._precision = precision;
-    BigDecimal.precision = precision;
     this._angularUnit = options?.angularUnit ?? 'rad';
 
     // Initialized before setTolerance() so fallback paths can use them.
@@ -59,6 +64,46 @@ export class EngineNumericConfiguration {
     return this._precision;
   }
 
+  /**
+   * `BigDecimal.precision` is one static for the whole program, but each
+   * engine has its own precision. An engine does not leave its precision in
+   * the static: it puts it there while it works (an operation, a slice of an
+   * asynchronous evaluation, the construction of the engine) and puts the
+   * previous value back when it stops, also on a throw, so interleaved and
+   * nested engines each compute at their own precision.
+   *
+   * Returns the value to hand to `leavePrecision`: the previous static
+   * precision, or `undefined` when it already is this engine's (no write).
+   * Every call is paired with a `leavePrecision`.
+   */
+  enterPrecision(): number | undefined {
+    activeEntries += 1;
+    const enclosing = BigDecimal.precision;
+    if (enclosing === this._precision) return undefined;
+    BigDecimal.precision = this._precision;
+    return enclosing;
+  }
+
+  leavePrecision(enclosing: number | undefined): void {
+    activeEntries -= 1;
+    if (enclosing !== undefined) BigDecimal.precision = enclosing;
+  }
+
+  /**
+   * The code that runs outside an engine's entry points (arithmetic methods
+   * of an expression, a `NumericValue` or a `BigDecimal` used directly) reads
+   * the static as it stands, the ambient precision. It is the precision of the
+   * first engine made, then of the engine whose precision was set last, so a
+   * program with one engine, or with engines at one precision, sees the
+   * precision of its engine. Making another engine leaves it alone, and so
+   * does a set that happens inside a running operation.
+   */
+  setAmbientPrecision(onlyFirst: boolean): void {
+    if (activeEntries !== 0 || (onlyFirst && ambientClaimed)) return;
+    ambientClaimed = true;
+    BigDecimal.precision = this._precision;
+  }
+
   setPrecision(value: number | 'machine' | 'auto'): boolean {
     let precision = value;
     if (precision === 'machine') precision = MACHINE_PRECISION;
@@ -70,7 +115,6 @@ export class EngineNumericConfiguration {
       throw Error('Expected "machine" or a positive number');
 
     this._precision = Math.max(precision, MACHINE_PRECISION);
-    BigDecimal.precision = this._precision;
 
     // In `'auto'` mode the tolerance follows the precision. An explicit
     // tolerance survives a precision change: `ce.tolerance = 1e-30` followed

@@ -1473,6 +1473,15 @@ export interface IComputeEngine {
    * @internal */
   _withTransientPrecision<T>(digits: number, fn: () => T): T;
 
+  /** Put the precision of this engine in `BigDecimal.precision`, which is
+   * one value for the program, and return what `_leavePrecision` needs to put
+   * the previous one back (`undefined`: nothing changed).
+   * @internal */
+  _enterPrecision(): number | undefined;
+
+  /** @internal */
+  _leavePrecision(enclosing: number | undefined): void;
+
   /** True while `_withTransientPrecision` runs a function. The value of a
    * constant is then computed again at the current precision on each read,
    * and not stored.

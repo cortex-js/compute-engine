@@ -478,7 +478,13 @@ export class BoxedNumber
 
   valueOf(): number | string {
     if (typeof this._value === 'number') return this._value;
-    return this._value.N().valueOf();
+    const engine = this.engine;
+    const enclosing = engine._enterPrecision();
+    try {
+      return this._value.N().valueOf();
+    } finally {
+      engine._leavePrecision(enclosing);
+    }
   }
 
   get numericValue(): number | NumericValue {
@@ -1673,6 +1679,16 @@ export class BoxedNumber
   }
 
   simplify(options?: Partial<SimplifyOptions>): Expression {
+    const engine = this.engine;
+    const enclosing = engine._enterPrecision();
+    try {
+      return this._simplify(options);
+    } finally {
+      engine._leavePrecision(enclosing);
+    }
+  }
+
+  private _simplify(options?: Partial<SimplifyOptions>): Expression {
     const structural = this.structural;
     const results = simplify(structural, options);
     const result = results.at(-1)?.value;
@@ -1704,12 +1720,18 @@ export class BoxedNumber
   N(): Expression {
     const v = this._value;
     if (typeof v === 'number') return this;
-    // NumericValue
-    const n = v.N();
-    // Often, 'evaluating' a numeric-value yields the same result, but sometimes may result in a
-    // different representation: e.g. some cases of Exact -> Big
-    if (v === n) return this;
-    return this.engine.number(n);
+    // NumericValue. The conversion rounds at the precision of the engine.
+    const engine = this.engine;
+    const enclosing = engine._enterPrecision();
+    try {
+      const n = v.N();
+      // Often, 'evaluating' a numeric-value yields the same result, but sometimes may result in a
+      // different representation: e.g. some cases of Exact -> Big
+      if (v === n) return this;
+      return this.engine.number(n);
+    } finally {
+      engine._leavePrecision(enclosing);
+    }
   }
 }
 

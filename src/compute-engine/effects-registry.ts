@@ -185,6 +185,8 @@ export function runWithEvaluationEffects<T, C>(
     _evalContextStack: C[];
     _requestedPrecision?: number | undefined;
     _withTransientPrecision?: <R>(digits: number, fn: () => R) => R;
+    _enterPrecision?: () => number | undefined;
+    _leavePrecision?: (enclosing: number | undefined) => void;
     _deadlineFrame?: DeadlineFrame | undefined;
     _boxingState?: {
       withOperation<R>(env: UnitEnvironment, fn: () => R): R;
@@ -236,6 +238,9 @@ function runSlice<T, C>(
     deadlineFrameOf(contextStack)
   );
   const installFrame = frame !== enclosingFrame;
+  // Each slice of an asynchronous evaluation computes at the precision of
+  // its engine, whatever other engines ran at the `await`.
+  const enclosingPrecision = engine._enterPrecision?.();
   engine._evaluationEffects = effects;
   if (contextStack !== undefined) engine._evalContextStack = contextStack;
   if (precisionWindow?.requested !== undefined)
@@ -247,6 +252,7 @@ function runSlice<T, C>(
       return engine._withTransientPrecision(working, fn);
     return fn();
   } finally {
+    engine._leavePrecision?.(enclosingPrecision);
     engine._evaluationEffects = enclosing;
     if (contextStack !== undefined) engine._evalContextStack = enclosingStack;
     if (precisionWindow?.requested !== undefined)

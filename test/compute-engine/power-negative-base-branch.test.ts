@@ -581,11 +581,10 @@ describe('NEGATIVE BASE: engine CREATION ORDER does not move the branch', () => 
 
   it('a default engine created BEFORE a machine engine still resolves the real branch', () => {
     const bignum = new ComputeEngine();
-    // Constructing this one rewrites the global to 15 under `bignum`'s feet.
+    // Another engine, at machine precision, does not move `bignum`'s.
     const machine = new ComputeEngine();
     machine.precision = 'machine';
     expect(bignum.precision).toBe(21);
-    expect(BigDecimal.precision).toBe(15);
 
     for (const engine of [bignum, machine]) {
       const n = engine.box(['Power', -2, ['Rational', 100, 3]]).N();
@@ -599,7 +598,7 @@ describe('NEGATIVE BASE: engine CREATION ORDER does not move the branch', () => 
     const machine = new ComputeEngine();
     machine.precision = 'machine';
     const bignum = new ComputeEngine();
-    expect(BigDecimal.precision).toBe(21);
+    expect(bignum.precision).toBe(21);
 
     for (const engine of [bignum, machine]) {
       const n = engine.box(['Power', -2, ['Rational', 100, 3]]).N();

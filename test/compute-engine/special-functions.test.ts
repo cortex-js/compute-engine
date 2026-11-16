@@ -2672,7 +2672,7 @@ describe('GAUSS HYPERGEOMETRIC ₂F₁: CANCELLATION AND SLOW CONVERGENCE', () =
     ce.precision = savedPrecision;
     const v = ce.expr(['Hypergeometric2F1', ...args] as any).N().toString();
     expect(digits(v).substring(0, 18)).toBe(digits(ref).substring(0, 18));
-    expect(v.split('e')[1]).toBe(ref.split('e')[1]);
+    expect(Math.abs(Number(v) / Number(ref) - 1)).toBeLessThan(1e-12);
   });
 
   test.each(cases)('50-digit ₂F₁(%j)', (args, ref) => {

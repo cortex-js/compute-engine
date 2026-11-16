@@ -78,13 +78,24 @@ export class EngineBoxingState<Scope extends object> {
     return ops.length === 0 ? undefined : ops[ops.length - 1].env;
   }
 
+  /** The numeric configuration of the engine that owns this state: an
+   * operation runs at its precision (`enterPrecision`). */
+  numericConfiguration?: {
+    enterPrecision(): number | undefined;
+    leavePrecision(enclosing: number | undefined): void;
+  };
+
   /** Run `fn` with `env` as the environment of the operation in progress,
    * and put back the previous one at the end, also on a throw. */
   withOperation<T>(env: UnitEnvironment, fn: () => T): T {
     this._operations.push({ env, programStatement: false });
+    // Every operation, and every slice of an asynchronous one, runs at the
+    // precision of its engine, whatever other engines did meanwhile.
+    const enclosingPrecision = this.numericConfiguration?.enterPrecision();
     try {
       return fn();
     } finally {
+      this.numericConfiguration?.leavePrecision(enclosingPrecision);
       this._operations.pop();
     }
   }

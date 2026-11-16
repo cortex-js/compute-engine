@@ -17,15 +17,9 @@ function atPrecision(precision: number, fn: (e: ComputeEngine) => void) {
     return;
   }
   const e = new ComputeEngine({ precision });
-  try {
-    fn(e);
-  } finally {
-    // Constructing an engine sets the global precision of big decimals.
-    // Setting the precision of the shared engine to its current value does
-    // not reset it, so it is set to another value first.
-    ce.precision = 30;
-    ce.precision = 'auto';
-  }
+  // `exactOrder` is not an entry point of the engine: it reads the ambient
+  // precision of the big decimals, which the engine puts in place for `fn`.
+  e._withTransientPrecision(precision, () => fn(e));
 }
 
 const EPSILON: MathJsonExpression = ['Power', 10, -30];
