@@ -66,6 +66,24 @@
 
 ### Bug Fixes
 
+- **`EllipticF(φ, m)` and the two-operand `EllipticE(φ, m)` no longer overflow
+  far from the real axis.** `EllipticF(0.3 + 400i, 0.5)` was
+  `ComplexInfinity` (1.8540746773i), `EllipticF(355i, 2)` was `0`
+  (1.3110287771i), `EllipticE(0.3 + 300i, 0.5)` was `ComplexInfinity`
+  (2.03e129 + 6.56e129i), and `F(φ|0)` and `E(φ|0)`, which are `φ`, lost
+  digits from `Im φ ≈ −10` and went to infinity from about `Im φ = −20`. `cos φ`, its square and `sin³ φ` left the
+  double range at `|Im φ|` near 355 (F) and 236 (E), long before the value does.
+  Above `|Im φ| = 20` the Carlson arguments are now rescaled by the positive
+  real `e^(−2 Im φ)`, which keeps their phases and so the branch cuts, and
+  `Im φ < 0` follows by oddness. `F(φ|0) = E(φ|0) = φ`. `EllipticE` stays
+  unevaluated where its value leaves the double range, near `|Im φ| = 709`
+  for `m = 1` and later for a smaller `|m|`: `EllipticE(708i, 1)` is
+  `i·sinh(708)`, and `EllipticE(0.3 + 715i, 10^(-8))` is
+  `4.899e305 + 1.584e306i`. Against mpmath over 3,200 points (`|Im φ|` from 1
+  to 1e4, `Re φ` across several periods, real and complex `m` on both sides of
+  0 and 1) the relative error is under 6e-16 for F and 7e-15 for E. (#605,
+  PR #606, contributed by [enumeratio](https://github.com/enumeratio))
+
 - **`Arccot` of a complex number next to a negative real number is next to
   the value at that real number** ([#563](https://github.com/cortex-js/compute-engine/issues/563)).
   `Arccot(-3)` is `2.8198…`, in the range `(0, π)` of the engine, but

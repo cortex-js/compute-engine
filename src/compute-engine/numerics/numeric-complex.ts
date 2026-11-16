@@ -4543,6 +4543,28 @@ export function ellipticEComplex(m: Complex): Complex {
 
 const CARLSON_TOL_C = 1e-24;
 
+/** Two arguments are the same for the equal-argument shortcuts of R_C and
+ * R_F when they agree relative to their size. `Complex.equals()` has an
+ * absolute tolerance of 1e-15, which reads two distinct arguments of size
+ * 1e-15 as equal: the rescaled incomplete integrals (`ellipticScaledImag()`)
+ * pass λ and λ − m·ŝ², which differ by about |m|/4. The test is by
+ * component, so no modulus overflows for finite parts near the double
+ * limit. Two arguments whose imaginary parts have opposite signs are never
+ * the same: a relative test would join conjugates on the two sides of the
+ * cut (`−1e16 ± i`), and the general iteration handles close ones. */
+function sameArgument(a: Complex, b: Complex): boolean {
+  const size = Math.max(
+    Math.abs(a.re),
+    Math.abs(a.im),
+    Math.abs(b.re),
+    Math.abs(b.im)
+  );
+  const tol = 1e-15 * size;
+  // two points on opposite sides of the cut on (−∞, 0) are not the same
+  if (a.im * b.im < 0) return false;
+  return Math.abs(a.re - b.re) <= tol && Math.abs(a.im - b.im) <= tol;
+}
+
 /** Carlson R_C(x, y), complex, principal value for y on (−∞, 0). */
 export function carlsonRCComplex(x: Complex, y: Complex): Complex {
   if (x.isNaN() || y.isNaN()) return C_NAN;
@@ -4554,7 +4576,7 @@ export function carlsonRCComplex(x: Complex, y: Complex): Complex {
       .div(x.sub(y))
       .sqrt()
       .mul(carlsonRCComplex(x.sub(y), y.neg()));
-  if (x.equals(y)) return x.sqrt().inverse();
+  if (sameArgument(x, y)) return x.sqrt().inverse();
   // Near-degenerate y ≈ x: series Σₖ (−e)ᵏ/(2k+1) (same conditioning
   // issue as the real kernel: acos at arguments → 1)
   const e = y.sub(x).div(x);
@@ -4579,9 +4601,9 @@ export function carlsonRCComplex(x: Complex, y: Complex): Complex {
 /** Carlson R_F(x, y, z), complex (cut plane). */
 export function carlsonRFComplex(x: Complex, y: Complex, z: Complex): Complex {
   if (x.isNaN() || y.isNaN() || z.isNaN()) return C_NAN;
-  if (y.equals(z)) return carlsonRCComplex(x, y);
-  if (x.equals(z)) return carlsonRCComplex(y, x);
-  if (x.equals(y)) return carlsonRCComplex(z, x);
+  if (sameArgument(y, z)) return carlsonRCComplex(x, y);
+  if (sameArgument(x, z)) return carlsonRCComplex(y, x);
+  if (sameArgument(x, y)) return carlsonRCComplex(z, x);
   if ((x.isZero() ? 1 : 0) + (y.isZero() ? 1 : 0) + (z.isZero() ? 1 : 0) > 1)
     return new Complex(Infinity, 0);
 
@@ -4948,9 +4970,82 @@ export function carlsonRDComplex(x: Complex, y: Complex, z: Complex): Complex {
 // quasi-periodic extension for |Re φ| > π/2.
 //
 
+/** |Im φ| above which the incomplete integrals take the rescaled form: `cos φ`
+ * and `sin φ` grow like e^|Im φ| and their squares and cubes leave the double
+ * range near 355 (F) and 236 (E), long before the value does. */
+const ELLIPTIC_SCALED_IM = 20;
+
+/** k·R_D(x, y, z) for z = e^(−2t), given t: the first duplication step takes
+ * the root e^(−t) directly, because z underflows past t = 372 while its root
+ * does not. Its first term, 3k/(√z (z + λ)), grows like e^t: k multiplies it
+ * before the division by √z, which is two products by e^(t/2), so the term
+ * stays finite while k·R_D does (E(708i | 1) = i·sinh(708)) and keeps its
+ * precision where e^(−t) is subnormal (t > 708). */
+function carlsonRDGivenRootZ(
+  k: Complex,
+  x: Complex,
+  y: Complex,
+  z: Complex,
+  t: number
+): Complex {
+  const sz = Math.exp(-t);
+  const h = Math.exp(t / 2);
+  const sx = x.sqrt();
+  const sy = y.sqrt();
+  const lm = sx.mul(sy).add(sx.mul(sz)).add(sy.mul(sz));
+  const zl = z.add(lm);
+  // R_D(x, y, z) = 3/(√z (z + λ)) + R_D(x′, y′, z′)/4 (DLMF 19.26.19)
+  return k
+    .mul(3)
+    .div(zl)
+    .mul(h)
+    .mul(h)
+    .add(
+      k.mul(
+        carlsonRDComplex(x.add(lm).div(4), y.add(lm).div(4), zl.div(4)).div(4)
+      )
+    );
+}
+
+/**
+ * F(φ|m), or E(φ|m) with `incompleteE`, for |Re φ| ≤ π/2 and a large |Im φ|.
+ * For t = Im φ > 0 write cos φ = eᵗĉ, sin φ = eᵗŝ with
+ * ĉ = e^(−iRe φ)(1 + w)/2, ŝ = i·e^(−iRe φ)(1 − w)/2, w = e^(2iφ), and scale
+ * the Carlson arguments by the positive real λ = |w| = e^(−2t) (R_F has degree
+ * −1/2, R_D −3/2):
+ *   F = ŝ·R_F(ĉ², λ − mŝ², λ)
+ *   E = F − (m/3)·ŝ³·R_D(ĉ², λ − mŝ², λ)
+ * Every argument is O(1). A positive real factor keeps their phases, so the
+ * branch cuts are those of the unscaled arguments. Im φ < 0 by oddness.
+ */
+function ellipticScaledImag(
+  phi: Complex,
+  m: Complex,
+  incompleteE: boolean
+): Complex {
+  if (phi.im < 0) return ellipticScaledImag(phi.neg(), m, incompleteE).neg();
+  const t = phi.im;
+  const lam = Math.exp(-2 * t);
+  const x = phi.re;
+  const half = new Complex(Math.cos(x) / 2, -Math.sin(x) / 2); // e^(−ix)/2
+  const w = new Complex(lam * Math.cos(2 * x), lam * Math.sin(2 * x));
+  const ch = half.mul(C_ONE.add(w));
+  const sh = half.mul(C_ONE.sub(w)).mul(new Complex(0, 1));
+  const cc = ch.mul(ch);
+  const yh = new Complex(lam, 0).sub(m.mul(sh).mul(sh));
+  const L = new Complex(lam, 0);
+  const F = sh.mul(carlsonRFComplex(cc, yh, L));
+  if (!incompleteE) return F;
+  // E grows like e^t, and leaves the double range at a t that depends on m
+  // (near 709 for m = 1, past 715 for m = 1e-8): NaN (unevaluated) there.
+  const E = F.sub(carlsonRDGivenRootZ(m.div(3).mul(sh.pow(3)), cc, yh, L, t));
+  return Number.isFinite(E.re) && Number.isFinite(E.im) ? E : C_NAN;
+}
+
 /** Incomplete elliptic integral of the first kind F(φ|m), complex. */
 export function ellipticFComplex(phi: Complex, m: Complex): Complex {
   if (phi.isNaN() || m.isNaN()) return C_NAN;
+  if (m.isZero()) return phi;
   if (Math.abs(phi.re) > Math.PI / 2) {
     // F(φ + kπ|m) = F(φ|m) + 2k·K(m)
     const k = Math.round(phi.re / Math.PI);
@@ -4958,6 +5053,8 @@ export function ellipticFComplex(phi: Complex, m: Complex): Complex {
     if (K.isNaN() || !Number.isFinite(K.re)) return C_NAN;
     return K.mul(2 * k).add(ellipticFComplex(phi.sub(k * Math.PI), m));
   }
+  if (Math.abs(phi.im) > ELLIPTIC_SCALED_IM)
+    return ellipticScaledImag(phi, m, false);
   const s = phi.sin();
   const c = phi.cos();
   const y = C_ONE.sub(m.mul(s).mul(s));
@@ -4967,6 +5064,7 @@ export function ellipticFComplex(phi: Complex, m: Complex): Complex {
 /** Incomplete elliptic integral of the second kind E(φ|m), complex. */
 export function ellipticEIncompleteComplex(phi: Complex, m: Complex): Complex {
   if (phi.isNaN() || m.isNaN()) return C_NAN;
+  if (m.isZero()) return phi;
   if (Math.abs(phi.re) > Math.PI / 2) {
     // E(φ + kπ|m) = E(φ|m) + 2k·E(m)
     const k = Math.round(phi.re / Math.PI);
@@ -4983,6 +5081,8 @@ export function ellipticEIncompleteComplex(phi: Complex, m: Complex): Complex {
   // complete kernel passes an exact 0 and has the m = 1 value.
   if (phi.im === 0 && Math.abs(Math.abs(phi.re) - Math.PI / 2) < 1e-15)
     return ellipticEComplex(m).mul(Math.sign(phi.re));
+  if (Math.abs(phi.im) > ELLIPTIC_SCALED_IM)
+    return ellipticScaledImag(phi, m, true);
   const s = phi.sin();
   const c = phi.cos();
   const cc = c.mul(c);
