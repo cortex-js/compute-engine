@@ -103,6 +103,9 @@ const CASES: Case[] = [
   C(['Power', x, ['Rational', 2, 3]], [0, -8]), C(['Power', x, ['Rational', -2, 3]], [0, -8]),
   C(['Power', x, ['Rational', 1, 3]], [0, -8]), C(['Power', x, ['Rational', 3, 2]], [0]),
   C(['Power', x, ['Rational', 5, 3]], [0, -2]),
+  C(['Power', x, ['Rational', -3, 2]], [0]), C(['Power', x, ['Rational', 3, 4]], [0]),
+  C(['Power', ['Power', x, 2], ['Rational', 3, 2]], [0]),
+  C(['Power', ['Ln', ['Abs', x]], ['Rational', 9, 2]], [1, -1]),
   C(['Power', x, 0.2], [0, -8]), C(['Power', x, 2.5], [0, -8]), C(['Power', x, 1.5], [0]),
   C(['Power', x, 0.75], [0, -2]), C(['Power', x, 0.6], [0, -8]),
   C(['Power', x, y], [0, 2]), C(['Power', 2, x]), C(['Power', ['Abs', y], x], [0]),
@@ -176,6 +179,9 @@ const CASES: Case[] = [
   // Batch 4: a decimal literal is its double
   C(['Add', x, 1.8]), C(['Subtract', y, 1.8]), C(['Multiply', 1.8, x, y]),
   C(['Add', ['Multiply', 0.3, x], 0.7]), C(['Less', x, 1.8], [1.8]),
+  // A negation read once is the subtrahend of `sub`.
+  C(['Add', ['Negate', x], y]), C(['Add', ['Negate', x], ['Negate', y]]),
+  C(['Add', ['Negate', ['Abs', x]], -3]), C(['Add', ['Negate', x], ['Multiply', 2, 'Pi']]),
   C(['GreaterEqual', ['Multiply', 0.1, x], 0.3], [3]),
   C(['Divide', 1, ['Add', ['Multiply', 0.5, ['Sin', ['Multiply', 2, x]]], 0.5]], [-0.7853981633974483]),
   // Batch 4: a float exponent read as the interpreter reads it
@@ -209,9 +215,6 @@ const MACHINE_CASES: Case[] = CASES.filter((c) => {
  *  box: an other kind, or a bound wider by more than 4 ulps. */
 // prettier-ignore
 const EXCEPTIONS: string[] = [
-  // `Root(x, 2)^3`: the root and the power each round outward, 5 ulps at
-  // the upper end where `_IA.powRational` gives the tighter enclosure.
-  JSON.stringify(['Power', x, ['Rational', 3, 2]]),
   // The existing target reads `Mod(1, 1/10)` as a jump; the mode folds it
   // to the exact 0.
   JSON.stringify(['Add', ['Mod', 1, ['Rational', 1, 10]], x]),
@@ -602,8 +605,10 @@ describe('the interval mode: spellings', () => {
     [['Power', x, 3.87], '_IA.pow(_.x, { lo: 3.87, hi: 3.87 }.lo)'],
     // A base that is provably non-negative: the principal power.
     [['Power', ['Abs', ['Subtract', x, 1]], 0.2], '_IA.pow(_IA.abs(_IA.add(_.x, { lo: -1, hi: -1 })), { lo: 0.2, hi: 0.2 }.lo)'],
-    // An exact rational: the root, then the integer power.
+    // An exact rational of odd denominator: the root, then the integer
+    // power; of a denominator 2, the principal power.
     [['Power', x, ['Rational', 11, 5]], '_IA.pow(_IA.nthRootInterval(_.x, { lo: 5, hi: 5 }), 11)'],
+    [['Power', x, ['Rational', 3, 2]], '_IA.pow(_.x, { lo: 1.5, hi: 1.5 }.lo)'],
     [['Add', x, 1.8], '{ lo: 1.8, hi: 1.8 }'],
   ])('%j', (json, spelling) => {
     const r = compile(ce.box(json as never), {
@@ -674,5 +679,37 @@ describe('the interval mode at machine precision', () => {
     const k = r.run({ x: { lo: 0.5, hi: 0.5 } });
     expect(k.value!.lo).toBeLessThanOrEqual(v);
     expect(k.value!.hi).toBeGreaterThanOrEqual(v);
+  });
+});
+
+describe('the interval mode: a known limitation', () => {
+  // The known-limitations line of `docs/COMPILATION-MODEL.md` for
+  // `Power(x, Rational(5, 6))` on `interval-js`: at machine precision the
+  // interpreter computes the power of the double 5/6, and the mode's root
+  // of degree 6 then fifth power encloses the exact power, which is not
+  // that value at `x = 1e10`. A fix or a new miss fails here.
+  test('x^(5/6) at machine precision misses at x = 1e10 and contains at x = 5.166137', () => {
+    const machine = new ComputeEngine();
+    machine.precision = 'machine';
+    try {
+      machine.declare('x', 'real');
+      const e = machine.box(['Power', 'x', ['Rational', 5, 6]] as never);
+      const r = compile(e, {
+        to: 'interval-js',
+        profile: 'ir',
+        fallback: false,
+      } as never) as unknown as {
+        run: (b: Box) => { value: { lo: number; hi: number } };
+      };
+      const contains = (x: number) => {
+        const v = e.subs({ x: machine.number(x) } as never).N().re;
+        const { lo, hi } = r.run({ x: { lo: x, hi: x } }).value;
+        return lo <= v && v <= hi;
+      };
+      expect(contains(1e10)).toBe(false);
+      expect(contains(5.166137)).toBe(true);
+    } finally {
+      BigDecimal.precision = ce.precision;
+    }
   });
 });

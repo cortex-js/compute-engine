@@ -472,7 +472,10 @@ does not end). The passes `fold` (a double is not an enclosure) and
 `strength` (`x·x` is wider than `x^2` over an interval) are off; two passes
 of the mode run, `narrow` first and `plain` last.
 
-Spelled: the arithmetic (`div.q` is `_IA.div`), `Power` (`pow`, also of
+Spelled: the arithmetic (`div.q` is `_IA.div`; an `add` of a `neg` that
+has no other use is `_IA.sub`, with the `neg` removed after the passes,
+`subtractions()`: `x - y` is `_IA.sub(_.x, _.y)`, `-x + y` is
+`_IA.sub(_.y, _.x)`, as on the existing target), `Power` (`pow`, also of
 integers, is `_IA.powReal`; a power by the exact constant 2 is
 `_IA.square`, the operation `square` that the lowering makes; a float
 literal exponent below), `Root` (`_IA.nthRootInterval`), `Sqrt`, `Abs`, `Exp`,
@@ -691,6 +694,10 @@ it at run time.
 
 `Power(x, p/q)` with a literal rational exponent, `q > 1`, is lowered as
 `Root(x, q)^p`, for any sign of `p`: `x^(2/3)` over `[-8, -1]` is `[1, 4]`.
+When `q` is a power of 2, `p/q` is a double and the power has no real
+value over a negative base: it is `pow.principal` of that double, one
+kernel, as on the existing target (`(x^2)^(3/2)` is `_IA.pow` of
+`_IA.square(_.x)` and 1.5).
 A float literal exponent that is not an integer is its double `e`, read
 when the program is lowered as the interpreter reads it
 (`realPowerBranchTerms()`), which takes only the sign from the reading:

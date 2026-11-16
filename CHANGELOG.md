@@ -213,7 +213,10 @@
   is `entire`. A decimal literal is the point at its double, as in the
   JavaScript code (`x + 1.8` adds the point `[1.8, 1.8]`), and a float
   exponent is read as the interpreter reads it: `x^0.2` is the real root of
-  a negative `x`, `x^1.5` has no value there. `Binomial` and `Choose` of
+  a negative `x`, `x^1.5` has no value there. A difference is one
+  `_IA.sub`, and a rational exponent whose denominator is a power of 2
+  (`x^(3/2)`) is the power of its double, as on the existing target, with
+  its bounds. `Binomial` and `Choose` of
   real operands compile (`_IA.binomial`). A comparison that the engine
   decides for every value of its inputs (`(x + 1)^2 < 0` or `Equal(x, x)`
   of a real `x`) is that verdict, as on the existing target. A value that

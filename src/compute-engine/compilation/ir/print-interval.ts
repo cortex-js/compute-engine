@@ -51,6 +51,8 @@ import {
   outsOf,
   recursiveFunctions,
   regionsOf,
+  useIndex,
+  type Instr,
   type Program,
   type Region,
   type V,
@@ -134,7 +136,8 @@ const fill =
  * (`printInterval()`); the powers of a float literal that the lowering
  * reads are `_IA.powRealBranch` of the double (`pow.branch` for an odd
  * numerator, `pow.branch.even`) and `_IA.pow` of the double
- * (`pow.principal`), as the existing target;
+ * (`pow.principal`, also of an exact rational exponent whose denominator
+ * is a power of 2), as the existing target;
  * `root` `_IA.nthRootInterval`; `div.q` is `div`; `deg` the product by an
  * enclosure of π and the quotient by 180. A constant is a point, or for a
  * literal marked `inexact` the enclosure of that many ulps on each side;
@@ -241,7 +244,9 @@ export const JS_INTERVAL: Syntax = Object.freeze({
 /** The rows of the mode: `Binomial` and `Choose` with a real signature
  *  too (`_IA.binomial`; the other targets have the integer one only),
  *  `OPERATORS`, `square`, which the lowering makes of a power by the
- *  constant 2, the powers of a float exponent read at compile time, the
+ *  constant 2, the powers of a float exponent read at compile time (and
+ *  `pow.principal` of a rational exponent whose denominator is a power of
+ *  2), the
  *  clamps `atleast` and `atmost`, which the pass `narrow` makes, and the
  *  rows of the pass `plain`. */
 export const INTERVAL_ROWS: readonly OperatorRow[] = Object.freeze([
@@ -267,7 +272,9 @@ export const INTERVAL_ROWS: readonly OperatorRow[] = Object.freeze([
     threads: true,
     effect: 'pure',
   } as OperatorRow),
-  // A power by a float literal that the lowering reads at compile time.
+  // A power by a float literal that the lowering reads at compile time,
+  // and `pow.principal` of a rational exponent whose denominator is a
+  // power of 2.
   ...['pow.branch', 'pow.branch.even', 'pow.principal'].map((op) =>
     deepFreeze({
       arity: 2,
@@ -303,6 +310,57 @@ export function dropClosedForms(
       regionsOf(i).forEach(walk);
     });
   p.functions.forEach((f) => walk(f.body));
+}
+
+/** `p` with each `add` that has an operand `neg` of no other use written
+ *  `sub` and the `neg` removed, a copy (`p` is unchanged):
+ *  `Add(a, Negate(b))` is `_IA.sub(a, b)`, `Add(Negate(a), b)` is
+ *  `_IA.sub(b, a)`, one kernel where there were two, as the existing target
+ *  writes them. `sub` gives the endpoints of `add` of `negate` in every
+ *  kind and rounding (`interval/arithmetic.ts`); an inlined operand is
+ *  pure, so the order of the two is not observed. */
+function subtractions(p: Program): Program {
+  const { uses, def } = useIndex(p);
+  const negation = (v: V) => {
+    const i = def.get(v);
+    return i?.k === 'op' &&
+      (i.op === 'neg' || i.op === 'neg.int') &&
+      uses.get(v) === 1
+      ? i
+      : undefined;
+  };
+  const dropped = new Set<Instr>();
+  const subs = new Map<Instr, Instr>();
+  const walk = (r: Region): void => {
+    for (const i of r.body) {
+      regionsOf(i).forEach(walk);
+      if (i.k !== 'op' || (i.op !== 'add' && i.op !== 'add.int')) continue;
+      const k = negation(i.args[1]) ? 1 : negation(i.args[0]) ? 0 : -1;
+      if (k < 0) continue;
+      const n = negation(i.args[k])!;
+      dropped.add(n);
+      const op = i.op === 'add' ? 'sub' : 'sub.int';
+      subs.set(i, { ...i, op, args: [i.args[1 - k], n.args[0]] });
+    }
+  };
+  p.functions.forEach((f) => walk(f.body));
+  if (subs.size === 0) return p;
+  const copy = (r: Region): Region => ({
+    ...r,
+    body: r.body.filter((i) => !dropped.has(i)).map(instr),
+  });
+  const instr = (i: Instr): Instr =>
+    i.k === 'if'
+      ? { ...i, then: copy(i.then), else: copy(i.else) }
+      : i.k === 'loop'
+        ? { ...i, body: copy(i.body) }
+        : i.k === 'region'
+          ? { ...i, regions: i.regions.map(copy) }
+          : (subs.get(i) ?? i);
+  return {
+    ...p,
+    functions: p.functions.map((f) => ({ ...f, body: copy(f.body) })),
+  };
 }
 
 /** The construct of `p` that the mode does not compile yet (a `Loop`,
@@ -449,9 +507,10 @@ export function printInterval(
   // runtime has its own number library, whose precision says nothing about
   // the engine's (`CompilationResult.reconstructionDigits`).
   const pow = `_IA.powReal($0, $1, ${realPowerReconstructionDigits()})`;
-  const plan = computedOnce(p, rows);
+  const q = subtractions(p);
+  const plan = computedOnce(q, rows);
   const printed = printProgram(
-    p,
+    q,
     {
       ...syntax,
       ops: { ...syntax.ops, pow },

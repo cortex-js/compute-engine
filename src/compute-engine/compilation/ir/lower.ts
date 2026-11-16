@@ -900,7 +900,8 @@ export function lower(
       case 'Power': {
         // The interval mode: `x^(p/q)` of a literal rational exponent is
         // the integer power `p` of the root of degree `q`, which the kernels
-        // enclose tightly for a negative `x` too.
+        // enclose tightly for a negative `x` too (a `q` that is a power of 2
+        // below).
         const nv = isNumber(e.ops[1]) ? e.ops[1].numericValue : undefined;
         // A float literal that is not an integer is its double `e`, read
         // as the interpreter reads it (`realPowerBranchTerms()`), now: over
@@ -947,6 +948,14 @@ export function lower(
             ? apply(e, rowOfOp(rows, 'square')!.row, [x])
             : apply(e, row('Power'), [x, k]);
         }
+        // A denominator that is a power of 2: `p/q` is a double, and the
+        // power has no real value over a negative base. The principal power
+        // of the double, one kernel, as the existing target.
+        if (2 ** Math.round(Math.log2(pq[1])) === pq[1])
+          return apply(e, rowOfOp(rows, 'pow.principal')!.row, [
+            value(e.ops[0])!,
+            b.constant(pq[0] / pq[1], 'real'),
+          ]);
         const root = apply(e, row('Root'), [
           value(e.ops[0])!,
           b.constant(pq[1], 'integer'),

@@ -345,7 +345,7 @@ describe('the interval mode, integrals: the code', () => {
         '    return _IA.sin(v6);',
         '  };',
         '  const v8 = _IA.integrateClosed(() => {',
-        '    return _IA.add(_IA.negate(_IA.cos(_.x)), { lo: 1, hi: 1 });',
+        '    return _IA.sub({ lo: 1, hi: 1 }, _IA.cos(_.x));',
         '  }, v8_f, { lo: 0, hi: 0 }, _.x, 256);',
         '  return v8;',
         '})()',

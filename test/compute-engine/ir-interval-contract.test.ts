@@ -8,6 +8,7 @@
 import { ComputeEngine, INTERVAL_KIND } from '../../src/compute-engine';
 import { BigDecimal } from '../../src/big-decimal';
 import { compile } from '../../src/compile';
+import { compileSlice } from '../../src/compute-engine/compilation/ir/index';
 import { createIntervalRuntime, IntervalArithmetic } from '../../src/interval';
 import { CompileDeclineError } from '../../src/compute-engine/compilation/diagnostics';
 import type { Expression } from '../../src/compute-engine/global-types';
@@ -1242,6 +1243,132 @@ describe('the interval mode: batch 7, the order of a sum', () => {
     expect(mode(['Sum', ['List', 'x']]).run({ x: { lo: -1, hi: 2 } })).toEqual({
       kind: 'interval',
       value: { lo: -1, hi: 2 },
+    });
+  });
+});
+
+describe('the interval mode: a subtraction and a power of a rational exponent', () => {
+  const old = (json: unknown) =>
+    compile(ce.box(json as never), {
+      to: 'interval-js',
+      fallback: false,
+    } as never) as unknown as Result;
+  const text = (json: unknown, to: 'javascript' | 'glsl') =>
+    (
+      compile(ce.box(json as never), {
+        to,
+        profile: 'ir',
+        fallback: false,
+      } as never) as unknown as Result
+    ).code;
+
+  // The interval text, the JavaScript and the GLSL text, which the mode's
+  // spellings do not change.
+  // prettier-ignore
+  test.each([
+    // A negation read once is the subtrahend of `sub`, in either order, as
+    // the existing target writes it.
+    [['Subtract', 'x', 'y'], '_IA.sub(_.x, _.y)', '(() => {\n  return (_.x + (-_.y));\n})()', '(x + (-y))'],
+    [['Add', ['Negate', 'x'], 'y'], '_IA.sub(_.y, _.x)', '(() => {\n  return ((-_.x) + _.y);\n})()', '((-x) + y)'],
+    [['Add', ['Negate', 'x'], ['Negate', 'y']], '_IA.sub(_IA.negate(_.x), _.y)', '(() => {\n  return ((-_.x) + (-_.y));\n})()', '((-x) + (-y))'],
+    [['Add', 'x', 'y', ['Negate', 'n']], '_IA.add(_IA.sub(_.x, _.n), _.y)', '(() => {\n  return (((-_.n) + _.x) + _.y);\n})()', '(((-n) + x) + y)'],
+    // A negation read twice stays.
+    [['Add', ['Exp', ['Negate', 'x']], ['Negate', 'x']], '(() => {\n  const v1 = _IA.negate(_.x);\n  return _IA.add(v1, _IA.exp(v1));\n})()', '(() => {\n  const v1 = (-_.x);\n  return (v1 + Math.exp(v1));\n})()', 'float v1 = (-x);\nreturn (v1 + exp(v1));'],
+    // A denominator that is a power of 2: the principal power of the double.
+    [['Power', ['Power', 'x', 2], ['Rational', 3, 2]], '_IA.pow(_IA.square(_.x), { lo: 1.5, hi: 1.5 }.lo)', '(() => {\n  return _SYS.ir.pow((_.x * _.x), 1.5);\n})()', '_gpu_ir_pow((x * x), 1.5)'],
+    [['Power', 'x', ['Rational', -3, 2]], '_IA.pow(_.x, { lo: -1.5, hi: -1.5 }.lo)', '(() => {\n  return _SYS.ir.pow(_.x, (-1.5));\n})()', '_gpu_ir_pow(x, (-1.5))'],
+    [['Power', 'x', ['Rational', 3, 4]], '_IA.pow(_.x, { lo: 0.75, hi: 0.75 }.lo)', '(() => {\n  return _SYS.ir.pow(_.x, 0.75);\n})()', '_gpu_ir_pow(x, 0.75)'],
+    // Another denominator: the root, then the integer power.
+    [['Power', 'x', ['Rational', 2, 3]], '_IA.pow(_IA.nthRootInterval(_.x, { lo: 3, hi: 3 }), 2)', '(() => {\n  return _SYS.ir.pow(_.x, 0.6666666666666666);\n})()', '_gpu_ir_pow(x, 0.6666667)'],
+    [['Power', 'x', ['Rational', 5, 6]], '_IA.pow(_IA.nthRootInterval(_.x, { lo: 6, hi: 6 }), 5)', '(() => {\n  return _SYS.ir.pow(_.x, 0.8333333333333334);\n})()', '_gpu_ir_pow(x, 0.8333333)'],
+  ])('%j', (json, interval, js, glsl) => {
+    expect(inlined(mode(json))).toBe(interval);
+    expect(text(json, 'javascript')).toBe(js);
+    expect(text(json, 'glsl')).toBe(glsl);
+  });
+
+  test.each([
+    [['Subtract', 'x', 'y'], { x: { lo: 1, hi: 2 }, y: { lo: 0.1, hi: 0.3 } }],
+    [['Add', ['Negate', 'x'], 'y'], { x: { lo: 1, hi: 2 }, y: { lo: 0.1, hi: 0.3 } }],
+    [['Power', 'x', ['Rational', 3, 2]], { x: { lo: -1, hi: 4 } }],
+    [['Power', 'x', ['Rational', 3, 2]], { x: { lo: -4, hi: -1 } }],
+    [['Power', 'x', ['Rational', -3, 2]], { x: { lo: 0, hi: 0 } }],
+    [['Power', 'x', ['Rational', -3, 2]], { x: { lo: -1, hi: 1 } }],
+  ])('the result of the existing target: %j over %j', (json, box) => {
+    expect(mode(json).run(box)).toEqual(old(json).run(box));
+  });
+
+  test('the program that compileSlice() returns keeps its add and neg', () => {
+    const s = compileSlice(ce.box(['Subtract', 'x', 'y'] as never), {
+      target: 'javascript',
+      mode: 'interval',
+    });
+    expect(s.code).toBe('_IA.sub(_.x, _.y)');
+    const ops = s.program.functions[0].body.body.map((i) =>
+      i.k === 'op' ? i.op : i.k
+    );
+    expect(ops).toEqual(['neg', 'add']);
+    expect(text(['Subtract', 'x', 'y'], 'javascript')).toBe(
+      '(() => {\n  return (_.x + (-_.y));\n})()'
+    );
+  });
+
+  describe('integers, a loop and a negation read twice', () => {
+    const engine = new ComputeEngine();
+    for (const v of ['x', 'y', 'z']) engine.declare(v, 'real');
+    for (const v of ['j', 'm']) engine.declare(v, 'integer');
+    const both = (json: unknown) => {
+      const expr = engine.box(json as never);
+      return [
+        compile(expr, { ...IR, fallback: false } as never),
+        compile(expr, { to: 'interval-js', fallback: false } as never),
+      ] as unknown as [Result, Result];
+    };
+    const boxes = [
+      { x: { lo: 0.1, hi: 0.4 }, y: { lo: 1, hi: 2 }, z: { lo: -1, hi: 0 }, j: 3, m: -2 },
+      { x: { lo: -2, hi: 1 }, y: 0.5, z: 3, j: { lo: 5, hi: 5 }, m: 7 },
+    ];
+    /** The result of the mode is the existing target's, or inside it. */
+    const within = (json: unknown) => {
+      const [r, was] = both(json);
+      for (const b of boxes) {
+        const [a, o] = [r.run(b), was.run(b)];
+        expect(a.kind).toBe(o.kind);
+        expect(a.value.lo >= o.value.lo && a.value.hi <= o.value.hi).toBe(true);
+      }
+      return r;
+    };
+
+    test('an integer subtraction is sub.int, spelled _IA.sub', () => {
+      expect(inlined(within(['Subtract', 'j', 'm']))).toBe('_IA.sub(_.j, _.m)');
+    });
+
+    test('a negation in a loop body, and one outside the loop read in it', () => {
+      const inLoop = within(['Sum', ['Add', ['Negate', ['Sin', 'x']], 'k'], ['Limits', 'k', 1, 3]]);
+      // The pass `invariants` computes `sin(x)` before the loop, and the
+      // negation with it: the subtraction reads it there.
+      expect(inLoop.code).toContain('const v5 = _IA.sin(_.x);');
+      expect(inLoop.code).toContain('_IA.sub({ lo: v3, hi: v3 }, v5)');
+      expect(inLoop.code).not.toContain('negate');
+      const outside = within([
+        'Block',
+        ['Declare', 't', "'real'", ['Negate', ['Sin', 'x']]],
+        ['Sum', ['Add', 't', 'k'], ['Limits', 'k', 1, 3]],
+      ]);
+      expect(outside.code).toContain('const v1 = _IA.sin(_.x);');
+      expect(outside.code).toContain('_IA.sub({ lo: v6, hi: v6 }, v1)');
+      expect(outside.code).not.toContain('negate');
+    });
+
+    test('a negation read twice stays, and both adds', () => {
+      const r = within([
+        'Multiply',
+        ['Add', ['Negate', ['Sin', 'x']], 'y'],
+        ['Add', ['Negate', ['Sin', 'x']], 'z'],
+      ]);
+      expect(r.code).toBe(
+        '(() => {\n  const v3 = _IA.negate(_IA.sin(_.x));\n  return _IA.mul(_IA.add(_.y, v3), _IA.add(_.z, v3));\n})()'
+      );
     });
   });
 });
