@@ -540,9 +540,14 @@ form. With every verdict decided, each call follows the path of every point
 of the box. A recursion that does not reach its base case throws a
 `RangeError` at the end of the JavaScript stack (`s(x, 2.5)` of "User
 functions", about 1.5 ms, as on the existing target); `run()` answers both
-errors with `entire`. The passes `fold` (a double is not an enclosure) and
-`strength` (`x·x` is wider than `x^2` over an interval) are off; two passes
-of the mode run, `narrow` first and `plain` last.
+errors with `entire`. The pass `fold` runs only its list rules (an element
+of a `list` is that element, an element of an element-wise operation is the
+operation on the elements, an `At` of a constant index in range is an
+`elem`): none of them computes a number, so each value is the one the
+program computed, where an arithmetic fold would give a double, which is not
+an enclosure. The pass `strength` (`x·x` is wider than `x^2` over an
+interval) is off; two passes of the mode run, `narrow` first and `plain`
+last.
 
 Spelled: the arithmetic (`div.q` is `_IA.div`; an `add` of a `neg` that
 has no other use is `_IA.sub`, with the `neg` removed after the passes,
@@ -593,8 +598,8 @@ of the interpreter's rule: the hull of the elements that the integers of
 the index select, `partial` when some select nothing, `empty` when none
 does (`At(List(x, 2x, x^2), Floor(y) + 1)`). The pass `plain` writes an `At`
 of a constant index in range of a stated length as `elem` (the `at` to
-`elem` rewrites of `scalarize` and `fold` do not run in the mode: both
-passes are off). A length is a plain integer of the bound 2^32: the length
+`elem` rewrites of `scalarize` and of the list rules of `fold` run first,
+for a list of a constant length). A length is a plain integer of the bound 2^32: the length
 parameter of an input or of a parameter of a user function, the length
 result of a call, the count of a `filter`, and the count of a `Range`,
 `_IA.rangeCount(lo, hi, step)`, the engine's `rangeCount()` on numbers,
@@ -904,7 +909,34 @@ so `Length(Range(1, n))` makes no list. On GLSL, which has no build, a `Map`
 element in order: a `vecN` or a `float[n]` (`Map(f, L)` of `L: list<real^3>`,
 `Map(f, List(a, b, c))`). The elements of such builds in one program are at most
 4,096; past that, a `Filter`, a `Range` and a list of a run-time length, the
-build declines on GLSL. `Max` and `Min` fold from -∞ and +∞ over all their
+build declines on GLSL. The short lists: in the interval mode, a list of a
+constant length of 1 to 16 elements (`MAX_UNROLLED_LIST` of `index.ts`, the
+option `unrollBuilds` of the lowering and of the passes; 0 on JavaScript,
+and GLSL keeps its 64 for builds) is written out. A build over a source of
+such a length, and a list that `built()` makes (a `Range`, a `Comprehension`
+of several clauses), is the list of its elements, as on GLSL. A reduction of
+such a list is folded through the sums written out (below), from the value
+the loop starts from. One exception: for `Sum`, `Product`, `Max` and `Min`
+(`reduction()`), when that value is still the identity (no scalar operand
+and no list before this one), and the loop's accumulator has the lane of the
+first element, the fold starts at the first element: `Sum(L)` of
+`L: list<real^3>` is `(L₁ + L₂) + L₃`. The identity is an exact point (0 for a
+`Sum`, 1 for a `Product`, ∓∞ for `Max` and `Min`), and the kernel on the
+identity and the first element gives that element or a hull of it one
+outward step wider: the fold from the first element gives the same enclosure
+or a tighter one, never a value outside it. `Reduce(L, f, init)` starts
+from `init`, as its loop does. A list of one element is that element, and
+a list of 0 elements keeps the loop (and the value of `Max` and `Min` of no
+element, NaN). Builds written out are at most 4,096 elements in a program,
+the budget of GLSL: past it, a build keeps its loop in the mode, where GLSL
+declines. `scalarize` writes an
+element-wise operation of such a length one element at a time, the list
+rules of `fold` then read an element of its result as the operation on the
+elements, and `inline` copies a call whose result is such a list ("User
+functions"): `At(S(x), 2)` of `S(t) = Cos(t + List(0, 1, 2))` is
+`cos(x + 1)`, and the two other cosines are not computed. A list of a
+run-time length or of 17 elements or more keeps its loop and its build.
+`Max` and `Min` fold from -∞ and +∞ over all their
 operands, and give NaN when the total count of elements and scalars is 0;
 `Max(x)` and `Min(x)` of one real or integer scalar are `x` (of a boolean or a
 complex number they decline: the interpreter leaves them unevaluated). A
@@ -1565,7 +1597,10 @@ The pass `inline` (`passes.ts`, before `cse` and `invariants`) replaces a call
 in the body of a `loop`, a `build` or a `filter` with a copy of the callee's
 lowered body, so that the passes see the calls it makes; in the interval mode
 also a call of a function that its caller calls twice or more (the pass option
-`inline`, `'loop'` or `'repeated'`, set in `sliceProgram()`). In Tycho's
+`inline`, `'loop'` or `'repeated'`, set in `sliceProgram()`), and a call whose
+result is a list of a constant length of at most 16 elements (the pass option
+`unrollBuilds`; "Lists", the short lists), under the conditions below and the
+budget of the rule `'repeated'`. In Tycho's
 `voronoi-diagram`, `n(x, y, k)` is called at each pass of the loops of `Z`, `v`,
 `u` and `H`, and its copy leaves a call `F(x, y)` of no index, which
 `invariants` moves before the loop (from about 40 µs a call to about 6, the
@@ -1636,6 +1671,9 @@ pass is off; `symbolDeps` still names it (`captures`). The `bigint` mode does no
 - The `fold` pass writes the element of an operation on lists (`elem` of an
   `add` of points) once per list and index in a region and the regions in it,
   not once per path of a shared graph.
+- In the interval mode `scalarize` writes an element-wise operation of at
+  most 16 elements one element at a time (the short lists of "Lists"); a
+  longer one stays element-wise.
 - On GLSL `scalarize` writes an element-wise operation as one expression per
   element for a list of at most 64 elements (`SCALARIZE_LIMIT`); over a longer
   list, an array or a list in storage, the operation declines (`2·E` for

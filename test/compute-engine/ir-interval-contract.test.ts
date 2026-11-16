@@ -1431,8 +1431,11 @@ describe('the interval mode: batch 7, the order of a sum', () => {
   });
 
   test('a sum of a list is added from the first element, as the existing target', () => {
+    // `L` holds 3 elements, a short list: the sum is written out, in
+    // ascending order from the first element (README, "Lists", the short
+    // lists).
     const r = mode(['Sum', 'L']);
-    expect(r.code).toMatch(ascending);
+    expect(r.code).toBe('_IA.add(_IA.add(_.L[0], _.L[1]), _.L[2])');
     expect(r.run({ L: [0.1, 0.2, 0.3] })).toEqual(
       old(['Sum', 'L']).run({ L: [0.1, 0.2, 0.3] })
     );

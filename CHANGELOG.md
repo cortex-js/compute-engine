@@ -470,7 +470,11 @@
   computed once: `2/π · Sum((-1)^i/i · sin(i·x), i = 1..100) + 3` takes 34 µs per
   call, where it took 75 µs in a loop (the existing target: 32 µs). A body
   with a random draw, with a `Loop` or with a call of a recursive function
-  keeps the loop. An integral of one
+  keeps the loop. A list of a constant length of at most 16 elements is
+  written out the same way, in its reductions, its element-wise operations
+  and the calls of a user function that return it, so that only the
+  elements that are read are computed: `At(S(x), 2)` of
+  `S(t) = Cos(t + List(0, 1, 2))` is one cosine. An integral of one
   variable (`Integrate` with one `Limits`, `NIntegrate`) is the enclosure
   of the existing target, with the same number of pieces, or the closed
   form of the engine's antiderivative where the existing target uses one

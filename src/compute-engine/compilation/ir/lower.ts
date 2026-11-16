@@ -222,6 +222,10 @@ export type LowerOptions = {
    *  is written out, its body lowered once per index (`aggregate()` of
    *  `lower-lists.ts`). Default 0: none. */
   readonly unrollSums?: number;
+  /** With `runtimeLengths`: a build, a `Range` or a reduction over a list
+   *  of a constant length of at most this many elements is written out
+   *  (`README.md`, "Lists", the short lists). Default 0: none. */
+  readonly unrollBuilds?: number;
   /** JavaScript, not the interval mode: the numeric derivative of a
    *  derivative with no closed form, and the closed form of a definite
    *  integral in place of the quadrature. */
@@ -2572,6 +2576,7 @@ export function lower(
     budget: options.iterationBudget,
     runtimeLengths: options.runtimeLengths ?? true,
     unrollSums: options.unrollSums ?? 0,
+    unrollBuilds: options.unrollBuilds ?? 0,
     attempt: (f, accept, refund) => {
       const [nodes, begun] = [lowered, fns.begun()];
       const r = trial(() => f(() => lowered - nodes, NODE_LIMIT - nodes));

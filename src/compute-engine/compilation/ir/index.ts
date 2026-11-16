@@ -355,6 +355,10 @@ export type SliceOptions = {
  *  existing targets (`MAX_UNROLLED_CONSTANT_LIST_WIDTH`). */
 const MAX_UNROLLED_SUM = 100;
 
+/** The longest list of a constant length that the interval mode writes
+ *  out (README, "Lists", the short lists). */
+const MAX_UNROLLED_LIST = 16;
+
 /**
  * Mark the inputs `names` and the parameters of the functions they are
  * passed to (to a fixed point) as lists in a `sampler2D`, which have no
@@ -498,6 +502,7 @@ export function sliceProgram(
             Math.floor(options.iterationBudget ?? Infinity)
           )
         : 0,
+    unrollBuilds: interval ? MAX_UNROLLED_LIST : 0,
     vars: Object.keys(options.vars ?? {}),
     objectVars: Object.keys(options.vars ?? {}).filter((n) =>
       readsVarsObject(options.vars![n])
@@ -526,9 +531,10 @@ export function sliceProgram(
       // The interval mode also copies a call made twice by its caller.
       ...(interval
         ? {
-            fold: false,
+            fold: passes.fold && 'lists',
             strength: false,
             inline: passes.inline && 'repeated',
+            unrollBuilds: options.passes === false ? 0 : MAX_UNROLLED_LIST,
           }
         : {}),
       ...(interval && Math.floor(options.iterationBudget ?? Infinity) < 2 ** 32

@@ -19,6 +19,7 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
+import { sliceProgram } from '../../src/compute-engine/compilation/ir/index';
 import { createIntervalRuntime } from '../../src/compute-engine/compilation/interval-runtime';
 import { IntervalArithmetic } from '../../src/compute-engine/interval/index';
 import { nextDown, nextUp } from '../../src/compute-engine/numerics/numeric';
@@ -77,7 +78,7 @@ ce.assign('HH', ce.box(['Function', ['CC', ['Add', ['Abs', ['Add', ['Multiply', 
 ce.assign('RR', ce.box(['Function', ['List', ['Sum', ['Multiply', 'p', ['List', ['Cos', 'r'], ['Negate', ['Sin', 'r']]]]], ['Sum', ['Multiply', 'p', ['List', ['Sin', 'r'], ['Cos', 'r']]]]], 'p', 'r'] as never));
 
 /** The length of each list input of the containment cases. */
-const LENGTHS: Record<string, number> = { L: 4, V: 3, B: 200, P: 2 };
+const LENGTHS: Record<string, number> = { L: 4, V: 3, B: 200, P: 2, U2: 2, W2: 2, U16: 16, U17: 17 };
 
 type Json = unknown;
 type Case = { json: Json; centres?: number[] };
@@ -676,11 +677,12 @@ describe('the interval mode, lists: robustness', () => {
       kind: 'interval',
       value: { lo: 2 + 49_995_000, hi: 2 + 49_995_000 },
     });
-    // The text does not grow with the length of the list.
+    // The text does not grow with the length of the list, past the short
+    // lists (of at most 16 elements, which are written out).
     const small = new ComputeEngine();
     small.declare('x', 'real');
-    small.declare('L', 'list<real^4>');
-    expect(r.code.replace('10000', '4')).toBe(mode(json, small).code);
+    small.declare('L', 'list<real^17>');
+    expect(r.code.replace('10000', '17')).toBe(mode(json, small).code);
   });
 
   test('At of a vector of 90,001 integers', () => {
@@ -694,6 +696,151 @@ describe('the interval mode, lists: robustness', () => {
       value: { lo: 270_000, hi: 270_000 },
     });
     expect(r.code.length).toBeLessThan(200);
+  });
+});
+
+describe('the interval mode, lists: the short lists', () => {
+  // A list of a constant length of at most 16 elements is written out
+  // (README, "Lists", the short lists).
+  ce.declare('U2', 'list<real^2>');
+  ce.declare('W2', 'list<real^2>');
+  ce.declare('U16', 'list<real^16>');
+  ce.declare('U17', 'list<real^17>');
+  const ones = (n: number) => Array.from({ length: n }, (_, k) => k + 1);
+  const fn = (name: string, body: Json, ...params: string[]) =>
+    ce.assign(name, ce.box(['Function', body, ...params] as never));
+  // `ccoc40kfhj`'s shape: an element-wise operation of 3 elements.
+  fn('tri', ['Cos', ['Add', 't', ['List', 0, 1, 2]]], 't');
+  fn('pair', ['List', 't', ['Multiply', 2, 't']], 't');
+  // A loop in the body (a sum of more passes than `unrollSums`).
+  fn('looped', ['List', ['Sum', ['Multiply', 'k', 't'], ['Limits', 'k', 1, 200]], 't'], 't');
+  fn('long', ['Add', 't', ['List', ...ones(17)]], 't');
+  fn('hulled', ['List', ['If', ['Greater', 't', 0], 't', ['Negate', 't']], 't'], 't');
+  ce.declare('cyc', '(real, integer) -> real');
+  fn('cyc', ['If', ['LessEqual', 'm', 0], ['At', ['pair', 't'], 2], ['cyc', ['Add', 't', 1], ['Subtract', 'm', 1]]], 't', 'm');
+
+  /** The compiled `json`, and the failures of containment at the first
+   *  `n` boxes. */
+  const check = (
+    json: Json,
+    n = 24
+  ): [Compiled & { preamble?: string }, string[]] => {
+    const expr = ce.box(json as never);
+    const r = mode(json);
+    const label = JSON.stringify(json);
+    const rnd = random(label.length * 7919 + 17);
+    const failures: string[] = [];
+    for (const b of boxes(expr, [], rnd).slice(0, n))
+      for (const point of pointsOf(b, rnd))
+        failures.push(
+          ...contains(r.run(b), interpret(expr, point), label, JSON.stringify(point))
+        );
+    return [r, failures.slice(0, 5)];
+  };
+  const text = (r: Compiled & { preamble?: string }) =>
+    `${r.code}\n${r.preamble ?? ''}`;
+  const loop = /for \(let (v\d+) = \1_lo; \1 <= \1_hi; \1\+\+\) \{/;
+
+  test('a sum of a list of 2 or of 16 is written out from its first element; of 17 it is a loop', () => {
+    const [r2, f2] = check(['Sum', 'U2']);
+    expect(r2.code).toBe('_IA.add(_.U2[0], _.U2[1])');
+    const [r16, f16] = check(['Sum', 'U16']);
+    expect(r16.code).not.toMatch(loop);
+    expect(r16.code.match(/_IA\.add\(/g)).toHaveLength(15);
+    const [r17, f17] = check(['Sum', 'U17']);
+    expect(r17.code).toMatch(loop);
+    expect([...f2, ...f16, ...f17]).toEqual([]);
+  });
+
+  test('an element-wise product of two short lists, then a Sum', () => {
+    const [r, failures] = check(['Sum', ['Multiply', 'U2', 'W2']]);
+    expect(r.code).toBe(
+      '_IA.add(_IA.mul(_.U2[0], _.W2[0]), _IA.mul(_.U2[1], _.W2[1]))'
+    );
+    expect(failures).toEqual([]);
+  });
+
+  test('At of a constant index of a short list result computes that element only', () => {
+    const [r, failures] = check(['At', ['tri', x], 2]);
+    // The call is copied, and the two other cosines are not computed.
+    expect(r.code).toMatch(/^_IA\.cos\(_IA\.add\(_\.x, v\d+\)\)$/);
+    expect(text(r).match(/_IA\.cos\(/g)).toHaveLength(1);
+    expect(failures).toEqual([]);
+  });
+
+  test('a call whose result is a short list is copied; with a loop in its body or 17 elements, it stays a call', () => {
+    const [pair, f1] = check(['At', ['pair', x], 2]);
+    expect(text(pair)).not.toMatch(/u\d+_pair/);
+    const [looped, f2] = check(['At', ['looped', x], 2]);
+    expect(looped.code).toMatch(/u\d+_looped\(_\.x\)/);
+    const [long, f3] = check(['At', ['long', x], 2]);
+    expect(long.code).toMatch(/u\d+_long\(_\.x\)/);
+    expect([...f1, ...f2, ...f3]).toEqual([]);
+  });
+
+  test('nothing is copied into a function on a cycle of calls', () => {
+    const [r, failures] = check(['cyc', x, 2]);
+    expect(r.code).toMatch(/u\d+_cyc\(_\.x, /);
+    expect(r.preamble).toMatch(/u\d+_pair\(v\d+\)/);
+    expect(failures).toEqual([]);
+  });
+
+  test('a Reduce with an initial value starts from it, written out or in a loop', () => {
+    const failures = [
+      ['Reduce', 'V', 'Add', 10],
+      ['Reduce', 'V', 'Max', 10],
+      ['Reduce', 'V', 'Multiply', 10],
+      ['Reduce', 'V', 'Add', x],
+      ['Reduce', 'U17', 'Add', 10],
+    ].flatMap((json) => check(json)[1]);
+    expect(failures).toEqual([]);
+    expect(mode(['Reduce', 'V', 'Add', 10]).run({ V: [1, 2, 3] })).toEqual({
+      kind: 'interval',
+      value: { lo: 16, hi: 16 },
+    });
+    expect(mode(['Reduce', 'U17', 'Add', 10]).code).toMatch(loop);
+  });
+
+  test('three levels of builds of 16 elements: the inner ones past the cap keep their loop', () => {
+    const level = (body: Json, v: string) => ['Sum', ['Map', ['Function', body, v], 'U16']];
+    const json = level(level(level(['Multiply', 's', 't', 'u'], 'u'), 't'), 's');
+    const [r, failures] = check(json, 4);
+    expect(r.code).toMatch(/for \(let /);
+    expect(failures).toEqual([]);
+  });
+
+  test('with passes: false, the mode runs no pass', () => {
+    const lists = (options: object) => {
+      const p = sliceProgram(ce.box(['Multiply', 'U2', 'W2'] as never), {
+        target: 'javascript',
+        mode: 'interval',
+        ...options,
+      } as never);
+      const entry = p.functions.find((f) => f.name === p.entry)!;
+      return entry.body.body.filter((i) => i.k === 'list').length;
+    };
+    // `scalarize` writes the product one element at a time; with no pass it
+    // stays one element-wise operation.
+    expect(lists({})).toBe(1);
+    expect(lists({ passes: false })).toBe(0);
+  });
+
+  test('a list of a run-time length is not written out', () => {
+    const [r, failures] = check(['Sum', 'L']);
+    expect(r.code).toMatch(loop);
+    expect(r.code).toContain('_.L.length');
+    expect(failures).toEqual([]);
+  });
+
+  test('an undecided If in a copied body keeps its hull', () => {
+    const [r, failures] = check(['At', ['hulled', x], 1]);
+    expect(text(r)).not.toMatch(/u\d+_hulled/);
+    expect(r.code).toContain('_IA.hull(');
+    // The hull of x on [0, 2] and of -x on [-0, 1].
+    const { kind, value } = r.run({ x: { lo: -1, hi: 2 } }) as Kinded;
+    expect(kind).toBe('interval');
+    expect(value!.lo === 0 && value!.hi === 2).toBe(true);
+    expect(failures).toEqual([]);
   });
 });
 

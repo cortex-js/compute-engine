@@ -162,6 +162,9 @@ export type Lowering = {
   /** The most passes of a `Sum` or a `Product` of constant bounds that is
    *  written out (`LowerOptions`). */
   readonly unrollSums: number;
+  /** The longest list of a constant length that is written out
+   *  (`LowerOptions`). */
+  readonly unrollBuilds: number;
   /** The value that `f` lowers in a region of its own, whose instructions
    *  then go to the current region; `undefined`, the region discarded, when
    *  `f` gives no value or declines, or `accept` refuses the region. The

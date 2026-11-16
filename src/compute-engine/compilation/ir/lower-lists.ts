@@ -79,6 +79,13 @@ export function listLowering(cx: Lowering) {
   /** The list of `length` elements whose element at the index `k` is
    *  `f(k)`. */
   const built = (site: Expression, length: V, f: (k: V) => V): V => {
+    // A short list of a constant length is the list of its elements.
+    const n = cx.constant(length);
+    if (n !== undefined && n >= 1 && n <= cx.unrollBuilds && isFunction(site))
+      return cx.list(
+        site,
+        Array.from({ length: n }, (_, j) => f(integer(j)))
+      );
     const k = b.newValue(scalarType('integer'));
     return cx.region('build', [length], [k], () => [f(k)], site)[0];
   };
@@ -155,14 +162,17 @@ export function listLowering(cx: Lowering) {
   /** The fold of `r` from `init` over the terms at the indices from `lo` to
    *  `hi`, in ascending order, each term lowered with its index a constant:
    *  the loop's operations, with no loop. `undefined`, and the loop runs, in
-   *  the cases of `README.md`, "Lists" (a sum written out). */
+   *  the cases of `README.md`, "Lists" (a sum written out). With
+   *  `identity`, `init` is the identity of `r`: the fold starts at the
+   *  first term when the loop's accumulator has its lane. */
   const writtenOut = (
     e: Fn,
     r: OperatorRow,
     init: V,
     lo: V,
     hi: V,
-    term: (k: V) => V
+    term: (k: V) => V,
+    identity = false
   ): V | undefined => {
     const [a, z] = [cx.constant(lo), cx.constant(hi)];
     const n = a === undefined || z === undefined ? 0 : z - a + 1;
@@ -192,9 +202,12 @@ export function listLowering(cx: Lowering) {
         for (let j = 0; j < n; j++) {
           if (j > 0 && (spent() * (j + 1)) / j > left / 2) return undefined;
           const t = term(integer(a! + j));
-          if (type(t).shape.length > 0 || !signatureOf(r, [type(acc), type(t)]))
-            return undefined;
-          acc = cx.apply(e, r, [acc, t]);
+          const s = signatureOf(r, [type(acc), type(t)]);
+          if (type(t).shape.length > 0 || !s) return undefined;
+          acc =
+            identity && j === 0 && s[1] === type(t).lane
+              ? t
+              : cx.apply(e, r, [acc, t]);
         }
         return b.effects === effects ? acc : undefined;
       },
@@ -262,13 +275,33 @@ export function listLowering(cx: Lowering) {
     r: OperatorRow,
     items: (Source | V)[],
     init: V,
-    empty?: number
+    empty?: number,
+    identity = false
   ): V => {
     let acc = init;
     for (const x of items)
       if (typeof x === 'number') acc = cx.apply(e, r, [acc, x]);
     const lists = items.filter((x): x is Source => typeof x !== 'number');
     for (const s of lists) {
+      // A short list of a constant length is written out, from its first
+      // element when `acc` is still the identity of `r` (`README.md`,
+      // "Lists", the short lists).
+      const n = cx.constant(s.length);
+      if (n !== undefined && n >= 1 && n <= cx.unrollBuilds) {
+        const written = writtenOut(
+          e,
+          r,
+          acc,
+          integer(0),
+          integer(n - 1),
+          s.at,
+          identity && acc === init
+        );
+        if (written !== undefined) {
+          acc = written;
+          continue;
+        }
+      }
       const last = cx.apply(e, 'Subtract', [s.length, integer(1)]);
       acc = accumulate(e, r, acc, integer(0), last, s.at);
     }
@@ -312,7 +345,8 @@ export function listLowering(cx: Lowering) {
       return cx.apply(e, r, items as V[]);
     }
     const lane = Number.isFinite(red.identity) ? 'integer' : 'real';
-    return reduce(e, r, items, b.constant(red.identity, lane), red.empty);
+    const init = b.constant(red.identity, lane);
+    return reduce(e, r, items, init, red.empty, true);
   };
 
   /** A `Map` (or, with `filter`, a `Filter`) of the function literal `f`
@@ -343,9 +377,14 @@ export function listLowering(cx: Lowering) {
       typeof body === 'function' ? body(x) : cx.value(body)!;
     // A target with no list of a run-time length has no build (GLSL): a
     // build of a constant length of at most `SCALARIZE_LIMIT` is the list
-    // of its elements, the body lowered once per element, in order.
-    const n = cx.runtimeLengths ? undefined : cx.constant(s.length);
-    if (!filter && n !== undefined && n >= 1 && n <= SCALARIZE_LIMIT) {
+    // of its elements, the body lowered once per element, in order; so is a
+    // short list (`unrollBuilds`) on another target.
+    const n = cx.constant(s.length);
+    const most = cx.runtimeLengths ? cx.unrollBuilds : SCALARIZE_LIMIT;
+    // With run-time lengths, past the cap the build keeps its loop.
+    const full =
+      cx.runtimeLengths && unrolled + (n ?? 0) > SCALARIZE_LIMIT ** 2;
+    if (!filter && n !== undefined && n >= 1 && n <= most && !full) {
       unrolled += n;
       if (unrolled > SCALARIZE_LIMIT ** 2)
         decline(e, `builds of more than ${SCALARIZE_LIMIT ** 2} elements`);

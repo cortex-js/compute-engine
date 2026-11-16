@@ -4,8 +4,9 @@
  * changes the operation of a computation (`a/b` stays a division).
  *
  * - `scalarize`: an operation on static lists becomes one operation per
- *   element (for a target with no element-wise operations), and an `At` of
- *   a constant index in range of a static list an element (`elem`).
+ *   element (for a target with no element-wise operations, and for the
+ *   short lists of the interval mode, `unrollBuilds`), and an `At` of a
+ *   constant index in range of a static list an element (`elem`).
  * - `fold`: a pure operation whose operands are constants is the value of
  *   its row's `fold` (the constants that the passes expose: a sub-expression
  *   with no input is a literal already, `lower.ts`); an element of a list
@@ -13,7 +14,8 @@
  *   operation on elements; the `At` of `scalarize`; a conditional with no
  *   effect whose condition is a constant is the arm it takes. A value
  *   replaces another only on its lane (an integer arm of a real result
- *   stays an arm).
+ *   stays an arm). The list rules (the elements and the `At`) compute no
+ *   number, and run alone in the interval mode (`fold: 'lists'`).
  * - `hoist`: the operands of `And` and `Or` are lowered in an arm (only
  *   evaluated when needed); a pure operand is moved out of its arm, and the
  *   conditional becomes the `and` or `or` it is.
@@ -72,13 +74,19 @@ import { SliceInternalError, verify } from './verify.js';
 
 export type PassOptions = {
   scalarize?: boolean;
-  fold?: boolean;
+  /** `'lists'`: only the list rules of `fold`, which compute no number
+   *  (the interval mode). */
+  fold?: boolean | 'lists';
   hoist?: boolean;
   strength?: boolean;
   /** The calls that `inline` replaces: `'loop'`, a call in the body of a
    *  `loop`, a `build` or a `filter`; `'repeated'`, also a call of a
    *  function that its caller calls twice or more. */
   inline?: 'loop' | 'repeated' | false;
+  /** The short lists (the interval mode): `scalarize` writes out an
+   *  element-wise operation of at most this many elements, and `inline`
+   *  copies a call whose result is such a list. Default 0: none. */
+  unrollBuilds?: number;
   cse?: boolean;
   invariants?: boolean;
   /** `invariants` moves a loop over the elements of a list that exists out
@@ -132,16 +140,23 @@ export function runPasses(
       );
     return changed;
   };
-  if (options.scalarize) run('scalarize', scalarize);
+  const short = options.unrollBuilds ?? 0;
+  if (options.scalarize || short > 0)
+    run('scalarize', (q, r) =>
+      scalarize(q, r, options.scalarize ? SCALARIZE_LIMIT : short)
+    );
   const budget = { left: options.inline ? INLINE_BUDGET[options.inline] : 0 };
   for (let round = 0; round < 8; round++) {
     let changed = false;
-    if (options.fold) changed = run('fold', fold) || changed;
+    const lists = options.fold === 'lists';
+    if (options.fold)
+      changed = run('fold', (q, r) => fold(q, r, lists)) || changed;
     if (options.hoist) changed = run('hoist', hoist) || changed;
     if (options.strength) changed = run('strength', strength) || changed;
     const where = options.inline;
     if (where)
-      changed = run('inline', (q, r) => inline(q, r, where, budget)) || changed;
+      changed =
+        run('inline', (q, r) => inline(q, r, where, budget, short)) || changed;
     if (options.cse) changed = run('cse', cse) || changed;
     if (options.invariants)
       changed =
@@ -292,18 +307,24 @@ function perElement(
 /** The most elements of a list that `scalarize` writes one by one. */
 export const SCALARIZE_LIMIT = 64;
 
-const scalarize: Pass = (p, rows) =>
+/** The number of elements of `t`, NaN for a length that is a value. */
+const count = (t: IRType): number =>
+  t.shape.reduce<number>((m, n) => (typeof n === 'number' ? m * n : NaN), 1);
+
+const scalarize = (
+  p: Program,
+  rows: readonly OperatorRow[],
+  limit: number
+): ReturnType<Pass> =>
   rewrite(p, (i, { constants }) => {
     if (i.k !== 'op') return undefined;
     const at = atToElem(p, i, constants);
     if (at !== undefined) return at;
     const t = p.types[i.out];
     if (t.shape.length === 0 || !threads(rows, i.op)) return undefined;
-    if (!t.shape.every((n) => typeof n === 'number')) return undefined;
     // A longer list stays element-wise: one expression per element would
     // make text without bound, and the target's check (`admits()`) refuses it.
-    const count = (t.shape as number[]).reduce((m, n) => m * n, 1);
-    if (count > SCALARIZE_LIMIT) return undefined;
+    if (!(count(t) <= limit)) return undefined;
     const out: Instr[] = [];
     perElement(p, rows, i, out);
     return out;
@@ -315,7 +336,13 @@ const scalarize: Pass = (p, rows) =>
 const sameLane = (p: Program, a: V, b: V) =>
   p.types[a].lane === p.types[b].lane;
 
-const fold: Pass = (p, rows) => {
+/** With `lists`, only the list rules: an element of a list or of an
+ *  element-wise operation, and the `At` of `scalarize`. */
+const fold = (
+  p: Program,
+  rows: readonly OperatorRow[],
+  lists = false
+): ReturnType<Pass> => {
   const fx = effects(p, rows);
   const defs = new Map<V, Instr>();
   // `seen`: the element of an operation on lists, by list and index, written
@@ -353,6 +380,7 @@ const fold: Pass = (p, rows) => {
         return out;
       }
     }
+    if (lists) return undefined;
     if (
       i.k === 'op' &&
       fx.speculatable(i) &&
@@ -478,6 +506,10 @@ const repeated = (i: Instr): Region | undefined =>
       ? i.regions[0]
       : undefined;
 
+/** `t` is a list of a constant length of at most `n` elements. */
+const shortList = (t: IRType, n: number): boolean =>
+  n > 0 && t.shape.length > 0 && count(t) <= n;
+
 /** The number of instructions of `r`, nested regions included. */
 const size = (r: Region): number =>
   r.body.reduce((n, i) => regionsOf(i).reduce((m, x) => m + size(x), n + 1), 0);
@@ -488,7 +520,8 @@ const inline = (
   p: Program,
   rows: readonly OperatorRow[],
   where: 'loop' | 'repeated',
-  budget: { left: number }
+  budget: { left: number },
+  short = 0
 ): ReturnType<Pass> => {
   const fx = effects(p, rows);
   const cyclic = recursiveFunctions(p.functions);
@@ -545,7 +578,11 @@ const inline = (
       i.args.some(
         (a, k) => p.types[a].shape.length > 0 && !sameLane(p, a, g.params[k])
       ) ||
-      !(s.loop || (where === 'repeated' && counts.get(`${s.fn} ${i.fn}`)! > 1))
+      !(
+        s.loop ||
+        (where === 'repeated' && counts.get(`${s.fn} ${i.fn}`)! > 1) ||
+        shortList(p.types[i.outs[0]], short)
+      )
     )
       return undefined;
     budget.left -= n;
