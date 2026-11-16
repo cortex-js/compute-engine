@@ -24335,14 +24335,18 @@ type LiteralSetIndex = {
   numbers: Expression[];
   /** The number literals that are not exact (floats, `NaN`). */
   inexactNumbers: Expression[];
-  /** True when an element is not a number literal. */
-  hasNonNumber: boolean;
+  /** The elements that are not number literals. Whether one is numeric
+   * with no unknowns (`isClosedNumeric`) depends on the values of its
+   * symbols, which can change after the index is built, so it is decided
+   * at each query. */
+  others: Expression[];
   /** True when an element is not a string. */
   hasNonString: boolean;
 };
 
 /** The index of each large literal set, built the first time a membership
- * is asked. An expression does not change, so the index stays valid. */
+ * is asked. It records only what does not change with the values of
+ * symbols (hashes, number literals), so it stays valid. */
 const LITERAL_SET_INDEX = new WeakMap<Expression, LiteralSetIndex>();
 
 /** A literal set with fewer elements is searched element by element: an
@@ -24355,19 +24359,19 @@ const LITERAL_SET_INDEX_MIN_SIZE = 32;
  * size of the set for most targets.
  *
  * `literalSetContains` answers `true` when an element is `isSame` the
- * target, or when the element and the target are number literals that
- * `isEqual` says are equal. It answers `undefined` when no element matches
- * and some element is undecided: a pair of numbers for which `isEqual` is
- * undecided, or a pair that is not two numbers or two strings. It answers
- * `false` otherwise.
+ * target, or when the element and the target are numeric with no unknowns
+ * (`isClosedNumeric`) and `isEqual` says they are equal. It answers
+ * `undefined` when no element matches and some element is undecided: a
+ * pair of numbers for which `isEqual` is undecided, or a pair that is not
+ * two numbers or two strings. It answers `false` otherwise.
  *
  * Here, the `isSame` test reads only the elements that have the hash of the
  * target: two `isSame` expressions always have the same hash. The `isEqual`
- * test is not syntactic, so it still reads every number element, except in
- * one case: for an exact target, it reads only the inexact elements. Two
- * exact numbers are compared exactly, without a tolerance, so they are
- * equal only when they are `isSame`, which the hash lookup has already
- * tested.
+ * test is not syntactic, so it still reads every numeric element, except in
+ * one case: for an exact number literal target, it reads only the inexact
+ * number literals and the elements that are not literals. Two exact number
+ * literals are compared exactly, without a tolerance, so they are equal
+ * only when they are `isSame`, which the hash lookup has already tested.
  */
 function indexedLiteralSetContains(
   expr: Expression,
@@ -24382,7 +24386,7 @@ function indexedLiteralSetContains(
       byHash: new Map(),
       numbers: [],
       inexactNumbers: [],
-      hasNonNumber: false,
+      others: [],
       hasNonString: false,
     };
     for (const op of expr.ops) {
@@ -24392,7 +24396,7 @@ function indexedLiteralSetContains(
       if (isNumber(op)) {
         index.numbers.push(op);
         if (!op.isExact) index.inexactNumbers.push(op);
-      } else index.hasNonNumber = true;
+      } else index.others.push(op);
       if (!isString(op)) index.hasNonString = true;
     }
     LITERAL_SET_INDEX.set(expr, index);
@@ -24401,10 +24405,22 @@ function indexedLiteralSetContains(
   if (index.byHash.get(target.hash)?.some((op) => target.isSame(op)))
     return true;
 
-  if (isNumber(target)) {
-    let indeterminate = index.hasNonNumber;
-    const candidates = target.isExact ? index.inexactNumbers : index.numbers;
-    for (const op of candidates) {
+  if (isClosedNumeric(target)) {
+    let indeterminate = false;
+    const numbers =
+      isNumber(target) && target.isExact
+        ? index.inexactNumbers
+        : index.numbers;
+    for (const op of numbers) {
+      const eq = target.isEqual(op);
+      if (eq === true) return true;
+      if (eq !== false) indeterminate = true;
+    }
+    for (const op of index.others) {
+      if (!isClosedNumeric(op)) {
+        indeterminate = true;
+        continue;
+      }
       const eq = target.isEqual(op);
       if (eq === true) return true;
       if (eq !== false) indeterminate = true;
@@ -24481,10 +24497,11 @@ function literalSetContains(
   target: Expression
 ): boolean | undefined {
   let indeterminate = false;
+  const targetClosed = isClosedNumeric(target);
   for (const op of ops) {
     if (target.isSame(op)) return true;
-    if (isNumber(target) && isNumber(op)) {
-      // Concrete numbers decide definitively
+    if (targetClosed && isClosedNumeric(op)) {
+      // Concrete numbers decide definitively: `ExponentialE` is not `3`
       const eq = target.isEqual(op);
       if (eq === true) return true;
       if (eq !== false) indeterminate = true;
@@ -24495,6 +24512,19 @@ function literalSetContains(
     }
   }
   return indeterminate ? undefined : false;
+}
+
+/**
+ * True when `expr` is a number literal, or a numeric expression with no
+ * unknowns (`ExponentialE`, `Sqrt(2)`): `isEqual` decides the equality of
+ * two such expressions. An expression with an unknown (`x`) is not, so a
+ * membership test of `x` stays undecided.
+ */
+function isClosedNumeric(expr: Expression): boolean {
+  return (
+    isNumber(expr) ||
+    (expr.unknowns.length === 0 && expr.type.matches('number'))
+  );
 }
 
 /**

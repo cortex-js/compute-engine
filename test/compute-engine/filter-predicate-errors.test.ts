@@ -636,6 +636,74 @@ describe('Filter contains with a non-boolean predicate result', () => {
 });
 
 /**
+ * GitHub #593: the membership of a numeric constant in a literal
+ * `Set` of numbers is decided by `isEqual`, so a `Filter` predicate that tests
+ * it is `True` or `False`. A membership of an unknown stays undecided.
+ */
+describe('membership of a numeric constant in a literal Set', () => {
+  const ev = (ce: ComputeEngine, json: unknown) =>
+    ce.box(json as any).evaluate().toString();
+  const filterContains = (target: string) => [
+    'Length',
+    [
+      'Filter',
+      ['List', ['Set', 1, 2, 3], ['Set', 3]],
+      ['Function', ['Contains', 'b', target], 'b'],
+    ],
+  ];
+
+  test('a constant that is not an element is refuted', () => {
+    const ce = new ComputeEngine();
+    expect(ev(ce, ['Contains', ['Set', 1, 2, 3], 'ExponentialE'])).toBe(
+      '"False"'
+    );
+    expect(ev(ce, ['Element', 'ExponentialE', ['Set', 1, 2]])).toBe('"False"');
+    expect(ev(ce, ['Element', 'Pi', ['Set', 1, 2]])).toBe('"False"');
+    expect(ev(ce, ['Element', 1, ['Set', 'Pi', 2]])).toBe('"False"');
+    expect(ev(ce, ['Element', 'Pi', ['Set', 1, 'Pi']])).toBe('"True"');
+  });
+
+  test('the Filter of the issue gives 0 instead of throwing', () => {
+    const ce = new ComputeEngine();
+    expect(ev(ce, filterContains('ExponentialE'))).toBe('0');
+    expect(ev(ce, filterContains('e'))).toBe('0');
+  });
+
+  test('an unknown stays undecided', () => {
+    const ce = new ComputeEngine();
+    expect(ev(ce, ['Contains', ['Set', 1, 2], 'x'])).toBe(
+      'Contains(Set(1, 2), x)'
+    );
+    expect(ev(ce, ['Element', 'ExponentialE', ['Set', 1, 'x']])).toBe(
+      'Element(e, Set(1, x))'
+    );
+    expect(ce.box(filterContains('x')).evaluate().operator).toBe('Length');
+  });
+
+  test('a large Set (the indexed search) answers the same', () => {
+    const ce = new ComputeEngine();
+    const big = ['Set', ...Array.from({ length: 40 }, (_, i) => i + 1)];
+    expect(ev(ce, ['Element', 'ExponentialE', big])).toBe('"False"');
+    expect(ev(ce, ['Element', 41, [...big, 'Pi']])).toBe('"False"');
+    expect(ev(ce, ['Element', 'Pi', [...big, 'Pi']])).toBe('"True"');
+    expect(ce.box(['Element', 'x', big]).evaluate().operator).toBe('Element');
+  });
+
+  test('the index of a large Set follows a later assignment', () => {
+    const ce = new ComputeEngine();
+    const pad = Array.from({ length: 40 }, (_, i) => 1000 + i);
+    const big = ce.box(['Set', 'z', ...pad]);
+    const small = ce.box(['Set', 'z', 1000]);
+    const five = ce.number(5);
+    expect(big.contains(five)).toBeUndefined();
+    expect(small.contains(five)).toBeUndefined();
+    ce.assign('z', 5);
+    expect(big.contains(five)).toBe(true);
+    expect(small.contains(five)).toBe(true);
+  });
+});
+
+/**
  * `color` is a concrete leaf primitive, so it is admitted by the element-type
  * gate of the per-application lambda-parameter inference: an inline callback
  * over a `list<color>` gets its parameter stamped `(c: color)`.

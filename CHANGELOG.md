@@ -94,6 +94,17 @@
 
 ### Bug Fixes
 
+- **A numeric constant tested against a `Set` of numbers is decided by
+  value** ([#593](https://github.com/cortex-js/compute-engine/issues/593)).
+  `Contains(Set(1, 2, 3), ExponentialE)`, `Element(ExponentialE, Set(1, 2))`
+  and `Element(Pi, Set(1, 2))` stayed unevaluated; they are now `False`. A
+  `Filter` whose predicate made that test threw "Filter predicate must
+  return "True" or "False"": `Length(Filter(List(Set(1, 2, 3), Set(3)),
+  b ↦ Contains(b, ExponentialE)))` is now `0`. A value with an unknown is
+  still undecided: `Contains(Set(1, 2), x)` stays unevaluated. `Contains`
+  over a `List` is unchanged: it compares by structure, so
+  `Contains(List(1, 2), x)` is `False`; use `Element` for a membership test
+  with an unknown.
 - **`EllipticF(φ, m)` and the two-operand `EllipticE(φ, m)` no longer overflow
   far from the real axis.** `EllipticF(0.3 + 400i, 0.5)` was
   `ComplexInfinity` (1.8540746773i), `EllipticF(355i, 2)` was `0`
