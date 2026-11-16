@@ -271,6 +271,15 @@
   GLSL). A nested list, a tuple or a list of points as the argument of
   `Apply`, and a literal of several parameters with a list argument, are not
   compiled by the profile.
+- **The experimental profile `'ir'` compiles a call of a user function with
+  a list argument** when every parameter of the function is a scalar: the
+  function is mapped over the list, as the interpreter evaluates it, on
+  JavaScript, on GLSL (a list of a length known at compile time) and for
+  `interval-js`. With `h(x, b) := b^x`, `h(0.5, List(2, 4, 8, 16))` gives
+  `[1.414…, 2, 2.828…, 4]`; lists of one length are taken element by element
+  together, and a scalar argument is passed to each call. A nested list, lists
+  of different lengths, a list for a function whose result is a list, and a
+  recursive call with a list argument are not compiled by the profile.
 - **Code of the experimental profile `'ir'` runs lists and loops faster.**
   A list is built in one preallocated array, two element-wise operations
   in a row are one loop, and a loop checks its deadline once per 1,024

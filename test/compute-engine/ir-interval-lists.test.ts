@@ -47,6 +47,23 @@ ce.assign(
   ] as never)
 );
 
+// Functions of scalar parameters, which a call maps over a list argument
+// as the interpreter does: Tycho's `f(t) = Mod(t, 1)`.
+ce.assign('md', ce.box(['Function', ['Mod', 't', 1], 't'] as never));
+ce.assign(
+  'g1',
+  ce.box(['Function', ['Multiply', 't', ['Sin', 't']], 't'] as never)
+);
+ce.assign(
+  'h2',
+  ce.box([
+    'Function',
+    ['Add', ['Multiply', 'a', 'b'], ['Sin', 'b']],
+    'a',
+    'b',
+  ] as never)
+);
+
 /** The length of each list input of the containment cases. */
 const LENGTHS: Record<string, number> = { L: 4, V: 3, B: 200, P: 2 };
 
@@ -167,6 +184,12 @@ const CASES: Case[] = [
   C(loopOf(['Loop', addTo(x), ['Element', 'k', ['Range', 5, 1, 1]]], ['Add', 't', x])),
   C(['Add', ['w', x], 1]),
   C(LOOP_IF, [0]), C(LOOP_IF_NO_ELSE, [1, 2, 3]),
+  // A list argument of a function of scalar parameters: the function
+  // mapped over the list, a scalar passed to each call, lists of one
+  // length zipped; read by a reduction and by `At`.
+  C(['md', ['List', ['Negate', x], ['Negate', y]]], [0, 1]), C(['g1', 'L']), C(['Sum', ['g1', 'V']]),
+  C(['h2', x, 'V']), C(['h2', 'V', 'V']), C(['h2', list3, y]), C(['w', 'V']),
+  C(['At', ['g1', list3], ['Add', ['Floor', y], 1]], [0, 1, 2, 3]),
 ];
 
 /** The programs whose result differs from the existing target's at some

@@ -1236,7 +1236,12 @@ describe('IR slice: decisions by binding', () => {
         if (!(d instanceof Decline)) throw d;
         v = 'declined';
       }
-      expect([head, v === 99 || v === 'declined']).toEqual([head, true]);
+      // The user At of a list maps over it, as the interpreter does.
+      const value = head === 'At' ? [99, 99, 99] : 99;
+      expect([
+        head,
+        JSON.stringify(v) === JSON.stringify(value) || v === 'declined',
+      ]).toEqual([head, true]);
     }
   });
   test('a library Sin after a user Sin is the library Sin', () => {

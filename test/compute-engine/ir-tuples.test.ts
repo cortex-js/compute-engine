@@ -527,10 +527,10 @@ describe('list parameters of user functions', () => {
       ]
     );
   });
-  test('a scalar parameter still declines a list argument', () => {
+  test('a scalar parameter maps over a list argument, as the interpreter does', () => {
     ce.declare('twice', '(real) -> real');
     ce.assign('twice', box(['Function', ['Multiply', 2, 'a'], 'a']));
-    expect(declined(['twice', 'D'])).toMatch(/a list argument of twice/);
+    check(['twice', 'D'], [{ D: [1, 2, 3] }, { D: [] }]);
   });
 });
 

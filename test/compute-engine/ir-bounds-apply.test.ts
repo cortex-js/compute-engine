@@ -407,13 +407,20 @@ describe('IR profile, batch G12: real bounds, real Ranges and Apply', () => {
     ['a Range of a NaN step', ['Sum', ['Range', 1, 5, 'NaN']], /a Range of an operand that is a constant infinity or NaN/],
     ['a Range of an infinite step', ['Multiply', 'x', ['Range', 0, 1, 'PositiveInfinity']], /a Range of an operand that is a constant infinity or NaN/],
     ['an element of an infinite Range', ['At', ['Range', 0.5, 'PositiveInfinity'], 3], /a Range of an operand that is a constant infinity or NaN/],
-    ['a list argument for a scalar parameter (neyret/rwhqbsp4wq)', ['Multiply', ['P', ['Multiply', 0.1, 'x'], ['Multiply', 6000, ['Range', 0, 1, 0.1]]], ['Power', 10, -12]], /list/],
   ])('%s declines, with the cause', (_, json, cause) => {
     for (const run of [js, glsl]) {
       const d = failure(() => run(json));
       expect(d?.code).toBe('outside-profile');
       expect(d?.message).toMatch(cause);
     }
+  });
+
+  test('a list argument for a scalar parameter is the function mapped over the list (neyret/rwhqbsp4wq)', () => {
+    // prettier-ignore
+    const json = ['Multiply', ['P', ['Multiply', 0.1, 'x'], ['Multiply', 6000, ['Range', 0, 1, 0.1]]], ['Power', 10, -12]];
+    check(json, [{ x: 0.5 }, { x: -3 }]);
+    // On GLSL the length of the Range is not a constant of the lowering.
+    expect(failure(() => glsl(json))?.message).toMatch(/the region build/);
   });
 
   test('GLSL: nested loops of run-time counts still decline (neyret/4hi9use9t2)', () => {

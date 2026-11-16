@@ -1215,6 +1215,200 @@ describe('a name whose held value is an expression is that expression where it i
   });
 });
 
+describe('a list argument of a user function of scalar parameters: the function mapped over the list', () => {
+  // The interpreter maps a call over its list arguments when every
+  // parameter is a scalar (`paramsAreScalar()`): lists of one length are
+  // zipped, a scalar is passed to each call. Tycho's corpus:
+  // `f(List(-a, -b))`, `h(x, List(2, 4, 8, 16))`, `Sum(f(L))`.
+  const engine = (): ComputeEngine => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('n', 'integer');
+    e.declare('D', 'list<real>');
+    e.declare('G', 'list<real>');
+    e.declare('V', 'list<real^3>');
+    const fn = (name: string, body: Json, ...params: string[]) =>
+      e.assign(name, box(['Function', body, ...params], e));
+    fn('f', ['Mod', 't', 1], 't');
+    fn('h', ['Power', 'b', 'x'], 'x', 'b');
+    fn('lt', ['Less', 't', 0.5], 't');
+    fn('fl', ['Floor', 't'], 't');
+    fn('two', ['List', 't', ['Multiply', 2, 't']], 't');
+    fn('r', ['Add', 't', ['Random']], 't');
+    fn('k', ['Add', 'a', ['Multiply', 0, 'b']], 'a', 'b');
+    fn('len', ['Add', ['Length', 't'], 1], 't');
+    e.declare('twice', '(real) -> real');
+    fn('twice', ['Multiply', 2, 'a'], 'a');
+    e.declare('rec', '(real) -> real');
+    // prettier-ignore
+    fn('rec', ['If', ['Less', 't', 0], 0, ['Add', 1, ['rec', ['List', ['Subtract', 't', 1]]]]], 't');
+    return e;
+  };
+  const e = engine();
+  const L4 = ['List', 2, 4, 8, 16];
+  const points = [{ x: 0.5 }, { x: -1.25 }, { x: 3 }];
+  const message = (json: Json, options: Record<string, unknown> = {}) => {
+    const o = outcome(box(json, e), options);
+    return 'message' in o ? o.message : 'compiled';
+  };
+  /** The number of IR functions of the user function `name` in the
+   *  program of `json` (the pass `inline` off: it removes a function whose
+   *  calls are all in loops). */
+  const functions = (json: Json, name: string) =>
+    sliceProgram(box(json, e), {
+      target: 'javascript',
+      passes: { ...ALL_PASSES, inline: false },
+    }).functions.filter((f) => f.source === name).length;
+
+  test('f(List(2, 4, 8, 16)), f(List(-x, -2x)), h(x, List(…)) and h(List(…), x)', () => {
+    againstInterpreter(e, ['f', ['List', 1.5, -0.25, 2.75]], [{}]);
+    againstInterpreter(
+      e,
+      ['f', ['List', ['Negate', 'x'], ['Multiply', -2, 'x']]],
+      points
+    );
+    againstInterpreter(e, ['h', 'x', L4], points);
+    againstInterpreter(e, ['h', ['List', 2, 4], 'x'], points);
+    // Two lists of one length are zipped.
+    againstInterpreter(e, ['h', ['List', 2, 4], ['List', 'x', 2]], points);
+    expect(
+      compile(box(['f', L4], e), { ...IR, fallback: false } as never).run!(
+        {} as never
+      )
+    ).toEqual([0, 0, 0, 0]);
+  });
+
+  test('the result: a list of the lane of the function, of the length of the lists', () => {
+    const b = againstInterpreter(e, ['lt', ['List', 0.25, 'x', 0.75]], points);
+    expect(b.run!({ x: 0.5 } as never)).toEqual([true, false, false]);
+    const i = againstInterpreter(e, ['fl', ['List', 1.5, 'x']], points);
+    expect(i.run!({ x: -1.25 } as never)).toEqual([1, -2]);
+    // Tycho's shapes: a reduction, and `At` of the mapped list.
+    againstInterpreter(e, ['Sum', ['f', ['List', 1.5, 'x', 2.75]]], points);
+    againstInterpreter(e, ['At', ['f', ['List', 1.5, 'x', 2.75]], 2], points);
+    againstInterpreter(
+      e,
+      ['At', ['h', 'x', L4], ['Add', 1, ['Mod', 'n', 4]]],
+      [0, 1, 3, 6].map((n) => ({ x: 0.5, n }))
+    );
+  });
+
+  test('a list input of a run-time length (JavaScript and the interval mode)', () => {
+    const at = [
+      { x: 0.5, D: [], G: [] },
+      { x: 0.5, D: [2], G: [3] },
+      { x: -1.25, D: [1.5, 2.25, -0.5], G: [1, 2, 3] },
+    ];
+    againstInterpreter(e, ['f', 'D'], at);
+    againstInterpreter(e, ['h', 'x', 'D'], at);
+    againstInterpreter(e, ['h', 'D', 'D'], at);
+    againstInterpreter(e, ['Sum', ['twice', 'D']], at);
+    const r = compile(box(['h', 'x', 'D'], e), {
+      ...IR,
+      to: 'interval-js',
+      fallback: false,
+    } as never);
+    const got = r.run!({
+      x: { lo: 0.5, hi: 1 },
+      D: [
+        { lo: 2, hi: 2 },
+        { lo: 4, hi: 9 },
+      ],
+    } as never) as { kind: string; value: { lo: number; hi: number } }[];
+    // 2^0.5 … 2^1 and 4^0.5 … 9^1.
+    expect(got[0].value.lo).toBeLessThanOrEqual(Math.SQRT2);
+    expect(got[0].value.hi).toBeGreaterThanOrEqual(2);
+    expect(got[1].value.lo).toBeLessThanOrEqual(2);
+    expect(got[1].value.hi).toBeGreaterThanOrEqual(9);
+  });
+
+  test('one function for a call with a list and a call with a scalar, in either order, and for lists of two lengths', () => {
+    for (const json of [
+      ['List', ['Sum', ['f', ['List', 1.5, 'x']]], ['f', 'x']],
+      ['List', ['f', 'x'], ['Sum', ['f', ['List', 1.5, 'x']]]],
+      [
+        'Add',
+        ['Sum', ['f', ['List', 1.5, 'x']]],
+        ['Sum', ['f', ['List', 1.5, 'x', 2.75]]],
+      ],
+    ]) {
+      againstInterpreter(e, json, points);
+      expect(functions(json, 'f')).toBe(1);
+    }
+    // A function of a declared signature, first called with a list.
+    const twice = ['List', ['Sum', ['twice', 'D']], ['twice', 'x']];
+    againstInterpreter(e, twice, [{ x: 0.5, D: [1, 2] }]);
+    expect(functions(twice, 'twice')).toBe(1);
+  });
+
+  test('in the body of a Sum, of a constant list and of one that reads the index', () => {
+    againstInterpreter(
+      e,
+      [
+        'Sum',
+        ['Multiply', 'j', ['Sum', ['f', ['List', 1.5, 2.25]]]],
+        ['Limits', 'j', 1, 'n'],
+      ],
+      [0, 1, 4].map((n) => ({ n }))
+    );
+    againstInterpreter(
+      e,
+      ['Sum', ['Sum', ['h', 'x', ['List', 'j', 2]]], ['Limits', 'j', 1, 'n']],
+      [0, 1, 4].map((n) => ({ x: 0.5, n }))
+    );
+  });
+
+  test('a draw: the arguments are lowered once, then one call per element, in order', () => {
+    // A draw in the body of the function: one draw per element.
+    // prettier-ignore
+    for (const json of [
+      ['WithRandomSeed', 5, ['r', ['List', 10, 20, 30]]],
+      ['WithRandomSeed', 5, ['k', ['Random'], ['List', 1, 2, 3]]],
+      ['WithRandomSeed', 5, ['f', ['List', ['Random'], ['Random']]]],
+    ])
+      againstInterpreter(e, json, [{}]);
+    const one = compile(box(['k', ['Random'], ['List', 1, 2, 3]], e), {
+      ...IR,
+      fallback: false,
+    } as never).run!({} as never) as number[];
+    expect(new Set(one).size).toBe(1);
+  });
+
+  test('on GLSL a list of a constant length is the list of the calls', () => {
+    const glsl = (json: Json) =>
+      compile(box(json, e), {
+        ...IR,
+        to: 'glsl',
+        fallback: false,
+      } as never).code;
+    expect(glsl(['f', ['List', 1.5, 'x']])).toMatch(
+      /float (v\d+) = _fn_ir_u0_f\(1\.5\);\nfloat (v\d+) = _fn_ir_u0_f\(x\);\nreturn vec2\(\1, \2\);/
+    );
+    expect(
+      glsl(['Sum', ['h', 'x', L4]]).match(/_fn_ir_u0_h\(x, /g)
+    ).toHaveLength(4);
+    expect(message(['f', 'D'], { to: 'glsl' })).toMatch(
+      /it needs a stated length/
+    );
+  });
+
+  // prettier-ignore
+  test.each([
+    ['lists of two stated lengths (the interpreter: incompatible-dimensions)', ['h', ['List', 2, 4], ['List', 1, 2, 3]], /list arguments of h whose lengths are not one value/],
+    ['two lists of run-time lengths that are not one value', ['h', 'D', 'G'], /list arguments of h whose lengths are not one value/],
+    ['a list of a stated length and one of a run-time length', ['h', 'V', 'D'], /list arguments of h whose lengths are not one value/],
+    ['a nested list (the interpreter maps to the leaves)', ['f', ['List', ['List', 1.5, 2.25], ['List', 3.5, 'x']]], /a list argument of f that is not a flat list/],
+    ['a tuple, bound whole', ['twice', ['Tuple', 1.5, 'x']], /a list argument of twice \(the interpreter maps the function over the list\)/],
+    ['a list of points', ['twice', ['List', ['Tuple', 1, 'x'], ['Tuple', 3, 4]]], /a list argument of twice \(the interpreter maps the function over the list\)/],
+    ['a function whose result is a list (a list of lists)', ['two', ['List', 1, 'x']], /a list argument of two, whose result is not a scalar/],
+    ['a recursive call', ['rec', 'x'], /a list argument of a recursive call of rec/],
+    ['a list of booleans for a real parameter (the interpreter: a list of errors)', ['f', ['List', 'True', ['Less', 'x', 0]]], /an argument of f that is not real/],
+    ['a parameter that the body reads as a list (bound whole)', ['len', ['List', 1, 'x']], /the parameter t of len is not a scalar/],
+  ])('%s declines', (_, json, cause) => {
+    expect(message(json)).toMatch(cause);
+  });
+});
+
 describe('Degrees and Cot', () => {
   test('Degrees on both targets (the witness Sin(Degrees(h_0)))', () => {
     const engine = new ComputeEngine();

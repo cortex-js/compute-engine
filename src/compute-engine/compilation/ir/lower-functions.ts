@@ -37,7 +37,8 @@ import {
   type Fn,
   type Lowering,
 } from './lower-context.js';
-import { parameterName } from './lower-lists.js';
+import { paramsAreScalar } from '../../boxed-expression/boxed-function.js';
+import { parameterName, type listLowering } from './lower-lists.js';
 
 /**
  * The IR type of an input of the engine type `t`: a real, an integer, a
@@ -260,6 +261,9 @@ function signatureTypes(e: Fn, literal: Fn) {
   // of that many numbers (`points`).
   const open = r === undefined || r === 'number' || r === 'any' || loose(r);
   const points = list === undefined && r ? pointLength(r) : undefined;
+  // The interpreter maps a call over its list arguments when every
+  // parameter is a scalar (`paramsAreScalar()`).
+  const maps = paramsAreScalar(signature ?? literal.type.type);
   // A colour result is on the colour lane; a colour parameter declines.
   const result: IRType | undefined =
     open || list !== undefined || points !== undefined
@@ -267,7 +271,7 @@ function signatureTypes(e: Fn, literal: Fn) {
       : r === 'color'
         ? { lane: 'color', shape: [] }
         : scalarOf(literal, r, `the result of ${e.operator}`);
-  return { names, params, result, list, tuple, r, open, points };
+  return { names, params, result, list, tuple, r, open, points, maps };
 }
 
 /** A user function: the IR function, its parameter types and its result
@@ -292,12 +296,17 @@ type UserFunction = {
   result?: IRType;
   /** The result is declared a list or a tuple: its type is the body's. */
   list: boolean;
+  /** A call maps over its list arguments (`signatureTypes()`). */
+  maps: boolean;
   ir: IRFunction;
   inputs: Type[];
   called: boolean;
 };
 
-export function functionLowering(cx: Lowering) {
+export function functionLowering(
+  cx: Lowering,
+  lists: ReturnType<typeof listLowering>
+) {
   const { b, type } = cx;
   const functions = new Map<object, UserFunction>();
   /** The functions being lowered, by the name of their head: a call of
@@ -398,6 +407,7 @@ export function functionLowering(cx: Lowering) {
       own: (ir.lifted = ir.body.params.length),
       result,
       list: list !== undefined || points !== undefined,
+      maps: sig.maps,
       ir,
       inputs: [],
       called: false,
@@ -477,13 +487,18 @@ export function functionLowering(cx: Lowering) {
   };
 
   /** A call of the user function that the head of `e` resolves to, or of
-   *  the function of that name being lowered. */
-  const call = (e: Fn, binding?: { key: object; literal: Fn }): number => {
+   *  the function of that name being lowered; with `given`, of the values
+   *  of its arguments, already lowered. */
+  const call = (
+    e: Fn,
+    binding?: { key: object; literal: Fn },
+    given?: V[]
+  ): number => {
     let fn = binding ? functions.get(binding.key) : pending.get(e.operator)!;
     // Without run-time lengths, the arguments of the first call are lowered
     // before the function, which takes their stated lengths; so are they
     // for a parameter that can take the point of its argument.
-    let early: V[] | undefined;
+    let early = given;
     if (fn === undefined) {
       const sig = signatureTypes(e, binding!.literal);
       if (
@@ -501,9 +516,15 @@ export function functionLowering(cx: Lowering) {
     }
     if (e.nops !== fn.params.length)
       decline(e, `${e.operator} with ${e.nops} arguments`);
+    // Each argument is lowered once, in order; `mapped`, a list for a
+    // scalar parameter, which the call maps over (`mapOver()`).
+    const values: V[] = [];
+    let mapped = false;
     const args = e.ops.flatMap((op, i) => {
       const p = fn.params[i];
-      const v = cx.widen(early?.[i] ?? cx.value(op)!, p.lane);
+      values.push(early?.[i] ?? cx.value(op)!);
+      if (mapped) return [];
+      const v = cx.widen(values[i], p.lane);
       const t = type(v);
       if (
         p.tuple === 0 &&
@@ -545,11 +566,16 @@ export function functionLowering(cx: Lowering) {
         lane: p.lane,
         shape: p.shape.map((m) => (m === 'run-time' ? n : m)),
       } as IRType;
-      if (p.shape.length === 0 && t.shape.length > 0)
-        decline(
-          op,
-          `a list argument of ${e.operator} (the interpreter maps the function over the list)`
-        );
+      if (p.shape.length === 0 && t.shape.length > 0) {
+        // A tuple binds whole.
+        if (!fn.maps || cx.tuples.has(v))
+          decline(
+            op,
+            `a list argument of ${e.operator} (the interpreter maps the function over the list)`
+          );
+        mapped = true;
+        return [];
+      }
       // A tuple argument for a tuple parameter only.
       if (cx.tuples.get(v) !== p.tuple || !isSubType(t, declared, cx.constant))
         decline(
@@ -558,6 +584,7 @@ export function functionLowering(cx: Lowering) {
         );
       return [...length, v];
     });
+    if (mapped) return mapOver(e, binding, fn, values);
     if (fn.result === undefined)
       decline(
         e,
@@ -609,6 +636,61 @@ export function functionLowering(cx: Lowering) {
     const axis = cx.tuples.get(fn.ir.body.yields[0]);
     if (axis !== undefined) cx.tuples.set(out, axis);
     return out;
+  };
+
+  /** The call `e` of `fn` of the arguments `args`, some of them lists for
+   *  its scalar parameters: as the interpreter maps it, a build of the
+   *  calls of the elements at each index, zipped, and of the scalars. The
+   *  lists are flat and of one length (lists of different lengths give
+   *  `incompatible-dimensions`), and the result of `fn` is a scalar. */
+  const mapOver = (
+    e: Fn,
+    binding: { key: object; literal: Fn } | undefined,
+    fn: UserFunction,
+    args: V[]
+  ): V => {
+    if (pending.get(e.operator) === fn)
+      decline(e, `a list argument of a recursive call of ${e.operator}`);
+    const lengths = new Set<string | number>();
+    const sources = args.map((v) => {
+      const t = type(v);
+      if (t.shape.length === 0) return undefined;
+      if (t.shape.length > 1 || cx.tuples.has(v))
+        decline(
+          e,
+          `a list argument of ${e.operator} that is not a flat list (the interpreter maps the function to the leaves of a nested list)`
+        );
+      lengths.add(
+        typeof t.shape[0] === 'number' ? t.shape[0] : `${t.shape[0].v}`
+      );
+      return lists.listSource(v);
+    });
+    if (lengths.size > 1)
+      decline(
+        e,
+        `list arguments of ${e.operator} whose lengths are not one value (lists of different lengths give incompatible-dimensions)`
+      );
+    const index = { length: sources.find((s) => s)!.length, at: (k: V) => k };
+    return lists.over(
+      e,
+      index,
+      '',
+      (k) => {
+        const out = call(
+          e,
+          binding,
+          args.map((v, i) => sources[i]?.at(k) ?? v)
+        );
+        if (type(out).shape.length > 0)
+          decline(
+            e,
+            `a list argument of ${e.operator}, whose result is not a scalar (the interpreter gives a list of lists)`
+          );
+        return out;
+      },
+      false,
+      e
+    );
   };
 
   /** The input `name` of the engine type `t` that the body of the function

@@ -1282,9 +1282,24 @@ applies its own derivative declines after about 9 s. The forward-mode
 lowering of the existing JavaScript target (`jet-derivative.ts`) and its
 vector stencil (a body that is a list or a point) are not in the profile. A
 function value other than the literal of a `Map`, a `Filter`, an `Apply` or the
-root, and a list argument for a scalar parameter (the interpreter maps the
-function over the list) decline. A declared result `complex` of a real body is
-the body converted to the complex lane. A declared result `color` takes a body
+root declines. A list argument of a call of a function whose parameters are all
+scalars (`paramsAreScalar()`, the interpreter's test: an untyped parameter is a
+scalar, a variadic signature is not) is mapped as the interpreter maps it
+(`mapOver()`): the arguments are lowered once, in order, then a build over the
+length of the lists (on GLSL the list of its elements, as `Map`) calls the
+function with the element of each list at the index and with each scalar
+argument, so a draw in an argument runs once and a draw in the body once per
+element, in order: `h(x, List(2, 4, 8, 16))`, `Sum(f(L))`. The function is
+defined with its scalar parameters, so a call with a list and a call with a
+scalar, in either order, and calls with lists of two lengths call one function.
+The lists must be flat and have one length: equal stated lengths, or one
+run-time length value (`h(D, D)`); lists of two lengths (the interpreter gives
+`incompatible-dimensions`) or of lengths that are not proved equal (`h(D, G)`)
+decline, as do a nested list (the interpreter maps to the leaves), a list of
+points, a function whose result is not a scalar (a list of lists), and a list
+argument of a recursive call. A tuple argument for a scalar parameter declines
+(a tuple is atomic). A declared result `complex` of a real body is the body
+converted to the complex lane. A declared result `color` takes a body
 on the colour lane ("The colour lane"); a parameter `color` declines.
 
 A parameter declared a list of reals or integers

@@ -2344,7 +2344,7 @@ export function lower(
     tuples,
   };
   const lists = listLowering(cx);
-  const fns = functionLowering(cx);
+  const fns = functionLowering(cx, lists);
 
   /** The program of the entry `f`, refused when an input that it reads has
    *  no type at any occurrence (`seen`, `typed`). A decline of the lowering

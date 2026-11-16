@@ -330,15 +330,17 @@ export function listLowering(cx: Lowering) {
   };
 
   /** A build (with `filter`, a filter) over `s` of `body`, which reads the
-   *  element as `name`. */
+   *  element as `name`, or of `body(x)` for the element `x`. */
   const over = (
     e: Fn,
     s: Source,
     name: string,
-    body: Expression,
+    body: Expression | ((x: V) => V),
     filter: boolean,
     site: Expression
   ): V => {
+    const element = (x: V) =>
+      typeof body === 'function' ? body(x) : cx.value(body)!;
     // A target with no list of a run-time length has no build (GLSL): a
     // build of a constant length of at most `SCALARIZE_LIMIT` is the list
     // of its elements, the body lowered once per element, in order.
@@ -347,9 +349,10 @@ export function listLowering(cx: Lowering) {
       unrolled += n;
       if (unrolled > SCALARIZE_LIMIT ** 2)
         decline(e, `builds of more than ${SCALARIZE_LIMIT ** 2} elements`);
-      const elements = Array.from({ length: n }, (_, j) =>
-        indexed(name, s.at(integer(j)), () => cx.value(body)!)
-      );
+      const elements = Array.from({ length: n }, (_, j) => {
+        const x = s.at(integer(j));
+        return indexed(name, x, () => element(x));
+      });
       return cx.list(e, elements);
     }
     const k = b.newValue(scalarType('integer'));
@@ -361,7 +364,7 @@ export function listLowering(cx: Lowering) {
         cx.withFrame(true, (frame) => {
           const x = s.at(k);
           frame.names.set(name, { v: x, role: 'index' });
-          const v = cx.value(body)!;
+          const v = element(x);
           if (lengthValues(type(v)).length > 0)
             decline(e, 'a list of lists of run-time length');
           if (!filter) return [v];

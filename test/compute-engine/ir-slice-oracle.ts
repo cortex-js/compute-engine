@@ -646,7 +646,7 @@ export const DECLINES: Record<string, Json> = {
   'different lengths': ['Add', 'L', ['List', 1, 2]],
   'a capture': ['cap', 1],
   'declared result type': ['rec2', 'n'],
-  'list argument': ['g', 'D'],
+  'not a flat list': ['g', ['List', ['List', 1, 'x'], ['List', 3, 4]]],
   'Range of an operand that is not a real': ['Range', 'Z', 5],
   'of a list of booleans': ['If', ['At', ['Map', ['Function', ['Less', 'z', 0], 'z'], 'D'], 'n'], 1, 2],
   'not a literal': ['Map', 'g', 'D'],

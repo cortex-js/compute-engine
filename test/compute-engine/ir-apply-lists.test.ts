@@ -273,6 +273,8 @@ describe('IR profile, batch G18: Map of a list of a constant length on GLSL', ()
     ['a list of 4 (a vec4)', ['Sum', ['Map', W, ['List', 'x', 1, 2, 'm']]]],
     ['a list of 5 (an array)', ['Sum', ['Map', W, ['List', 'x', 1, 2, 'm', 4]]]],
     ['a one-clause Comprehension', ['Sum', ['Comprehension', ['Sin', 'k'], ['Element', 'k', 'L']]]],
+    ['a user function of a scalar parameter over a literal list', ['Sum', ['g', LIST3]]],
+    ['a user function of a scalar parameter over a list<real^3>', ['At', ['g', 'L'], 2]],
   ])('%s compiles', (_, json) => {
     expect(glsl(json)).toMatchObject({ success: true, profile: 'ir' });
     check(json, POINTS);
@@ -420,6 +422,9 @@ function chromiumAvailable(): boolean {
       ['a body that calls a user function', ['Sum', ['Map', ['Function', ['g', 'k'], 'k'], LIST3]]],
       ['a list of 4', ['Sum', ['Map', W, ['List', 'x', 1, 2, 'm']]]],
       ['a list of 5', ['Sum', ['Map', W, ['List', 'x', 1, 2, 'm', 4]]]],
+      ['a user function over a literal list', ['Sum', ['g', LIST3]]],
+      ['a user function over a list<real^3>', ['At', ['g', 'L'], 2]],
+      ['a user function over a list of 6', ['Sum', ['g', LIST6]]],
     ];
 
     test.each(programs)(
