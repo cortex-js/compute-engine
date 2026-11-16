@@ -1231,3 +1231,42 @@ in the sweep's own timing (286), 32 above 1.5 (36), 3 above 10 (5). In
 flight when this was written: the sums of constant bounds written out, and
 the values common to the arms of a conditional.
 
+### 18.2 A defect of the sweep, the corrected baseline, and the constant sums
+
+The sweep did not supply an input that the option `vars` maps to
+`_.<name>` when the document gives that name a value (81 programs in 22
+documents): both targets then threw to `entire`, the existing one at its
+first statement and the mode after running the whole program, so the time
+ratio meant nothing and the comparison of results was empty. The airfoil's
+15 to 17 times was this: with `R` supplied, two of its four programs were
+9.9 times slower before the structural memo (the shared parts lowered once
+per arm, 64,000 characters of code) and all four are at 0.9 to 1.1 after it.
+`sweep-t12.mts` and `retime-slow.mts` now give such a name the point at its
+document value. The pass for a value common to the arms of an `if` was
+dropped after a diagnosis: one instruction of the airfoil is of the kind
+that rule moves (1 to 3 %).
+
+The corrected baseline, on main `b3fc5a4a2` (`sweep-t12-at-b3fc5a4a2-vars`):
+4,748 programs both targets compile; boxes equal 28,068 of 28,488, tighter
+274, wider 117 (sums), `singular → partial` 15, `empty → entire` 6, shifted
+4, `partial → interval` 4; 65,571 points, 54 containment misses in 6
+programs, the same on both targets; 32 programs above 1.5 times the
+existing target, 5 above 3, 1 above 10.
+
+The sums of constant bounds written out are on main
+(`4b7d135c01dc5e28e4a67f723878a9174376b4b1`; README, "Lists"). The sweep
+with them: no program admitted before declines, every class of result is
+the same box by box, 17 programs above 1.5 (32), 4 above 3 (5). What is
+above 1.5: the comparison decided after folding (`nbbj88wunw` #1, 172),
+`buddhabrot` (5.9, an artefact of the sweep's list input), voronoi (5.7:
+the inlining of small functions, `ce-compiler`'s batch G21), two integrals
+with a run-time exponent (4.8 and 2.5), `At(S(x), k)` of a list-valued
+function (three programs, about 2), and about nine programs between 1.5 and
+2.5 that take under 2 µs and were not timed again on a quiet machine. The
+run-time exponent (`powReal`, 1.16 to 1.36, accepted by the user) is below
+1.5 and is the largest class above 1.1.
+
+`ir/` is 9,882 lines on main; the user's limit of 10,000 was set before the
+interval mode existed (about 1,620 lines of the directory are the mode's
+alone), and `ce-compiler` asks the user how it counts.
+
