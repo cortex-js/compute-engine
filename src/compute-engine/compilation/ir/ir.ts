@@ -42,9 +42,6 @@ export type IRType = {
   readonly shape: readonly Length[];
   readonly storage?: 'sampler2D';
 };
-// Room for an aggregate of fields (design only, no lowering): a tuple type
-// `{ kind: 'tuple'; elements: IRType[] }` in a union with the type above,
-// read by `elem` with a literal index and printed as an array or a struct.
 
 /** A typed literal. An integer beyond the safe integers is a `bigint`
  *  (`mode: 'bigint'` only); a safe one is always a number. `inexact`
@@ -66,11 +63,15 @@ export type Constant = number | bigint | boolean | Cx;
 
 /** The key of a constant: equal keys are one value (`-0` is not `0`, a
  *  literal marked `inexact` is not the double). */
-export function literalKey(
-  lane: Lane,
-  value: Constant,
-  inexact?: number
-): string {
+export function literalKey({
+  lane,
+  value,
+  inexact,
+}: {
+  lane: Lane;
+  value: Constant;
+  inexact?: number;
+}): string {
   const n = (x: number | bigint | boolean) =>
     Object.is(x, -0) ? '-0' : String(x);
   const key =
@@ -254,6 +255,24 @@ export function joinType(a: IRType, b: IRType): IRType | undefined {
   return widensTo(b.lane, a.lane) ? a : undefined;
 }
 
+/** The index from 0 of the element `k` (from 1, or from the end when
+ *  negative) of a list of the length `n`, when `n` is stated and `k` is an
+ *  integer in range; else `undefined`. */
+export function elementIndex(
+  n: Length | undefined,
+  k: Constant | undefined
+): number | undefined {
+  if (
+    typeof n !== 'number' ||
+    typeof k !== 'number' ||
+    !Number.isInteger(k) ||
+    k === 0 ||
+    Math.abs(k) > n
+  )
+    return undefined;
+  return k > 0 ? k - 1 : n + k;
+}
+
 /** The type of an element of a list of type `t`. */
 export function elementType(t: IRType): IRType {
   return { lane: t.lane, shape: t.shape.slice(1) };
@@ -432,7 +451,7 @@ export class Builder {
 
   /** `inexact`: the mark of a real literal (`Literal`). */
   constant(value: Constant, lane: Lane, inexact?: number): V {
-    return this.once(literalKey(lane, value, inexact), () => {
+    return this.once(literalKey({ lane, value, inexact }), () => {
       const out = this.newValue(scalarType(lane));
       this.constants.set(out, value);
       const literal = (

@@ -19,15 +19,14 @@ import { createIntervalRuntime } from '../interval-runtime.js';
 import { readsVarsObject } from '../vars-inputs.js';
 import { resetIntervalClosedFormBudgets } from '../interval-quadrature.js';
 import { isBooleanBindingType } from '../compiler-type-facts.js';
-import { ALL_PASSES } from './passes.js';
 import { compileSlice } from './index.js';
 import { entryOf } from './ir.js';
 import {
-  addSymbolDeps,
   decline,
-  irTestExtension,
+  entryInputs,
   optionDecline,
   sliceError,
+  sliceOptions,
   IR_OPTIONS,
   type IrOptions,
 } from './adapter.js';
@@ -53,11 +52,7 @@ export function compileWithIrProfileInterval(
   // A fresh antiderivative budget for the closed forms of the integrals.
   resetIntervalClosedFormBudgets();
   try {
-    const refused = optionDecline(options, IR_INTERVAL_OPTIONS);
-    if (refused !== undefined)
-      throw decline(
-        `${refused} is not supported by the profile 'ir' on interval-js`
-      );
+    optionDecline(options, IR_INTERVAL_OPTIONS, ' on interval-js');
     // `vars`: a read of the inputs object only. The mode evaluates both
     // arms of an undecided condition, where another text would run where
     // the interpreter does not run it.
@@ -73,27 +68,15 @@ export function compileWithIrProfileInterval(
     const s = compileSlice(expr, {
       target: 'javascript',
       mode: 'interval',
-      passes: {
-        ...ALL_PASSES,
-        ...(options?.cse === false ? { cse: false } : {}),
-      },
-      constantFold: options?.constantFold !== false,
+      ...sliceOptions(options),
       iterationBudget: options?.iterationBudget,
       vars,
-      extend: irTestExtension(),
     });
     const p = s.program;
     const entry = entryOf(p);
     const positional = entry.positional ?? 0;
     const literal = entry.literal === true;
-    const inputs = entry.paramNames.filter((_, k) => k >= positional);
-    for (const name of inputs) options?.varsObjectRefs?.add(name);
-    if (literal && inputs.length > 0)
-      throw decline(
-        `a Function literal that reads the free name \`${inputs[0]}\`: its code is called with its arguments only`,
-        { binding: inputs[0] }
-      );
-    addSymbolDeps(p, options?.symbolDeps);
+    const inputs = entryInputs(p, options);
     // A scalar boolean input; a list of booleans is a list input.
     const booleans = inputs.filter((_, k) => {
       const t = p.types[entry.body.params[k + positional]];

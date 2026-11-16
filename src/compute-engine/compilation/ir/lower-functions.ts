@@ -308,6 +308,15 @@ export function functionLowering(cx: Lowering) {
   // The lowerings of a function begun (`cx.attempt()`).
   let begun = 0;
 
+  /** A parameter `name` of the type `t` of the IR function `ir`. */
+  const param = (ir: IRFunction, name: string, t: IRType, length = false) => {
+    const v = b.newValue(t);
+    ir.body.params.push(v);
+    ir.paramNames.push(name);
+    ir.lengthOf.push(length);
+    return v;
+  };
+
   /** The IR function of the user function of `key`, lowered once. `args`:
    *  the arguments of the first call, whose stated lengths a list parameter
    *  of a run-time length takes (a target without run-time lengths). */
@@ -373,20 +382,13 @@ export function functionLowering(cx: Lowering) {
       body: { params: [], body: [], yields: [] },
       results: [],
     };
-    const param = (name: string, t: IRType, length = false): V => {
-      const v = b.newValue(t);
-      ir.body.params.push(v);
-      ir.paramNames.push(name);
-      ir.lengthOf.push(length);
-      return v;
-    };
     const values = params.map((t, i) => {
       const shape = t.shape.map((n) =>
         n === 'run-time'
-          ? { v: param(names[i], { lane: 'integer', shape: [] }, true) }
+          ? { v: param(ir, names[i], { lane: 'integer', shape: [] }, true) }
           : n
       );
-      const v = param(names[i], { lane: t.lane, shape });
+      const v = param(ir, names[i], { lane: t.lane, shape });
       if ('tuple' in t && t.tuple !== undefined) cx.tuples.set(v, t.tuple);
       return v;
     });
@@ -632,11 +634,8 @@ export function functionLowering(cx: Lowering) {
         e,
         `the function ${fn.ir.source} reads the input ${name} of type ${engineTypeToString(t)}, which is not a scalar or a list of numbers of a stated length`
       );
-    const v = b.newValue(ir as IRType);
+    const v = param(fn.ir, name, ir as IRType);
     if (tupleAxis(t) === 0) cx.tuples.set(v, 0);
-    fn.ir.body.params.push(v);
-    fn.ir.paramNames.push(name);
-    fn.ir.lengthOf.push(false);
     fn.inputs.push(t);
     cx.frames[0].names.set(name, { v, role: 'input' });
     return v;

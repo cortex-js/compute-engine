@@ -1,15 +1,9 @@
 /**
  * The profile `'ir'` of `compile()` for the `glsl` target (experimental):
- * the result of the existing GLSL target from the slice compiler, for a
- * scalar or list result (real, integer or boolean; a point is a `vec2`; a
- * complex scalar is a `vec2` too, and a colour an OKLCh `vec3`) of
- * inputs that are scalars or lists of a stated length (`vec3`,
- * `float[6]`), and the warning `float32-unsafe-argument`. `code` is a GLSL
- * expression, or statements that end in `return …;`, in which an input is
- * its bare name or its `vars` text; `preamble` holds the helpers
- * (`_gpu_ir_…`) and the user functions (`_fn_ir_…`). Anything else
- * declines with `'outside-profile'`; `compile()` then applies `fallback`
- * (the existing GLSL target). See "Selecting the pipeline" in `README.md`.
+ * the result of the existing GLSL target from the slice compiler, or the
+ * decline `'outside-profile'`, to which `compile()` applies `fallback`. What
+ * it compiles and the fields of its result: README, "Selecting the
+ * pipeline", the paragraph on GLSL.
  */
 
 import type { Expression } from '../../global-types.js';
@@ -29,9 +23,9 @@ import {
   isShadowedSymbol,
 } from '../../library-shadowing.js';
 import { CONSTANTS, OPERATORS, rowOfHead } from './operators.js';
-import { ALL_PASSES } from './passes.js';
 import { compileSlice } from './index.js';
 import { typeName } from './print-glsl.js';
+import { expressionOf } from './print.js';
 import {
   entryOf,
   regionsOf,
@@ -43,44 +37,24 @@ import {
 import {
   addSymbolDeps,
   decline,
-  irTestExtension,
   optionDecline,
   sliceError,
-  type IR_OPTIONS,
+  sliceOptions,
+  IR_OPTIONS,
   type IrOptions,
 } from './adapter.js';
 
-/** The class of each option of `compile()` on GLSL, as `IR_OPTIONS`
- *  (whose check against `compile()`'s options makes this one complete):
- *  `mapped`, `no-op` (a JavaScript option with no effect on GLSL), or
- *  `declined` when given (`optionDecline()`). */
+/** The class of each option of `compile()` on GLSL: that of `IR_OPTIONS`,
+ *  except the rows that differ (`no-op`: a JavaScript option with no effect
+ *  on GLSL; `declined` when given, `optionDecline()`). */
 const IR_GLSL_OPTIONS = {
-  to: 'mapped',
-  target: 'mapped',
-  profile: 'mapped',
-  fallback: 'mapped',
+  ...IR_OPTIONS,
   entryChecks: 'no-op',
-  iterationBudget: 'mapped',
-  symbolDeps: 'mapped',
   varsObjectRefs: 'no-op',
-  cse: 'mapped',
-  constantFold: 'mapped',
-  mode: 'mapped',
   storage: 'mapped',
   quadrature: 'no-op',
-  functions: 'declined',
-  vars: 'mapped',
-  symbolic: 'mapped',
-  inputs: 'mapped',
-  operators: 'declined',
-  imports: 'declined',
-  preamble: 'declined',
   broadcast: 'declined',
-  strictTypes: 'declined',
-} as const satisfies Record<
-  keyof typeof IR_OPTIONS,
-  'mapped' | 'no-op' | 'declined'
->;
+} as const;
 
 /** An upper bound of the passes of every loop (`Loop`, `Sum`, `Product`,
  *  a reduction) of one evaluation of the program, at compile time: a
@@ -179,14 +153,10 @@ function amplifiedTrigMemo(): (u: Expression) => boolean {
 }
 
 /** The warning `float32-unsafe-argument` of the existing target, once per
- *  operand of a `Mod` or a `Fract` in which a constant of magnitude 1000
- *  or more amplifies a trigonometric value (`amplifiedTrigMemo()`), in `expr`
- *  and in the bodies of the user functions it calls, each node visited
- *  once. There is no exact sine hash: such an operand always warns, except
- *  in a `Mod` or a `Fract` that is closed as a whole when `fold` (numbers
- *  and library constants under library rows that are not effectful, which
- *  the lowering and the `fold` pass compute in doubles; a closed dividend
- *  of a `Mod` by an input is not folded). */
+ *  operand of a `Mod` or a `Fract` that `amplifiedTrigMemo()` flags, in
+ *  `expr` and in the bodies of the user functions it calls, each node once;
+ *  not in a `Mod` or a `Fract` that is closed as a whole when `fold`, which
+ *  the lowering computes in doubles (README, "Selecting the pipeline"). */
 function float32Warnings(expr: Expression, fold: boolean): CompileDiagnostic[] {
   const found = new Map<string, CompileDiagnostic>();
   const seen = new Set<object>();
@@ -242,9 +212,7 @@ export function compileWithIrProfileGlsl(
   try {
     // `callerLocals` has no effect: a user function takes every input that
     // its body reads as a parameter, which each call passes (`capture()`).
-    const refused = optionDecline(options, IR_GLSL_OPTIONS);
-    if (refused !== undefined)
-      throw decline(`${refused} is not supported by the profile 'ir' on glsl`);
+    optionDecline(options, IR_GLSL_OPTIONS, ' on glsl');
     // `vars`: an input spelled as the host's text, a name or a member or
     // element of one (`u_x`, `u.x`, `u[0]`), which reads a uniform and calls
     // nothing, each name of it no GLSL word; a name with a value in the
@@ -288,16 +256,10 @@ export function compileWithIrProfileGlsl(
       target: 'glsl',
       bareInputs: vars,
       storage,
-      passes: {
-        ...ALL_PASSES,
-        ...(options?.cse === false ? { cse: false } : {}),
-        ...(options?.constantFold === false ? { fold: false } : {}),
-      },
-      constantFold: options?.constantFold !== false,
+      ...sliceOptions(options),
       iterationBudget: budget,
       // `'bigint'` declines in `compileSlice()` (JavaScript only).
       mode: options?.mode as 'strict' | 'complex' | 'bigint' | undefined,
-      extend: irTestExtension(),
     });
     const p = s.program;
     const entry = entryOf(p);
@@ -314,12 +276,9 @@ export function compileWithIrProfileGlsl(
             `the function ${f.source} reads the input ${f.paramNames[f.lifted! + k]}, a list of ${n} elements, which glsl would copy at each call`
           );
       });
-    // The rule of the profile: `At` with a constant index (after the
-    // passes, so a folded index counts) that is 0, not an integer or past
-    // the stated length of its list declines, in the entry and in every
-    // user function (each region once), where JavaScript gives NaN: a host
-    // keys a retry on the refusal. A run-time index keeps the read that is
-    // NaN outside. `def` is also read by the result check below.
+    // The rule of `At` with a constant index (README, "Selecting the
+    // pipeline"), after the passes, in every function, each region once.
+    // `def` is also read by the result check below.
     const def = useIndex(p).def;
     const walk = (r: Region): void =>
       r.body.forEach((i) => {
@@ -360,12 +319,9 @@ export function compileWithIrProfileGlsl(
         `loops that can run more passes than the iterationBudget (${budget}) on glsl`
       );
     const preamble = [...s.printed.helpers, ...s.printed.functions].join('\n');
-    const statements = s.printed.body.map((line) => line.slice(2));
-    const single = /^return (.*);$/s.exec(statements[0]);
     const code =
-      statements.length === 1 && single !== null
-        ? single[1]
-        : statements.join('\n');
+      expressionOf(s.printed.body) ??
+      s.printed.body.map((line) => line.slice(2)).join('\n');
     const inputs = entry.paramNames;
     const lowered: Record<string, string> = {};
     entry.body.params.forEach((v, k) => {

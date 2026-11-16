@@ -14,6 +14,7 @@ import {
 } from '../interval-runtime.js';
 import { JS } from './print-js.js';
 import {
+  expressionOf,
   printProgram,
   type Printed,
   type RegionSpelling,
@@ -431,17 +432,10 @@ export function printInterval(
   const literal = entry.literal === true;
   const n = argumentIndex(entry, entry.positional ?? 0);
   const params = Array.from({ length: n }, (_, k) => `a${k}`).join(', ');
-  // A body of one `return` is its expression.
-  const single =
-    printed.body.length === 1
-      ? /^\s*return (.*);$/s.exec(printed.body[0])
-      : null;
   const body = printed.body.join('\n');
   const code = literal
     ? `(${params}) => {\n${body}\n}`
-    : single !== null
-      ? single[1]
-      : `(() => {\n${body}\n})()`;
+    : (expressionOf(printed.body) ?? `(() => {\n${body}\n})()`);
   const stored = {
     runtimeVersion: INTERVAL_RUNTIME_VERSION,
     code,

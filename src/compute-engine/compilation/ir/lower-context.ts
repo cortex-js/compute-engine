@@ -90,21 +90,15 @@ export type Binding = {
 /** The names of one scope. A loop frame stops writes to outer locals. */
 export type Frame = { names: Map<string, Binding>; loop: boolean };
 
-/** A list operand: its length, its element at a value from 0, and its
- *  value (a `Range` is a list only when its value is read). */
-export type Source = { length: V; at: (k: V) => V; value: () => V };
+/** A list operand: its length, and its element at a value from 0 (a
+ *  `Range` is a list only when its value is read). */
+export type Source = { length: V; at: (k: V) => V };
 
 /** The heads whose value on a tuple is their value on the list of the same
  *  elements, by how they read a tuple operand: `each`, element by element
- *  with scalars (`2^Tuple(1, 2)`); `all`, every operand a tuple (`Add`);
- *  `scale`, one tuple and scalars (`Multiply`), the tuple first for
- *  `Divide` (`2/Tuple(1, 2)` is an error), or a list of tuples and a list
- *  of numbers of its length, read tuple by tuple. A difference of tuples is an
- *  `Add` of a negated tuple in the canonical form. `norm`: the Euclidean norm
- *  of a tuple of numbers (`Abs(Tuple(3, 4))` is 5). A threading row of one
- *  operand other than `Abs` is `each`. A list of tuples with a tuple (`all`),
- *  and a list of tuples under `norm`, is read tuple by tuple: the
- *  interpreter adds a point to each point of a list. */
+ *  with scalars; `all`, every operand a tuple; `scale`, one tuple and
+ *  scalars, the tuple first for `Divide`; `norm`, the Euclidean norm of a
+ *  tuple of numbers (`README.md`, "Tuples"). */
 type TupleRule = 'each' | 'all' | 'scale' | 'norm';
 export const TUPLE_RULES: Readonly<Record<string, TupleRule>> = Object.freeze({
   Power: 'each',
@@ -119,16 +113,15 @@ export const TUPLE_RULES: Readonly<Record<string, TupleRule>> = Object.freeze({
 
 /** The operations of the walk (`lower.ts`) that the other parts call. */
 export type Lowering = {
-  readonly ce: Expression['engine'];
   readonly b: Builder;
   readonly rows: readonly OperatorRow[];
   readonly frames: Frame[];
   value(e: Expression, want?: boolean): V | undefined;
   /** The value of `e`, which must be a scalar. */
   scalar(e: Expression): V;
-  apply(node: Expression, r: OperatorRow, args: V[]): V;
-  /** The row of the library head `head`, or of the IR operation `op`. */
-  row(head: string): OperatorRow;
+  /** Apply the row `r`, or the row of the library head of that name, to
+   *  `args`. */
+  apply(node: Expression, r: OperatorRow | string, args: V[]): V;
   type(v: V): IRType;
   constant(v: V): number | undefined;
   branch(
@@ -170,16 +163,12 @@ export type Lowering = {
    *  written out (`LowerOptions`). */
   readonly unrollSums: number;
   /** The value that `f` lowers in a region of its own, whose instructions
-   *  then go to the current region. When `f` gives no value or declines
-   *  (`Decline`), or `accept` refuses the region, the region is discarded
-   *  with the effects that it counted, and the result is `undefined`; the
+   *  then go to the current region; `undefined`, the region discarded, when
+   *  `f` gives no value or declines, or `accept` refuses the region. The
    *  nodes and what `refund` restores are given back only when no user
-   *  function began to be lowered in `f` (it stays registered), and a
-   *  decline after that begins is the program's. `f` reads the nodes it has
-   *  lowered (`spent()`) and the nodes left before the limit (`left`). The
-   *  entries of the memo and of the builder's constants written in an
-   *  accepted region name it, a closed region: a sub-expression lowered in
-   *  `f` is lowered again after it (a constant is emitted again). */
+   *  function began to be lowered in `f`; a decline after that begins is
+   *  the program's. `f` reads the nodes it has lowered (`spent()`) and the
+   *  nodes left (`left`). `README.md`, "Lists", the sums written out. */
   attempt(
     f: (spent: () => number, left: number) => V | undefined,
     accept: (r: Region) => boolean,

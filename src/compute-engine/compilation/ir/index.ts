@@ -1,7 +1,7 @@
 /**
  * The slice compiler: a table-driven compiler with an SSA representation
- * and two thin printers (JavaScript and GLSL ES 3.00). It is not used by
- * `compile()`. See `README.md`.
+ * and thin printers (JavaScript, GLSL ES 3.00, interval JavaScript);
+ * `compile()` reaches it through the adapters. See `README.md`.
  *
  * The pipeline: `lower()` (the one walk, which declines what the slice does
  * not compile) → `verify()` → the warnings of the random frames → the
@@ -40,7 +40,7 @@ import {
 import { spellingOf, type Spelling, type Syntax } from './print.js';
 import { narrow } from './narrow.js';
 import { plain } from './plain.js';
-import { effects, effectTrace } from './effects.js';
+import { effects, effectTrace, sameTrace } from './effects.js';
 import {
   deepFreeze,
   OPERATORS,
@@ -58,6 +58,7 @@ import {
   typeToString,
   useIndex,
   type IRType,
+  type Instr,
   type Lane,
   type Program,
   type Region,
@@ -65,19 +66,9 @@ import {
 } from './ir.js';
 
 export { Decline } from './lower.js';
-export {
-  OPERATORS,
-  CONSTANTS,
-  REDUCTIONS,
-  type OperatorRow,
-} from './operators.js';
-export { verify, SliceInternalError } from './verify.js';
-export { lower } from './lower.js';
-export { runPasses } from './passes.js';
+export { OPERATORS } from './operators.js';
+export { verify } from './verify.js';
 export type { Program } from './ir.js';
-export type { PassOptions } from './passes.js';
-export type { JavaScriptResult } from './print-js.js';
-export type { GlslResult } from './print-glsl.js';
 
 export type Target = 'javascript' | 'glsl';
 
@@ -240,21 +231,12 @@ export function admits(
   }
   if (entry.tuple === true && profile.syntax.retTuple === undefined)
     return { head: 'Tuple', cause: 'a Tuple of elements of several shapes' };
-  // A function returns no list of a run-time length where lengths are
-  // stated only (GLSL).
-  const listResult = p.functions.find(
-    (f) => f !== entry && lengthValues(f.results[0]).length > 0
-  );
-  if (listResult !== undefined && !profile.runtimeLengths)
-    return { cause: `the list result of ${listResult.source}` };
   if (!profile.recursion && recursiveFunctions(p.functions).size > 0)
     return {
       cause: `a recursive function (${[...recursiveFunctions(p.functions)].join(', ')})`,
     };
   return undefined;
 }
-
-type Instr = Region['body'][number];
 
 export type Warning = {
   readonly code: 'seeded-draw-order';
@@ -268,10 +250,7 @@ export type Warning = {
  * a site under a loop, a build, or a call of an effectful function is not
  * evaluated once. A frame nested in the frame has its own warning.
  */
-export function seededWarnings(
-  p: Program,
-  rows: readonly OperatorRow[]
-): Warning[] {
+function seededWarnings(p: Program, rows: readonly OperatorRow[]): Warning[] {
   const fx = effects(p, rows);
   const warnings: Warning[] = [];
   const count = (r: Region, repeated: boolean, why: string[]): number =>
@@ -434,27 +413,7 @@ function tables(options: SliceOptions): {
 } {
   const lanes = ['real', 'integer', 'boolean'] as const;
   const vars = Object.values(options.vars ?? {});
-  const x: Extension = {
-    rows: [
-      ...(options.extend?.rows ?? []),
-      ...vars.map((_, k) => ({
-        arity: 0 as const,
-        signatures: lanes.map((l) => [[], l, hostVarOp(k, l)] as const),
-        threads: false,
-        effect: 'effectful' as const,
-      })),
-    ],
-    spellings: {
-      ...options.extend?.spellings,
-      ...Object.fromEntries(
-        vars.flatMap((text, k) =>
-          // A newline: a text that ends in a `//` comment keeps the `)`.
-          lanes.map((l) => [hostVarOp(k, l), `(${text}\n)`])
-        )
-      ),
-    },
-    helpers: options.extend?.helpers,
-  };
+  const { extend } = options;
   const interval = options.mode === 'interval';
   const base =
     options.mode === 'bigint'
@@ -463,14 +422,32 @@ function tables(options: SliceOptions): {
         ? JS_INTERVAL
         : TARGETS[options.target].syntax;
   const own = interval ? INTERVAL_ROWS : OPERATORS;
-  if (options.extend === undefined && vars.length === 0)
+  if (extend === undefined && vars.length === 0)
     return { rows: own, syntax: base };
   return {
-    rows: [...own, ...(x.rows ?? [])],
+    rows: [
+      ...own,
+      ...(extend?.rows ?? []),
+      ...vars.map((_, k) => ({
+        arity: 0 as const,
+        signatures: lanes.map((l) => [[], l, hostVarOp(k, l)] as const),
+        threads: false,
+        effect: 'effectful' as const,
+      })),
+    ],
     syntax: {
       ...base,
-      ops: { ...base.ops, ...x.spellings },
-      helpers: { ...base.helpers, ...x.helpers },
+      ops: {
+        ...base.ops,
+        ...extend?.spellings,
+        ...Object.fromEntries(
+          vars.flatMap((text, k) =>
+            // A newline: a text that ends in a `//` comment keeps the `)`.
+            lanes.map((l) => [hostVarOp(k, l), `(${text}\n)`])
+          )
+        ),
+      },
+      helpers: { ...base.helpers, ...extend?.helpers },
     },
   };
 }
@@ -527,15 +504,9 @@ export function sliceProgram(
     verify(p, rows);
   }
   const passes = options.passes === false ? {} : (options.passes ?? ALL_PASSES);
-  // The bigint mode: a helper throws at a pole (`Mod`, `At`, `Factorial`,
-  // `Power`, `Binomial`, a call), so no operation is evaluated before it is
-  // written: no `hoist` (it moves a guarded arm out of its guard), no
-  // `invariants` (it moves an operation out of a loop of no pass), and no
-  // `fold` (the folds of the rows compute with doubles).
-  // The interval mode: no `fold` (a double is not an enclosure) and no
-  // `strength` (`x·x` is wider than `x^2` over an interval); with an
-  // `iterationBudget` below 2^32, no `listLoops` (the limit of its loops
-  // refuses a loop over a list longer than the budget, `printInterval()`).
+  // The passes that the bigint mode (README, "The `bigint` mode") and the
+  // interval mode (README, "The interval mode", and "Effects" for
+  // `listLoops`) turn off.
   runPasses(
     p,
     {
@@ -644,17 +615,7 @@ export function compileSlice(
               : syntax
           );
   // The printer writes the effectful instructions in the IR's order.
-  const trace = effectTrace(p, rows, new Map());
-  const order = printed.printed.order;
-  if (
-    order.length !== trace.length ||
-    !order.every(
-      (x, k) =>
-        x.name === trace[k].name &&
-        x.args.join() === trace[k].args.join() &&
-        x.outs.join() === trace[k].outs.join()
-    )
-  )
+  if (!sameTrace(printed.printed.order, effectTrace(p, rows, new Map())))
     throw new SliceInternalError(
       'slice printer: the order of the effectful instructions'
     );

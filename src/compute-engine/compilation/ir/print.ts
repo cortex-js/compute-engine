@@ -16,10 +16,12 @@ import {
   entryOf,
   outsOf,
   regionsOf,
+  sameShape,
   useIndex,
   type IRFunction,
   type IRType,
   type Instr,
+  type Length,
   type Literal,
   type Program,
   type Region,
@@ -38,7 +40,6 @@ export type Spelling =
  *  lines `between` separates from those of the first. */
 export type RegionSpelling = (r: {
   outs: string[];
-  types: IRType[];
   args: string[];
   params: string[];
   pieces?: number;
@@ -82,14 +83,11 @@ export type Syntax = {
     value?: string,
     mutable?: boolean
   ): string;
-  assign(name: string, value: string): string;
-  ifOpen(cond: string): string;
-  readonly elseOpen: string;
   /** An `if` whose condition is a verdict, each arm printed once (the
    *  interval mode): the test that runs the first arm, the test that runs
    *  the second, both of the name of the condition, and the value of a
-   *  result from the values of the two arms. Absent: `ifOpen` and
-   *  `elseOpen`. */
+   *  result from the values of the two arms. Absent: an `if` and an
+   *  `else`. */
   readonly verdictIf?: {
     first(cond: string): string;
     second(cond: string): string;
@@ -99,8 +97,6 @@ export type Syntax = {
    *  each bound evaluated once. `passes`: a pass of a `Loop`, which the
    *  iteration budget counts. */
   loopOpen(k: string, lo: string, hi: string, passes: boolean): string[];
-  readonly close: string;
-  ret(value: string, type: IRType): string;
   /** The return of the array of `values` (an entry `tuple`). Absent: the
    *  target declines such an entry. */
   retTuple?(values: string[]): string;
@@ -137,6 +133,24 @@ export function spellingOf(
   return typeof s === 'string' ? { text: s, helpers: [] } : s;
 }
 
+/** The spellings that JavaScript and GLSL share. */
+// prettier-ignore
+export const ARITHMETIC = { add: '($0 + $1)', sub: '($0 - $1)', neg: '(-$0)',
+  mul: '($0 * $1)', div: '($0 / $1)' };
+// prettier-ignore
+export const COMPARISONS = { lt: '($0 < $1)', le: '($0 <= $1)',
+  gt: '($0 > $1)', ge: '($0 >= $1)' };
+export const LOGIC = { and: '($0 && $1)', or: '($0 || $1)', not: '(!$0)' };
+
+/** The spelling `<prefix>f($0)` of each operation `f` of `names`: a
+ *  function of the target of the name of the operation. */
+export const calls = (prefix: string, names: string[]) =>
+  Object.fromEntries(names.map((f) => [f, `${prefix}${f}($0)`]));
+
+/** The expression of a body of one `return`, or `undefined`. */
+export const expressionOf = (body: readonly string[]): string | undefined =>
+  body.length === 1 ? /^\s*return (.*);$/s.exec(body[0])?.[1] : undefined;
+
 const INLINE_DEPTH = 64;
 
 /**
@@ -152,12 +166,12 @@ const INLINE_DEPTH = 64;
  * the printer writes an inlined value by recursion (`Max` of 1,000
  * operands is a chain of 1,000 `max`).
  */
-export function inlinedValues(
+function inlinedValues(
   p: Program,
   syntax: Syntax,
   rows: readonly OperatorRow[],
-  fx: Effects = effects(p, rows),
-  index: UseIndex = useIndex(p)
+  fx: Effects,
+  index: UseIndex
 ): Set<V> {
   const inlined = new Set<V>();
   const depth = new Map<V, number>();
@@ -215,8 +229,7 @@ const fuses = (
   user: Instr
 ): boolean =>
   threads(rows, p, i) &&
-  JSON.stringify(p.types[outsOf(i)[0]].shape) ===
-    JSON.stringify(p.types[outsOf(user)[0]].shape);
+  sameShape(p.types[outsOf(i)[0]].shape, p.types[outsOf(user)[0]].shape);
 
 /** `once`: the values that the target computes once, out of the
  *  functions, each bound to its name (`Printed.once`). */
@@ -254,6 +267,7 @@ export function printProgram(
   /** The text of the value of `v` at a use. */
   const use = (v: V): string =>
     inlined.has(v) ? text(index.def.get(v)!) : name(v);
+  const length = (n: Length) => (typeof n === 'number' ? String(n) : use(n.v));
 
   /** The text of `op` applied to the texts of `operands`; `$#k` is the
    *  length of the list operand `k` of `i`. */
@@ -267,10 +281,7 @@ export function printProgram(
       throw new Error(`slice printer: no spelling for the operation ${op}`);
     for (const h of spelling.helpers) helpers.add(syntax.helpers[h]);
     return spelling.text
-      .replace(/\$#(\d)/g, (_, k) => {
-        const n = type(i!.args[Number(k)]).shape[0]!;
-        return typeof n === 'number' ? String(n) : use(n.v);
-      })
+      .replace(/\$#(\d)/g, (_, k) => length(type(i!.args[Number(k)]).shape[0]!))
       .replace(/\$(\d)/g, (_, k) => operands(Number(k)));
   };
 
@@ -295,10 +306,7 @@ export function printProgram(
           );
         // A plain `elem`: a list in storage is on GLSL only, which has no
         // `map` (no target reaches this with one).
-        const lengths = shape.shape.map((n) =>
-          typeof n === 'number' ? String(n) : use(n.v)
-        );
-        return syntax.map(lengths, (ix) => element(i, ix));
+        return syntax.map(shape.shape.map(length), (ix) => element(i, ix));
       }
     }
     throw new Error(`slice printer: ${i.k} is not a value`);
@@ -330,7 +338,7 @@ export function printProgram(
       // assignment wrote: with more than one, each value is read first.
       if (!carried || targets.length === 1) {
         targets.forEach((t, j) =>
-          line(syntax.assign(t, use(inner.yields[j])), depth + 1)
+          line(`${t} = ${use(inner.yields[j])};`, depth + 1)
         );
         return;
       }
@@ -338,15 +346,12 @@ export function printProgram(
         line(syntax.declare(type(y), `${targets[j]}_next`, use(y)), depth + 1);
         return `${targets[j]}_next`;
       });
-      temps.forEach((t, j) => line(syntax.assign(targets[j], t), depth + 1));
+      temps.forEach((t, j) => line(`${targets[j]} = ${t};`, depth + 1));
     };
     for (const i of r.body) {
       if (
         fx.of(i) === 'effectful' &&
-        i.k !== 'if' &&
-        i.k !== 'loop' &&
-        i.k !== 'const' &&
-        i.k !== 'list'
+        (i.k === 'op' || i.k === 'call' || i.k === 'region')
       )
         order.push({
           name: i.k === 'call' ? `call ${i.fn}` : i.op,
@@ -370,10 +375,10 @@ export function printProgram(
         );
         line(v.first(c));
         nested(i.then, arm('a'), false);
-        line(syntax.close);
+        line('}');
         line(v.second(c));
         nested(i.else, arm('b'), false);
-        line(syntax.close);
+        line('}');
         i.outs.forEach((o, j) =>
           line(
             syntax.declare(type(o), name(o), v.join(c, arm('a')[j], arm('b')[j]))
@@ -383,11 +388,11 @@ export function printProgram(
         i.outs.forEach((v) =>
           line(syntax.declare(type(v), name(v), undefined, true))
         );
-        line(syntax.ifOpen(use(i.cond)));
+        line(`if (${use(i.cond)}) {`);
         nested(i.then, i.outs.map(name), false);
-        line(syntax.elseOpen);
+        line('} else {');
         nested(i.else, i.outs.map(name), false);
-        line(syntax.close);
+        line('}');
       } else if (i.k === 'loop') {
         // A carried value has one variable: the result of the loop, which
         // the body reads as its parameter.
@@ -404,12 +409,11 @@ export function printProgram(
           )
           .forEach((s) => line(s));
         nested(i.body, i.outs.map(name), true);
-        line(syntax.close);
+        line('}');
       } else if (i.k === 'region') {
         const [inner] = i.regions;
         const s = syntax.regions[i.op]({
           outs: i.outs.map(name),
-          types: i.outs.map(type),
           args: i.args.map(use),
           params: inner.params.map(name),
           pieces: i.pieces,
@@ -446,8 +450,7 @@ export function printProgram(
       return [...body(f.body, 1), '  ' + syntax.retTuple(ys.map(use))];
     if (f.results.length !== 1)
       throw new Error('slice printer: a function with several results');
-    const y = f.body.yields[0];
-    return [...body(f.body, 1), '  ' + syntax.ret(use(y), f.results[0])];
+    return [...body(f.body, 1), `  return ${use(ys[0])};`];
   };
   // The entry first: `order` follows `p.functions`, whose first is the entry.
   const main = returned(entry);

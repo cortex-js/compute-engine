@@ -2224,6 +2224,72 @@ G21, inlining at the lowering a small non-recursive function called inside a
 loop (what is left of voronoi, 6 times, after the pass), and G20, the closed
 form of an integral on JavaScript.
 
+User decisions of the evening of 2026-11-15, in the user's words:
+
+- The size of `ir/`: "let's do a pass to look for opportunities for
+  refactoring and code simplification that could reduce the lines of code.
+  After that pass, let's raise the target to 12,000." The limit of `ir/` is
+  12,000 lines from the landing of that pass, the interval mode included.
+- The goal: "Please continue coordinating with `ce-interval`. Our goal
+  remains to produce code that executes at most 1.1x slower than the "old"
+  compiler. In addition, let's work on increasing the breadth of coverage of
+  the Tycho corpus." Read as: per corpus program, timed alone with the two
+  compilers interleaved; a program that stays above 1.1 is listed with its
+  cause.
+- To `ce-interval`, relayed: "Yes, I think we should revisit Loop/Break",
+  and "I am willing to compromise on the iteration counter/limits: I believe
+  it's a reasonable compromise to tradeoff speed for the risk of an
+  out-of-control loop." Read as: a per-pass count may be dropped or
+  coarsened where it costs against the bound; a limit that is free stays.
+- A way for a host to customize a lowering per target: "I'm open to
+  reconsidering a way to do per-target customization/override. Not sure
+  exactly what form that could take yet." No form is chosen. The two cases
+  that prompted it (Tycho's row MK, session `tycho-18`) need none:
+  `neyret/1a9de333a1` is a list input with no element type (CE-1357: the
+  host declares `list<real>`), and Gomoku is the interpreter's evaluation.
+
+The simplification pass, 2026-11-15. Three read-only audits (the lowering,
+the core and passes, the printers and adapters; `ce-interval` audited the
+interval mode) found the code tight: no dead function, no handler that a
+later mechanism made redundant. What they found was applied in four batches
+under one rule: no emitted text, decline, message, warning or admission may
+change, and no test is edited. The proof of each batch is the emitted text of
+Tycho's corpus before and after, by hash
+(`_TASKS/2026-11-14-ir-batches/replay-texts.mts`: 13,966 JavaScript and GLSL
+programs; `_TASKS/2026-11-15-interval-mode/record-interval-texts.mts`: 5,155
+interval programs), both identical.
+
+| Batch | What | Lines of `ir/` |
+| --- | --- | --- |
+| before | | 9,882 |
+| S1, `ce-interval` (`9b9e79fd8`) | the interval mode: the option table as overrides, a region walk, dead members, comments | 9,723 |
+| S2a | the lowering: `apply()` by head name, one helper for "the binding this occurrence reads", `built()`, `trial()` shared by the closed form of an integral and the written-out sums | |
+| S2b | the core and passes: `rewrite()` owns the constants and the maps per region, ten unused re-exports, an unreachable check of `admits()`, `elementIndex()`, `operandFits()` | |
+| S2c | the printers and adapters: the GLSL option table as overrides, five statement forms as text of `printProgram()`, `sliceOptions()` and `entryInputs()` for the three adapters, GLSL helpers as template literals, identity spellings from lists of names | 9,441 |
+
+Reviews (Codex on each batch): S2a merged the lookup of a head with the
+lookup of an internal operation, so a row of the test extension whose head is
+`log2` took over `Log(x, 2)`: fixed (the two lookups are distinct again), with
+a test that failed before the fix; S2b nothing; S2c a removed field of the
+internal GLSL result that nothing reads (kept removed). One item was
+withdrawn by `ce-interval` (a handler for a closed form that the mode cannot
+print: a test built to cover it showed a plausible program that reaches it).
+Not taken, on the audits' advice: changes that alter pinned decline messages,
+merging the two ways a build is printed (it changes the text of every
+element-wise operation), a duplicate of a function of the existing GLSL
+target that goes with that target. Measured in a worktree at
+`1cd6b1c8f51bdb549457121fe969ca5224302625` plus the three batches: both suite
+runs green (2,053 suites, 85,607 tests); programs that the existing compiler
+declines and the profile admits unchanged (78, 67, 41), no message moves.
+
+Batch G21 as written (inlining at the lowering, +146 lines; voronoi 38.3 to
+5.6 µs per call against 6.2 for the existing compiler) is NOT landed. Both
+reviews found defects that come from lowering the callee's body a second time
+in the caller's context (a constant argument selects another signature, an
+input read by the body takes the type of the body's occurrence, an inlined
+function leaves `symbolDeps`). It is redone as a pass that copies the
+callee's region.
+
 Found after the review, to settle before the default:
 
 - A hang, with the switch `CE_JS_PROFILE_PUBLIC=ir`:

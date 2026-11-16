@@ -37,6 +37,7 @@
 
 import {
   argsOf,
+  elementIndex,
   elementType,
   lengthValues,
   literalKey,
@@ -46,6 +47,7 @@ import {
   recursiveFunctions,
   regionsOf,
   scalarType,
+  useIndex,
   type Constant,
   type IRType,
   type Instr,
@@ -84,7 +86,6 @@ export const ALL_PASSES: PassOptions = Object.freeze({
   strength: true,
   cse: true,
   invariants: true,
-  listLoops: true,
   dce: true,
 });
 
@@ -132,19 +133,37 @@ export function runPasses(
   return p;
 }
 
+/** What `rewrite()` gives `f` with an instruction: `subst`, where `f`
+ *  records each value that another value replaces; the value of each
+ *  constant rewritten so far; `seen`, keys of `f` visible in the open
+ *  regions (`set` writes in the innermost). */
+type Rewriting<T> = {
+  subst: Map<V, V>;
+  constants: ReadonlyMap<V, Constant>;
+  seen: { get(key: string): T | undefined; set(key: string, value: T): void };
+};
+
 /**
  * Rewrite each region of `p` once, in order. `f` returns `undefined` to
  * keep an instruction, or the instructions that replace it, which are
- * rewritten in turn; it records in `subst` each value that another value
- * replaces. The operands of an instruction (and the lengths of the types)
- * are substituted. `enter` brackets the rewrite of each region.
+ * rewritten in turn. The operands of an instruction (and the lengths of
+ * the types) are substituted.
  */
-function rewrite(
+function rewrite<T = never>(
   p: Program,
-  f: (i: Instr, subst: Map<V, V>) => Instr[] | undefined,
-  enter: (inside: () => void) => void = (inside) => inside()
+  f: (i: Instr, cx: Rewriting<T>) => Instr[] | undefined
 ): { changed: boolean; resolve: (v: V) => V } {
   const subst = new Map<V, V>();
+  const constants = new Map<V, Constant>();
+  const scopes: Map<string, T>[] = [];
+  const cx: Rewriting<T> = {
+    subst,
+    constants,
+    seen: {
+      get: (key) => scopes.find((s) => s.has(key))?.get(key),
+      set: (key, value) => void scopes[scopes.length - 1].set(key, value),
+    },
+  };
   let changed = false;
   const resolve = (v: V): V => {
     while (subst.has(v)) v = subst.get(v)!;
@@ -153,7 +172,8 @@ function rewrite(
   const instrs = (list: Instr[], out: Instr[]) => {
     for (const i of list) {
       mapDirectArgs(i, resolve);
-      const replacement = f(i, subst);
+      if (i.k === 'const') constants.set(i.out, i.value.value);
+      const replacement = f(i, cx);
       if (replacement === undefined) {
         regionsOf(i).forEach(region);
         out.push(i);
@@ -163,13 +183,14 @@ function rewrite(
       }
     }
   };
-  const region = (r: Region) =>
-    enter(() => {
-      const body: Instr[] = [];
-      instrs(r.body, body);
-      r.body = body;
-      r.yields = r.yields.map(resolve);
-    });
+  const region = (r: Region) => {
+    scopes.push(new Map());
+    const body: Instr[] = [];
+    instrs(r.body, body);
+    r.body = body;
+    r.yields = r.yields.map(resolve);
+    scopes.pop();
+  };
   for (const fn of p.functions) region(fn.body);
   if (subst.size > 0) {
     p.types = p.types.map((t) => mapLengths(t, resolve));
@@ -184,26 +205,18 @@ function rewrite(
 }
 
 /** A new value of type `t`. */
-function fresh(p: Program, t: IRType): V {
-  p.types.push(t);
-  return p.types.length - 1;
-}
+const fresh = (p: Program, t: IRType): V => p.types.push(t) - 1;
 
-/** A constant `value` of `lane`, appended to `out`. */
-function constant(
-  p: Program,
-  value: number | boolean,
-  lane: 'integer' | 'boolean',
-  out: Instr[]
-): V {
-  const v = fresh(p, scalarType(lane));
-  out.push({ k: 'const', out: v, value: { lane, value } as Literal });
+/** An integer constant `value`, appended to `out`. */
+function integer(p: Program, value: number, out: Instr[]): V {
+  const v = fresh(p, scalarType('integer'));
+  out.push({ k: 'const', out: v, value: { lane: 'integer', value } });
   return v;
 }
 
 /** The element `k` of the list `a`: a constant index and an `elem`. */
 function element(p: Program, a: V, k: number, out: Instr[]): V {
-  const index = constant(p, k, 'integer', out);
+  const index = integer(p, k, out);
   const e = fresh(p, elementType(p.types[a]));
   out.push({ k: 'op', out: e, op: 'elem', args: [a, index] });
   return e;
@@ -214,20 +227,14 @@ function element(p: Program, a: V, k: number, out: Instr[]): V {
 function atToElem(
   p: Program,
   i: Instr,
-  index: number | undefined
+  constants: ReadonlyMap<V, Constant>
 ): Instr[] | undefined {
-  if (i.k !== 'op' || i.op !== 'at' || index === undefined) return undefined;
-  const n = p.types[i.args[0]].shape[0];
-  if (
-    typeof n !== 'number' ||
-    !Number.isInteger(index) ||
-    index === 0 ||
-    Math.abs(index) > n
-  )
-    return undefined;
+  if (i.k !== 'op' || i.op !== 'at') return undefined;
+  const [l, index] = i.args;
+  const k = elementIndex(p.types[l].shape[0], constants.get(index));
+  if (k === undefined) return undefined;
   const out: Instr[] = [];
-  const k = constant(p, index > 0 ? index - 1 : n + index, 'integer', out);
-  out.push({ k: 'op', out: i.out, op: 'elem', args: [i.args[0], k] });
+  out.push({ k: 'op', out: i.out, op: 'elem', args: [l, integer(p, k, out)] });
   return out;
 }
 
@@ -264,12 +271,10 @@ function perElement(
 /** The most elements of a list that `scalarize` writes one by one. */
 export const SCALARIZE_LIMIT = 64;
 
-const scalarize: Pass = (p, rows) => {
-  const constants = new Map<V, Constant>();
-  return rewrite(p, (i) => {
-    if (i.k === 'const') constants.set(i.out, i.value.value);
+const scalarize: Pass = (p, rows) =>
+  rewrite(p, (i, { constants }) => {
     if (i.k !== 'op') return undefined;
-    const at = atToElem(p, i, constants.get(i.args[1]) as number | undefined);
+    const at = atToElem(p, i, constants);
     if (at !== undefined) return at;
     const t = p.types[i.out];
     if (t.shape.length === 0 || !threads(rows, i.op)) return undefined;
@@ -282,7 +287,6 @@ const scalarize: Pass = (p, rows) => {
     perElement(p, rows, i, out);
     return out;
   });
-};
 
 /** A value of `a` replaces `b` only on the same lane: an integer that
  *  stands for a real result (an arm, a list cell, `pow`) would narrow the
@@ -292,33 +296,17 @@ const sameLane = (p: Program, a: V, b: V) =>
 
 const fold: Pass = (p, rows) => {
   const fx = effects(p, rows);
-  const constants = new Map<V, Literal>();
   const defs = new Map<V, Instr>();
-  // The element of an operation on lists, by list and index, written in the
-  // region or a region around it: a shared graph is rewritten once per
-  // element, not once per path.
-  const scopes = [new Map<string, V>()];
-  const enter = (inside: () => void) => {
-    scopes.push(new Map());
-    try {
-      inside();
-    } finally {
-      scopes.pop();
-    }
-  };
-  const step = (i: Instr, subst: Map<V, V>): Instr[] | undefined => {
+  // `seen`: the element of an operation on lists, by list and index, written
+  // in the region or a region around it: a shared graph is rewritten once
+  // per element, not once per path.
+  return rewrite<V>(p, (i, { subst, constants, seen }) => {
     for (const o of outsOf(i)) defs.set(o, i);
-    if (i.k === 'const') constants.set(i.out, i.value);
-    const at = atToElem(
-      p,
-      i,
-      constants.get((i as { args?: V[] }).args?.[1] ?? -1)?.value as
-        number | undefined
-    );
+    const at = atToElem(p, i, constants);
     if (at !== undefined) return at;
     if (i.k === 'op' && i.op === 'elem' && constants.has(i.args[1])) {
       const [a, index] = i.args;
-      const k = constants.get(index)!.value as number;
+      const k = constants.get(index) as number;
       const list = defs.get(a);
       if (list?.k === 'list' && sameLane(p, list.args[k], i.out)) {
         subst.set(i.out, list.args[k]);
@@ -326,7 +314,7 @@ const fold: Pass = (p, rows) => {
       }
       if (list?.k === 'op' && fx.speculatable(list) && threads(rows, list.op)) {
         const key = `${a},${k}`;
-        const known = scopes.find((s) => s.has(key))?.get(key);
+        const known = seen.get(key);
         if (known !== undefined) {
           subst.set(i.out, known);
           return [];
@@ -340,7 +328,7 @@ const fold: Pass = (p, rows) => {
         const o = fresh(p, elementType(p.types[list.out]));
         out.push({ k: 'op', out: o, op: list.op, args });
         subst.set(i.out, o);
-        scopes[scopes.length - 1].set(key, o);
+        seen.set(key, o);
         return out;
       }
     }
@@ -349,7 +337,7 @@ const fold: Pass = (p, rows) => {
       fx.speculatable(i) &&
       i.args.every((a) => constants.has(a))
     ) {
-      const args = i.args.map((a) => constants.get(a)!.value);
+      const args = i.args.map((a) => constants.get(a)!);
       const value = foldOf(rows, i.op)?.(...args);
       if (value !== undefined)
         return [
@@ -361,25 +349,21 @@ const fold: Pass = (p, rows) => {
         ];
     }
     if (i.k === 'if' && constants.has(i.cond) && fx.of(i) !== 'effectful') {
-      const taken = constants.get(i.cond)!.value ? i.then : i.else;
+      const taken = constants.get(i.cond) ? i.then : i.else;
       if (!taken.yields.every((y, j) => sameLane(p, y, i.outs[j])))
         return undefined;
       taken.yields.forEach((y, j) => subst.set(i.outs[j], y));
       return taken.body;
     }
     return undefined;
-  };
-  return rewrite(p, step, enter);
+  });
 };
 
 /** `if (c) { …y } else { false }` is `and(c, y)`, `if (c) { true } else
  *  { …y }` is `or(c, y)`, when the body of `y` is pure: it moves out. */
 const hoist: Pass = (p, rows) => {
   const fx = effects(p, rows);
-  const constants = new Map<V, boolean>();
-  return rewrite(p, (i) => {
-    if (i.k === 'const' && i.value.lane === 'boolean')
-      constants.set(i.out, i.value.value);
+  return rewrite(p, (i, { constants }) => {
     if (i.k !== 'if' || i.outs.length !== 1) return undefined;
     const decided = (r: Region) => {
       const c = r.body.find((x) => x.k === 'const' && x.out === r.yields[0]);
@@ -404,10 +388,8 @@ const hoist: Pass = (p, rows) => {
   });
 };
 
-const strength: Pass = (p) => {
-  const constants = new Map<V, Constant>();
-  return rewrite(p, (i, subst) => {
-    if (i.k === 'const') constants.set(i.out, i.value.value);
+const strength: Pass = (p) =>
+  rewrite(p, (i, { subst, constants }) => {
     if (i.k !== 'op' || i.op !== 'pow') return undefined;
     const [base, exponent] = i.args;
     const n = constants.get(exponent);
@@ -433,14 +415,10 @@ const strength: Pass = (p) => {
     }
     return undefined;
   });
-};
 
 const cse: Pass = (p, rows) => {
   const fx = effects(p, rows);
   const cyclic = recursiveFunctions(p.functions);
-  // The keys of the visible instructions, one map per open region, to
-  // their values.
-  const scopes: Map<string, V[]>[] = [];
   const key = (i: Instr): string | undefined => {
     // A call of a function with no effect, not on a cycle of calls: a
     // `may-fail` one too, since the visible call failed if this one would.
@@ -449,64 +427,50 @@ const cse: Pass = (p, rows) => {
         ? `c ${i.fn} ${i.args.join(',')}`
         : undefined;
     if (!fx.mergeable(i)) return undefined;
-    if (i.k === 'const')
-      return literalKey(
-        i.value.lane,
-        i.value.value,
-        i.value.lane === 'real' ? i.value.inexact : undefined
-      );
+    if (i.k === 'const') return literalKey(i.value);
     if (i.k === 'op') return `o ${i.op} ${i.args.join(',')}`;
     if (i.k === 'list') return `l ${p.types[i.out].lane} ${i.args.join(',')}`;
     return undefined;
   };
-  return rewrite(
-    p,
-    (i, subst) => {
-      const k = key(i);
-      if (k === undefined) return undefined;
-      const found = scopes.map((s) => s.get(k)).find((v) => v !== undefined);
-      if (found !== undefined) {
-        outsOf(i).forEach((o, j) => subst.set(o, found[j]));
-        return [];
-      }
-      scopes[scopes.length - 1].set(k, outsOf(i));
-      return undefined;
-    },
-    (inside) => {
-      scopes.push(new Map());
-      inside();
-      scopes.pop();
+  // `seen`: the keys of the visible instructions to their values.
+  return rewrite<V[]>(p, (i, { subst, seen }) => {
+    const k = key(i);
+    if (k === undefined) return undefined;
+    const found = seen.get(k);
+    if (found !== undefined) {
+      outsOf(i).forEach((o, j) => subst.set(o, found[j]));
+      return [];
     }
-  );
+    seen.set(k, outsOf(i));
+    return undefined;
+  });
 };
 
 /** Whether `test` holds for `i` or for an instruction of its regions. */
 const some = (i: Instr, test: (x: Instr) => boolean): boolean =>
   test(i) || regionsOf(i).some((r) => r.body.some((x) => some(x, test)));
 
+/** The body that a `loop`, a `build` or a `filter` repeats. */
+const repeated = (i: Instr): Region | undefined =>
+  i.k === 'loop'
+    ? i.body
+    : i.k === 'region' && (i.op === 'build' || i.op === 'filter')
+      ? i.regions[0]
+      : undefined;
+
 /**
- * An instruction at the top level of the body of a `loop`, a `build` or a
- * `filter` moves to just before it when nothing in it reads a parameter of
- * the body (the index, a carried value) or a value of the body that stays,
- * in the order of the body; the loops inside it first, so a value moves
- * out of a nest as far as it is invariant. An inner loop, a build or an
- * `if` moves as a whole. What moves:
- * - a pure instruction out of every loop, unless it holds a call or an
- *   operation that the pass `plain` of the interval mode makes throw: a
- *   `rangecount` (`_IA.rangeCount()`), and a `rangestep` or an `elem` of an
- *   index that is not a constant or a loop index (`_IA.number()` of an
- *   interval that is not a point);
- * - one that can fail, or a call of a function that is not effectful and
- *   not on a cycle of calls, only out of a loop that runs at least one pass
- *   (constant bounds, a constant length) and is not a `Loop` (which counts
- *   its passes), and only before the first effectful instruction of the
- *   body: it failed in the first pass if it fails before the loop;
+ * An instruction at the top level of a repeated body that reads no
+ * parameter of the body and no value of the body that stays moves to just
+ * before the loop, the inner loops first (README, "Effects"). What moves:
+ * - a pure instruction, unless `hazard`: the pass `plain` of the interval
+ *   mode makes it throw (`_IA.rangeCount()`, `_IA.number()`);
+ * - one that can fail, or a call that is not effectful and not on a cycle
+ *   of calls, out of a loop that runs a pass and is not a `Loop`, before
+ *   the first effectful instruction of the body: it failed in the first
+ *   pass if it fails before the loop;
  * - out of a loop that can run no pass, a build with a pure body over the
- *   elements of a list that exists (an input, a result of a call or of a
- *   filter, or the shortest of such lists), which cannot fail, and with
- *   `listLoops` a loop over them, whose limit of passes it does not reach:
- *   each runs once where the program ran it no time, no longer than the
- *   list took to make, and on JavaScript it ticks the deadline then.
+ *   elements of a list that exists, and with `listLoops` a loop over them:
+ *   each runs once, no longer than the list took to make.
  */
 const invariants = (
   p: Program,
@@ -516,7 +480,7 @@ const invariants = (
   const fx = effects(p, rows);
   const cyclic = recursiveFunctions(p.functions);
   const constants = new Map<V, Constant>();
-  const defs = new Map<V, Instr>();
+  const { def: defs } = useIndex(p);
   // The index of each loop, build and filter.
   const indices = new Set<V>();
   // The lengths of the lists that exist where the length is visible.
@@ -529,7 +493,6 @@ const invariants = (
     );
   const index = (r: Region) =>
     r.body.forEach((i) => {
-      outsOf(i).forEach((o) => defs.set(o, i));
       if (i.k === 'const') constants.set(i.out, i.value.value);
       if (i.k === 'call' || i.k === 'region') ofLists(i.outs);
       // The shortest of such lists (`PointList(A, B)`).
@@ -539,9 +502,8 @@ const invariants = (
         i.args.every((a) => lengths.has(a))
       )
         lengths.add(i.out);
-      if (i.k === 'loop') indices.add(i.body.params[0]);
-      if (i.k === 'region' && (i.op === 'build' || i.op === 'filter'))
-        indices.add(i.regions[0].params[0]);
+      const body = repeated(i);
+      if (body !== undefined) indices.add(body.params[0]);
       regionsOf(i).forEach(index);
     });
   for (const f of p.functions) {
@@ -619,9 +581,8 @@ const invariants = (
     const out: Instr[] = [];
     for (const i of r.body) {
       regionsOf(i).forEach(visit);
-      if (i.k === 'loop') out.push(...moveOut(i, i.body));
-      else if (i.k === 'region' && (i.op === 'build' || i.op === 'filter'))
-        out.push(...moveOut(i, i.regions[0]));
+      const body = repeated(i);
+      if (body !== undefined) out.push(...moveOut(i, body));
       out.push(i);
     }
     r.body = out;

@@ -443,6 +443,45 @@ describe('an internal error', () => {
   });
 });
 
+describe('a row whose head is the name of an IR operation', () => {
+  // The lowering names some rows by their IR operation (`log2`, `div.q`,
+  // `rangecount`); a `vars` name or an extension row with such a head is not
+  // that operation.
+  const programs: Json[] = [
+    ['Log', 'x', 2],
+    ['Multiply', 'x', ['Rational', 1, 3]],
+    ['Length', ['Range', 1, 'x']],
+    ['At', ['List', 'x', ['Sin', 'x'], 3], 2],
+  ];
+  const code = (json: Json, options: Record<string, unknown> = {}) =>
+    compile(box(json), { ...IR, ...options, fallback: false }).code;
+  const names = ['log2', 'elem', 'div.q', 'rangestep', 'rangecount', 'at'];
+  test('a vars name', () => {
+    const vars = Object.fromEntries(names.map((n) => [n, '1']));
+    for (const json of programs)
+      expect([json, code(json, { vars })]).toEqual([json, code(json)]);
+  });
+  test('an extension row', () => {
+    const extension = {
+      rows: names.map((head) => ({
+        head,
+        arity: 'variadic' as const,
+        signatures: [[['real'], 'real', 'intercepted'] as const],
+        threads: false,
+        effect: 'pure' as const,
+      })),
+      spellings: { intercepted: '(-$0)' },
+    };
+    for (const json of programs) {
+      const expected = code(json);
+      expect([
+        json,
+        _withIrProfileTestExtension(extension as never, () => code(json)),
+      ]).toEqual([json, expected]);
+    }
+  });
+});
+
 describe('a cancellation', () => {
   // A row whose fold is cancelled: `Length(L)` is the constant 3, so the
   // `fold` pass folds `Sinc(3)` with the row.

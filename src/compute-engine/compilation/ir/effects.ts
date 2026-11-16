@@ -47,12 +47,12 @@ const RANK: Record<Effect, number> = {
   'effectful': 2,
 };
 
-export function maxEffect(a: Effect, b: Effect): Effect {
+function maxEffect(a: Effect, b: Effect): Effect {
   return RANK[a] >= RANK[b] ? a : b;
 }
 
 /** The effect of `i`, given the effect of each function. */
-export function instrEffect(
+function instrEffect(
   rows: readonly OperatorRow[],
   i: Instr,
   fn: (name: string) => Effect,
@@ -103,13 +103,12 @@ function regionEffect(
 
 /** The effect of each function of `functions`: the least fixed point, at
  *  least `may-fail` for a recursive function. A function that is not in
- *  the list (`known` absent) is effectful. */
+ *  the list is effectful. */
 export function functionEffects(
   rows: readonly OperatorRow[],
-  functions: readonly IRFunction[],
-  known: ReadonlyMap<string, Effect> = new Map()
+  functions: readonly IRFunction[]
 ): Map<string, Effect> {
-  const effects = new Map<string, Effect>(known);
+  const effects = new Map<string, Effect>();
   const cyclic = recursiveFunctions(functions);
   const floor = (name: string): Effect =>
     cyclic.has(name) ? 'may-fail' : 'pure';
@@ -193,9 +192,9 @@ export function effectTrace(
 }
 
 /** Whether the trace `after` is `before` with its operands renamed by
- *  `resolve`. */
+ *  `resolve` (and in the same regions, when `before` names them). */
 export function sameTrace(
-  before: readonly TraceEntry[],
+  before: readonly (Omit<TraceEntry, 'region'> & { region?: number })[],
   after: readonly TraceEntry[],
   resolve: (v: V) => V = (v) => v
 ): boolean {
@@ -203,9 +202,11 @@ export function sameTrace(
     before.length === after.length &&
     before.every(
       (x, k) =>
-        x.region === after[k].region &&
+        (x.region === undefined || x.region === after[k].region) &&
         x.name === after[k].name &&
+        x.args.length === after[k].args.length &&
         x.args.every((a, j) => resolve(a) === after[k].args[j]) &&
+        x.outs.length === after[k].outs.length &&
         x.outs.every((a, j) => resolve(a) === after[k].outs[j])
     )
   );

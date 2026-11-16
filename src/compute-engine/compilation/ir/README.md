@@ -531,7 +531,7 @@ general). A comparison of two plain integers (the test of `Max()` of no
 element) is a verdict of numbers. A value whose length is not a plain
 integer declines. An `if` of two list arms (of one length value, as the
 lowering requires) joins element by element (`_IA.hull`). A list result,
-also a root `Tuple`, is an array of kinded results; `ret` writes no copy,
+also a root `Tuple`, is an array of kinded results; the return writes no copy,
 because `run()` copies the inputs and the result and no kernel writes to an
 operand. An input of a list or tuple type (`list<real>`, `list<real^3>`,
 `tuple<real, real>`, `list<tuple<real, real>>`, `vector<integer^90001>`) is

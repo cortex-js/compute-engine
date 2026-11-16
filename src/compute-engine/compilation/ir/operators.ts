@@ -485,18 +485,26 @@ export function signatureOf(
   complex = false,
   bigint = false
 ): Signature | undefined {
-  const operand = (args: readonly Operand[], i: number) =>
-    args.length === 1 ? args[0] : args[i];
   return row.signatures.find(
     ([args, result]) =>
       (!complex || args.includes('complex')) &&
       (!bigint || (result !== 'real' && result !== 'complex')) &&
-      types.every((t, i) => {
-        const a = operand(args, i);
-        if (a === 'list') return t.shape.length > 0;
-        return widensTo(t.lane, a) && (t.shape.length === 0 || row.threads);
-      })
+      types.every((t, i) => operandFits(row, args, i, t))
   );
+}
+
+/** Whether a value of type `t` is the operand `k` of `args`, operands of a
+ *  signature of `row`: by `fits` of its lane (the verifier: `isSubLane`). */
+export function operandFits(
+  row: OperatorRow,
+  args: readonly Operand[],
+  k: number,
+  t: IRType,
+  fits: (a: Lane, b: Lane) => boolean = widensTo
+): boolean {
+  const a = args.length === 1 ? args[0] : args[k];
+  if (a === 'list') return t.shape.length > 0;
+  return fits(t.lane, a) && (t.shape.length === 0 || row.threads);
 }
 
 /** The type of the result of `signature` on operands of `types`, or
@@ -520,9 +528,4 @@ export function resultType(
   if (!lists.every((t) => sameShape(t.shape, shape) || fits(t.shape)))
     return undefined;
   return { lane: result, shape };
-}
-
-/** The number of operands of the IR operation of `row`. */
-export function irArity(row: OperatorRow): number {
-  return typeof row.arity === 'number' ? row.arity : 2;
 }

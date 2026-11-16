@@ -309,11 +309,9 @@ export function lower(
   const same = (x: readonly Length[], y: readonly Length[]) =>
     sameShape(x, y, constant);
   const row = (head: string) => rowOfHead(rows, head)!;
-  /** The constant of the integer `x`: a number when it is safe. */
-  const exact = (x: bigint): V => {
-    const n = Number(x);
-    return b.constant(Number.isSafeInteger(n) ? n : x, 'integer');
-  };
+  /** The row of the IR operation `name` (not a head: an extension row can
+   *  have any head). */
+  const ofOp = (name: string) => rowOfOp(rows, name)!.row;
 
   /** `v` where a value of `lane` is read: converted to the complex lane
    *  when it is real, as it is otherwise. */
@@ -416,22 +414,15 @@ export function lower(
 
   const facts = (e: Expression): Facts => {
     const none = new Set<string>();
-    if (isSymbol(e))
-      return {
-        names: new Set([e.symbol]),
-        writes: none,
-        loop: false,
-        slice: true,
-        size: 1,
-      };
-    if (!isFunction(e))
-      return {
-        names: none,
-        writes: none,
-        loop: false,
-        slice: isNumber(e),
-        size: 1,
-      };
+    const leaf = (names: Set<string>, slice: boolean): Facts => ({
+      names,
+      writes: none,
+      loop: false,
+      slice,
+      size: 1,
+    });
+    if (isSymbol(e)) return leaf(new Set([e.symbol]), true);
+    if (!isFunction(e)) return leaf(none, isNumber(e));
     const f = known.get(e);
     if (f !== undefined) return f;
     const h = e.operator;
@@ -468,8 +459,14 @@ export function lower(
     return info;
   };
 
-  /** Apply `row` to the values `args`. */
-  const apply = (node: Expression, r: OperatorRow, args: V[]): V => {
+  /** Apply the row `head`, or the row of the library head of that name, to
+   *  the values `args`. */
+  const apply = (
+    node: Expression,
+    head: OperatorRow | string,
+    args: V[]
+  ): V => {
+    const r = typeof head === 'string' ? row(head) : head;
     // An angle in another unit than radians: the operands of a direct
     // function are converted to radians, the result of an inverse one from
     // radians, with the factors of the unit at the time of the compilation.
@@ -477,7 +474,7 @@ export function lower(
     if (factors) {
       const plain = { ...r, angle: undefined };
       const scale = (v: V, k: number) =>
-        apply(node, row('Multiply'), [
+        apply(node, 'Multiply', [
           v,
           // Two roundings (`Math.PI / 180`).
           b.constant(k, 'real', interval ? 2 : undefined),
@@ -524,7 +521,7 @@ export function lower(
     )
       return apply(
         node,
-        row(c.head),
+        c.head,
         args.filter((_, i) => i !== c.index)
       );
     const complex = leaves(r, args, node);
@@ -612,10 +609,10 @@ export function lower(
       decline(node, 'the norm of a value that is not a point of numbers');
     const squares = Array.from({ length: n }, (_, k) => {
       const x = b.op('elem', [p, b.constant(k, 'integer')], scalarType(t.lane));
-      return apply(node, row('Multiply'), [x, x]);
+      return apply(node, 'Multiply', [x, x]);
     });
-    const sum = squares.reduce((s, x) => apply(node, row('Add'), [s, x]));
-    return apply(node, row('Sqrt'), [sum]);
+    const sum = squares.reduce((s, x) => apply(node, 'Add', [s, x]));
+    return apply(node, 'Sqrt', [sum]);
   };
 
   /** `v` is a list of numbers (not a tuple). */
@@ -843,7 +840,7 @@ export function lower(
           !isSubLane(t.lane, 'real')
         )
           decline(e, 'RandomShuffle of a value that is not a list of numbers');
-        return apply(e, row('RandomShuffle'), [l]);
+        return apply(e, 'RandomShuffle', [l]);
       }
       case 'At': {
         if (e.nops !== 2) decline(e, 'At with an index for each level');
@@ -870,7 +867,7 @@ export function lower(
             e,
             'an index that can be out of range, of a list of booleans, of complex numbers or of lists'
           );
-        return apply(e, row('At'), [l, i]);
+        return apply(e, 'At', [l, i]);
       }
       case 'PointX':
       case 'PointY':
@@ -882,7 +879,7 @@ export function lower(
         const p = value(e.ops[0])!;
         const k = ['PointX', 'PointY', 'PointZ'].indexOf(e.operator) + 1;
         const coordinate = ([q]: V[]) =>
-          apply(e, row('At'), [q, b.constant(k, 'integer')]);
+          apply(e, 'At', [q, b.constant(k, 'integer')]);
         if (e.nops === 1 && tuples.get(p) === 1 && type(p).shape.length === 2)
           return eachPoint(e, e.operator, [p], coordinate);
         if (e.nops !== 1 || tuples.get(p) !== 0 || type(p).shape.length !== 1)
@@ -896,24 +893,20 @@ export function lower(
         const [p, q] = e.ops.map((op) => value(op)!);
         if (!tuples.has(p) || !tuples.has(q))
           decline(e, 'Distance of a value that is not a point');
-        const d = apply(e, row('Add'), [p, apply(e, row('Negate'), [q])]);
-        return apply(e, row('Abs'), [d]);
+        const d = apply(e, 'Add', [p, apply(e, 'Negate', [q])]);
+        return apply(e, 'Abs', [d]);
       }
       case 'Multiply':
         return product(e);
       case 'Power': {
-        // The interval mode: `x^(p/q)` of a literal rational exponent is
-        // the integer power `p` of the root of degree `q`, which the kernels
-        // enclose tightly for a negative `x` too (a `q` that is a power of 2
-        // below).
+        // The interval mode (`README.md`, "The interval mode"): `x^(p/q)` of
+        // a literal rational is `Root(x, q)^p`, or `pow.principal` of the
+        // double `p/q` when `q` is a power of 2; a float literal that is not
+        // an integer is read as the interpreter reads it
+        // (`realPowerBranchTerms()`), `pow.branch` over a base that can be
+        // negative when its `q` is odd, `pow.principal` otherwise; a power
+        // by the unmarked constant 2 is `square`.
         const nv = isNumber(e.ops[1]) ? e.ops[1].numericValue : undefined;
-        // A float literal that is not an integer is its double `e`, read
-        // as the interpreter reads it (`realPowerBranchTerms()`), now: over
-        // a base that can be negative, `p/q` of odd `q` is the real root
-        // `±|x|^e` with the double (`pow.branch`); anything else, and every
-        // float over a base that the lowering proves non-negative, is the
-        // principal power `x^e` (`pow.principal`), with no real value over
-        // a negative base.
         const float =
           !interval || nv === undefined
             ? undefined
@@ -932,9 +925,6 @@ export function lower(
             ? e.ops[1].toRational()
             : null;
         if (pq === null || !pq.every(Number.isSafeInteger) || pq[1] < 2) {
-          // The interval mode: a power by the unmarked constant 2 (a
-          // literal, a name that holds 2) is `square`, the kernel of half
-          // the cost of `pow`.
           if (!interval || e.nops !== 2) break;
           const [x, k] = e.ops.map((op) => value(op)!);
           if (terms !== undefined) {
@@ -946,27 +936,24 @@ export function lower(
                 : terms[0] % 2 !== 0
                   ? 'pow.branch'
                   : 'pow.branch.even';
-            return apply(e, rowOfOp(rows, op)!.row, [x, k]);
+            return apply(e, ofOp(op), [x, k]);
           }
           return constant(k) === 2 && type(k).lane === 'integer'
-            ? apply(e, rowOfOp(rows, 'square')!.row, [x])
-            : apply(e, row('Power'), [x, k]);
+            ? apply(e, ofOp('square'), [x])
+            : apply(e, 'Power', [x, k]);
         }
-        // A denominator that is a power of 2: `p/q` is a double, and the
-        // power has no real value over a negative base. The principal power
-        // of the double, one kernel, as the existing target.
         if (2 ** Math.round(Math.log2(pq[1])) === pq[1])
-          return apply(e, rowOfOp(rows, 'pow.principal')!.row, [
+          return apply(e, ofOp('pow.principal'), [
             value(e.ops[0])!,
             b.constant(pq[0] / pq[1], 'real'),
           ]);
-        const root = apply(e, row('Root'), [
+        const root = apply(e, 'Root', [
           value(e.ops[0])!,
           b.constant(pq[1], 'integer'),
         ]);
         return pq[0] === 1
           ? root
-          : apply(e, row('Power'), [root, b.constant(pq[0], 'integer')]);
+          : apply(e, 'Power', [root, b.constant(pq[0], 'integer')]);
       }
       case 'Log': {
         // `Log(x, 10)` is `log10`, a real `Log(x, 2)` is `log2` (exact at a
@@ -980,23 +967,21 @@ export function lower(
         // double: `10.0000000000000001` is the integer 10.
         const is = (n: number) =>
           constant(base) === n && (!interval || type(base).lane === 'integer');
-        if (is(10)) return apply(e, row('Log'), [x]);
-        if (
-          is(2) &&
-          type(x).lane !== 'complex' &&
-          options.mode !== 'complex'
-        )
-          return apply(e, rowOfOp(rows, 'log2')!.row, [x]);
+        if (is(10)) return apply(e, 'Log', [x]);
+        if (is(2) && type(x).lane !== 'complex' && options.mode !== 'complex')
+          return apply(e, ofOp('log2'), [x]);
         return apply(
           e,
-          row('Divide'),
-          [x, base].map((v) => apply(e, row('Ln'), [v]))
+          'Divide',
+          [x, base].map((v) => apply(e, 'Ln', [v]))
         );
       }
       case 'Length':
         return lists.source(e.ops[0], false, true).length;
-      case 'Range':
-        return lists.source(e).value();
+      case 'Range': {
+        const s = lists.source(e);
+        return lists.built(e, s.length, s.at);
+      }
       case 'Map':
         if (e.nops !== 2) decline(e, 'Map of more than one list');
         return lists.build(e, e.ops[1], e.ops[0], false);
@@ -1148,33 +1133,17 @@ export function lower(
   };
 
   /** A product. With a rational constant `p/q` whose denominator is not a
-   *  power of two, it is `(p · factors) / q`: a multiplication by the
-   *  integer `p` (a negation for -1), then a division by the integer `q`.
-   *  IEEE division is correctly rounded, so the value is exact wherever
-   *  `p · factors` is an exact multiple of `q`: `Floor(x/49)` at 49 is 1,
-   *  where the product by the double of `1/49` gives 0. `p` and the sign
-   *  multiply the scalar factors first, so a list is passed over once for
-   *  the product and once for the division. The constant can be a free
-   *  name that holds it (a capture, as `captured()` lowers it). A power of
-   *  two as the denominator keeps the product by the double `p/q`, which is
-   *  exact; so do a complex factor (no rounding reads a complex value) and
-   *  the `bigint` mode (a rational declines there). */
+   *  power of two, it is `(p · factors) / q` (`div.q`): `Floor(x/49)` at 49
+   *  is 1, where the product by the double of `1/49` gives 0 (`README.md`,
+   *  "The contracts"). The constant can be a free name that holds it. */
   const product = (e: Fn): V => {
     // The number of `x`: a literal, or the value a free name holds.
     const numberOf = (x: Expression): Expression | undefined => {
       if (isNumber(x)) return x;
       if (!isSymbol(x) || lookup(x.symbol) !== undefined) return undefined;
       if (options.vars?.includes(x.symbol) || CONSTANTS.has(x.symbol)) return;
-      const def = ce.lookupDefinition(x.symbol);
-      const v = held(x.symbol)?.value;
-      return v !== undefined &&
-        isNumber(v) &&
-        (cx.inFunction === undefined ||
-          (def !== undefined &&
-            'value' in def &&
-            def.value === resolvedValueDefinition(x)))
-        ? v
-        : undefined;
+      const v = own(x);
+      return v !== undefined && isNumber(v) ? v : undefined;
     };
     const ratio = (x: Expression) => {
       const n = numberOf(x);
@@ -1191,14 +1160,14 @@ export function lower(
     if (k < 0 || rest.some((v) => type(v).lane === 'complex'))
       return apply(
         e,
-        row('Multiply'),
+        'Multiply',
         values.map((v, i) => v ?? value(e.ops[i])!)
       );
     const c = e.ops[k];
     if (isSymbol(c) && !held(c.symbol)!.library) b.captures.add(c.symbol);
     const [p, q] = ratio(c)!;
     const mul = (xs: V[]) =>
-      xs.length === 1 ? xs[0] : apply(e, row('Multiply'), xs);
+      xs.length === 1 ? xs[0] : apply(e, 'Multiply', xs);
     const scalars = rest.filter((v) => type(v).shape.length === 0);
     const lists = rest.filter((v) => type(v).shape.length > 0);
     let factors = lists;
@@ -1206,11 +1175,11 @@ export function lower(
       let s = mul(
         p === 1 || p === -1 ? scalars : [b.constant(p, 'integer'), ...scalars]
       );
-      if (p === -1) s = apply(e, row('Negate'), [s]);
+      if (p === -1) s = apply(e, 'Negate', [s]);
       factors = [s, ...lists];
     } else if (p !== 1) factors = [b.constant(p, 'integer'), ...lists];
     const v = mul(factors);
-    return apply(e, rowOfOp(rows, 'div.q')!.row, [v, b.constant(q, 'integer')]);
+    return apply(e, ofOp('div.q'), [v, b.constant(q, 'integer')]);
   };
 
   /** The booleans `first`, `next(1)`, … `next(n - 1)` joined by `And`
@@ -1280,7 +1249,13 @@ export function lower(
       n = bigint || interval ? e.evaluate() : e.N();
       if (interval) {
         const nv = isNumber(n) ? n.numericValue : undefined;
-        const big = bigDecimalFolds(ce.precision);
+        // `N()` computes in big decimals of more digits than the 17 of a
+        // double, so that its value read as a double is within 1 ulp: the
+        // engine's precision decides big decimals against doubles
+        // (`bignumPreferred()`), and the process-global
+        // `BigDecimal.precision`, which another engine can have changed,
+        // sizes them (the note in `numerics/real-power.ts`).
+        const big = ce.precision >= 18 && BigDecimal.precision >= 18;
         exact =
           typeof nv === 'number'
             ? big && Number.isSafeInteger(nv)
@@ -1299,8 +1274,7 @@ export function lower(
       return b.constant(isSymbol(n, 'True'), 'boolean');
     // A value that is not an integer (a pole, `Mod(5, 0)`) is lowered as
     // written: its helper throws the pole where the node is evaluated.
-    if (bigint && isNumber(n) && n.isInteger !== true) return undefined;
-    if (!isNumber(n)) return undefined;
+    if (!isNumber(n) || (bigint && n.isInteger !== true)) return undefined;
     return number(n, interval && !exact ? 1 : undefined);
   };
 
@@ -1315,7 +1289,10 @@ export function lower(
       const n = e.isInteger === true ? toBigint(e) : null;
       if (n === null)
         decline(e, 'a number that is not an integer (the bigint mode)');
-      return exact(n);
+      return b.constant(
+        Number.isSafeInteger(Number(n)) ? Number(n) : n,
+        'integer'
+      );
     }
     if (e.im === 0 && inexact !== undefined && Number.isFinite(e.re))
       return b.constant(e.re, 'real', inexact);
@@ -1336,12 +1313,28 @@ export function lower(
 
   /** The value that the name `name` holds in the innermost binding of
    *  the engine (as the interpreter reads a symbol that is not a call,
-   *  docs/SCOPING-MODEL.md), and whether that binding is the library's. */
+   *  docs/SCOPING-MODEL.md), its definition, and whether that binding is
+   *  the library's. */
   const held = (name: string) => {
     const binding = ce.lookupDefinition(name);
     const library = ce.contextStack[0]?.lexicalScope.bindings.get(name);
     return binding !== undefined && 'value' in binding
-      ? { value: binding.value.value, library: binding === library }
+      ? {
+          definition: binding.value,
+          value: binding.value.value,
+          library: binding === library,
+        }
+      : undefined;
+  };
+
+  /** The value that the name of `e` holds, when its binding here is the one
+   *  that the occurrence reads (always, at the entry). */
+  const own = (e: Expression & { symbol: string }) => {
+    const h = held(e.symbol);
+    return h !== undefined &&
+      (cx.inFunction === undefined ||
+        h.definition === resolvedValueDefinition(e))
+      ? h.value
       : undefined;
   };
 
@@ -1448,27 +1441,17 @@ export function lower(
         decline(e, `${name} is not the library constant here`);
       return b.constant(c, 'real', interval ? 1 : undefined);
     }
-    const h = held(name);
-    if (cx.inFunction === undefined)
-      return h?.value !== undefined
-        ? captured(e, name, h.value)
-        : input(e, name, e.type.type);
     // In a function body the interpreter reads the binding of the body,
     // which need not be the binding of the name where the call is: a name
     // whose binding here is the body's is its value, as at the entry
     // (`compile()` chooses a scope where it is, `compilationScope()`);
     // another name with a value declines; an input is a parameter that
     // each call passes.
-    const def = ce.lookupDefinition(name);
+    const v = own(e);
+    if (v !== undefined) return captured(e, name, v);
+    if (cx.inFunction === undefined) return input(e, name, e.type.type);
     if (
-      h?.value !== undefined &&
-      def !== undefined &&
-      'value' in def &&
-      def.value === resolvedValueDefinition(e)
-    )
-      return captured(e, name, h.value);
-    if (
-      h?.value !== undefined ||
+      held(name)?.value !== undefined ||
       resolvedValueDefinition(e)?.value !== undefined
     )
       decline(
@@ -1507,13 +1490,8 @@ export function lower(
     // At the entry the input has the type that the scope of the
     // compilation gives the name, which a call checks against the
     // parameter.
-    const def = ce.lookupDefinition(name);
     return cx.inFunction === undefined
-      ? input(
-          e,
-          name,
-          def !== undefined && 'value' in def ? def.value.type.type : t
-        )
+      ? input(e, name, held(name)?.definition.type.type ?? t)
       : fns.capture(e, name, t);
   };
 
@@ -1794,17 +1772,15 @@ export function lower(
       ...(fixed.length > 0 ? [b.constant(Math.min(...fixed), 'integer')] : []),
       ...new Set(n.flatMap((x) => (typeof x === 'number' ? [] : [x.v]))),
     ];
-    const length = lengths.reduce((m, x) => apply(e, row('Min'), [m, x]));
-    const k = b.newValue(scalarType('integer'));
-    const at = (v: V) =>
-      type(v).shape.length === 0 ? v : lists.listSource(v).at(k);
-    return region(
-      'build',
-      [length],
-      [k],
-      () => [tuple(e, parts.map(at))],
-      e
-    )[0];
+    const length = lengths.reduce((m, x) => apply(e, 'Min', [m, x]));
+    return lists.built(e, length, (k) =>
+      tuple(
+        e,
+        parts.map((v) =>
+          type(v).shape.length === 0 ? v : lists.listSource(v).at(k)
+        )
+      )
+    );
   };
 
   const local = (s: Expression, v: V, lane: Lane): V => {
@@ -1867,10 +1843,7 @@ export function lower(
           const lane: Lane =
             typeName !== 'unknown'
               ? (typeName as Lane)
-              : type(v).lane === 'boolean' ||
-                  type(v).lane === 'complex' ||
-                  type(v).lane === 'color' ||
-                  bigint
+              : bigint || !isSubLane(type(v).lane, 'real')
                 ? type(v).lane
                 : 'real';
           result = local(s, v, lane);
@@ -1906,10 +1879,7 @@ export function lower(
       if (!isSymbol(index)) decline(c, 'a Loop index that is not a name');
       const s = lists.source(c.ops[1]);
       const lo = b.constant(0, 'integer');
-      const hi = apply(c, row('Subtract'), [
-        s.length,
-        b.constant(1, 'integer'),
-      ]);
+      const hi = apply(c, 'Subtract', [s.length, b.constant(1, 'integer')]);
       const init = carried.map((x) => widen(x.v, x.lane!));
       const k = b.newValue(scalarType('integer'));
       const params = carried.map((x) => b.newValue(scalarType(x.lane!)));
@@ -1940,16 +1910,29 @@ export function lower(
    *  counted. */
   const closedRegion = (c: Expression | undefined): Region | undefined => {
     if (c === undefined || facts(c).loop || !facts(c).slice) return undefined;
-    const effects = b.effects;
-    try {
-      const r = b.region([], () => [scalar(c)]);
-      return isSubLane(type(r.yields[0]).lane, 'real') ? r : undefined;
-    } catch (error) {
-      if (!(error instanceof Decline)) throw error;
-      return undefined;
-    } finally {
-      b.effects = effects;
-    }
+    const r = trial(() => scalar(c), true);
+    return r && isSubLane(type(r.yields[0]).lane, 'real') ? r : undefined;
+  };
+  /** The region of the value that `f` lowers, which is not emitted, or
+   *  `undefined` when `f` gives no value or declines; `b.effects` is
+   *  restored. A decline after a user function began to be lowered in `f`
+   *  is rethrown, unless `any`. */
+  const trial = (f: () => V | undefined, any = false): Region | undefined => {
+    const [effects, begun, outer] = [b.effects, fns.begun(), quadrature];
+    let v: V | undefined;
+    const r = b.region([], () => {
+      try {
+        v = f();
+      } catch (error) {
+        // A user function whose lowering began stays registered.
+        if (!(error instanceof Decline) || (!any && fns.begun() !== begun))
+          throw error;
+        quadrature = outer;
+      }
+      return v === undefined ? [] : [v];
+    });
+    b.effects = effects;
+    return v === undefined ? undefined : r;
   };
   /** The interval mode: `x` is safe to compute before an integral whose
    *  integrand holds it (an invariant): every head is a pure row of the
@@ -2105,14 +2088,12 @@ export function lower(
   };
 
   const cx: Lowering = {
-    ce,
     b,
     rows,
     frames,
     value,
     scalar,
     apply,
-    row,
     type,
     constant,
     branch,
@@ -2127,26 +2108,9 @@ export function lower(
     runtimeLengths: options.runtimeLengths ?? true,
     unrollSums: options.unrollSums ?? 0,
     attempt: (f, accept, refund) => {
-      const [nodes, effects, begun, outer] = [
-        lowered,
-        b.effects,
-        fns.begun(),
-        quadrature,
-      ];
-      let v: V | undefined;
-      const r = b.region([], () => {
-        try {
-          v = f(() => lowered - nodes, NODE_LIMIT - nodes);
-        } catch (error) {
-          // A user function whose lowering began stays registered.
-          if (!(error instanceof Decline) || fns.begun() !== begun)
-            throw error;
-          quadrature = outer;
-        }
-        return v === undefined ? [] : [v];
-      });
-      b.effects = effects;
-      if (v === undefined || !accept(r)) {
+      const [nodes, begun] = [lowered, fns.begun()];
+      const r = trial(() => f(() => lowered - nodes, NODE_LIMIT - nodes));
+      if (r === undefined || !accept(r)) {
         // A function lowered in the attempt is called again by the loop.
         if (fns.begun() === begun) {
           lowered = nodes;
@@ -2155,7 +2119,7 @@ export function lower(
         return undefined;
       }
       r.body.forEach((i) => b.emit(i));
-      return v;
+      return r.yields[0];
     },
     tuples,
   };
@@ -2229,16 +2193,4 @@ function literalUlps(nv: number | NumericValue): number | undefined {
   return exactDoubleValue(nv) === undefined
     ? exactValueDoubleRoundings(nv)
     : undefined;
-}
-
-/**
- * The interval mode: whether `N()` computes in big decimals of more digits
- * than the 17 of a double, so that its value read as a double is within
- * 1 ulp. The engine's precision decides big decimals against doubles
- * (`bignumPreferred()`, `precision > MACHINE_PRECISION`), and the
- * process-global `BigDecimal.precision`, which another engine can have
- * changed, sizes the big decimals (the note in `numerics/real-power.ts`).
- */
-function bigDecimalFolds(precision: number): boolean {
-  return precision >= 18 && BigDecimal.precision >= 18;
 }

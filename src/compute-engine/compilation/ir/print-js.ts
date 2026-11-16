@@ -15,20 +15,11 @@
  * shape. A result is read-only: it can be an input, hold a part of one, or
  * be a list of constants that every call shares.
  *
- * A power, a `Mod` and the functions of `REAL_FUNCTIONS` and
- * `COMPLEX_FUNCTIONS` (a complex value is a `{ re, im }` object) call
- * `_SYS.ir`, the functions that the folds compute. A draw, a random frame
- * and the length of a `Range` call the members of the existing compiler
- * (`drawNextRandomNumber`, `withRandomSeed`, `rangeCount`), so these are the
- * interpreter's by construction. An integral calls `_SYS.irIntegrate`, the
- * existing quadrature and its Monte-Carlo fallback, NaN when that fallback
- * samples an integrand that gave a value that is not finite. Code that
- * draws or integrates is not shippable (`isShippableCode()`). A loop counts
- * its passes, so it ends for any bounds. A loop or a build adds its passes to
- * the deadline count of the runtime (`_SYS.tick(n)`), which checks the
- * deadline every 1024 passes; with an `iterationBudget`, each pass of a
- * `Loop` also counts one pass of the call (`_SYS.countLoopPass()`), and the
- * entry starts that count again.
+ * A power, a `Mod`, the functions of the folds, a draw, a random frame,
+ * an integral and the count of the passes of a loop call `_SYS` (README,
+ * "Loops and the runtime"). An integral is NaN when the Monte-Carlo
+ * fallback of `_SYS.irIntegrate` samples an integrand that gave a value that
+ * is not finite.
  */
 
 import type { IComputeEngine as ComputeEngine } from '../../global-types.js';
@@ -50,10 +41,19 @@ import {
 } from './ir.js';
 import {
   COMPLEX_FUNCTIONS,
+  deepFreeze,
   REAL_FUNCTIONS,
   type OperatorRow,
 } from './operators.js';
-import { printProgram, type Printed, type Syntax } from './print.js';
+import {
+  ARITHMETIC,
+  calls,
+  COMPARISONS,
+  LOGIC,
+  printProgram,
+  type Printed,
+  type Syntax,
+} from './print.js';
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
@@ -139,47 +139,31 @@ const builds = (z: Ints, count: Wrap): Syntax['regions'] => {
   };
 };
 
-export const JS: Syntax = Object.freeze({
+export const JS: Syntax = deepFreeze({
   ops: {
-    add: '($0 + $1)',
-    sub: '($0 - $1)',
-    neg: '(-$0)',
-    mul: '($0 * $1)',
-    div: '($0 / $1)',
+    ...ARITHMETIC,
     pow: '_SYS.ir.pow($0, $1)',
-    sqrt: 'Math.sqrt($0)',
-    abs: 'Math.abs($0)',
-    exp: 'Math.exp($0)',
+    ...calls('Math.', ['sqrt', 'abs', 'exp']),
     ln: 'Math.log($0)',
-    sin: 'Math.sin($0)',
-    cos: 'Math.cos($0)',
-    tan: 'Math.tan($0)',
+    ...calls('Math.', ['sin', 'cos', 'tan']),
     cot: '(1 / Math.tan($0))',
     sec: '(1 / Math.cos($0))',
     csc: '(1 / Math.sin($0))',
-    sinh: 'Math.sinh($0)',
-    cosh: 'Math.cosh($0)',
-    tanh: 'Math.tanh($0)',
+    ...calls('Math.', ['sinh', 'cosh', 'tanh']),
     sech: '(1 / Math.cosh($0))',
     csch: '(1 / Math.sinh($0))',
     deg: '(($0 * Math.PI) / 180)',
-    floor: 'Math.floor($0)',
-    ceil: 'Math.ceil($0)',
+    ...calls('Math.', ['floor', 'ceil']),
     round: { text: '_round($0)', helpers: ['_round'] },
     mod: '_SYS.ir.mod($0, $1)',
     max: 'Math.max($0, $1)',
     min: 'Math.min($0, $1)',
     emax: 'Math.max($0, $1)',
     emin: 'Math.min($0, $1)',
-    lt: '($0 < $1)',
-    le: '($0 <= $1)',
-    gt: '($0 > $1)',
-    ge: '($0 >= $1)',
+    ...COMPARISONS,
     eq: '($0 === $1)',
     ne: '($0 !== $1)',
-    and: '($0 && $1)',
-    or: '($0 || $1)',
-    not: '(!$0)',
+    ...LOGIC,
     elem: '$0[$1]',
     at: { text: '_at($0, $1)', helpers: ['_at'] },
     draw: '_SYS.drawNextRandomNumber()',
@@ -187,17 +171,9 @@ export const JS: Syntax = Object.freeze({
     binomial: '_SYS.binomial($0, $1)',
     rangecount: '_SYS.rangeCount($0, $1, $2)',
     rangestep: '($1 >= $0 ? 1 : -1)',
-    trunc: 'Math.trunc($0)',
-    sign: 'Math.sign($0)',
-    log10: 'Math.log10($0)',
-    log2: 'Math.log2($0)',
+    ...calls('Math.', ['trunc', 'sign', 'log10', 'log2']),
     hypot: 'Math.hypot($0, $1)',
-    atan: 'Math.atan($0)',
-    asin: 'Math.asin($0)',
-    acos: 'Math.acos($0)',
-    asinh: 'Math.asinh($0)',
-    acosh: 'Math.acosh($0)',
-    atanh: 'Math.atanh($0)',
+    ...calls('Math.', ['atan', 'asin', 'acos', 'asinh', 'acosh', 'atanh']),
     // A colour is the existing compiler's object (`CompiledColor`): a
     // constructor gives it in OKLCh, a conversion in the space it names.
     rgb: '_SYS.rgb($0, $1, $2)',
@@ -266,12 +242,7 @@ export const JS: Syntax = Object.freeze({
   },
   declare: (_type, name, value, mutable) =>
     `${mutable ? 'let' : 'const'} ${name}${value === undefined ? '' : ` = ${value}`};`,
-  assign: (name, value) => `${name} = ${value};`,
-  ifOpen: (cond) => `if (${cond}) {`,
-  elseOpen: '} else {',
   loopOpen: loopOpen(NUMBERS),
-  close: '}',
-  ret: (value) => `return ${value};`,
   retTuple: (values) => `return [${values.join(', ')}];`,
   call: (fn, args) => `${fn}(${args.join(', ')})`,
   fn: (name, params, _result, body) =>
@@ -281,8 +252,6 @@ export const JS: Syntax = Object.freeze({
       '};',
     ].join('\n'),
 });
-
-[JS.ops, JS.regions, JS.helpers].forEach((t) => Object.freeze(t));
 
 /**
  * The syntax of `mode: 'bigint'`: every integer is a JavaScript `bigint`
@@ -295,7 +264,7 @@ export const JS: Syntax = Object.freeze({
  * throws a `NonFiniteValue` at a pole, and one catch around the entry
  * returns its number.
  */
-export const JS_BIGINT: Syntax = Object.freeze({
+export const JS_BIGINT: Syntax = deepFreeze({
   ...JS,
   ops: {
     'add.int': '($0 + $1)',
@@ -314,12 +283,10 @@ export const JS_BIGINT: Syntax = Object.freeze({
     'binomial': '_SYS.bbinomial($0, $1)',
     'gcd': '_SYS.bgcd($0, $1)',
     'lcm': '_SYS.blcm($0, $1)',
-    ...Object.fromEntries(
-      ['lt', 'le', 'gt', 'ge', 'eq', 'ne', 'and', 'or', 'not'].map((o) => [
-        o,
-        JS.ops[o],
-      ])
-    ),
+    ...COMPARISONS,
+    'eq': JS.ops.eq,
+    'ne': JS.ops.ne,
+    ...LOGIC,
     'elem': '$0[Number($1)]',
     'at': '_SYS.bat($0, $1)',
     'rangecount': '_SYS.brangeCount($0, $1, $2)',
@@ -347,8 +314,6 @@ export const JS_BIGINT: Syntax = Object.freeze({
     '} catch (_e) { if (_e instanceof _SYS.NonFiniteValue) return _e.value; throw _e; }',
   ],
 });
-
-[JS_BIGINT.ops, JS_BIGINT.regions].forEach((t) => Object.freeze(t));
 
 export type JavaScriptResult = {
   /** The value of a call: an expression of the inputs object `_`, or for

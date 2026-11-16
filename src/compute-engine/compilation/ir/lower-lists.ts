@@ -66,8 +66,14 @@ export function listLowering(cx: Lowering) {
         if (axis !== undefined && axis > 0) cx.tuples.set(x, axis - 1);
         return x;
       },
-      value: () => l,
     };
+  };
+
+  /** The list of `length` elements whose element at the index `k` is
+   *  `f(k)`. */
+  const built = (site: Expression, length: V, f: (k: V) => V): V => {
+    const k = b.newValue(scalarType('integer'));
+    return cx.region('build', [length], [k], () => [f(k)], site)[0];
   };
 
   /** The list `e` as a source; with `scalars`, a scalar is its value. A
@@ -104,18 +110,8 @@ export function listLowering(cx: Lowering) {
     const step = given ?? cx.apply(e, op('rangestep'), [lo, hi]);
     const length = cx.apply(e, op('rangecount'), [lo, hi, step]);
     const at = (k: V) =>
-      cx.apply(e, cx.row('Add'), [
-        lo,
-        cx.apply(e, cx.row('Multiply'), [k, step]),
-      ]);
-    return {
-      length,
-      at,
-      value: () => {
-        const k = b.newValue(scalarType('integer'));
-        return cx.region('build', [length], [k], () => [at(k)], e)[0];
-      },
-    };
+      cx.apply(e, 'Add', [lo, cx.apply(e, 'Multiply', [k, step])]);
+    return { length, at };
   }
 
   /** A counted loop from `lo` to `hi` that carries the accumulator of
@@ -151,12 +147,8 @@ export function listLowering(cx: Lowering) {
 
   /** The fold of `r` from `init` over the terms at the indices from `lo` to
    *  `hi`, in ascending order, each term lowered with its index a constant:
-   *  the loop's operations, with no loop. `undefined`, and the loop runs,
-   *  for bounds that are not constants, a count of passes below 1 or above
-   *  `cx.unrollSums`, bodies written out in the program past
-   *  `SCALARIZE_LIMIT ** 2` or past half the nodes left, a term that is not
-   *  a number, and a body with an effect (n copies of a draw are n draw
-   *  sites), a `Loop` or a call of a function on a cycle of calls. */
+   *  the loop's operations, with no loop. `undefined`, and the loop runs, in
+   *  the cases of `README.md`, "Lists" (a sum written out). */
   const writtenOut = (
     e: Fn,
     r: OperatorRow,
@@ -171,12 +163,9 @@ export function listLowering(cx: Lowering) {
       return undefined;
     const before = unrolled;
     unrolled += n;
-    // A body that holds a loop (a `Loop`, an inner sum of a count that is
-    // not written out) keeps the loop: in a nest, the inner sums are
-    // written out, and the outer one when they all are. So does a complex
-    // value: a constant read directly by a row that leaves the reals
-    // (`Sqrt(k)` at k = -1), where the loop's real kernel gives NaN (the
-    // complex mode keeps every loop, `sliceProgram()`).
+    // A body that holds a loop, a call of a function on a cycle of calls or
+    // a complex value (`Sqrt(k)` at k = -1, where the loop's real kernel
+    // gives NaN) keeps the loop.
     const accept = (region: Region): boolean => {
       const cyclic = recursiveFunctions(b.functions);
       const straight = (r: Region): boolean =>
@@ -189,7 +178,7 @@ export function listLowering(cx: Lowering) {
         );
       return straight(region);
     };
-    const v = cx.attempt(
+    return cx.attempt(
       (spent, left) => {
         const effects = b.effects;
         let acc = init;
@@ -205,7 +194,6 @@ export function listLowering(cx: Lowering) {
       accept,
       () => (unrolled = before)
     );
-    return v;
   };
 
   /** `Sum(body, Limits(k, a, b))`: a loop from the identity of `r`. */
@@ -226,7 +214,7 @@ export function listLowering(cx: Lowering) {
       // The interpreter gives `out-of-range` where the range is not empty.
       if (c !== undefined && Math.abs(c) > Number.MAX_SAFE_INTEGER)
         decline(x, 'a bound that is a constant beyond 2^53 - 1');
-      if (type(v).lane === 'real') return cx.apply(x, cx.row('Floor'), [v]);
+      if (type(v).lane === 'real') return cx.apply(x, 'Floor', [v]);
       if (type(v).lane !== 'integer')
         decline(x, 'a bound that is not a real number');
       return v;
@@ -239,9 +227,9 @@ export function listLowering(cx: Lowering) {
     if (cx.budget === undefined || !Number.isFinite(cx.budget)) return run();
     // `iterationBudget`: a loop of more passes than the budget is NaN
     // (`CompilationOptions.iterationBudget`), `hi - lo < budget` otherwise.
-    const span = cx.apply(e, cx.row('Subtract'), [hi, lo]);
+    const span = cx.apply(e, 'Subtract', [hi, lo]);
     const budget = integer(Math.floor(cx.budget));
-    const within = cx.apply(e, cx.row('Less'), [span, budget]);
+    const within = cx.apply(e, 'Less', [span, budget]);
     let lane: Lane = 'real';
     return cx.branch(
       e,
@@ -274,14 +262,14 @@ export function listLowering(cx: Lowering) {
       if (typeof x === 'number') acc = cx.apply(e, r, [acc, x]);
     const lists = items.filter((x): x is Source => typeof x !== 'number');
     for (const s of lists) {
-      const last = cx.apply(e, cx.row('Subtract'), [s.length, integer(1)]);
+      const last = cx.apply(e, 'Subtract', [s.length, integer(1)]);
       acc = accumulate(e, r, acc, integer(0), last, s.at);
     }
     if (empty === undefined || lists.length < items.length) return acc;
     const total = lists
       .map((s) => s.length)
-      .reduce((n, m) => cx.apply(e, cx.row('Add'), [n, m]));
-    const none = cx.apply(e, cx.row('Equal'), [total, integer(0)]);
+      .reduce((n, m) => cx.apply(e, 'Add', [n, m]));
+    const none = cx.apply(e, 'Equal', [total, integer(0)]);
     const result = acc;
     return cx.branch(
       e,
@@ -384,10 +372,8 @@ export function listLowering(cx: Lowering) {
 
   /** `Comprehension(body, Element(i, L))`, and with a condition
    *  `Element(i, L, cond)`: a filter of `L` by `cond`, then a build of
-   *  `body` over the elements kept. The interpreter's list is lazy: it
-   *  evaluates the condition and the body of an element only when the
-   *  element is read (`Length` reads none), so a condition or a body with
-   *  an effect declines. */
+   *  `body` over the elements kept. The interpreter's list is lazy, so an
+   *  effect declines (`README.md`, "Lists"). */
   const comprehension = (e: Fn): V => {
     const c = e.ops[1];
     if (e.nops > 2) return product(e);
@@ -416,11 +402,10 @@ export function listLowering(cx: Lowering) {
   };
 
   /** A `Comprehension` of several clauses `Element(i, L)`, none of whose
-   *  lists reads an index: the flat list over the Cartesian product of the
-   *  lists, the last index the fastest, as in the interpreter. One build
-   *  over the product of the lengths, whose index `k` gives the index of
-   *  the clause `j` as `Floor(k / s_j) mod n_j`, `s_j` the product of the
-   *  lengths after it (exact for a total below 2^53). */
+   *  lists reads an index (`README.md`, "Lists"): one build over the
+   *  product of the lengths, whose index `k` gives the index of the clause
+   *  `j` as `Floor(k / s_j) mod n_j`, `s_j` the product of the lengths after
+   *  it (exact for a total below 2^53). */
   const product = (e: Fn): V => {
     const names: string[] = [];
     const before = b.effects;
@@ -438,7 +423,7 @@ export function listLowering(cx: Lowering) {
       names.push(c.ops[0].symbol);
       return source(c.ops[1]);
     });
-    const mul = (x: V, y: V) => cx.apply(e, cx.row('Multiply'), [x, y]);
+    const mul = (x: V, y: V) => cx.apply(e, 'Multiply', [x, y]);
     const strides = sources.reduceRight<V[]>(
       (s, x, j) => (j === 0 ? s : [mul(x.length, s[0]), ...s]),
       [integer(1)]
@@ -451,10 +436,10 @@ export function listLowering(cx: Lowering) {
       () =>
         cx.withFrame(true, (frame) => {
           sources.forEach((s, j) => {
-            const q = cx.apply(e, cx.row('Floor'), [
-              cx.apply(e, cx.row('Divide'), [k, strides[j]]),
+            const q = cx.apply(e, 'Floor', [
+              cx.apply(e, 'Divide', [k, strides[j]]),
             ]);
-            const i = j === 0 ? q : cx.apply(e, cx.row('Mod'), [q, s.length]);
+            const i = j === 0 ? q : cx.apply(e, 'Mod', [q, s.length]);
             frame.names.set(names[j], { v: s.at(i), role: 'index' });
           });
           const y = cx.value(e.ops[0])!;
@@ -485,33 +470,25 @@ export function listLowering(cx: Lowering) {
       ends.push(
         ends.length === 0
           ? length(x)
-          : cx.apply(e, cx.row('Add'), [ends[ends.length - 1], length(x)])
+          : cx.apply(e, 'Add', [ends[ends.length - 1], length(x)])
       );
-    const k = b.newValue(scalarType('integer'));
-    const at = (j: number): V => {
+    const at = (k: V, j: number): V => {
       const x = parts[j];
       const read = () =>
         typeof x === 'number'
           ? x
-          : x.at(
-              j === 0 ? k : cx.apply(e, cx.row('Subtract'), [k, ends[j - 1]])
-            );
+          : x.at(j === 0 ? k : cx.apply(e, 'Subtract', [k, ends[j - 1]]));
       if (j === parts.length - 1) return read();
-      const inside = cx.apply(e, cx.row('Less'), [k, ends[j]]);
-      return cx.branch(e, inside, read, () => at(j + 1), true)!;
+      const inside = cx.apply(e, 'Less', [k, ends[j]]);
+      return cx.branch(e, inside, read, () => at(k, j + 1), true)!;
     };
-    return cx.region(
-      'build',
-      [ends[ends.length - 1]],
-      [k],
-      () => [at(0)],
-      e
-    )[0];
+    return built(e, ends[ends.length - 1], (k) => at(k, 0));
   };
 
   return {
     source,
     listSource,
+    built,
     reduce,
     reduction,
     build,

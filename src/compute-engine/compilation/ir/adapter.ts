@@ -81,7 +81,7 @@ export const IR_OPTIONS = {
   strictTypes: 'declined',
 } as const;
 
-export type IrOptionName = keyof typeof IR_OPTIONS;
+type IrOptionName = keyof typeof IR_OPTIONS;
 
 /** The options of `compile()`, by the names of `IR_OPTIONS`
  *  (`compile-expression.ts` imports this file, so its type is not imported
@@ -114,9 +114,18 @@ export function _withIrProfileTestExtension<T>(x: Extension, f: () => T): T {
   }
 }
 
-/** The extension of `_withIrProfileTestExtension()` (both targets).
- *  @internal */
-export const irTestExtension = (): Extension | undefined => testExtension;
+/** The options of `compileSlice()` that every target reads of those of
+ *  `compile()`: the passes, the folds and the extension of
+ *  `_withIrProfileTestExtension()`. */
+export const sliceOptions = (options: IrOptions | undefined) => ({
+  passes: {
+    ...ALL_PASSES,
+    cse: options?.cse !== false,
+    fold: options?.constantFold !== false,
+  },
+  constantFold: options?.constantFold !== false,
+  extend: testExtension,
+});
 
 /** Whether `x` is an option given with content: an object with a key, an
  *  array with an element, a string that is not blank, a function. */
@@ -144,19 +153,21 @@ function refusal(name: IrOptionName, value: unknown): string | undefined {
   }
 }
 
-/** The first option of `options` that the profile does not have, by the
- *  classes of `table`, as the text of its decline, or `undefined`. */
+/** The decline of the first option of `options` that the profile does not
+ *  have on the target `where` (`''` or ` on <target>`), by the classes of
+ *  `table`. */
 export function optionDecline(
   options: IrOptions | undefined,
-  table: Readonly<Record<IrOptionName, string>> = IR_OPTIONS
-): string | undefined {
-  if (options === undefined) return undefined;
+  table: Readonly<Record<IrOptionName, string>>,
+  where: string
+): void {
+  if (options === undefined) return;
   for (const name of Object.keys(table) as IrOptionName[]) {
     if (table[name] !== 'declined') continue;
     const text = refusal(name, options[name]);
-    if (text !== undefined) return text;
+    if (text !== undefined)
+      throw decline(`${text} is not supported by the profile 'ir'${where}`);
   }
-  return undefined;
 }
 
 export function decline(
@@ -176,6 +187,30 @@ export function decline(
 export function addSymbolDeps(p: Program, deps: Set<string> | undefined) {
   for (const f of p.functions) if (f.source !== undefined) deps?.add(f.source);
   for (const name of p.captures ?? []) deps?.add(name);
+}
+
+/** The inputs of the inputs object of the entry of `p` (the parameters
+ *  after the positional ones, at the indices that `keep` keeps), added to
+ *  `varsObjectRefs` also when the compilation declines here; then the
+ *  symbol deps (`addSymbolDeps()`). */
+export function entryInputs(
+  p: Program,
+  options: IrOptions | undefined,
+  keep: (k: number) => boolean = () => true
+): string[] {
+  const entry = entryOf(p);
+  const positional = entry.positional ?? 0;
+  const inputs = entry.paramNames.filter((_, k) => k >= positional && keep(k));
+  for (const name of inputs) options?.varsObjectRefs?.add(name);
+  // The engine calls a compiled `Function` literal with its arguments only
+  // (`implicitCompile()`): it has no object for the free names of the body.
+  if (entry.literal === true && inputs.length > 0)
+    throw decline(
+      `a Function literal that reads the free name \`${inputs[0]}\`: its code is called with its arguments only`,
+      { binding: inputs[0] }
+    );
+  addSymbolDeps(p, options?.symbolDeps);
+  return inputs;
 }
 
 /** The error of `compile()` for the error `e` of the slice or the adapter:
@@ -219,9 +254,10 @@ export function compileWithIrProfile(
       ? "the option `vars` in the mode 'bigint'"
       : options?.quadrature === 'monte-carlo'
         ? "the option `quadrature` with the value 'monte-carlo'"
-        : optionDecline(options);
+        : undefined;
   if (refused !== undefined)
     throw decline(`${refused} is not supported by the profile 'ir'`);
+  optionDecline(options, IR_OPTIONS, '');
   // `vars`: a name read as the host's text (`compile()` checks that each
   // entry is a string).
   // No prototype: an entry named `__proto__` is an entry.
@@ -235,16 +271,10 @@ export function compileWithIrProfile(
   try {
     slice = compileSlice(expr, {
       target: 'javascript',
-      passes: {
-        ...ALL_PASSES,
-        ...(options?.cse === false ? { cse: false } : {}),
-        ...(options?.constantFold === false ? { fold: false } : {}),
-      },
-      constantFold: options?.constantFold !== false,
+      ...sliceOptions(options),
       mode,
       iterationBudget: options?.iterationBudget,
       vars,
-      extend: testExtension,
     });
   } catch (e) {
     throw sliceError(e);
@@ -252,32 +282,15 @@ export function compileWithIrProfile(
   const p = slice.program;
 
   const entry = entryOf(p);
-  const positional = entry.positional ?? 0;
   const literal = entry.literal === true;
-  const inputs = entry.paramNames.filter(
-    (_, k) => k >= positional && !entry.lengthOf[k]
-  );
-  // Filled also when the compilation declines below
-  // (`CompilationOptions.varsObjectRefs`).
-  for (const name of inputs) options?.varsObjectRefs?.add(name);
-  // The engine calls a compiled `Function` literal with its arguments only
-  // (`implicitCompile()`): it has no object for the free names of the body.
-  if (literal && inputs.length > 0)
-    throw decline(
-      `a Function literal that reads the free name \`${inputs[0]}\`: its code is called with its arguments only`,
-      { binding: inputs[0] }
-    );
-  addSymbolDeps(p, options?.symbolDeps);
+  const inputs = entryInputs(p, options, (k) => !entry.lengthOf[k]);
 
   // The entry plan of a loader of stored code (`checkEntry()` of
-  // `javascript-runtime.ts`), which `run()` applies too: a number for a
-  // complex input is converted to `{re, im: 0}`, also with `entryChecks:
-  // false`; with `entryChecks`, a `{re, im}` value for a real input, and a
-  // string or a typed array for a list input, throw a `TypeError`. In the
-  // bigint mode, with `entryChecks`, an integer input that is not a
-  // `bigint` or a safe integer throws, and the `number` cells of a list of
-  // integers are converted (`bigints`, `bigintLists`); the code converts a
-  // scalar (`JS_BIGINT.read`).
+  // `javascript-runtime.ts`), which `run()` applies too (README, "Selecting
+  // the pipeline", `entryChecks` and "Stored code"). In the bigint mode, with
+  // `entryChecks`, an integer input that is not a `bigint` or a safe integer
+  // throws, and the `number` cells of a list of integers are converted
+  // (`bigints`, `bigintLists`); the code converts a scalar (`JS_BIGINT.read`).
   type Key = string | number;
   const plan = {
     kind: literal ? 'args' : 'vars',
@@ -378,12 +391,10 @@ export function compileWithIrProfile(
   };
   if (literal) return result;
 
-  // The batch and asynchronous members of an expression, built by the
-  // generic functions of the existing compiler over the raw call `f` (the
-  // batch applies the entry plan and reads the value itself) and the stored
-  // result, which a worker loads. There is no batch body (CE-410) and no
-  // asynchronous copy (`parallelCode`): `runAsync()` runs `run()`. A batch
-  // runs in one reconstruction-digit frame, as a loader runs each call.
+  // The batch and asynchronous members of an expression (README, "Batches
+  // and `runAsync()`"), over the raw call `f`: the batch applies the entry
+  // plan and reads the value itself. A batch runs in one reconstruction-digit
+  // frame, as a loader runs each call.
   const outputs = entry.tuple ? 1 : broadcastStrideOfType(expr.type.type);
   if (outputs > 1) result.broadcastOutputs = outputs;
   const inFrame = <T>(g: () => T): T => {

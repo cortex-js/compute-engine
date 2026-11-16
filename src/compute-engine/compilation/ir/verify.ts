@@ -12,6 +12,7 @@
 
 import {
   argsOf,
+  elementType,
   isSubLane,
   isSubType,
   lengthValues,
@@ -29,7 +30,7 @@ import {
   type V,
 } from './ir.js';
 import {
-  irArity,
+  operandFits,
   regionRow,
   resultType,
   rowOfOp,
@@ -124,18 +125,12 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
       case 'op': {
         const found =
           rowOfOp(rows, i.op) ?? fail(`no row for the operation ${i.op}`);
-        const [operands] = found.signature;
-        if (i.args.length !== irArity(found.row))
+        const { row, signature } = found;
+        if (i.args.length !== (typeof row.arity === 'number' ? row.arity : 2))
           fail(`${i.op} has ${i.args.length} operands`);
         i.args.forEach((a, k) => {
-          const o = operands.length === 1 ? operands[0] : operands[k];
-          const t = type(a);
-          const ok =
-            o === 'list'
-              ? t.shape.length > 0
-              : isSubLane(t.lane, o) &&
-                (t.shape.length === 0 || found.row.threads);
-          if (!ok) fail(`${i.op}: operand ${k} is ${typeToString(t)}`);
+          if (!operandFits(row, signature[0], k, type(a), isSubLane))
+            fail(`${i.op}: operand ${k} is ${typeToString(type(a))}`);
         });
         const r =
           resultType(found.signature, i.args.map(type), same) ??
@@ -146,7 +141,7 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
       }
       case 'list': {
         const t = type(i.out);
-        const element = { lane: t.lane, shape: t.shape.slice(1) };
+        const element = elementType(t);
         if (t.shape[0] !== i.args.length)
           fail(`list v${i.out}: length ${JSON.stringify(t.shape[0])}`);
         return i.args.forEach((a) => sub(a, element, 'list'));
@@ -193,9 +188,7 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
         if (
           closed !== undefined &&
           (closed.params.length > 0 ||
-            closed.yields.length !== 1 ||
-            !isSubLane(type(closed.yields[0]).lane, 'real') ||
-            type(closed.yields[0]).shape.length > 0)
+            row.results(i.args, closed.yields.map(type), i.outs) === undefined)
         )
           fail(`${i.op}: its closed form`);
         i.args.forEach((a, k) => sub(a, scalarType(row.args[k]), i.op));
