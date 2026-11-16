@@ -3195,6 +3195,8 @@ describe('EISENSTEIN SERIES', () => {
     [18, 0.3, 1.0, 0.76588207047006724, 0.36883087421092693],
     [12, 0.1, 0.3, -752192.46448556698, -658944.40690405878],
     [1000, 0.25, 1.2, 1, 0],
+    [24, 0.5, 0.25, 17080633.363745473, 0],
+    [30, 0.5, 0.15, -4.856936207943711e15, 0],
   ])('E_%s(%s + %si)', (k, a, b, re, im) => {
     const r = ce.expr(['EisensteinE', k, ['Complex', a, b]]).N();
     const err = Math.hypot(r.re - re, (r.im ?? 0) - im);
@@ -3213,6 +3215,43 @@ describe('EISENSTEIN SERIES', () => {
     const r = ce.expr(['EisensteinE', 20, ['Complex', 0, 4e-16]]).N();
     expect(r.re / 9.094947017729282e307).toBeCloseTo(1, 12);
     expect(r.im).toBe(0);
+  });
+
+  // Near the cusp the imaginary part keeps its relative accuracy. Reference
+  // values: mpmath at 400 digits, by the q-series.
+  test.each([
+    [20, 0.25, 10, 3.8991976923312674e-29],
+    [400, 0.4, 1.5, -2.1261931528586308e-77],
+    [400, 0.3, 1.99, -5.1359105067347372e-123],
+    [400, 0.3, 2.01, 2.6565703317157368e-124],
+  ])('Im E_%s(%s + %si)', (k, a, b, im) => {
+    const r = ce.expr(['EisensteinE', k, ['Complex', a, b]]).N();
+    expect(r.re).toBe(1);
+    expect(Math.abs((r.im ?? 0) - im)).toBeLessThan(1e-11 * Math.abs(im));
+  });
+
+  // Each τ below is moved to a zero of Eₛ (or near one) by the reduction, and
+  // (cτ + d)^{−s} would make the rounding residue there a large wrong value:
+  // the result is a value within its error bound, or none.
+  test.each([
+    // 0.5 + 0.5i reduces to i, and Eₛ(i) = 0 for s ≡ 2 (mod 4)
+    [398, 0.5, 0.5, 0, 0],
+    [102, 0.5, 0.5, 0, 0],
+    // −1/(z + 3) for z the double nearest a zero of E₁₂ (0.2513… + 0.9679…i)
+    // or of E₂₄ (0.1305… + 0.9914…i) on |z| = 1; mpmath values at 60 digits
+    [
+      12, -0.28252799632608633, 0.08410664977593446, -9.4385516423939444e-10,
+      3.3394837308496252e-9,
+    ],
+    [
+      24, -0.29031241219423815, 0.0919402657796973, 0.0041603091517840033,
+      0.0046281734173040516,
+    ],
+  ])('E_%s(%s + %si) near a zero is not a wrong value', (k, a, b, re, im) => {
+    const r = ce.expr(['EisensteinE', k, ['Complex', a, b]]).N();
+    if (r.operator === 'EisensteinE') return;
+    const err = Math.hypot(r.re - re, (r.im ?? 0) - im);
+    expect(err).toBeLessThanOrEqual(Math.max(1e-8 * Math.hypot(re, im), 1e-12));
   });
 
   test('a value at a real q is real', () => {

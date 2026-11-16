@@ -214,7 +214,10 @@
   gave `ComplexInfinity` (the value is `−31507089.95 + 13619148.95i`). For a
   weight of 4 or more, τ is now first moved into the fundamental domain, and
   a weight of 20 or more is computed by the lattice sum. A value too large
-  for a double stays unevaluated.
+  for a double stays unevaluated, and so does a value whose rounding error,
+  multiplied by the factor (cτ + d)^{−s} of the reduction, is more than 10⁻⁸
+  of it: this happens near a zero of `EisensteinE`, as at
+  `EisensteinE(102, 0.5 + 0.5i)`, whose value is 0.
 - **A function returned by another function no longer gets a `scope` effect
   in its type for a loop that assigns its own index.** With
   `mk := y ↦ (x ↦ Block(Loop(Assign(i, i + 1), Element(i, [1, 2])), x + y))`,

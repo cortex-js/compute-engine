@@ -6265,9 +6265,14 @@ export function dedekindEta(tau: Complex): Complex {
  * fundamental domain every |cτ + d| ≥ 1, and the terms decrease as
  * |cτ + d|^{−s}.
  *
+ * For `s ≥ 20` and Im τ ≥ 2 the q-series is summed again, with the logarithm
+ * of each term: there the rows of the lattice sum cancel far below their
+ * terms.
+ *
  * Returns NaN outside the upper half-plane, for non-even s, when |q| is too
- * close to 1 to converge at machine precision, or when the value is too
- * large for a double.
+ * close to 1 to converge at machine precision, when the value is too large
+ * for a double, or when (cτ + d)^{−s} makes the error of Eₛ(γτ) more than
+ * 10⁻⁸ of the result and more than 10⁻¹², as it does near a zero of Eₛ.
  */
 export function eisensteinE(s: number, tau: Complex): Complex {
   const value = eisensteinValue(s, tau);
@@ -6284,65 +6289,109 @@ function eisensteinValue(s: number, tau: Complex): Complex {
   if (tau.im <= 0) return C_NAN;
 
   // E₂ is only quasi-modular: no reduction.
-  if (s === 2) return eisensteinQSeries(s, tau);
+  if (s === 2) return eisensteinQSeries(s, tau).value;
 
   // Reduce τ to the fundamental domain. Each inversion τ ↦ −1/τ multiplies
   // the automorphy factor cτ + d by the current τ; its logarithm is kept as
   // a modulus and an argument, since (cτ + d)^{−s} can be far out of the
   // range of a double before it multiplies a small Eₛ(γτ).
+  // Each operation of the reduction errs by at most 4ε|t|, and an error made
+  // at t′ reaches the reduced t multiplied by |dt/dt′| = Im t / Im t′: with
+  // `drift` = Σ |t′|/Im t′, the error of t is at most 4ε·Im t·drift.
+  // `errLogJ` bounds the error of log J.
   let t = tau;
   let logAbsJ = 0;
   let argJ = 0;
+  let drift = 0;
+  let errLogJ = 0;
   for (let i = 0; ; i++) {
     if (i === 1000) return C_NAN;
     const n = Math.round(t.re);
-    if (n !== 0) t = new Complex(t.re - n, t.im);
+    if (n !== 0) {
+      t = new Complex(t.re - n, t.im);
+      drift += t.abs() / t.im;
+    }
     const r2 = t.re * t.re + t.im * t.im;
     if (!(r2 < 1)) break;
+    errLogJ += (4 * EPSILON * t.im * drift) / Math.sqrt(r2) + 4 * EPSILON;
     logAbsJ += 0.5 * Math.log(r2);
     argJ += Math.atan2(t.im, t.re);
     t = new Complex(-t.re / r2, t.im / r2);
+    drift += t.abs() / t.im;
   }
 
-  const value =
-    s < 20 ? eisensteinQSeries(s, t) : eisensteinLatticeSum(s, t);
+  // Near the cusp the rows of the lattice sum cancel to about e^{−2π Im τ}
+  // below their terms, so from Im τ ≥ 2 (|q| ≤ e^{−4π}) the q-series is summed.
+  const r =
+    s < 20
+      ? eisensteinQSeries(s, t)
+      : t.im >= 2
+        ? eisensteinCuspSeries(s, t)
+        : eisensteinLatticeSum(s, t);
+  const value = r.value;
   if (value.isNaN() || logAbsJ === 0) return value;
 
   // Eₛ(τ) = J^{−s} Eₛ(t), with J = cτ + d
   const absV = value.abs();
-  if (absV === 0) return C_ZERO;
   const logAbs = Math.log(absV) - s * logAbsJ;
   if (!(logAbs <= Math.log(Number.MAX_VALUE))) return C_NAN; // overflows a double
-  const arg = Math.atan2(value.im, value.re) - s * argJ;
   const mag = Math.exp(logAbs);
+
+  // J^{−s} multiplies the error of Eₛ(t) as well: near a zero of Eₛ (on the
+  // arc |t| = 1) the rounding residue would become a large wrong value.
+  // Decline unless the error of the result is below 10⁻⁸ of its modulus, or
+  // below 10⁻¹² (the rounding residue of an unreduced value at a zero).
+  const errT = r.err + r.deriv * 4 * EPSILON * t.im * drift;
+  const err = Math.exp(Math.log(errT) - s * logAbsJ) + s * errLogJ * mag;
+  if (!(err <= Math.max(1e-8 * mag, 1e-12))) return C_NAN;
+
+  const arg = Math.atan2(value.im, value.re) - s * argJ;
   return new Complex(mag * Math.cos(arg), mag * Math.sin(arg));
 }
 
 /**
+ * A value of `Eₛ(t)` with a bound `err` of its rounding and truncation
+ * error, and a bound `deriv` of the modulus of the derivative `dEₛ/dt`.
+ */
+type EisensteinSum = { value: Complex; err: number; deriv: number };
+
+/**
  * The lattice sum `Eₛ(τ) = 1 + ζ(s)⁻¹ Σ_{c≥1} Σ_{d∈ℤ} (cτ + d)^{−s}` for an
  * even `s ≥ 20` and τ in the fundamental domain, where every term has a
- * modulus of at most 1. A row c stops when its terms fall below 10⁻¹⁸ on
- * both sides of its largest term: the terms of a row decrease on each side
- * of it, as fast as |cτ + d|^{−s}, so the part left out is of the order of
- * 10⁻¹⁸. The rows stop when the bound (c·Im τ)^{−s}·(1 + 2c·Im τ) of a row
- * sum falls below 10⁻¹⁸; at an infinite Im τ no row is summed.
+ * modulus of at most 1. The tolerance is 10⁻¹⁸ times the largest term
+ * |τ|^{−s}, so that a small imaginary part keeps its relative accuracy. A
+ * row c stops when its terms fall below the tolerance on both sides of its
+ * largest term: the terms of a row decrease on each side of it, as fast as
+ * |cτ + d|^{−s}, so the part left out is of the order of c times the
+ * tolerance. The rows stop when the bound (c·Im τ)^{−s}·(1 + 2c·Im τ) of a
+ * row sum falls below the tolerance; at an infinite Im τ no row is summed.
+ *
+ * In the fundamental domain |u|/|cτ + d|² ≤ 1/(2c·Im τ) for u = c·Re τ + d,
+ * so |cτ + d|² errs by at most 5ε and the modulus of a term by (5s/2 + 1)ε;
+ * its angle −s·arg(cτ + d) errs by at most (6 + π)sε. Each term errs by less
+ * than (16s + 16)ε of its modulus, and |d(cτ + d)^{−s}/dτ| ≤ s·c·|cτ + d|^{−s}.
  */
-function eisensteinLatticeSum(s: number, tau: Complex): Complex {
+function eisensteinLatticeSum(s: number, tau: Complex): EisensteinSum {
   const x = tau.re;
   const y = tau.im;
-  const tol = 1e-18;
-  const logTol = Math.log(tol);
 
   // ζ(s) for s ≥ 20: n^{−s} < 10⁻¹⁸ from n = 9 on
   let zeta = 1;
   for (let n = 2; ; n++) {
     const t = Math.pow(n, -s);
     zeta += t;
-    if (t < tol) break;
+    if (t < 1e-18) break;
   }
+
+  // |τ| ≥ 1 in the fundamental domain
+  const tol = Math.max(1e-18 * Math.pow(x * x + y * y, -s / 2), 1e-300);
+  const logTol = Math.log(tol);
 
   let re = 0;
   let im = 0;
+  let absSum = 0; // Σ |term|
+  let sumErr = 0; // rounding of the additions
+  let derivSum = 0; // Σ c·|term|
   // (cτ + d)^{−s}, accumulated into re and im; returns its modulus
   const addTerm = (c: number, d: number): number => {
     const u = c * x + d;
@@ -6352,51 +6401,162 @@ function eisensteinLatticeSum(s: number, tau: Complex): Complex {
     const theta = -s * Math.atan2(v, u);
     re += mag * Math.cos(theta);
     im += mag * Math.sin(theta);
+    absSum += mag;
+    sumErr += EPSILON * (Math.abs(re) + Math.abs(im));
+    derivSum += c * mag;
     return mag;
   };
 
+  let rows = 0;
   for (let c = 1; ; c++) {
-    if (c === 10_000) return C_NAN;
+    if (c === 10_000) return { value: C_NAN, err: NaN, deriv: NaN };
     // log of (c·y)^{−s}·(1 + 2c·y), written so that it does not overflow for
     // a finite c·y; it is NaN for an infinite c·y, which also stops
     const logCy = Math.log(c * y);
     const logBound = -s * logCy + logCy + Math.log(2 + 1 / (c * y));
     if (!(logBound >= logTol)) break;
+    rows += 1;
     const d0 = -Math.round(c * x);
     addTerm(c, d0);
     for (let d = d0 + 1; addTerm(c, d) >= tol; d++);
     for (let d = d0 - 1; addTerm(c, d) >= tol; d--);
   }
 
-  return new Complex(1 + re / zeta, im / zeta);
+  const value = new Complex(1 + re / zeta, im / zeta);
+  const err =
+    ((16 * s + 16) * EPSILON * absSum + sumErr + 4 * tol * (rows + 1) ** 2) /
+      zeta +
+    2 * EPSILON * value.abs();
+  return { value, err, deriv: (s * derivSum) / zeta };
 }
 
 /**
  * The Lambert series `1 − (2s/Bₛ) Σ_{m≥1} m^{s−1} qᵐ/(1 − qᵐ)` of `Eₛ(τ)`.
+ *
+ * q = e^{2πiτ} errs by at most δ = (2π|τ| + 2)ε of its modulus and qᵐ by
+ * m(δ + 4ε); dividing by 1 − qᵐ multiplies that by at most 1 + w, with
+ * w = 1/(1 − |q|ᵐ). The derivative of qᵐ/(1 − qᵐ) is 2πim·qᵐ/(1 − qᵐ)².
  */
-function eisensteinQSeries(s: number, tau: Complex): Complex {
+function eisensteinQSeries(s: number, tau: Complex): EisensteinSum {
+  const nan = { value: C_NAN, err: NaN, deriv: NaN };
   const q = tau.mul(new Complex(0, 2 * Math.PI)).exp(); // e^{2πiτ}
   const absQ = q.abs();
-  if (absQ >= 1) return C_NAN;
+  if (absQ >= 1) return nan;
 
   // Coefficient 2s/Bₛ (an integer/rational; exact via the bigint Bernoulli).
   const [bNum, bDen] = bernoulliRational(s);
-  if (bNum === 0n) return C_NAN;
+  if (bNum === 0n) return nan;
   const coeff = (2 * s * Number(bDen)) / Number(bNum);
-  if (!Number.isFinite(coeff)) return C_NAN; // weight too large for a float kernel
+  if (!Number.isFinite(coeff)) return nan; // weight too large for a float kernel
 
   // Σ m^{s−1} qᵐ/(1 − qᵐ): exponential decay in |q|ᵐ dominates the m^{s−1}
   // growth, so truncate once the (coefficient-amplified) term is negligible.
   const mMax = Math.min(100_000, Math.ceil(-40 / Math.log10(absQ)) + 1);
-  if (mMax >= 100_000) return C_NAN; // |q| too close to 1
+  if (mMax >= 100_000) return nan; // |q| too close to 1
 
+  const dq = (2 * Math.PI * tau.abs() + 2) * EPSILON;
   let sum: Complex = C_ZERO;
   let qm: Complex = q; // qᵐ
+  let absSum = 0; // Σ |term|
+  let termErr = 0;
+  let derivSum = 0;
   for (let m = 1; m <= mMax; m++) {
     const term = qm.div(C_ONE.sub(qm)).mul(new Complex(Math.pow(m, s - 1), 0));
     sum = sum.add(term);
-    if (term.abs() * Math.abs(coeff) < 1e-18 && m > s) break;
+    const a = term.abs();
+    const w = 1 / (1 - Math.pow(absQ, m));
+    absSum += a;
+    termErr += a * (m * (dq + 4 * EPSILON) * (1 + w) + 8 * EPSILON);
+    termErr += 2 * EPSILON * absSum; // the addition
+    derivSum += 2 * Math.PI * m * a * w;
+    if (a * Math.abs(coeff) < 1e-18 && m > s) break;
     qm = qm.mul(q);
   }
-  return C_ONE.sub(sum.mul(new Complex(coeff, 0)));
+  const value = C_ONE.sub(sum.mul(new Complex(coeff, 0)));
+  const err =
+    Math.abs(coeff) * (termErr + 2 * EPSILON * absSum) +
+    1e-17 +
+    2 * EPSILON * (1 + Math.abs(coeff) * absSum);
+  return { value, err, deriv: Math.abs(coeff) * derivSum };
+}
+
+/**
+ * The q-series of `Eₛ(τ)` for an even `s ≥ 20` and `Im τ ≥ 2`, summed with
+ * the logarithm of each term, since 2s/Bₛ underflows and m^{s−1}
+ * overflows:
+ *
+ *   Eₛ(τ) = 1 + σ Σ_{m≥1} e^{Lₘ} e^{2πimx}/(1 − qᵐ),
+ *   Lₘ = log|2s/Bₛ| + (s − 1) log m − 2πm·Im τ,
+ *
+ * with σ = (−1)^{s/2} the sign of −Bₛ, and
+ * log|Bₛ| = log 2 + log s! + log ζ(s) − s·log 2π.
+ * Lₘ is concave in m: the sum stops past its largest term, once a term is
+ * below e^{−46} times the largest and the next is less than e^{−1} times it,
+ * so the tail is less than 1.6 times the last term. A term errs by
+ * (2|Lₘ| + 4π(m|x| + 1) + 8)ε plus the error of log s!, a sum of s logarithms.
+ */
+function eisensteinCuspSeries(s: number, tau: Complex): EisensteinSum {
+  const x = tau.re;
+  const y = tau.im;
+
+  let logFact = 0;
+  for (let k = 2; k <= s; k++) logFact += Math.log(k);
+  let zetaTail = 0; // ζ(s) − 1
+  for (let n = 2; ; n++) {
+    const t = Math.pow(n, -s);
+    zetaTail += t;
+    if (t < 1e-18) break;
+  }
+  const logB =
+    Math.LN2 + logFact + Math.log1p(zetaTail) - s * Math.log(2 * Math.PI);
+  const logCoeff = Math.log(2 * s) - logB;
+  const sigma = (s / 2) % 2 === 0 ? 1 : -1;
+  const logQ = -2 * Math.PI * y;
+  // log s! errs by at most s·ε·log s! (s additions of a partial sum)
+  const coeffErr = (s * logFact + 4 * s + 10) * EPSILON;
+
+  let re = 0;
+  let im = 0;
+  let absSum = 0;
+  let termErr = 0;
+  let derivSum = 0;
+  let lMax = -Infinity;
+  for (let m = 1; ; m++) {
+    if (m === 100_000) return { value: C_NAN, err: NaN, deriv: NaN };
+    const l = logCoeff + (s - 1) * Math.log(m) + m * logQ;
+    if (!(l > -Infinity)) break; // an infinite Im τ: every term is 0
+    if (l > lMax) lMax = l;
+    const theta = 2 * Math.PI * ((m * x) % 1);
+    // 1/(1 − qᵐ), with |qᵐ| ≤ e^{−4πm}
+    const qmAbs = Math.exp(m * logQ);
+    const den = new Complex(
+      1 - qmAbs * Math.cos(theta),
+      -qmAbs * Math.sin(theta)
+    );
+    const term = new Complex(Math.cos(theta), Math.sin(theta))
+      .div(den)
+      .mul(new Complex(Math.exp(l), 0));
+    re += term.re;
+    im += term.im;
+    const a = term.abs();
+    const w = 1 / (1 - qmAbs);
+    absSum += a;
+    termErr +=
+      a *
+        ((2 * Math.abs(l) + 4 * Math.PI * (m * Math.abs(x) + 1) + 8) * EPSILON +
+          coeffErr) +
+      EPSILON * (Math.abs(re) + Math.abs(im));
+    derivSum += 2 * Math.PI * m * a * w;
+    const next = logCoeff + (s - 1) * Math.log(m + 1) + (m + 1) * logQ;
+    if (l < lMax - 46 && next - l <= -1) {
+      termErr += 1.6 * a;
+      break;
+    }
+  }
+  const value = new Complex(1 + sigma * re, sigma * im);
+  return {
+    value,
+    err: termErr + 2 * EPSILON * value.abs(),
+    deriv: derivSum,
+  };
 }
