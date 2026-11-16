@@ -348,10 +348,20 @@
   of the existing target, with the same number of pieces, or the closed
   form of the engine's antiderivative where the existing target uses one
   (an indefinite integral is its closed form); with an angular unit other
-  than radians it is the enclosure only. Any other program declines, and
+  than radians it is the enclosure only. A `Loop` over a `Range` or a list
+  compiles: a local that its passes assign holds the hull of both arms of
+  an undecided `If` (the existing target answers `entire`), a bound that is
+  not one integer over the box gives `entire`, and with an
+  `iterationBudget` each pass counts one pass of the call, as on the
+  existing target, and a call over the budget throws the same
+  `CancellationError`. A value computed once at the first call (a call of
+  constant arguments) counts its passes apart, so a program that the
+  existing target cancels can give a value, and the first call can run up
+  to twice the budget. Any other program declines, and
   with `fallback` the existing target then compiles it: an integral of
-  several `Limits`, a `Loop`, a recursive function, a `Range` of real
-  operands. Without the option `profile`, nothing changes.
+  several `Limits`, a `Loop` with a `Break`, a `Continue` or a `Return`, a
+  recursive function, a `Range` of real operands. Without the option
+  `profile`, nothing changes.
 - **With the profile `'ir'`, two calls of a user function with the same
   arguments are one call** on every target (JavaScript, GLSL,
   `interval-js`), when the function draws no random number, directly or

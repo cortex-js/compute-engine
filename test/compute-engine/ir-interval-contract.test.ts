@@ -257,15 +257,16 @@ describe('the interval mode: the result contract', () => {
   });
 
   test('a decline: outside-profile with fallback false, the existing target with it', () => {
+    // A `Loop` with a `Break`, which the existing target compiles.
     const loop = [
       'Block',
       ['Declare', 's', 'real', 0],
-      ['Loop', ['Assign', 's', ['Add', 's', 'e']], ['Element', 'e', ['Range', 1, 3]]],
+      ['Loop', ['If', ['Greater', 's', 3], ['Break'], ['Assign', 's', ['Add', 's', 'e']]], ['Element', 'e', ['Range', 1, 3]]],
       ['Multiply', 's', 'x'],
     ];
     const e = declineOf(() => mode(loop));
     expect(e.diagnostic.code).toBe('outside-profile');
-    expect(e.message).toMatch(/a Loop/);
+    expect(e.message).toMatch(/the operator Break is not in the slice/);
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const r = compile(ce.box(loop as never), IR as never) as unknown as Result;
@@ -331,11 +332,8 @@ describe('the interval mode: the declines', () => {
     [['Add', 'Z', 'x'], /the lane complex/],
     [['fact', 3], /a recursive function \(.*fact.*\)/],
     [['Zeta', 'x'], /Zeta \(the operation zeta\)/],
-    // Integrals compile since batch 6 (`ir-interval-integrals.test.ts`).
-    [
-      ['Block', ['Declare', 's', 'real', 0], ['Loop', ['Assign', 's', ['Add', 's', 'e']], ['Element', 'e', ['Range', 1, 3]]], ['Multiply', 's', 'x']],
-      /a Loop/,
-    ],
+    // Integrals compile since batch 6 (`ir-interval-integrals.test.ts`),
+    // a `Loop` with no early exit too (`ir-interval-lists.test.ts`).
   ])('%j', (json, cause) => {
     const e = declineOf(() => mode(json));
     expect(e.diagnostic.code).toBe('outside-profile');

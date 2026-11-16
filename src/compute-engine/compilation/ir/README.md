@@ -489,11 +489,13 @@ verdicts), `If`, `Which`, a `Block` with locals, user functions that are
 not recursive, `Sum` and `Product` with `Limits`, `Random()` and
 `WithRandomSeed` of a number seed, a root function literal, and the lists
 below, and integrals (below). `Haversine`, `Zeta` and the complex and
-colour operations have no spelling and decline; a `Loop` declines in the
-lowering with the cause "the interval mode does not compile it yet", also
-one whose values are not read (a cause of the mode ends with "on
-interval-js"). A string seed and `Random` of a domain decline in the
-lowering.
+colour operations have no spelling and decline (a cause of the mode ends
+with "on interval-js"). A `Loop` is lowered as on JavaScript ("Loops and
+the runtime"): its carried values are intervals, a local assigned in an
+undecided `If` of a pass holds the hull of both arms (the existing target
+answers `entire` there), and one whose values are not read is removed; a
+`Break`, a `Continue` and a `Return` decline in the slice. A string seed
+and `Random` of a domain decline in the lowering.
 
 Lists. What the lowering makes of a list (sections "Lists" and "Tuples") is
 printed with the spellings of the mode, and what it declines for JavaScript
@@ -653,7 +655,14 @@ A loop writes no deadline check, and the lowering writes no NaN test of the
 `iterationBudget` (NaN reads as `empty`): a loop of more passes than the
 budget (2^32 without one) throws the error of `_IA.decided()` before its
 first pass (`_IA.undecided()`), so the result is `entire`; so does a
-`build` or a `filter` of more elements, before its first element. A sum of
+`build` or a `filter` of more elements, before its first element. With a
+finite budget a pass of a `Loop` is counted instead, as on the existing
+target: `_IA.countLoopPass(budget)` adds one to the count of the call
+(nested loops and the loops of user functions included), and over the
+budget throws the `CancellationError` that `run()` rethrows; the count
+starts again in `preamblePerCall` (`_IA.resetLoopPasses()`), at each call
+and for the values computed at the first call, whose passes no call
+counts. A sum of
 constant bounds of at most 100 passes within the budget is written out
 ("Lists"), with no loop and no such test. A sum is a loop from the lower
 bound up (or, written out, added in that order), so that its result contains
@@ -782,7 +791,7 @@ each use), another text declines; a `mode` other than `'strict'`,
 `functions`, `operators`, `imports`, `preamble` and `strictTypes: true`
 decline by name; `entryChecks`, `storage`, `broadcast` and `quadrature`
 have no effect; `iterationBudget` limits the passes of each `Sum` and
-`Product` (above).
+`Product`, and those of the `Loop`s of a call (above).
 
 ## Lists
 

@@ -378,7 +378,8 @@ export type IntervalPrinted = StoredIntervalJavaScript & {
   readonly preambleOnce: string;
   /** Present when a value computed once can throw or run a loop: its
    *  computation at the first call, and at each call the throw of the
-   *  error that it threw then. */
+   *  error that it threw then; and when the code counts `Loop` passes: the
+   *  reset of the count at each call. */
   readonly preamblePerCall?: string;
   readonly calling: 'expression' | 'lambda';
   /** `createIntervalRuntime().load()` of the stored form. */
@@ -395,6 +396,17 @@ export function printInterval(
   iterationBudget?: number
 ): IntervalPrinted {
   const limit = Math.min(Math.floor(iterationBudget ?? Infinity), 2 ** 32);
+  // With a finite budget, each pass of a `Loop` counts one pass of the call
+  // (`_IA.countLoopPass()`, as the existing target), whose limit throws the
+  // cancellation that `run()` rethrows; another loop is refused before its
+  // first pass.
+  const open: Syntax['loopOpen'] = (k, lo, hi, passes) =>
+    passes && Number.isFinite(iterationBudget ?? Infinity)
+      ? [
+          ...loopOpen(2 ** 32)(k, lo, hi, passes),
+          `  _IA.countLoopPass(${Math.floor(iterationBudget!)});`,
+        ]
+      : loopOpen(limit)(k, lo, hi, passes);
   // The digits of the reading of a run-time float exponent, fixed now: the
   // runtime has its own number library, whose precision says nothing about
   // the engine's (`CompilationResult.reconstructionDigits`).
@@ -403,7 +415,7 @@ export function printInterval(
   const plan = computedOnce(q, rows);
   const printed = printProgram(
     q,
-    { ...syntax, ops: { ...syntax.ops, pow }, loopOpen: loopOpen(limit) },
+    { ...syntax, ops: { ...syntax.ops, pow }, loopOpen: open },
     rows,
     plan.once
   );
@@ -416,10 +428,18 @@ export function printInterval(
     .map(([, [name, value]]) => `const ${name} = ${value};`);
   if (late.length > 0)
     computed.push(`let _once, ${late.map(([name]) => name).join(', ')};`);
+  // The count of the passes starts again at each call, and for the values
+  // computed at the first call, whose passes no call counts.
+  const reset = [...printed.functions, ...printed.body].some((s) =>
+    s.includes('_IA.countLoopPass(')
+  )
+    ? '_IA.resetLoopPasses();'
+    : undefined;
   const perCall = [
     'if (_once !== null) {',
     '  if (_once === undefined)',
     '    try {',
+    ...(reset ? [`      ${reset}`] : []),
     ...late.map(([name, value]) => `      ${name} = ${value};`),
     '      _once = null;',
     '    } catch (e) {',
@@ -427,6 +447,7 @@ export function printInterval(
     '    }',
     '  if (_once !== null) throw _once;',
     '}',
+    ...(reset ? [reset] : []),
   ].join('\n');
   const entry = entryOf(p);
   const literal = entry.literal === true;
@@ -442,7 +463,9 @@ export function printInterval(
     preambleOnce: [...printed.helpers, ...printed.functions, ...computed].join(
       '\n'
     ),
-    ...(late.length > 0 ? { preamblePerCall: perCall } : {}),
+    ...(late.length > 0 || reset
+      ? { preamblePerCall: late.length > 0 ? perCall : reset }
+      : {}),
     calling: literal ? ('lambda' as const) : ('expression' as const),
   };
   let run: IntervalPrinted['run'];

@@ -12,12 +12,15 @@
  * programs for which some box differs are pinned in `EXCEPTIONS`.
  *
  * Then the result contract with list inputs and results, the declines of
- * the batch, and robustness.
+ * the batch, and robustness. The `Loop` statement (over a `Range` or a list,
+ * with carried locals) is in the cases too, and its contract (a bound that
+ * is not a point, the `iterationBudget`) in its own section.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
 import { createIntervalRuntime } from '../../src/compute-engine/compilation/interval-runtime';
+import { IntervalArithmetic } from '../../src/compute-engine/interval/index';
 import { nextDown, nextUp } from '../../src/compute-engine/numerics/numeric';
 import type { Expression } from '../../src/compute-engine/global-types';
 
@@ -33,6 +36,16 @@ ce.declare('f', '(list<real>) -> list<real>');
 ce.assign('f', ce.box(['Function', ['Multiply', 2, 'A'], 'A'] as never));
 ce.declare('s', '(list<real>) -> real');
 ce.assign('s', ce.box(['Function', ['Sum', 'A'], 'A'] as never));
+// A `Loop` in a user function, Tycho's shape: the sum of a/k for k = 1..8.
+ce.declare('w', '(real) -> real');
+ce.assign(
+  'w',
+  ce.box([
+    'Function',
+    ['Block', ['Declare', 'u', "'real'", 0], ['Loop', ['Assign', 'u', ['Add', 'u', ['Divide', 'a', 'k']]], ['Element', 'k', ['Range', 1, 8]]], 'u'],
+    'a',
+  ] as never)
+);
 
 /** The length of each list input of the containment cases. */
 const LENGTHS: Record<string, number> = { L: 4, V: 3, B: 200, P: 2 };
@@ -48,6 +61,29 @@ const T = (body: Json) => ['Function', body, 't'];
 const K = (body: Json) => ['Function', body, 'k'];
 const squares = ['List', ['Power', x, 2], ['Power', ['Subtract', x, 1], 2], ['Power', ['Subtract', x, 2], 2]];
 const list3 = ['List', x, ['Multiply', 2, x], ['Power', x, 2]];
+/** A program that declares `t`, of the value 0, runs `loop` and returns
+ *  `t`. */
+const loopOf = (loop: Json, last: Json = 't') => ['Block', ['Declare', 't', "'real'", 0], loop, last];
+const addTo = (v: Json) => ['Assign', 't', ['Add', 't', v]];
+/** A local declared as Tycho declares it, with a value. */
+const local = (name: string, v: Json) => ['Declare', name, ['Dictionary', ['KeyValuePair', { str: 'value' }, v]]];
+/** The shape of Tycho's `showcase/black-hole` #0, reduced: a `Loop` over
+ *  `Range(1, 6)` that declares a local in its pass and updates two locals
+ *  declared outside it. */
+// prettier-ignore
+const BLACK_HOLE = ['Block',
+  local('b', ['Sqrt', ['Add', ['Power', x, 2], ['Power', y, 2]]]),
+  local('r', ['Max', 'b', 1.5]), local('v', 0),
+  ['Loop', ['Block',
+    local('ca', ['Subtract', 1, ['Divide', 1, 'r']]),
+    ['Assign', 'r', ['Max', ['Divide', ['Multiply', 'b', ['Sqrt', ['Subtract', 1, ['Divide', 1, 'r']]]], ['Sqrt', ['Max', ['Subtract', 1, ['Power', 'ca', 2]], 1e-9]]], 1.01]],
+    ['Assign', 'v', ['Add', 'v', ['Divide', 1, 'r']]]],
+  ['Element', 'k', ['Range', 1, 6]]],
+  ['Add', 'r', 'v']];
+/** A local assigned in both arms of an `If` in each pass, and in one arm
+ *  of an `If` with no else. */
+const LOOP_IF = loopOf(['Loop', ['If', ['Greater', x, 0], addTo(['Multiply', 2, x]), addTo(-1)], ['Element', 'k', ['Range', 1, 3]]]);
+const LOOP_IF_NO_ELSE = ['Block', ['Declare', 't', "'real'", 1], ['Loop', ['If', ['Greater', x, 'k'], ['Assign', 't', ['Multiply', 't', x]]], ['Element', 'k', ['Range', 1, 3]]], 't'];
 
 // prettier-ignore
 const CASES: Case[] = [
@@ -120,12 +156,28 @@ const CASES: Case[] = [
   // Element-wise powers by a constant exponent.
   C(['Power', 'L', 3]), C(['Power', ['List', x, 2], 3]), C(['Power', 'L', 2]),
   C(['Power', 'L', -1], [0]),
+  // `Loop`: Tycho's black-hole shape; nested loops, the inner bound read
+  // from the outer index; over a list literal and over an input list; a
+  // run-time bound; an empty range; in a user function; an `If` in a pass.
+  C(BLACK_HOLE, [0, 1, 1.5]),
+  C(loopOf(['Loop', ['Loop', addTo(['Multiply', 'j', 'k', x]), ['Element', 'j', ['Range', 1, 'k']]], ['Element', 'k', ['Range', 1, 3]]])),
+  C(loopOf(['Loop', addTo(['Multiply', 'e', x]), ['Element', 'e', ['List', 1, y, 3]]])),
+  C(loopOf(['Loop', ['Assign', 't', ['Max', 't', ['Multiply', 'e', x]]], ['Element', 'e', 'L']])),
+  C(loopOf(['Loop', addTo(['Multiply', 'k', x]), ['Element', 'k', ['Range', 1, 'n', 1]]])),
+  C(loopOf(['Loop', addTo(x), ['Element', 'k', ['Range', 5, 1, 1]]], ['Add', 't', x])),
+  C(['Add', ['w', x], 1]),
+  C(LOOP_IF, [0]), C(LOOP_IF_NO_ELSE, [1, 2, 3]),
 ];
 
 /** The programs whose result differs from the existing target's at some
  *  box: another kind, or a bound wider by more than 4 ulps. */
 // prettier-ignore
-const EXCEPTIONS: string[] = [];
+const EXCEPTIONS: string[] = [
+  // An `If` in a pass of a `Loop` whose condition the box does not decide:
+  // the mode joins the values of both arms (a hull); the existing target
+  // answers `entire`.
+  JSON.stringify(LOOP_IF), JSON.stringify(LOOP_IF_NO_ELSE),
+];
 
 // A seeded generator (mulberry32).
 function random(seed: number): () => number {
@@ -449,6 +501,103 @@ describe('the interval mode, lists: the result contract', () => {
   });
 });
 
+describe('the interval mode, Loop: the contract', () => {
+  const budgeted = (json: Json, iterationBudget?: number) =>
+    compile(ce.box(json as never), {
+      to: 'interval-js',
+      profile: 'ir',
+      fallback: false,
+      iterationBudget,
+    } as never) as unknown as Compiled & { preamblePerCall?: string };
+  const existing = (json: Json, iterationBudget?: number) =>
+    compile(ce.box(json as never), {
+      to: 'interval-js',
+      iterationBudget,
+    } as never) as unknown as Compiled;
+  /** The result of `f()`, or the name of the error that it throws. */
+  const outcome = (f: () => unknown) => {
+    try {
+      return f();
+    } catch (e) {
+      return (e as Error).name;
+    }
+  };
+  const upTo = (bound: Json, body: Json = addTo(x)) =>
+    loopOf(['Loop', body, ['Element', 'k', ['Range', 1, bound, 1]]]);
+
+  test('a bound that is not a point is entire, an empty range runs no pass', () => {
+    const r = budgeted(upTo('n'));
+    expect(r.run({ x: 1, n: 4 })).toEqual({ kind: 'interval', value: { lo: 4, hi: 4 } });
+    expect(r.run({ x: 1, n: { lo: 2, hi: 4 } })).toEqual({ kind: 'entire' });
+    expect(r.run({ x: 1, n: 0 })).toEqual({ kind: 'interval', value: { lo: 0, hi: 0 } });
+  });
+
+  test('the undecided If of a pass: the hull of both arms, the existing target entire', () => {
+    const box = { x: { lo: -1, hi: 0.5 } };
+    // At x = -1 the value is -3, at x = 0.5 it is 3.
+    expect(budgeted(LOOP_IF).run(box)).toEqual({ kind: 'interval', value: { lo: -3, hi: 3 } });
+    expect(existing(LOOP_IF).run(box)).toEqual({ kind: 'entire' });
+  });
+
+  test('a pass of a Loop counts one pass of the iterationBudget, as on the existing target', () => {
+    const json = upTo('n');
+    const r = budgeted(json, 5);
+    expect(r.code).toContain('_IA.countLoopPass(5);');
+    expect(r.preamblePerCall).toBe('_IA.resetLoopPasses();');
+    for (const n of [5, 6, 5]) {
+      const got = outcome(() => r.run({ x: 1, n }));
+      expect(got).toEqual(outcome(() => existing(json, 5).run({ x: 1, n })));
+      // The count starts again at each call.
+      expect(got).toEqual(n === 5 ? { kind: 'interval', value: { lo: 5, hi: 5 } } : 'CancellationError');
+    }
+    // The stored result counts the same way.
+    const stored = createIntervalRuntime().load(JSON.parse(JSON.stringify(r)));
+    expect(outcome(() => stored({ x: 1, n: 6 }))).toBe('CancellationError');
+    expect(stored({ x: 1, n: 5 })).toEqual({ kind: 'interval', value: { lo: 5, hi: 5 } });
+    // Without a budget nothing is counted.
+    expect(budgeted(json).code).not.toContain('countLoopPass');
+  });
+
+  test('with no value computed once, preamble holds the reset', () => {
+    const json = ['Block', ['Declare', 't', "'real'", x], ['Loop', ['Assign', 't', ['Multiply', 't', x]], ['Element', 'k', ['Range', 1, 'n', 1]]], 't'];
+    const r = budgeted(json, 5) as Compiled & { preamble?: string; preambleOnce?: string };
+    expect(r.preamble).toBe('_IA.resetLoopPasses();');
+    expect(r.preambleOnce).toBe('');
+    // A host that evaluates `preamble` and `code` together at each call.
+    const call = new Function('_IA', '_', `${r.preamble}\nreturn ${r.code};`);
+    for (let k = 0; k < 10; k++)
+      expect(call(IntervalArithmetic, { x: { lo: 2, hi: 2 }, n: { lo: 2, hi: 2 } })).toEqual({ kind: 'interval', value: { lo: 8, hi: 8 } });
+    // Without a budget nothing is counted, and there is no preamble.
+    const free = budgeted(json) as Compiled & { preamble?: string; preamblePerCall?: string };
+    expect([free.preamble, free.preamblePerCall]).toEqual([undefined, undefined]);
+  });
+
+  test('the passes of nested Loops add up', () => {
+    // 3 outer passes and 3 × 2 inner ones.
+    const json = loopOf(['Loop', ['Loop', addTo(x), ['Element', 'j', ['Range', 1, 2]]], ['Element', 'k', ['Range', 1, 3]]]);
+    expect(budgeted(json, 9).run({ x: 1 })).toEqual({ kind: 'interval', value: { lo: 6, hi: 6 } });
+    expect(outcome(() => budgeted(json, 8).run({ x: 1 }))).toBe('CancellationError');
+    expect(outcome(() => existing(json, 8).run({ x: 1 }))).toBe('CancellationError');
+  });
+
+  test('a call computed once counts its passes apart from the calls', () => {
+    // `w(2)` is computed at the first call (8 passes), `w(x)` at each (8).
+    const json = ['Add', ['w', x], ['w', 2]];
+    const r = budgeted(json, 12);
+    expect(r.preamblePerCall).toContain('_IA.resetLoopPasses();');
+    for (let k = 0; k < 2; k++) expect((r.run({ x: 1 }) as Kinded).kind).toBe('interval');
+    // The existing target counts the 16 passes of each call.
+    expect(outcome(() => existing(json, 12).run({ x: 1 }))).toBe('CancellationError');
+    // Over the budget alone, the value computed once throws at every call.
+    const over = budgeted(json, 7);
+    for (let k = 0; k < 2; k++) expect(outcome(() => over.run({ x: 1 }))).toBe('CancellationError');
+  });
+
+  test('a Loop whose values are not read is removed', () => {
+    expect(budgeted(loopOf(['Loop', addTo(x), ['Element', 'k', ['Range', 1, 3]]], x)).code).toBe('_.x');
+  });
+});
+
 describe('the interval mode, lists: declines', () => {
   ce.declare('Q', 'list<tuple<real, real>>');
   test.each([
@@ -463,7 +612,10 @@ describe('the interval mode, lists: declines', () => {
     [['Apply', K(['Multiply', 'k', x]), 'P'], /a list or a tuple argument of Apply/],
     [['Apply', K(['Multiply', 'k', x]), ['Tuple', x, y]], /a list or a tuple argument of Apply/],
     [['Apply', ['Function', ['Add', 'j', 'k'], 'j', 'k'], 'L', x], /a list or a tuple argument of Apply/],
-    [['Block', ['Declare', 'q', "'real'", 0], ['Loop', ['Assign', 'q', ['Add', 'q', 't']], ['Element', 't', 'L']], 'q'], /a Loop: the interval mode does not compile it yet on interval-js/],
+    // A `Loop` with an early exit declines in the pipeline.
+    [loopOf(['Loop', ['If', ['Greater', 't', 3], ['Break'], addTo(x)], ['Element', 'k', ['Range', 1, 9]]]), /the operator Break is not in the slice/],
+    [loopOf(['Loop', ['If', ['Greater', 't', 3], ['Continue'], addTo(x)], ['Element', 'k', ['Range', 1, 9]]]), /the operator Continue is not in the slice/],
+    [loopOf(['Loop', ['If', ['Greater', 't', 3], ['Return', 't'], addTo(x)], ['Element', 'k', ['Range', 1, 9]]]), /Return/],
   ])('%j', (json, cause) => {
     expect(() => mode(json)).toThrow(cause);
   });

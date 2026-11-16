@@ -108,10 +108,12 @@ export function compileWithIrProfileInterval(
       success: true,
       runtimeVersion: INTERVAL_RUNTIME_VERSION,
       code: s.code,
-      ...(once === ''
+      // `preamble` is the two, also when one is empty: the reset of the
+      // count of `Loop` passes is per call with no value computed once.
+      ...(once === '' && perCall === undefined
         ? {}
         : {
-            preamble: perCall === undefined ? once : `${once}\n${perCall}`,
+            preamble: [once, perCall ?? ''].filter((t) => t !== '').join('\n'),
             preambleOnce: once,
           }),
       ...(perCall === undefined ? {} : { preamblePerCall: perCall }),

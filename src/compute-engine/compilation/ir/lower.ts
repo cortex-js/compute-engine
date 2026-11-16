@@ -1013,11 +1013,6 @@ export function lower(
       case 'Assign':
         return assign(e);
       case 'Loop':
-        if (interval)
-          throw new Decline(
-            'program',
-            'a Loop: the interval mode does not compile it yet on interval-js'
-          );
         return loop(e, want);
       case 'Integrate':
       case 'NIntegrate':
