@@ -446,7 +446,7 @@ describe('IR profile, batch G11: arithmetic on points', () => {
     ['a recursive call, a result tuple<unknown, unknown>', ['PointX', ['Xr', 'x', 'y']], ['javascript'], /a recursive call of Xr, a function with a list or tuple result/],
     ['a point plus a list of points on GLSL', ['Add', 'P', ['List', ['Tuple', 1, 2], ['Tuple', 'u', 'v']]], ['glsl'], /rank 2|region/],
     ['PointList of lists on GLSL', ['PointList', 'L2', 'L2'], ['glsl'], /rank 2|region/],
-    ['PointX of a list of points on GLSL', ['PointX', ['List', ['Tuple', 1, 'u'], ['Tuple', 2, 'v']]], ['glsl'], /rank 2|region/],
+    ['PointX of a list of points on GLSL', ['PointX', ['PointList', 'L2', 'L2']], ['glsl'], /rank 2|region/],
     ['a list of points of two lengths', ['Add', ['List', ['Tuple', 1, 2]], ['List', ['Tuple', 1, 2], ['Tuple', 'u', 'v']], 'P'], ['javascript'], /lists of different lengths|another shape/],
   ])('%s declines, with the cause', (_, json, targets, cause) => {
     for (const to of targets) {

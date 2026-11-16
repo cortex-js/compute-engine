@@ -41,6 +41,13 @@ export function parameterName(p: Expression): string | undefined {
   return isSymbol(p) ? p.symbol : undefined;
 }
 
+/** `l` is a literal `List` of the library (a user definition or a lowering
+ *  of its own declines in `cx.value()`). */
+export const literalList = (cx: Lowering, l: Expression): l is Fn =>
+  isFunction(l, 'List') &&
+  cx.isLibrary(l) &&
+  !hasOwnLowering('List', l.operatorDefinition);
+
 export function listLowering(cx: Lowering) {
   const { b, type } = cx;
   const op = (name: string) => rowOfOp(cx.rows, name)!.row;
@@ -287,14 +294,11 @@ export function listLowering(cx: Lowering) {
       return aggregate(e, r);
     // A literal list of scalars is read as its elements, with no array:
     // `Max(List(x, y))` is `Max(x, y)`, and `Sum(List(x, y))` is `Sum(x, y)`,
-    // whose fold from the identity is the loop's. Only the library's `List`
-    // (a user definition or a lowering of its own declines in `cx.value()`).
+    // whose fold from the identity is the loop's. Only the library's `List`.
     const [l] = e.ops;
     const literal =
       e.nops === 1 &&
-      isFunction(l, 'List') &&
-      cx.isLibrary(l) &&
-      !hasOwnLowering('List', l.operatorDefinition) &&
+      literalList(cx, l) &&
       l.nops > 0 &&
       l.ops.every((x) => x.type.matches('number'))
         ? l.ops

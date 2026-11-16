@@ -108,12 +108,15 @@ import {
   type Lowering,
 } from './lower-context.js';
 import { toBigint } from '../../boxed-expression/numerics.js';
-import { listLowering, parameterName } from './lower-lists.js';
+import { listLowering, literalList, parameterName } from './lower-lists.js';
 import {
   intervalClosedForm,
   intervalQuadratureRefusal,
   intervalQuadratureSize,
 } from '../interval-quadrature.js';
+import { derivativeClosedForm } from '../derivative-closed-form.js';
+import { withVarsValuesHidden } from '../vars-inputs.js';
+import { prefersJetDerivative } from '../jet-derivative.js';
 import {
   functionLowering,
   inputType,
@@ -172,6 +175,8 @@ type Facts = {
  *  depth. A larger node is lowered, and its parts are folded. */
 const CLOSED_SIZE = 10_000;
 
+const NO_CLOSED_FORM = `a derivative with no closed form of at most ${CLOSED_SIZE} nodes in radians at compile time`;
+
 /** The most nodes that one compilation lowers. A shared node, and the nodes
  *  equal to it, are lowered once per region (the memo of `value()`), so
  *  the two arms of an `If` that both read a shared graph lower it once
@@ -208,6 +213,9 @@ export type LowerOptions = {
    *  is written out, its body lowered once per index (`aggregate()` of
    *  `lower-lists.ts`). Default 0: none. */
   readonly unrollSums?: number;
+  /** The numeric derivative of a derivative with no closed form
+   *  (JavaScript, not the interval mode). */
+  readonly stencil?: boolean;
 };
 
 /** The IR operation of the read of the `vars` name of index `k` on the
@@ -875,11 +883,25 @@ export function lower(
         // The coordinate of a point, an `At` of a tuple of scalars (a
         // coordinate past the last one is an `incompatible-dimensions`
         // error of the canonical form, which declines first).
-        // Of a list of points, the list of the coordinates.
-        const p = value(e.ops[0])!;
+        // Of a list of points, the list of the coordinates; of the library's
+        // literal `List` of points, with no list of points (GLSL has none).
+        const [l] = e.ops;
         const k = ['PointX', 'PointY', 'PointZ'].indexOf(e.operator) + 1;
         const coordinate = ([q]: V[]) =>
           apply(e, 'At', [q, b.constant(k, 'integer')]);
+        const ps =
+          e.nops === 1 && literalList(cx, l) && l.type.type !== 'error'
+            ? l.ops.map((x) => value(x)!)
+            : undefined;
+        if (
+          ps?.length &&
+          ps.every((q) => tuples.get(q) === 0 && type(q).shape.length === 1)
+        )
+          return list(
+            e,
+            ps.map((q) => coordinate([q]))
+          );
+        const p = ps ? list(l as Fn, ps) : value(l)!;
         if (e.nops === 1 && tuples.get(p) === 1 && type(p).shape.length === 2)
           return eachPoint(e, e.operator, [p], coordinate);
         if (e.nops !== 1 || tuples.get(p) !== 0 || type(p).shape.length !== 1)
@@ -1017,12 +1039,60 @@ export function lower(
       case 'Integrate':
       case 'NIntegrate':
         return integral(e);
+      case 'D': {
+        // A variable that holds a value (not a `vars` name) is read with it
+        // by the engine. With no closed form, JavaScript takes the stencil of
+        // the existing compiler (`_SYS.nd`), of `D(f, x)` of a pure real body
+        // at the value of the name outside (`D` binds `x`).
+        const [body, x] = e.ops;
+        const valued = (v: Expression) =>
+          isSymbol(v) &&
+          !lookup(v.symbol) &&
+          !options.vars?.includes(v.symbol) &&
+          held(v.symbol)?.value !== undefined;
+        if (e.ops.slice(1).some(valued))
+          decline(e, 'a variable of a derivative that holds a value');
+        const c = closedForm(e, () => derivativeClosedForm('D', e.ops));
+        if (c !== undefined) return value(c, want);
+        const name = e.nops === 2 && isSymbol(x) ? x.symbol : '';
+        if (!options.stencil || !name || body.isPure !== true)
+          decline(e, NO_CLOSED_FORM);
+        if (!lookup(name) && !ce.lookupDefinition(name))
+          decline(x, `the variable ${name} of a derivative is not declared`);
+        const point = scalar(lookup(name) ? x : ce.box(name));
+        if (!isSubLane(type(point).lane, 'real'))
+          decline(e, 'the point of a derivative is not real');
+        const effects = b.effects;
+        const [out] = region(
+          'derivative',
+          [point],
+          ...realBody(e, name, body, 'a derivative'),
+          e
+        );
+        if (b.effects !== effects) decline(e, 'a derivative with an effect');
+        return out;
+      }
       case 'Apply': {
         // `Apply(Function(body, p1, …), a1, …)`: the body with each
         // parameter bound to its argument, each argument evaluated once, in
         // order, before it. (`Apply(g, x)` of a name is the call `g(x)` in
-        // the canonical form.)
-        const [f, ...args] = e.ops;
+        // the canonical form.) `Apply(Derivative(g, n…), a1, …)` is the
+        // application of the function literal of the derivative, which
+        // declines with none, and at a total order of 3 or more of a large
+        // body (the existing compiler's forward mode,
+        // `prefersJetDerivative()`) before the engine is asked.
+        const [g, ...args] = e.ops;
+        let f: Expression | undefined = g;
+        if (isFunction(g, 'Derivative')) {
+          const h = g.ops[0];
+          const lit = isSymbol(h) ? userBinding(h as never)?.literal : h;
+          const k = g.ops
+            .slice(1)
+            .reduce((n, o) => n + Math.floor(o.N().re), 0);
+          if (!(k >= 3) || lit === undefined || !prefersJetDerivative(lit, k))
+            f = closedForm(g, () => derivativeClosedForm('Derivative', g.ops));
+          if (f === g || f === undefined) decline(g, NO_CLOSED_FORM);
+        }
         const names = isFunction(f, 'Function')
           ? f.ops.slice(1).map((p) => (isSymbol(p) ? p.symbol : ''))
           : [];
@@ -1271,6 +1341,73 @@ export function lower(
     // written: its helper throws the pole where the node is evaluated.
     if (!isNumber(n) || (bigint && n.isInteger !== true)) return undefined;
     return number(n, interval && !exact ? 1 : undefined);
+  };
+
+  /** The expression that `ask()` gives at compile time for `e` (the closed
+   *  form of a derivative), with the values of the `vars` names hidden as on
+   *  the existing targets; `undefined` when there is none; a decline under
+   *  an angular unit other than radians (the walk converts the units
+   *  itself), when `e` or it has more than `CLOSED_SIZE` nodes, and when it
+   *  reads a name that the walk would read in another binding (`foreign()`). */
+  const closedForm = (e: Fn, ask: () => Expression | undefined) => {
+    // `withVarsValuesHidden()` hides no value of a constant or of a name
+    // whose type is inferred from its value.
+    const fixed = (n: string) => {
+      const d = held(n);
+      return (
+        d?.value !== undefined &&
+        (d.definition.isConstant || d.definition.inferredType)
+      );
+    };
+    if (
+      ce.angularUnit !== 'rad' ||
+      facts(e).size > CLOSED_SIZE ||
+      options.vars?.some(fixed)
+    )
+      decline(e, NO_CLOSED_FORM);
+    const vars = options.vars?.map((n) => [n, n]);
+    const c = withVarsValuesHidden(e, vars && Object.fromEntries(vars), ask);
+    if (c !== undefined && (facts(c).size > CLOSED_SIZE || foreign(e, c)))
+      decline(e, NO_CLOSED_FORM);
+    return c;
+  };
+  /** `c` reads a name, not its own parameter, that the walk binds other than
+   *  as an input (an index, a local, a parameter) and that `e` does not
+   *  read, or that a value that `e` reaches reads (`calledNames()`). */
+  const foreign = (e: Fn, c: Expression) => {
+    const called = calledNames(e);
+    const param = (n: string) =>
+      isFunction(c, 'Function') &&
+      c.ops.slice(1).some((p) => parameterName(p) === n);
+    return [...facts(c).names].some(
+      (n) =>
+        (lookup(n)?.binding.role ?? 'input') !== 'input' &&
+        (!facts(e).names.has(n) || called.has(n)) &&
+        !param(n)
+    );
+  };
+  /** The names read by the values that `x` reaches: the body of each user
+   *  function that it calls or names (other than its parameters) and each
+   *  expression that a name of it holds, through other such values. */
+  const calledNames = (
+    x: Expression,
+    out = new Set<string>(),
+    seen = new Set<object>()
+  ) => {
+    if (seen.has(x) || !(isFunction(x) || isSymbol(x))) return out;
+    seen.add(x);
+    const v =
+      userBinding(x as never)?.literal ??
+      (isSymbol(x) ? x.valueDefinition?.value : undefined);
+    if (v !== undefined && !seen.has(v)) {
+      seen.add(v);
+      const [body, ...ps] = isFunction(v, 'Function') ? v.ops : [v];
+      const params = ps.map(parameterName);
+      for (const n of facts(body).names) if (!params.includes(n)) out.add(n);
+      calledNames(body, out, seen);
+    }
+    if (isFunction(x)) x.ops.forEach((op) => calledNames(op, out, seen));
+    return out;
   };
 
   /** The literal of the number `e`: an integer, a real, or a complex of
@@ -2042,19 +2179,10 @@ export function lower(
       interval && e.operator === 'Integrate'
         ? closedRegion(intervalClosedForm(e.ops, options.varsTexts ?? {}))
         : undefined;
-    const t = b.newValue(scalarType('real'));
     const [out] = region(
       'integrate',
       [lo, hi],
-      [t],
-      () =>
-        withFrame(true, (frame) => {
-          frame.names.set(name, { v: t, role: 'index' });
-          const y = scalar(literal?.ops[0] ?? f);
-          if (!isSubLane(type(y).lane, 'real'))
-            decline(e, 'an integrand that is not real');
-          return [y];
-        }),
+      ...realBody(e, name, literal?.ops[0] ?? f, 'an integrand'),
       e,
       interval ? quadrature!.n : undefined,
       closed
@@ -2062,6 +2190,28 @@ export function lower(
     if (b.effects !== effects) decline(e, 'an integrand with an effect');
     quadrature = outer;
     return out;
+  };
+
+  /** The parameter and the body of a region of one real parameter, bound to
+   *  `name`: the real value of `body` (`what`: the body, in a decline). */
+  const realBody = (
+    e: Fn,
+    name: string,
+    body: Expression,
+    what: string
+  ): [V[], () => V[]] => {
+    const t = b.newValue(scalarType('real'));
+    return [
+      [t],
+      () =>
+        withFrame(true, (frame) => {
+          frame.names.set(name, { v: t, role: 'index' });
+          const y = scalar(body);
+          if (!isSubLane(type(y).lane, 'real'))
+            decline(e, `${what} that is not real`);
+          return [y];
+        }),
+    ];
   };
 
   const assign = (e: Fn): V => {

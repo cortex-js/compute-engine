@@ -199,6 +199,11 @@ export const JS: Syntax = deepFreeze({
       open: [`const ${out} = _SYS.irIntegrate((${t}) => {`],
       close: ([y]) => [`  return ${y};`, `}, ${a}, ${b});`],
     }),
+    // The call of the existing compiler (`compileDerivative()`).
+    derivative: ({ outs: [out], args: [x], params: [t] }) => ({
+      open: [`const ${out} = _SYS.nd((${t}) => {`],
+      close: ([y]) => [`  return ${y};`, `}, 1, 'scalar')(${x});`],
+    }),
     choice: ({ outs: [c, out], args: [n] }) => ({
       open: [
         `const ${out} = _SYS.randomChoice(_SYS.domainInterval('RandomChoice', 0, 1), ${n});`,

@@ -138,6 +138,11 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `(E(x) − (1 − x)K(x))/(2x(1 − x))`; the interpreter gives `π/8`
   (`symbolic/removable-points.ts`). The same holds for the derivatives of
   `EllipticE`, `LambertW`, `PolyLog(s, x)` and `LerchPhi(x, s, a)` at 0.
+- `javascript` (crafted), `a: real`, `w(t) = a·t²`: the derivative of a user
+  function whose body reads a free name, at a site where a `Sum` index, a
+  parameter or a local has that name, reads the bound name:
+  `Sum(Apply(Derivative(w), a), Limits(a, 1, 3))` at `a = 5` gives `28`; the
+  interpreter gives `60`. The profile `ir` declines it.
 - `javascript` (crafted), `x: real`, `g` assigned `0.75` with no declared
   type, `angularUnit = 'deg'`, the `complex` mode: in
   `Block(Declare(t, real, x), Assign(t, Block(Declare(b0, unknown, g), Arctan(b0))), t)`

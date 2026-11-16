@@ -960,8 +960,10 @@ decline); and under `Multiply` and `Divide` with a list of numbers of its length
 (`(M − P) / D`, as the interpreter gives it). `PointX`, `PointY` and `PointZ` of
 a tuple of scalars are `At` of index 1, 2 and 3 (`PointZ` of a point of 2
 coordinates is an `incompatible-dimensions` error of the canonical form, and
-declines); of a list of points, the list of those coordinates; of a list of
-numbers, they decline. Any other reader declines a tuple operand:
+declines); of a list of points, the list of those coordinates, and of a
+literal `List` of points (the library's, as `Max(List(…))` reads one) the list
+of the coordinate of each point, with no list of points (so on GLSL too:
+`PointX(List(p1, …, p9))` is a `float[9]`); of a list of numbers, they decline. Any other reader declines a tuple operand:
 `Equal(Tuple(1, 2), List(1, 2))` is `False`, a comparison of a tuple stays
 unevaluated, `Map`, `Filter`, `Reduce`, `Loop` and `Comprehension` over a tuple,
 and the arms of a conditional of which one is a tuple and the other a list. The
@@ -1227,7 +1229,42 @@ tuple argument declines: a nested list (the interpreter maps to the leaves), a
 tuple and a list of points (atomic), a list of booleans, a list with several
 parameters, and a literal whose signature takes a collection (`k ↦ Length(k)`,
 which binds the list whole). A typed parameter and another count of arguments
-decline too; `Apply(g, x)` of a name is the call `g(x)` in the canonical form. A
+decline too; `Apply(g, x)` of a name is the call `g(x)` in the canonical form.
+`Apply(Derivative(g, n…), a1, …)` is the application of the function literal
+that the engine gives for the derivative at compile time, and `D(f, x, …)` the
+expression it gives (`derivativeClosedForm()`, the closed form of the existing
+compilers; `closedForm()` of `lower.ts`): `D(Abs(x), x)` is `Sign(x)`,
+`Apply(Derivative(Sin), x)` is `Cos(x)`. The engine computes it with the
+values of the `vars` names hidden, as for the existing targets
+(`withVarsValuesHidden()`): `D(T·x², x)` with `vars: {T}` is `2T·x` also when
+`T` holds 2. That helper hides no value of a constant or of a name whose type
+is inferred from its value (`T` assigned and not declared): with such a name
+in `vars`, a derivative declines. A variable of a `D` that holds a value, and is not bound in the
+walk or a `vars` name, declines (`D(T²·x, T)` with `T = 2`: the engine reads
+2). A `D(f, x)` with no closed form (a derivative head stays in it: `D(Min(L),
+x)` of a list) is, on JavaScript, the existing compiler's numeric derivative:
+the region `derivative`, printed as its call `_SYS.nd((t) => …, 1,
+'scalar')(x)`, so the value is its value bit for bit, at the value of the
+name `x` outside (`D` binds `x`). Its body is pure, of a real scalar value;
+one with an effect (a draw, a write, a `vars` read) declines, and so do GLSL
+and the interval mode. The region is `may-fail`, as `integrate`: `cse` does
+not merge it, and it moves out of a loop only as a whole. Otherwise the node
+declines: with no closed form (`Apply(Derivative(g), a)` has no stencil, and
+neither has `D(f, (x, 2))`), under an angular unit other than radians, when
+the node or the result has more than `CLOSED_SIZE` nodes counted on every
+path, and when the result reads a name that the walk binds other than as an
+input and that the node does not read, or that a value that the node reaches
+reads: the body of a user function that it calls or names, an expression that
+a name of it holds (`foreign()`: `w(t) = a·t²` in `Sum(Apply(Derivative(w), a),
+Limits(a, 1, 3))`). An `Apply(Derivative(g, k…), a…)` of a total order of 3 or
+more of a body that the existing compiler differentiates in forward mode
+(`prefersJetDerivative()`) declines before the engine is asked. The time of
+the engine's differentiation is bounded by its own limit
+(`MAX_DERIVATIVE_NODES`): `D(r(x), x, x, x)` of a radical `r` of four levels
+takes about 4 s, of five about 10 s, and declines; a function whose body
+applies its own derivative declines after about 9 s. The forward-mode
+lowering of the existing JavaScript target (`jet-derivative.ts`) and its
+vector stencil (a body that is a list or a point) are not in the profile. A
 function value other than the literal of a `Map`, a `Filter`, an `Apply` or the
 root, and a list argument for a scalar parameter (the interpreter maps the
 function over the list) decline. A declared result `complex` of a real body is

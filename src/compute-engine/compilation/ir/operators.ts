@@ -338,6 +338,12 @@ export type RegionRow = {
   ) => IRType[] | undefined;
 };
 
+/** The results of a region whose one yield is a real scalar. */
+const real: RegionRow['results'] = (_, ys) =>
+  ys.length === 1 && ys[0].shape.length === 0 && widensTo(ys[0].lane, R)
+    ? [{ lane: R, shape: [] }]
+    : undefined;
+
 const listOf = (element: IRType, n: Length): IRType => ({
   lane: element.lane,
   shape: [n, ...element.shape],
@@ -392,10 +398,16 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
     effect: 'may-fail',
     args: [R, R],
     params: [R],
-    results: (_, ys) =>
-      ys.length === 1 && ys[0].shape.length === 0 && widensTo(ys[0].lane, R)
-        ? [{ lane: R, shape: [] }]
-        : undefined,
+    results: real,
+  },
+  // The numeric derivative at `x` of the region's yield at its parameter:
+  // the stencil of the existing compiler.
+  {
+    op: 'derivative',
+    effect: 'may-fail',
+    args: [R],
+    params: [R],
+    results: real,
   },
 ]);
 

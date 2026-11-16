@@ -1669,12 +1669,16 @@ describe('IR profile, batch G6: GLSL', () => {
     for (const json of [
       ['Factorial', 'x'],
       ['PointX', ['List', 'x', 'y']],
-      ['PointX', ['List', ['Tuple', 'x', 'y'], ['Tuple', 'y', 'x']]],
     ])
       expect([json, thrown(() => g6(json, 'glsl'))?.code]).toEqual([
         json,
         'outside-profile',
       ]);
+    // Of a literal list of points, the list of the coordinates (batch G22).
+    expect(
+      g6(['PointX', ['List', ['Tuple', 'x', 'y'], ['Tuple', 'y', 'x']]], 'glsl')
+        .code
+    ).toBe('vec2(x, y)');
     // On JavaScript, the factorial of a real is the Gamma function.
     expect(
       g6(['Factorial', 'x'], 'javascript').run!({ x: 2.5 } as never)
