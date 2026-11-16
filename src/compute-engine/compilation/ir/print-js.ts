@@ -33,7 +33,10 @@ import {
 import {
   argumentIndex,
   entryOf,
+  loopPasses,
+  recursiveFunctions,
   regionsOf,
+  useIndex,
   type Instr,
   type Program,
   type Region,
@@ -57,9 +60,10 @@ import {
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
-/** The guard of a loop or a build of more than 2^32 iterations. */
-const guard = (n: string, what: string) =>
-  `if (!(${n} < 4294967296)) throw new RangeError('${what} of more than 2^32 iterations');`;
+/** The guard of a loop or a build of more than 2^32 iterations (2^53 for
+ *  a loop with an exit: it can end sooner). */
+const guard = (n: string, what: string, bits = 32) =>
+  `if (!(${n} < ${2 ** bits})) throw new RangeError('${what} of more than 2^${bits} iterations');`;
 
 /** The integers of a mode: `zero`, the literal `c` (`5` or `5n`), the
  *  number of an integer (`toNumber()`), the least of two (`min()`) and the
@@ -92,9 +96,13 @@ const BIGINTS: Ints = {
  *  printer closes) runs a block, and the update of the outer one adds the
  *  passes of the block to the deadline count of the runtime
  *  (`_SYS.tick(passes)`, on the deadline frame), so no pass makes a call. A
- *  block left by a throw is not counted. */
-const blocks = (z: Ints, i: string, n: string): string =>
-  `for (let ${i}_b = ${z.zero}, ${i}_e = ${z.min(z.c(1024), n)}; ${i}_b < ${n}; _SYS.tick(${z.toNumber(`${i}_e - ${i}_b`)}), ${i}_b = ${i}_e, ${i}_e = ${z.min(`${i}_b + ${z.c(1024)}`, n)}) for (let ${i} = ${i}_b; ${i} < ${i}_e; ${i}++) {`;
+ *  block left by a throw is not counted. `done`: the flag of an exit; both
+ *  loops stop when it is true, and the block charges the passes it ran. */
+const blocks = (z: Ints, i: string, n: string, done?: string): string => {
+  if (done === undefined)
+    return `for (let ${i}_b = ${z.zero}, ${i}_e = ${z.min(z.c(1024), n)}; ${i}_b < ${n}; _SYS.tick(${z.toNumber(`${i}_e - ${i}_b`)}), ${i}_b = ${i}_e, ${i}_e = ${z.min(`${i}_b + ${z.c(1024)}`, n)}) for (let ${i} = ${i}_b; ${i} < ${i}_e; ${i}++) {`;
+  return `for (let ${i}_b = ${z.zero}, ${i}_e = ${z.min(z.c(1024), n)}, ${i} = ${z.zero}; ${i}_b < ${n} && !${done}; _SYS.tick(${z.toNumber(`${i} - ${i}_b`)}), ${i}_b = ${i}_e, ${i}_e = ${z.min(`${i}_b + ${z.c(1024)}`, n)}) for (${i} = ${i}_b; ${i} < ${i}_e && !${done}; ${i}++) {`;
+};
 
 /** A counted loop of `n` passes, from `lo` while the index is at most `hi`
  *  (a bound can be a real: `Floor(hi - lo) + 1` passes): the index is
@@ -102,10 +110,10 @@ const blocks = (z: Ints, i: string, n: string): string =>
  *  `k++` would not advance (from 2^53). */
 const loopOpen =
   (z: Ints): Syntax['loopOpen'] =>
-  (k, lo, hi) => [
+  (k, lo, hi, _passes, done) => [
     `const ${k}_lo = ${lo}, ${k}_n = ${z.floor(`${hi} - ${k}_lo`)} + ${z.c(1)};`,
-    guard(`${k}_n - ${z.c(1)}`, 'a loop'),
-    blocks(z, `${k}_i`, `${k}_n`),
+    guard(`${k}_n - ${z.c(1)}`, 'a loop', done === undefined ? 32 : 53),
+    blocks(z, `${k}_i`, `${k}_n`, done),
     `  const ${k} = ${k}_lo + ${k}_i;`,
   ];
 
@@ -382,16 +390,23 @@ export function printJavaScript(
 ): JavaScriptResult {
   // With a budget, each pass of a `Loop` counts one pass of the call, as
   // `compile()`'s `iterationBudget` (floored, as the existing compiler).
+  // No count where it cannot reach the budget: a bound of the passes of a
+  // call at compile time (`loopPasses()`) within it, and no recursion.
+  const limit = Math.floor(iterationBudget ?? Infinity);
   const budget =
-    iterationBudget === undefined ? undefined : Math.floor(iterationBudget);
+    !Number.isFinite(limit) ||
+    (recursiveFunctions(p.functions).size === 0 &&
+      loopPasses(p, limit, useIndex(p).def, Infinity) <= limit)
+      ? undefined
+      : limit;
   const printed = printProgram(
     p,
     budget === undefined
       ? syntax
       : {
           ...syntax,
-          loopOpen: (k, lo, hi, passes) => [
-            ...syntax.loopOpen(k, lo, hi, passes),
+          loopOpen: (k, lo, hi, passes, done) => [
+            ...syntax.loopOpen(k, lo, hi, passes, done),
             ...(passes ? [`  _SYS.countLoopPass(${budget});`] : []),
           ],
         },

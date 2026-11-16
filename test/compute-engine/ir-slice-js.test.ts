@@ -1609,31 +1609,27 @@ describe('IR slice: Loop', () => {
       }
     }
   });
-  test('a Break, a Continue, a Loop as a value and a write to the index decline', () => {
+  test('a Break in a value, a Continue in a function literal, a Loop as a value and a write to the index decline', () => {
     for (const [json, cause] of [
       [
         total(
           0,
-          [
-            'Block',
-            ['If', ['Less', 'n', 'k'], ['Break']],
-            ['Assign', 's', 'k'],
-          ],
+          ['Assign', 's', ['If', ['Less', 'n', 'k'], ['Break'], 'k']],
           range('k', 1, 9)
         ),
-        /Break/,
+        /a Break that is not a statement of a Loop body/,
       ],
       [
         total(
           0,
           [
             'Block',
-            ['If', ['Less', 'n', 'k'], ['Continue']],
+            ['Apply', ['Function', ['Block', ['Continue'], 'j'], 'j'], 'k'],
             ['Assign', 's', 'k'],
           ],
           range('k', 1, 9)
         ),
-        /Continue/,
+        /a Break or a Continue in a function literal in a Loop/,
       ],
       [['Loop', ['Add', 'x', 'k'], range('k', 1, 3)], /value of a Loop/],
       [total(0, ['Assign', 'k', 2], range('k', 1, 3)), /not a local/],

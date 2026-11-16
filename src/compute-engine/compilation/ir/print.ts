@@ -95,8 +95,15 @@ export type Syntax = {
   };
   /** The lines that open a counted loop of the index `k` from `lo` to `hi`,
    *  each bound evaluated once. `passes`: a pass of a `Loop`, which the
-   *  iteration budget counts. */
-  loopOpen(k: string, lo: string, hi: string, passes: boolean): string[];
+   *  iteration budget counts. `done`: the name of the flag of the loop's
+   *  `exit`; no pass runs once it is true. */
+  loopOpen(
+    k: string,
+    lo: string,
+    hi: string,
+    passes: boolean,
+    done?: string
+  ): string[];
   /** The return of the array of `values` (an entry `tuple`). Absent: the
    *  target declines such an entry. */
   retTuple?(values: string[]): string;
@@ -405,7 +412,8 @@ export function printProgram(
             name(i.body.params[0]),
             use(i.lo),
             use(i.hi),
-            i.passes === true
+            i.passes === true,
+            i.exit === undefined ? undefined : name(i.outs[i.exit])
           )
           .forEach((s) => line(s));
         nested(i.body, i.outs.map(name), true);

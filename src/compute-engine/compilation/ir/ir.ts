@@ -95,7 +95,8 @@ export type Instr =
   | { k: 'list'; out: V; args: V[] }
   | { k: 'if'; outs: V[]; cond: V; then: Region; else: Region }
   /** `passes`: each pass is a pass of a `Loop`, which the iteration
-   *  budget counts. */
+   *  budget counts. `exit`: the position of a boolean carried value (the
+   *  `Break` flag of a `Loop`); no pass runs once it is true. */
   | {
       k: 'loop';
       outs: V[];
@@ -104,6 +105,7 @@ export type Instr =
       init: V[];
       body: Region;
       passes?: boolean;
+      exit?: number;
     }
   | { k: 'call'; outs: V[]; fn: string; args: V[] }
   /** The region row `op`; `site` is the source text, for a warning.
@@ -293,6 +295,53 @@ export function typeToString(
         : `list<${s}${typeof n === 'number' ? `^${n}` : axis === false ? `^v${n.v}` : ''}>`,
     t.lane
   );
+}
+
+/** An upper bound of the passes of every loop (`Loop`, `Sum`, `Product`,
+ *  a reduction) of one evaluation of the program, at compile time: a
+ *  constant count is itself, a run-time count is `budget` (the count of a
+ *  `Sum` or a `Product`, which the lowering tests against it), multiplied
+ *  down the nesting and through the calls (both arms of an `if` are
+ *  added). GLSL counts no pass at run time. `unbounded`: the run-time
+ *  count of a `Loop` (`passes`), which no test bounds on JavaScript. */
+export function loopPasses(
+  p: Program,
+  budget: number,
+  def: ReadonlyMap<number, Instr>,
+  unbounded = budget
+): number {
+  const memo = new Map<Region, number>();
+  const passes = (r: Region): number => {
+    const known = memo.get(r);
+    if (known !== undefined) return known;
+    const total = r.body.reduce((n, i) => {
+      const inner =
+        i.k === 'call'
+          ? passes(p.functions.find((f) => f.name === i.fn)!.body)
+          : regionsOf(i).reduce((m, x) => m + passes(x), 0);
+      // A region other than `seeded` runs its body once per element or
+      // sample: with a pass in it, the bound of JavaScript is `unbounded`.
+      if (
+        i.k === 'region' &&
+        i.op !== 'seeded' &&
+        inner > 0 &&
+        unbounded !== budget
+      )
+        return n + unbounded;
+      if (i.k !== 'loop') return n + inner;
+      const [lo, hi] = [i.lo, i.hi].map((v) => def.get(v));
+      const count =
+        lo?.k === 'const' && hi?.k === 'const'
+          ? Math.max(0, Number(hi.value.value) - Number(lo.value.value) + 1)
+          : i.passes === true
+            ? unbounded
+            : budget;
+      return n + (count === 0 ? 0 : count * (1 + inner));
+    }, 0);
+    memo.set(r, total);
+    return total;
+  };
+  return passes(entryOf(p).body);
 }
 
 /** The functions of `p` that are in a cycle of the call graph: one walk

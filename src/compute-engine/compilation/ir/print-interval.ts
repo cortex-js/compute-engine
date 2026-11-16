@@ -78,10 +78,12 @@ const enclosure = (x: number, ulps: number): string => {
  *  number bounds `lo` and `hi`; more passes throw before the first. */
 const loopOpen =
   (limit: number): Syntax['loopOpen'] =>
-  (k, lo, hi) => [
+  (k, lo, hi, _passes, done) => [
     `const ${k}_lo = ${lo}, ${k}_hi = ${hi};`,
     `if (!(${k}_hi - ${k}_lo < ${limit})) _IA.undecided('A loop of more than ${limit} passes');`,
-    `for (let ${k} = ${k}_lo; ${k} <= ${k}_hi; ${k}++) {`,
+    // `done`, the flag of a `Break`: an undecided flag throws the mode's
+    // error (the whole range).
+    `for (let ${k} = ${k}_lo; ${k} <= ${k}_hi${done === undefined ? '' : ` && !_IA.decided(${done})`}; ${k}++) {`,
   ];
 
 /** The region `build` or `filter`: a loop over a number count that fills
@@ -401,13 +403,13 @@ export function printInterval(
   // (`_IA.countLoopPass()`, as the existing target), whose limit throws the
   // cancellation that `run()` rethrows; another loop is refused before its
   // first pass.
-  const open: Syntax['loopOpen'] = (k, lo, hi, passes) =>
+  const open: Syntax['loopOpen'] = (k, lo, hi, passes, done) =>
     passes && Number.isFinite(iterationBudget ?? Infinity)
       ? [
-          ...loopOpen(2 ** 32)(k, lo, hi, passes),
+          ...loopOpen(2 ** 32)(k, lo, hi, passes, done),
           `  _IA.countLoopPass(${Math.floor(iterationBudget!)});`,
         ]
-      : loopOpen(limit)(k, lo, hi, passes);
+      : loopOpen(limit)(k, lo, hi, passes, done);
   // The digits of the reading of a run-time float exponent, fixed now from
   // `precision`, the precision of the engine: the runtime has its own number
   // library (`CompilationResult.reconstructionDigits`).

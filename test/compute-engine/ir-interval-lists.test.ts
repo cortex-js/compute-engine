@@ -652,9 +652,10 @@ describe('the interval mode, lists: declines', () => {
     [['Apply', K(['Multiply', 'k', x]), 'P'], /a list or a tuple argument of Apply/],
     [['Apply', K(['Multiply', 'k', x]), ['Tuple', x, y]], /a list or a tuple argument of Apply/],
     [['Apply', ['Function', ['Add', 'j', 'k'], 'j', 'k'], 'L', x], /a list or a tuple argument of Apply/],
-    // A `Loop` with an early exit declines in the pipeline.
-    [loopOf(['Loop', ['If', ['Greater', 't', 3], ['Break'], addTo(x)], ['Element', 'k', ['Range', 1, 9]]]), /the operator Break is not in the slice/],
-    [loopOf(['Loop', ['If', ['Greater', 't', 3], ['Continue'], addTo(x)], ['Element', 'k', ['Range', 1, 9]]]), /the operator Continue is not in the slice/],
+    // A `Break` that is not a statement of a `Loop` body, and a `Return`,
+    // decline in the pipeline.
+    [loopOf(['Loop', addTo(['If', ['Greater', 't', 3], ['Break'], x]), ['Element', 'k', ['Range', 1, 9]]]), /a Break that is not a statement of a Loop body/],
+    [['If', ['Greater', x, 3], ['Continue'], x], /a Continue that is not a statement of a Loop body/],
     [loopOf(['Loop', ['If', ['Greater', 't', 3], ['Return', 't'], addTo(x)], ['Element', 'k', ['Range', 1, 9]]]), /Return/],
   ])('%j', (json, cause) => {
     expect(() => mode(json)).toThrow(cause);

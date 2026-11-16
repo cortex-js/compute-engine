@@ -257,16 +257,16 @@ describe('the interval mode: the result contract', () => {
   });
 
   test('a decline: outside-profile with fallback false, the existing target with it', () => {
-    // A `Loop` with a `Break`, which the existing target compiles.
+    // A `Loop` with no `Element` clause, which the existing target compiles.
     const loop = [
       'Block',
       ['Declare', 's', 'real', 0],
-      ['Loop', ['If', ['Greater', 's', 3], ['Break'], ['Assign', 's', ['Add', 's', 'e']]], ['Element', 'e', ['Range', 1, 3]]],
+      ['Loop', ['Block', ['If', ['Greater', 's', 3], ['Break']], ['Assign', 's', ['Add', 's', 1]]]],
       ['Multiply', 's', 'x'],
     ];
     const e = declineOf(() => mode(loop));
     expect(e.diagnostic.code).toBe('outside-profile');
-    expect(e.message).toMatch(/the operator Break is not in the slice/);
+    expect(e.message).toMatch(/a Loop with no Element clause/);
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const r = compile(ce.box(loop as never), IR as never) as unknown as Result;

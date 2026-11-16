@@ -401,9 +401,9 @@ export const GLSL: Syntax = deepFreeze({
     `${declarator(t, name)}${value === undefined ? '' : ` = ${value}`};`,
   // An `int` counter: a `float` one stops advancing at 2^24. The bounds are
   // clamped to ±2^30 before the conversion.
-  loopOpen: (k, lo, hi) => [
+  loopOpen: (k, lo, hi, _passes, done) => [
     `int ${k}_hi = int(clamp(${hi}, -1073741824.0, 1073741824.0));`,
-    `for (int ${k}_i = int(clamp(${lo}, -1073741824.0, 1073741824.0)); ${k}_i <= ${k}_hi; ${k}_i++) {`,
+    `for (int ${k}_i = int(clamp(${lo}, -1073741824.0, 1073741824.0)); ${k}_i <= ${k}_hi${done === undefined ? '' : ` && !${done}`}; ${k}_i++) {`,
     `  float ${k} = float(${k}_i);`,
   ],
   // A helper is named `_gpu_ir_…` and a user function `_fn_ir_…`: a host

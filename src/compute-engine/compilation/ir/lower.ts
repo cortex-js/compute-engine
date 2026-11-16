@@ -105,6 +105,7 @@ import {
   text,
   TUPLE_RULES,
   UntypedInputs,
+  type Binding,
   type Fn,
   type Frame,
   type Lowering,
@@ -176,6 +177,11 @@ type Facts = {
  *  closed tower of shared nodes would take a time exponential in its
  *  depth. A larger node is lowered, and its parts are folded. */
 const CLOSED_SIZE = 10_000;
+
+/** The frame names of the flags of a `Loop` (`loop()`): no symbol has a
+ *  name that starts with a space. */
+const SKIP = ' skip';
+const DONE = ' done';
 
 const NO_CLOSED_FORM = `a derivative with no closed form of at most ${CLOSED_SIZE} nodes in radians at compile time`;
 
@@ -1042,6 +1048,15 @@ export function lower(
         return assign(e);
       case 'Loop':
         return loop(e, want);
+      case 'Break':
+      case 'Continue': {
+        const skip = lookup(SKIP);
+        const done = e.operator === 'Break' ? lookup(DONE) : skip;
+        if (want || e.nops > 0 || !skip || skip.outer || !done)
+          decline(e, `a ${e.operator} that is not a statement of a Loop body`);
+        skip.binding.v = done.binding.v = b.constant(true, 'boolean');
+        return undefined;
+      }
       case 'Integrate':
       case 'NIntegrate':
         return integral(e);
@@ -1760,7 +1775,8 @@ export function lower(
    *  restored; an input that `f` reads adds a binding, not in the list). */
   const arm = (
     f: () => V | undefined,
-    bindings = frames.flatMap((f) => [...f.names.values()])
+    // A binding is once in the list (the flags of a Loop, `loop()`).
+    bindings = [...new Set(frames.flatMap((f) => [...f.names.values()]))]
   ) => {
     const before = bindings.map((x) => x.v);
     let result: V | undefined;
@@ -2003,7 +2019,7 @@ export function lower(
   const block = (e: Fn, want: boolean): V | undefined =>
     withFrame(false, (frame) => {
       let result: V | undefined;
-      e.ops.forEach((s, i) => {
+      const statement = (s: Expression, i: number) => {
         if (isFunction(s, 'Declare')) {
           // `Declare(t, type, value)`, `Declare(t, type, {value})` or
           // `Declare(t, {value})`; a type `unknown`, or none, is the lane
@@ -2064,7 +2080,25 @@ export function lower(
             role: isSymbol(constant, 'True') ? 'constant' : 'local',
           });
         } else result = value(s, want && i === e.nops - 1);
-      });
+      };
+      // The statements after one that may leave the pass of a Loop (`loop()`)
+      // run in the arm where it did not.
+      const statements = (from: number): void => {
+        for (let i = from; i < e.nops; i++) {
+          const skip = lookup(SKIP)?.binding;
+          const before = skip?.v;
+          statement(e.ops[i], i);
+          if (skip === undefined || skip.v === before || i === e.nops - 1)
+            continue;
+          if (b.constants.get(skip.v) !== true) {
+            if (want) decline(e, 'a value after a Break or a Continue');
+            const rest = () => (statements(i + 1), undefined);
+            branch(e, skip.v, () => undefined, rest, false);
+          }
+          return;
+        }
+      };
+      statements(0);
       if (want && result === undefined) decline(e, 'a block with no value');
       return result;
     });
@@ -2073,16 +2107,36 @@ export function lower(
    *  `Nothing`: a counted loop per clause (a later clause is lowered in the
    *  body of the one before it, so it reads its index), whose carried
    *  values are the locals declared outside it that the body writes. Each
-   *  pass is a pass of the `iterationBudget` (`passes`). */
+   *  pass is a pass of the `iterationBudget` (`passes`). A `Break` sets the
+   *  carried flag `DONE`, the `exit` of every clause; a `Break` or a
+   *  `Continue` sets `SKIP` (`DONE` itself when there is no `Continue`),
+   *  under which `block()` skips the rest of the pass. */
   const loop = (e: Fn, want: boolean): undefined => {
     if (want) decline(e, 'the value of a Loop (Nothing)');
     if (e.nops < 2) decline(e, 'a Loop with no Element clause');
+    const heads = jumps(e.ops[0]);
+    if (heads & 4)
+      decline(e, 'a Break or a Continue in a function literal in a Loop');
+    const flag = (): Binding => ({
+      v: b.constant(false, 'boolean'),
+      lane: 'boolean',
+      role: 'local',
+    });
+    const done = heads & 1 ? flag() : undefined;
     const carried = [...facts(e).writes].flatMap((n) => {
       const x = lookup(n);
       return x?.binding.role === 'local' && !x.outer ? [x.binding] : [];
     });
+    if (done) carried.push(done);
+    const exit = done ? { exit: carried.length - 1 } : {};
     const clause = (j: number): void => {
-      if (j === e.nops) return void value(e.ops[0], false);
+      if (j === e.nops)
+        return withFrame(false, (frame) => {
+          const skip = heads & 2 ? flag() : done;
+          if (skip) frame.names.set(SKIP, skip);
+          if (done) frame.names.set(DONE, done);
+          value(e.ops[0], false);
+        });
       const c = e.ops[j];
       if (!isFunction(c, 'Element') || c.nops !== 2)
         decline(c, 'a Loop clause that is not Element(i, L)');
@@ -2103,11 +2157,26 @@ export function lower(
         return carried.map((x) => x.v);
       });
       const outs = params.map((v) => b.newValue(type(v)));
-      b.emit({ k: 'loop', outs, lo, hi, init, body, passes: true });
+      b.emit({ k: 'loop', outs, lo, hi, init, body, passes: true, ...exit });
       carried.forEach((x, i) => (x.v = outs[i]));
     };
     clause(1);
     return undefined;
+  };
+
+  /** The `Break` (1) and the `Continue` (2) of the Loop whose body is `x`,
+   *  not of a Loop in it; 4 when one is in a function literal. Memoized: a
+   *  shared node is visited once. */
+  const jumped = new WeakMap<Expression, number>();
+  const jumps = (x: Expression): number => {
+    if (!isFunction(x) || x.operator === 'Loop') return 0;
+    let k = jumped.get(x);
+    if (k !== undefined) return k;
+    k = x.operator === 'Break' ? 1 : x.operator === 'Continue' ? 2 : 0;
+    for (const op of x.ops) k |= jumps(op);
+    if (x.operator === 'Function' && k !== 0) k = 4;
+    jumped.set(x, k);
+    return k;
   };
 
   /** The interval mode: the pieces of the integral being lowered, and the

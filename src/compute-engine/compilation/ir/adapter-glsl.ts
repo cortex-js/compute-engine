@@ -28,10 +28,9 @@ import { typeName } from './print-glsl.js';
 import { expressionOf } from './print.js';
 import {
   entryOf,
+  loopPasses,
   regionsOf,
   useIndex,
-  type Instr,
-  type Program,
   type Region,
 } from './ir.js';
 import {
@@ -55,40 +54,6 @@ const IR_GLSL_OPTIONS = {
   quadrature: 'no-op',
   broadcast: 'declined',
 } as const;
-
-/** An upper bound of the passes of every loop (`Loop`, `Sum`, `Product`,
- *  a reduction) of one evaluation of the program, at compile time: a
- *  constant count is itself, a run-time count is `budget` (the count of a
- *  `Sum` or a `Product`, which the lowering tests against it), multiplied
- *  down the nesting and through the calls (both arms of an `if` are
- *  added). GLSL counts no pass at run time. */
-function loopPasses(
-  p: Program,
-  budget: number,
-  def: ReadonlyMap<number, Instr>
-): number {
-  const memo = new Map<Region, number>();
-  const passes = (r: Region): number => {
-    const known = memo.get(r);
-    if (known !== undefined) return known;
-    const total = r.body.reduce((n, i) => {
-      const inner =
-        i.k === 'call'
-          ? passes(p.functions.find((f) => f.name === i.fn)!.body)
-          : regionsOf(i).reduce((m, x) => m + passes(x), 0);
-      if (i.k !== 'loop') return n + inner;
-      const [lo, hi] = [i.lo, i.hi].map((v) => def.get(v));
-      const count =
-        lo?.k === 'const' && hi?.k === 'const'
-          ? Math.max(0, Number(hi.value.value) - Number(lo.value.value) + 1)
-          : budget;
-      return n + (count === 0 ? 0 : count * (1 + inner));
-    }, 0);
-    memo.set(r, total);
-    return total;
-  };
-  return passes(entryOf(p).body);
-}
 
 const TRIG_HEADS = new Set(['Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc']);
 

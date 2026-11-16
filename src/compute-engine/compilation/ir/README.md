@@ -510,7 +510,9 @@ with "on interval-js"). A `Loop` is lowered as on JavaScript ("Loops and
 the runtime"): its carried values are intervals, a local assigned in an
 undecided `If` of a pass holds the hull of both arms (the existing target
 answers `entire` there), and one whose values are not read is removed; a
-`Break`, a `Continue` and a `Return` decline in the slice. A string seed
+`Break` and a `Continue` compile, and a pass whose flag of a `Break` is
+undecided throws the error of `_IA.decided()` (the whole range); a
+`Return` declines in the slice. A string seed
 and `Random` of a domain decline in the lowering.
 
 Lists. What the lowering makes of a list (sections "Lists" and "Tuples") is
@@ -1125,7 +1127,13 @@ with `passes`) also calls `_SYS.countLoopPass(budget)`, which adds one to one
 count for a call, nested loops and the loops of user functions included; over
 the budget, the call throws a `CancellationError` with the cause
 `iteration-limit-exceeded` (`docs/COMPILATION-MODEL.md`, "A limit on `Loop`
-passes"). A bound of a `Sum` or a `Product` with `Limits` of a real type is its
+passes"). No pass is counted when the count cannot reach the budget: an
+infinite budget, or a program with no recursive function whose bound of the
+passes of a call at compile time (`loopPasses()` of `ir.ts`, the bound of
+GLSL below, with a run-time count of a `Loop` unbounded, and a `Loop` in a body
+that runs once per element or sample unbounded too: the callback of a `Map`
+or a `Filter`, an integrand) is within the budget (the `Loop` of 128 passes of
+Tycho's `showcase/burning-ship` under a budget of 10^6). A bound of a `Sum` or a `Product` with `Limits` of a real type is its
 `Floor`, as the interpreter counts (`normalizeIndexingSet()`):
 `Sum(k, Limits(k, 0.5, 3.7))` is 0 + 1 + 2 + 3, and `Limits(k, 1, -0.5)` is
 empty (the identity); a complex bound declines, and in the `bigint` mode a real
@@ -1161,9 +1169,32 @@ such a `Sum`. A single `Sum` of a run-time count compiles. With
 counted loop per clause over the source of `L` (an input list, a list, a
 `Range`), a later clause lowered in the body of the one before, so it reads its
 index. The locals declared outside the loop that the body writes are its carried
-values. A `Loop` with no `Element` clause, a `Break`, a `Continue`, a `Return`,
-a write to the index and a `Loop` whose value is read decline: the structured
-regions have no early exit.
+values. A `Break` or a `Continue` (with no operand) is a statement of the body:
+a statement of a `Block`, or of an arm of an `If` or a `Which` that is one. A
+`Break` sets a boolean carried value, false before the loop, which is the
+`exit` of the `loop` instruction of every clause: the printer stops the loop
+when it is true (`loopOpen()` receives the flag's name: `!done` in the `for`
+condition on JavaScript and GLSL, `!_IA.decided(done)` in the interval mode;
+on JavaScript the block of passes then charges the deadline count with the
+passes it ran, the breaking one included), so a `Break` ends every
+clause, as in the interpreter. A `Continue` sets a flag of the pass, false at
+its start (a `Break` also sets it; with no `Continue`, the flag is the one of
+the `Break`). The statements of a `Block` that follow a statement that set the
+flag, or may have set it, are lowered in the arm of an `if` where it is false:
+after a `Break` the rest of the pass computes nothing, and every carried value
+keeps its value at the break. No instruction jumps. The passes run on such a
+loop as on any other: the iteration budget counts the passes that run (an early
+exit runs fewer). The guard of the JavaScript loop before its first pass is
+2^53 passes for a loop with a `Break` (an open search over `Range(1, 1e12)`
+ends at its `Break`), 2^32 for another. A loop that never reaches its `Break`
+and has no budget runs until the host's deadline, as on the existing compiler
+(`docs/COMPILATION-MODEL.md`, "A limit on `Loop` passes"). A `Break` or a
+`Continue` that is not such
+a statement (`If(c, Break(), 1)` read as a value, one outside a `Loop`, or in
+a function literal in the body), a `Break` with a value, a `Return`, a `Loop`
+with no `Element` clause, a write to the index and a `Loop` whose value is read
+decline. `Repeat(v, n)` is the list of `n` copies of `v`, not a loop: it
+declines.
 
 `Integrate(f, Limits(t, a, b))` and `NIntegrate(f, a, b)` of real bounds
 (infinite ones too) and a real integrand (a function literal of one parameter,

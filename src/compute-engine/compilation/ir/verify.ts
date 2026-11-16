@@ -165,6 +165,8 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
           fail('loop: the parameters, initial values and yields disagree');
         if (i.outs.length !== i.init.length)
           fail('loop: one result per carried value');
+        if (i.exit !== undefined && type(params[i.exit + 1]).lane !== 'boolean')
+          fail('loop: an exit that is not a boolean carried value');
         sub(params[0], scalarType('integer'), 'loop index');
         i.init.forEach((v, j) => {
           const t = type(params[j + 1]);
