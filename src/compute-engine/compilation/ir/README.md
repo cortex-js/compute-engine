@@ -482,8 +482,16 @@ the kernel of its row, with the operands in the order of the row's `fold`
 `singular` and `partial`, so the code never reads the kind of a value: the
 marks of a jump and of a clipped domain travel through every operation. The
 lanes are `real`, `integer` and `boolean`, a list or a tuple is a JavaScript
-array of such values (of arrays for rank 2), and a recursive function declines (with an undecided guard both arms run, and the recursion
-does not end). The passes `fold` (a double is not an enclosure) and
+array of such values (of arrays for rank 2). In a function on a cycle of
+calls an `if` runs one arm (`verdictIf.decided`, `_IA.decided(c)`): an
+undecided verdict throws the mode's undecided error, so that a recursion
+ends where both arms would recurse; the `if`s of the entry and of a function
+not on a cycle, also one that a recursive function calls, keep the three-way
+form. With every verdict decided, each call follows the path of every point
+of the box. A recursion that does not reach its base case throws a
+`RangeError` at the end of the JavaScript stack (`s(x, 2.5)` of "User
+functions", about 1.5 ms, as on the existing target); `run()` answers both
+errors with `entire`. The passes `fold` (a double is not an enclosure) and
 `strength` (`x·x` is wider than `x^2` over an interval) are off; two passes
 of the mode run, `narrow` first and `plain` last.
 
@@ -501,10 +509,9 @@ and their inverses (also the reciprocal ones), `Arctan2`, `Hypot`,
 `Erf`, `Erfc`, `Gamma`, `GammaLn`, `Factorial`, `Factorial2`, `Binomial`
 and `Choose` (also of real operands, `binomial.real`, a row of the mode),
 `GCD`, `LCM`, the comparisons, `And`, `Or`, `Not` (Kleene logic on
-verdicts), `If`, `Which`, a `Block` with locals, user functions that are
-not recursive, `Sum` and `Product` with `Limits`, `Random()` and
-`WithRandomSeed` of a number seed, a root function literal, and the lists
-below, and integrals (below). `Haversine`, `Zeta` and the complex and
+verdicts), `If`, `Which`, a `Block` with locals, user functions, `Sum`
+and `Product` with `Limits`, `Random()` and `WithRandomSeed` of a number
+seed, a root function literal, and the lists below, and integrals (below). `Haversine`, `Zeta` and the complex and
 colour operations have no spelling and decline (a cause of the mode ends
 with "on interval-js"). A `Loop` is lowered as on JavaScript ("Loops and
 the runtime"): its carried values are intervals, a local assigned in an
@@ -757,7 +764,7 @@ constant read only by such values is written in their text); a pure
 operation or a list of such values, in any function and any region (no
 kernel throws, except `_IA.rangeCount()`, which is not moved); and an
 operation that can fail (`_IA.number`) or a call of a function that has no
-effect and is not on a cycle, of such values, only at a top level that runs
+effect (also a recursive one), of such values, only at a top level that runs
 at every call: the top level of the entry, and of a function that such a
 top level calls (`b(3π)` in the body of `w`, called as `w(x)`). Nothing
 that draws or has an effect is moved. The values follow the functions,
@@ -1044,12 +1051,18 @@ results and region); the same check runs over the printer's order.
 The pass `cse` merges an instruction with an earlier one of the same operation
 and operands whose value is visible (written before it in its region or in a
 region around it, not in an arm or a loop body that has ended): a `pure`
-operation, and a call of a user function that is not `effectful` and not on a
-cycle of calls, with each of its results (a list and its length). A `may-fail`
-call is merged because the visible call failed if the second would. So
-`a_1(x) = g(a_0(x), a_0(x), …)` calls `a_0` once, and a chain of such functions
-runs in a time proportional to its length. A function that draws, directly or
-through a call, is `effectful` and is called each time.
+operation, and a call of a user function that is not `effectful`, with each
+of its results (a list and its length). A `may-fail` call, also of a function
+on a cycle of calls, is merged because the visible call failed if the second
+would. So `a_1(x) = g(a_0(x), a_0(x), …)` calls `a_0` once, and a chain of
+such functions runs in a time proportional to its length; a recursive
+function that makes the same call twice in its body
+(`R(i, x) = R(i − 1, x) + S(R(i − 1, x))`) makes it once, so that `R(20, x)`
+runs 20 calls, not 2^20. When the function runs a `Loop`, the passes of the
+merged call are not counted, so a program that threw
+`iteration-limit-exceeded` can give its value, as for a moved call
+("Effects"). A function that draws, directly or through a call, is
+`effectful` and is called each time, also on a cycle of calls.
 
 The pass `invariants` computes once, before the loop, an instruction at the top
 level of the body of a `loop`, a `build` or a `filter` that reads no parameter
@@ -1253,10 +1266,23 @@ length, and a later call with another length declines:
 `R(p, φ) := [Σ p·[cos φ, −sin φ], Σ p·[sin φ, cos φ]]` of `R([−0.57, 2.8], φ)`.
 Otherwise, when the lowered argument of the first call is not a point, a
 parameter of no declared type is a real, and one of a type that is not a scalar
-declines. A recursive one needs a result type (declared, or inferred by the
-engine). An input of the compilation that the body reads (a free name with no
-value, or a name of `symbolic` or `inputs`) is a parameter after the function's
-own, in the order of its first read in the body (lambda lifting; a scalar, a
+declines. A recursive function whose result is not declared (no type,
+`number`, `any`) has a real scalar result: a call of it made while its body
+is lowered has a real result (`UserFunction.guess`), and the body must then
+be a real or an integer scalar, which is widened; a complex or a boolean body
+declines with the cause of that call, and a node that reads the call as
+another type declines with its own cause
+(`If(n = 0, List(1, 2), 2·l(n − 1))`: arms of two types). No other result
+is tried. In a cycle of calls, each function called before its body is
+lowered has that result, and another the
+type of its body. The depth is bounded by the JavaScript stack: with
+`s(x, n) := Which(n = 1, Sin(x), True, Sin(s(x, n − 1)))`, `s(x, 2.5)`
+throws a `RangeError`, as the code of the existing compiler does, where the
+interpreter throws a `CancellationError` at its `recursionLimit` (256 frames,
+fewer than 100 levels of `s`); a depth between the two (`s(x, 200)`) is a
+value in compiled code. An input of the compilation that the body reads (a
+free name with no value, or a name of `symbolic` or `inputs`) is a parameter
+after the function's own, in the order of its first read in the body (lambda lifting; a scalar, a
 list of reals or integers of a stated length, or a tuple of them, which stays a
 tuple; on GLSL, which copies an array argument at each call, a list of more than
 4 elements that is not in storage declines, `IRFunction.lifted`): each call
@@ -1406,10 +1432,11 @@ also a call of a function that its caller calls twice or more (the pass option
 `u` and `H`, and its copy leaves a call `F(x, y)` of no index, which
 `invariants` moves before the loop (from about 40 µs a call to about 6, the
 time of the existing compiler). The callee qualifies when it is not effectful
-and not on a cycle of calls, its body holds no `loop` and no region instruction
-(a function that loops stays a call, which `invariants` can move), it has at
-most `INLINE_SIZE` instructions, nested regions included, and one result of the
-lane of the call's result, each list argument has the lane of its parameter,
+and not on a cycle of calls (nor, by the rule `'repeated'`, its caller, whose
+`if` runs one arm in the interval mode), its body holds no `loop` and no
+region instruction (a function that loops stays a call, which `invariants`
+can move), it has at most `INLINE_SIZE` instructions, nested regions
+included, and one result of the lane of the call's result, each list argument has the lane of its parameter,
 and, when an argument is a constant, neither its body nor the body of a
 function that it calls holds an `At` (a constant index out of range declines
 on GLSL, where the call gives NaN: `la(A, 5)` of

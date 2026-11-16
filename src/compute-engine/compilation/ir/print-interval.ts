@@ -184,6 +184,7 @@ export const JS_INTERVAL: Syntax = Object.freeze({
     second: (c) => `if (${c} !== 'true') {`,
     join: (c, a, b) =>
       `${c} === 'true' ? ${a} : ${c} === 'false' ? ${b} : _IA.hull(${a}, ${b})`,
+    decided: (c) => `_IA.decided(${c})`,
   },
   loopOpen: loopOpen(2 ** 32),
   constant: (l) =>
@@ -334,7 +335,7 @@ function computedOnce(
       const fallible =
         top &&
         (i.k === 'call'
-          ? effect !== 'effectful' && !cyclic.has(i.fn)
+          ? effect !== 'effectful'
           : i.k === 'op' && effect === 'may-fail');
       if (i.k === 'const') known.add(out);
       else if (

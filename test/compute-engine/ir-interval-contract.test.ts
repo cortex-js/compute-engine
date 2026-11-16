@@ -330,7 +330,7 @@ describe('the interval mode: the declines', () => {
     // a real operand declines.
     [['Range', 0.5, 'x'], /a Range of a real operand/],
     [['Add', 'Z', 'x'], /the lane complex/],
-    [['fact', 3], /a recursive function \(.*fact.*\)/],
+    // A recursive function compiles (the describe 'recursive functions').
     [['Zeta', 'x'], /Zeta \(the operation zeta\)/],
     // Integrals compile since batch 6 (`ir-interval-integrals.test.ts`),
     // a `Loop` with no early exit too (`ir-interval-lists.test.ts`).
@@ -351,6 +351,98 @@ describe('the interval mode: the declines', () => {
     expect(
       declineOf(() => mode(['Add', 'x', 'c'], { vars: { c: 'f()' } })).message
     ).toMatch(/the vars entry of c, which is not a read of the inputs object/);
+  });
+});
+
+describe('the interval mode: recursive functions', () => {
+  // prettier-ignore
+  {
+    ce.assign('rs', ce.box(['Function', ['Which', ['Equal', 'm', 1], ['Sin', 'z'], 'True', ['Sin', ['rs', 'z', ['Add', 'm', -1]]]], 'z', 'm'] as never));
+    ce.assign('rg', ce.box(['Function', ['If', ['Greater', 'z', 0], ['Sin', ['rg', ['Subtract', 'z', 1]]], 'z'], 'z'] as never));
+    ce.assign('rh', ce.box(['Function', ['If', ['Greater', 'z', 0], 1, 2], 'z'] as never));
+    ce.assign('rt', ce.box(['Function', ['Which', ['Equal', 'm', 1], ['rh', 'z'], 'True', ['Add', ['rh', 'z'], ['rt', 'z', ['Add', 'm', -1]]]], 'z', 'm'] as never));
+    ce.assign('rf', ce.box(['Function', ['Which', ['Equal', 'm', 0], 'z', 'True', ['Divide', 1, ['Mod', ['rf', 'z', ['Add', 'm', -1]], 1]]], 'z', 'm'] as never));
+  }
+  /** The interpreter's value of `json` at `point`. */
+  const at = (json: unknown, point: Record<string, number>) =>
+    ce.box(json as never).subs(point).N().re;
+  const contains = (v: any, json: unknown, points: Record<string, number>[]) => {
+    expect(v.kind).toBe('interval');
+    for (const point of points) {
+      const value = at(json, point);
+      expect([point, v.value.lo <= value && value <= v.value.hi]).toEqual([
+        point,
+        true,
+      ]);
+    }
+  };
+
+  test('a counter that is a point: each guard is decided, the result encloses the values', () => {
+    const json = ['rs', 'x', 'n'];
+    const r = mode(json);
+    expect(r.preambleOnce).toMatch(/if \(_IA\.decided\(_IA\.equal\(/);
+    contains(r.run({ x: { lo: 0.1, hi: 0.4 }, n: 3 }), json, [
+      { x: 0.1, n: 3 },
+      { x: 0.25, n: 3 },
+      { x: 0.4, n: 3 },
+    ]);
+    contains(r.run({ x: 0.7, n: 1 }), json, [{ x: 0.7, n: 1 }]);
+    // A counter that is not a point: the first guard is undecided.
+    expect(r.run({ x: 0.3, n: { lo: 2, hi: 3 } })).toEqual({ kind: 'entire' });
+  });
+
+  test('a guard that reads x: a box that straddles it at some depth is entire', () => {
+    const json = ['rg', 'x'];
+    const r = mode(json);
+    contains(r.run({ x: { lo: 2.2, hi: 2.6 } }), json, [
+      { x: 2.2 },
+      { x: 2.6 },
+    ]);
+    contains(r.run({ x: { lo: -1, hi: -0.5 } }), json, [{ x: -1 }]);
+    expect(r.run({ x: { lo: 1.5, hi: 2.5 } })).toEqual({ kind: 'entire' });
+  });
+
+  test('a recursion that never reaches its base case is entire', () => {
+    // `m = 1` is decided false at every depth: the JavaScript stack ends,
+    // and run() answers a RangeError with entire, as the existing target.
+    const r = mode(['rs', 'x', 'n']);
+    for (const n of [2.5, -1])
+      expect(r.run({ x: 0.3, n })).toEqual({ kind: 'entire' });
+  });
+
+  test('a function not on a cycle keeps its three-way if, also when a recursive one calls it', () => {
+    const r = mode(['rt', 'x', 2]);
+    // `rh` is a call (not copied into `rt`), with its own three-way if.
+    const rh = r.preambleOnce!.match(/const u\d+_rh = [\s\S]*?\n};/)![0];
+    expect(rh).toMatch(/!== 'false'/);
+    expect(rh).not.toMatch(/_IA\.decided/);
+    const rt = r.preambleOnce!.match(/const u\d+_rt = [\s\S]*?\n};/)![0];
+    expect(rt).toMatch(/_IA\.decided/);
+    expect(rt).not.toMatch(/!== 'false'/);
+    // The guard of `rt` reads the counter only: the hull of `rh`'s arms.
+    expect(r.run({ x: { lo: -1, hi: 1 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 2, hi: 4 },
+    });
+  });
+
+  test("an if of the entry runs both arms, the recursive call in one", () => {
+    const json = ['If', ['Greater', 'x', 0], ['rs', 'x', 2], 0];
+    const v = mode(json).run({ x: { lo: -0.5, hi: 0.5 } });
+    contains(v, json, [{ x: -0.5 }, { x: 0.25 }, { x: 0.5 }]);
+  });
+
+  test('a recursive call of constant arguments is computed at the first call', () => {
+    const r = mode(['Add', ['rf', 0.3, 2], 'x']) as Result & {
+      preamblePerCall?: string;
+    };
+    expect(r.code).toMatch(/^_IA\.add\(_\.x, v\d+\)$/);
+    expect(r.preamblePerCall).toMatch(/_once[\s\S]*u\d+_rf\(\{ lo: 0\.3/);
+    contains(r.run({ x: 1 }), ['Add', ['rf', 0.3, 2], 'x'], [{ x: 1 }]);
+    // One that never ends: the error of the first call, at each call.
+    const never = mode(['Add', ['rf', 0.3, 2.5], 'x']);
+    expect(never.run({ x: 1 })).toEqual({ kind: 'entire' });
+    expect(never.run({ x: 2 })).toEqual({ kind: 'entire' });
   });
 });
 

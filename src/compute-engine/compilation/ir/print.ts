@@ -15,6 +15,7 @@ import {
   argumentIndex,
   entryOf,
   outsOf,
+  recursiveFunctions,
   regionsOf,
   sameShape,
   useIndex,
@@ -92,6 +93,9 @@ export type Syntax = {
     first(cond: string): string;
     second(cond: string): string;
     join(cond: string, a: string, b: string): string;
+    /** The test of an `if` in a function on a cycle of calls, which runs
+     *  one arm: an undecided verdict throws, so that a recursion ends. */
+    decided(cond: string): string;
   };
   /** The lines that open a counted loop of the index `k` from `lo` to `hi`,
    *  each bound evaluated once. `passes`: a pass of a `Loop`, which the
@@ -254,6 +258,10 @@ export function printProgram(
   const names = new Map<V, string>();
   const helpers = new Set<string>();
   const order: Omit<TraceEntry, 'region'>[] = [];
+  // The functions whose `if` runs one arm (`verdictIf.decided()`), and
+  // whether the function printed is one of them.
+  const cyclic = syntax.verdictIf ? recursiveFunctions(p.functions) : undefined;
+  let decided = false;
   const entry = entryOf(p);
   const positional = entry.positional ?? 0;
   entry.body.params.forEach((v, k) => {
@@ -365,7 +373,7 @@ export function printProgram(
           args: i.args,
           outs: outsOf(i),
         });
-      if (i.k === 'if' && syntax.verdictIf !== undefined) {
+      if (i.k === 'if' && syntax.verdictIf !== undefined && !decided) {
         // The condition is read three times: a value written at its use is
         // bound to a name first (a constant is its text).
         const v = syntax.verdictIf;
@@ -395,7 +403,8 @@ export function printProgram(
         i.outs.forEach((v) =>
           line(syntax.declare(type(v), name(v), undefined, true))
         );
-        line(`if (${use(i.cond)}) {`);
+        const c = use(i.cond);
+        line(`if (${decided ? syntax.verdictIf!.decided(c) : c}) {`);
         nested(i.then, i.outs.map(name), false);
         line('} else {');
         nested(i.else, i.outs.map(name), false);
@@ -453,6 +462,7 @@ export function printProgram(
   };
 
   const returned = (f: IRFunction): string[] => {
+    decided = cyclic?.has(f.name) ?? false;
     const ys = f.body.yields;
     if (f.tuple === true && syntax.retTuple !== undefined)
       return [...body(f.body, 1), '  ' + syntax.retTuple(ys.map(use))];

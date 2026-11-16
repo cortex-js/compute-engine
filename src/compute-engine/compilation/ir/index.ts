@@ -568,12 +568,7 @@ export function sliceProgram(
   const where = interval
     ? 'interval-js'
     : `${options.target}${bigint ? ' in the bigint mode' : ''}`;
-  const checked: Profile = {
-    ...profile,
-    lanes,
-    syntax,
-    ...(interval ? { recursion: false } : {}),
-  };
+  const checked: Profile = { ...profile, lanes, syntax };
   // The interval mode: a closed form that the mode does not print leaves
   // the enclosure alone.
   if (interval)

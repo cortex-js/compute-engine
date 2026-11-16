@@ -1050,6 +1050,151 @@ describe('a user function that reads an input of the compilation', () => {
   });
 });
 
+describe('a recursive function with no declared result is a real scalar', () => {
+  // The shapes of Tycho's documents (`neyret/xvviql5z8f`, `tdyz9z5uxb`,
+  // `ond0vgpslf`): functions assigned with no declaration, which recurse on
+  // a counter to a base case.
+  const engine = () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('t', 'real');
+    e.declare('k', 'integer');
+    const fn = (name: string, body: Json, ...params: string[]) =>
+      e.assign(name, box(['Function', body, ...params], e));
+    // prettier-ignore
+    {
+      fn('s', ['Which', ['Equal', 'n', 1], ['Sin', 'x'], 'True', ['Sin', ['s', 'x', ['Add', 'n', -1]]]], 'x', 'n');
+      fn('Ia', ['Add', ['Multiply', 'a', 'a'], 'b'], 'a', 'b');
+      fn('Jr', ['Which', ['Equal', 'n', 0], 'x', 'True', ['Ia', 'x', ['Jr', ['Add', 'n', -1], 'x']]], 'n', 'x');
+      fn('f', ['Which', ['Equal', 'n', 0], 'x', 'True', ['Divide', 1, ['Mod', ['f', 'x', ['Add', 'n', -1]], 1]]], 'x', 'n');
+      // An integer body, widened.
+      fn('K', ['If', ['LessEqual', 'n', 0], 1, ['Multiply', 2, ['K', ['Add', 'n', -1]]]], 'n');
+      // A boolean result, which the engine infers: no guess.
+      fn('B', ['If', ['LessEqual', 'n', 0], 'True', ['B', ['Add', 'n', -1]]], 'n');
+      // A complex body and a list body.
+      fn('C', ['If', ['LessEqual', 'n', 0], 'ImaginaryUnit', ['Multiply', 2, ['C', ['Add', 'n', -1]]]], 'n');
+      fn('Lr', ['If', ['LessEqual', 'n', 0], ['List', 1, 2], ['Multiply', 2, ['Lr', ['Add', 'n', -1]]]], 'n');
+      // Two functions that call each other, of no inferred result.
+      fn('Ev', ['If', ['LessEqual', 'n', 0], 1, ['Od', ['Add', 'n', -1]]], 'n');
+      fn('Od', ['If', ['LessEqual', 'n', 0], 0, ['Ev', ['Add', 'n', -1]]], 'n');
+      // The same, one of them boolean.
+      fn('Pb', ['If', ['LessEqual', 'n', 0], 1, ['Qb', ['Add', 'n', -1]]], 'n');
+      fn('Qb', ['If', ['LessEqual', 'n', 0], 'False', ['Pb', ['Add', 'n', -1]]], 'n');
+      // A boolean body, through a function that reads its result as a real.
+      fn('Ba', ['If', ['LessEqual', 'n', 0], 'True', ['Greater', ['Bb', ['Add', 'n', -1]], 0]], 'n');
+      fn('Bb', ['If', ['LessEqual', 'n', 0], 1, ['If', ['Greater', ['Ba', ['Add', 'n', -1]], 0], 1, 0]], 'n');
+      // The same recursive call twice in the body (`neyret/ndqj7hupta`).
+      fn('Tw', ['Which', ['Equal', 'n', 0], 0, 'True', ['Add', ['Tw', ['Add', 'n', -1], 'x'], ['Multiply', 0.5, ['Sin', ['Multiply', 'x', ['Tw', ['Add', 'n', -1], 'x']]]]]], 'n', 'x');
+      // A draw at each level.
+      fn('Rd', ['If', ['LessEqual', 'n', 0], ['Random'], ['Add', ['Rd', ['Add', 'n', -1]], ['Random']]], 'n');
+    }
+    return e;
+  };
+  const e = engine();
+  const run = (json: Json, options: Record<string, unknown> = {}) =>
+    compile(box(json, e), { ...IR, ...options, fallback: false } as never);
+  const calls = (code: string, name: string) =>
+    code.match(new RegExp(`\\bu\\d+_${name}\\(`, 'g'))?.length ?? 0;
+
+  test('the shapes of the corpus are the interpreter values', () => {
+    againstInterpreter(e, ['s', 'x', 'k'], [
+      { x: 0.7, k: 3 },
+      { x: -2, k: 1 },
+    ]);
+    againstInterpreter(e, ['Jr', 3, 'x'], [{ x: 0.3 }, { x: -1.5 }]);
+    againstInterpreter(e, ['f', 'x', 2], [{ x: 0.37 }, { x: 0.61 }]);
+    // An integer body is widened to the real result.
+    againstInterpreter(e, ['K', 'k'], [{ k: 3 }, { k: 0 }]);
+  });
+  test('an integer argument first and a real one later call one function', () => {
+    const r = againstInterpreter(e, ['Add', ['K', 'k'], ['K', 't']], [
+      { k: 3, t: 2.5 },
+    ]);
+    expect(r.preambleOnce?.match(/const u\d+_K =/g)).toHaveLength(1);
+  });
+  test('a declared or inferred result is not guessed', () => {
+    const r = run(['B', 'k']);
+    expect((r.run as (x: object) => unknown)({ k: 3 })).toBe(true);
+  });
+  test('a complex or a boolean body declines with the cause of the recursive call', () => {
+    for (const [json, name] of [
+      [['C', 'k'], 'C'],
+      [['Ba', 'k'], 'Ba'],
+    ] as const) {
+      const o = outcome(box(json, e));
+      expect('message' in o && o.message).toMatch(
+        new RegExp(
+          `${name}\\(Add\\(n, -1\\)\\): a recursive call of ${name}, which has no declared result type`
+        )
+      );
+    }
+    // A recursive call read where a list or a boolean is: the decline of
+    // that node.
+    for (const json of [['Lr', 'k'], ['Pb', 'k']]) {
+      const o = outcome(box(json, e));
+      expect('message' in o && o.message).toMatch(/: arms of two types/);
+    }
+  });
+  test('two functions that call each other', () => {
+    againstInterpreter(e, ['Ev', 'k'], [{ k: 5 }, { k: 4 }, { k: 0 }]);
+  });
+  test('a recursive function that draws is called each time', () => {
+    const r = run(['Subtract', ['Rd', 'k'], ['Rd', 'k']]);
+    expect(calls(r.code, 'Rd')).toBe(2);
+    expect(
+      calls(run(['Subtract', ['Rd', 'k'], ['Rd', 'k']], { to: 'interval-js' }).code, 'Rd')
+    ).toBe(2);
+    expect((r.run as (x: object) => number)({ k: 2 })).not.toBe(0);
+  });
+  test('the same recursive call twice in the body is one call', () => {
+    const json = ['Tw', 12, 'x'];
+    const r = againstInterpreter(e, json, [{ x: 0.3 }, { x: -1.7 }]);
+    const body = (text: string) =>
+      text.match(/const u\d+_Tw = [\s\S]*?\n};/)![0];
+    expect(calls(body(r.preambleOnce ?? ''), 'Tw')).toBe(1);
+    const i = run(json, { to: 'interval-js' });
+    expect(calls(body(i.preambleOnce ?? ''), 'Tw')).toBe(1);
+    const v = (i.run as (x: object) => any)({ x: { lo: 0.3, hi: 0.3 } });
+    const expected = box(['Tw', 12, 0.3], e).N().re;
+    expect(v.value.lo <= expected && expected <= v.value.hi).toBe(true);
+  });
+  test('a recursive call in a Sum is neither copied nor moved out of the loop', () => {
+    for (const to of ['javascript', 'interval-js']) {
+      const r = run(['Sum', ['s', 'x', 3], ['Limits', 'j', 1, 4]], { to });
+      expect(calls(r.code, 's')).toBe(1);
+      expect(r.code.indexOf('u0_s(')).toBeGreaterThan(r.code.indexOf('for ('));
+    }
+    againstInterpreter(e, ['Sum', ['s', 'x', 'j'], ['Limits', 'j', 1, 4]], [
+      { x: 0.3 },
+    ]);
+  });
+  test('a recursion that does not reach its base case throws a RangeError, as the existing compiler', () => {
+    // The interpreter stops at its recursion limit (`CancellationError`);
+    // the compiled code at the end of the JavaScript stack.
+    for (const profile of ['ir', undefined]) {
+      const r = compile(box(['s', 'x', 't'], e), { profile, fallback: false });
+      for (const t of [2.5, -1])
+        expect(() => (r.run as (x: object) => number)({ x: 0.3, t })).toThrow(
+          RangeError
+        );
+    }
+    expect(() => box(['s', 0.3, 2.5], e).evaluate()).toThrow(CancellationError);
+    // A depth past the interpreter's limit and within the stack: a value.
+    expect(() => box(['s', 0.3, 200], e).evaluate()).toThrow(CancellationError);
+    const r = run(['s', 'x', 't']);
+    const existing = compile(box(['s', 'x', 't'], e), { fallback: false });
+    expect(r.run!({ x: 0.3, t: 200 } as never)).toBe(
+      existing.run!({ x: 0.3, t: 200 } as never)
+    );
+  });
+  test('GLSL declines a recursive function', () => {
+    const o = outcome(box(['s', 'x', 3], e), { to: 'glsl' });
+    expect('message' in o && o.message).toMatch(
+      /a recursive function \(u\d+_s\) on glsl/
+    );
+  });
+});
+
 describe('a name whose held value is an expression is that expression where it is read', () => {
   /** `x`, `n`, `x_1`, `x_2` real; `Rm` a list computed by `Map` over a
    *  `Range` of constants (Tycho's `neyret/lrpzqnemhy`), `P` a list of
@@ -2387,22 +2532,24 @@ describe('cse merges two calls of a user function with no effect', () => {
     expect(calls(r, 'S')).toBe(2);
     expect(calls(run(['Add', ['S', 'x'], ['S', 'x']], { to: 'interval-js' }), 'S')).toBe(2);
   });
-  test('a recursive function and two mutually recursive ones are called each time', () => {
+  test('two equal calls of a recursive function, or of two mutually recursive ones, are one call', () => {
+    // A function on a cycle of calls is `may-fail`, not effectful: `cse`
+    // replaces the second call by the visible equal call, which already ran
+    // with the same arguments, so its termination, its failure and its value
+    // are the first call's.
     const r = againstInterpreter(e, ['Add', ['R', 'k'], ['R', 'k']], [
       { k: 3 },
       { k: 0 },
     ]);
-    expect(r.code.match(/\bu\d+_R\(/g)).toHaveLength(2);
+    expect(r.code.match(/\bu\d+_R\(/g)).toHaveLength(1);
     const pq = againstInterpreter(e, ['Add', ['P', 'k'], ['P', 'k']], [
       { k: 3 },
       { k: 4 },
     ]);
-    expect(pq.code.match(/\bu\d+_P\(/g)).toHaveLength(2);
-    // The interval mode declines a recursive function.
-    for (const json of [['R', 'k'], ['P', 'k']]) {
-      const o = outcome(box(json, e), { to: 'interval-js' });
-      expect('message' in o && o.message).toMatch(/a recursive function/);
-    }
+    expect(pq.code.match(/\bu\d+_P\(/g)).toHaveLength(1);
+    // The interval mode: one call in the entry, one in the body.
+    expect(calls(interval(['Add', ['R', 'k'], ['R', 'k']], { k: 3 }), 'R')).toBe(2);
+    interval(['P', 'k'], { k: 4 });
   });
   test('a call in an arm or in a loop body is not read after it', () => {
     const arm = ['List', ['If', ['Greater', 'x', 0], ['f', 'x'], 0], ['f', 'x']];

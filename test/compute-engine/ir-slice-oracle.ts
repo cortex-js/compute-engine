@@ -41,7 +41,9 @@ export type Expected =
  *  `(integer) -> integer`, recursive); `h2(a) = g(a) + f(a, a)`, which
  *  calls the others; `cap2(a) = a + h`, which reads the value of `h`; and
  *  two that decline: `cap(a) = a + hc`, whose `hc` is a name of a popped
- *  scope (a capture), and `rec2`, recursive with no result type. `rnd(a) = a·Random()`
+ *  scope (a capture), and `rec3`, recursive with no result type and a
+ *  complex body; `rec2`, recursive with no result type, compiles (a real
+ *  result). `rnd(a) = a·Random()`
  *  draws; `ev` and `od` (declared `(integer) -> integer`) call each
  *  other. */
 export function makeEngine(): ComputeEngine {
@@ -127,6 +129,19 @@ export function makeEngine(): ComputeEngine {
         ['LessEqual', 'k', 0],
         0.5,
         ['Multiply', 'k', ['rec2', ['Subtract', 'k', 1]]],
+      ],
+      'k',
+    ])
+  );
+  ce.assign(
+    'rec3',
+    fn([
+      'Function',
+      [
+        'If',
+        ['LessEqual', 'k', 0],
+        'ImaginaryUnit',
+        ['Multiply', 2, ['rec3', ['Subtract', 'k', 1]]],
       ],
       'k',
     ])
@@ -623,7 +638,7 @@ export const PROGRAMS: Json[] = [
   ['cap2', 'x'],
   // User functions
   ['f', 'x', 2], ['f', 'n', 'y'], ['g', 'x'], ['g', 'n'], ['h2', 'x'], ['Add', ['g', 'x'], ['g', 'y']],
-  ['fact', ['Mod', 'n', 7]], ['fact', 0], ['Sum', ['g', 'k'], ['Limits', 'k', 1, 'n']],
+  ['fact', ['Mod', 'n', 7]], ['fact', 0], ['rec2', ['Mod', 'n', 7]], ['Sum', ['g', 'k'], ['Limits', 'k', 1, 'n']],
   ['Map', ['Function', ['f', 'z', 'z'], 'z'], 'D'], ['If', ['Less', ['g', 'x'], 1], ['f', 'x', 'y'], 0],
   // Equal sub-expressions written as separate nodes, one lowering; a copy
   // that reads an index of the name it reads outside
@@ -645,7 +660,7 @@ export const DECLINES: Record<string, Json> = {
   'bound that is not a real number': ['Sum', 'k', ['Limits', 'k', 1, 'Z']],
   'different lengths': ['Add', 'L', ['List', 1, 2]],
   'a capture': ['cap', 1],
-  'declared result type': ['rec2', 'n'],
+  'declared result type': ['rec3', 'n'],
   'not a flat list': ['g', ['List', ['List', 1, 'x'], ['List', 3, 4]]],
   'Range of an operand that is not a real': ['Range', 'Z', 5],
   'of a list of booleans': ['If', ['At', ['Map', ['Function', ['Less', 'z', 0], 'z'], 'D'], 'n'], 1, 2],

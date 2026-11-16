@@ -365,6 +365,21 @@
   the body reads as a list (`Sum(p·List(Cos(φ), Sin(φ)))`) takes a list
   argument of a length known at compile time whole, as the interpreter binds
   it.
+- **The experimental profile `'ir'` compiles a recursive user function
+  whose result is not declared**, as a function assigned with no declaration:
+  with `s(x, n) := Which(n = 1, Sin(x), True, Sin(s(x, n − 1)))`, `s(x, 3)`
+  gives 0.5651… at `x = 0.7` on JavaScript, and compiles for `interval-js`.
+  When the result is neither declared nor inferred, it is taken as a real
+  number, and such a function whose body is a complex number, a boolean, a
+  list or a tuple is not compiled by the profile; GLSL declines a recursive
+  function. As with the existing compiler, a
+  recursion that does not reach its base case (`s(x, 2.5)`) throws a
+  `RangeError` at the end of the JavaScript stack, where the interpreter
+  throws a `CancellationError` at its recursion limit; a depth past that
+  limit (`s(x, 200)`) gives a value where the interpreter throws. Two equal
+  calls of a recursive function that draws no random number are one call:
+  `R(i, x) = R(i − 1, x) + S(R(i − 1, x))` makes 20 calls for `R(20, x)`,
+  not 2^20.
 - **Code of the experimental profile `'ir'` runs lists and loops faster.**
   A list is built in one preallocated array, two element-wise operations
   in a row are one loop, and a loop checks its deadline once per 1,024
@@ -407,11 +422,14 @@
   `compile(expr, { to: 'interval-js', profile: 'ir' })` compiles scalar
   arithmetic, the elementary functions, powers, comparisons, `If`, `Which`,
   `And`, `Or`, `Not`, locals of a `Block`, `Sum` and `Product` with `Limits`,
-  `Random()` (the interval `[0, 1]`) and calls of user functions that are
-  not recursive, with the result shapes of the target (an `IntervalResult`,
-  or the verdict `'true'`, `'false'` or `'maybe'`). Where a condition is
-  undecided over the input box, both arms are evaluated and the result is
-  their hull; a local assigned in both arms has the hull of both values.
+  `Random()` (the interval `[0, 1]`) and calls of user functions, with the
+  result shapes of the target (an `IntervalResult`, or the verdict `'true'`,
+  `'false'` or `'maybe'`). Where a condition is undecided over the input
+  box, both arms are evaluated and the result is their hull; a local
+  assigned in both arms has the hull of both values. In a recursive
+  function (a function on a cycle of calls) a condition must be decided, so
+  that the recursion ends: where it is undecided, and where the recursion
+  does not reach its base case, the result is `entire`.
   Lists and tuples compile too, as arrays of such values: `At` (an index
   that is an interval gives the hull of the elements it can select),
   element-wise operations, `Sum`, `Product`, `Max`, `Min` and `Length` of a

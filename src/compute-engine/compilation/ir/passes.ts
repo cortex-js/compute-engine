@@ -23,7 +23,9 @@
  *   (`inline` below), so that `cse` and `invariants` see the calls it makes.
  * - `cse`: an instruction that repeats an earlier mergeable one whose value
  *   is visible reads that value instead, and so does a call of a function
- *   that is not effectful and not on a cycle of calls (each of its results).
+ *   that is not effectful (also one on a cycle of calls), merged with an
+ *   earlier visible call of the same arguments, which failed if this one
+ *   would (each of its results).
  *   No value is moved.
  * - `invariants`: an instruction of a loop body that reads nothing that the
  *   body computes is computed once, before the loop (`invariants` below).
@@ -437,12 +439,11 @@ const strength: Pass = (p) =>
 
 const cse: Pass = (p, rows) => {
   const fx = effects(p, rows);
-  const cyclic = recursiveFunctions(p.functions);
   const key = (i: Instr): string | undefined => {
-    // A call of a function with no effect, not on a cycle of calls: a
-    // `may-fail` one too, since the visible call failed if this one would.
+    // A call of a function with no effect: a `may-fail` one too (a function
+    // on a cycle of calls), since the visible call failed if this one would.
     if (i.k === 'call')
-      return fx.of(i) !== 'effectful' && !cyclic.has(i.fn)
+      return fx.of(i) !== 'effectful'
         ? `c ${i.fn} ${i.args.join(',')}`
         : undefined;
     if (!fx.mergeable(i)) return undefined;
@@ -536,6 +537,11 @@ const inline = (
       // An `At` whose index the copy makes a constant out of range declines
       // on GLSL, where the call gives NaN.
       (i.args.some((a) => constants.has(a)) && reads.has(i.fn)) ||
+      // In the interval mode (the rule 'repeated') nothing is copied into a
+      // function on a cycle of calls: an `if` there runs one arm
+      // (`verdictIf.decided`), so a copied `if` of the callee would lose
+      // its hull.
+      (where === 'repeated' && cyclic.has(s.fn)) ||
       i.args.some(
         (a, k) => p.types[a].shape.length > 0 && !sameLane(p, a, g.params[k])
       ) ||

@@ -550,7 +550,8 @@ tell a `plausible` witness from a `crafted` one, so it is a line marked
    `compile-real-analysis.ts`, a file of the shared layer.
    DECIDED 2026-11-15: the simple rule; the float case is recorded as a
    known limitation with `x^0.2` over a negative box.
-6. **A recursive function declines.** Alternative: compile it; an undecided
+6. **A recursive function declines.** (Reversed by the user on 2026-11-16:
+   section 18.3.) Alternative: compile it; an undecided
    guard then recurses until the stack ends, and the runner answers
    `entire`. Recommended: decline.
 7. **During the work the mode is behind `profile: 'ir'`**, and the public
@@ -1270,3 +1271,88 @@ run-time exponent (`powReal`, 1.16 to 1.36, accepted by the user) is below
 interval mode existed (about 1,620 lines of the directory are the mode's
 alone), and `ce-compiler` asks the user how it counts.
 
+
+### 18.3 The landings of 2026-11-15 and 2026-11-16, and the baseline on main `87f8cf3e7`
+
+The user's decisions since section 18.2: the limit of `ir/` is 12,000 lines
+(after a simplification pass by both sessions); `Loop` and `Break` are
+revisited; a per-pass count may be dropped where it costs against the time
+bound; and, on 2026-11-16, decision 6 of section 11 is reversed (below).
+
+On main, newest last:
+
+- `887bc8ab3f1a616fcba26c26e2fdeab5c9c0b2c3`: `undecided()` keeps one frozen
+  `Error` per message, so a throw of the undecided error costs no stack
+  capture.
+- `9b9e79fd866ac4f6db01617f92672a8610279385`: a simplification of the mode
+  (159 lines fewer). `dropClosedForms()` stays: the Bose integral reaches it.
+- `85752a2d0942602ffdec01a5d38745b6230c892f`: a `Loop` without `Break`
+  compiles; each pass counts against a finite `iterationBudget`
+  (`_IA.countLoopPass(budget)`). The count measured free.
+- `e18d04999de8a51a6ed5c55125859aaeec5c5457` (A): a name whose held value is
+  an expression is lowered as that expression. `5e286aa36514d36114e9b8155cffc3bb5cf488c7`
+  (E): a list argument of a user function of scalars is the function mapped
+  over the list. Together: interval +33 programs, JavaScript +71, GLSL +63.
+- `87f8cf3e734956c6191bb1229219a6a11d255d65`: the budget of the inlining
+  pass per site rule (`INLINE_BUDGET = { loop: 1000, repeated: 4000 }`);
+  voronoi runs at 0.72 times the existing target.
+- `15f8c6ca499a1fb4b7125a730939c8e8e92ec586` (D): a user function whose
+  result is a list of elements of no stated type takes the shape of its
+  lowered body; a parameter that the body reads as a list takes a flat list
+  argument whole. Interval +15, JavaScript +16, GLSL +6. One reviewer ran
+  (Codex was out on a usage limit; its review is owed).
+
+The baseline on main `87f8cf3e7` (`sweep-t12-at-87f8cf3e7`, before D): the
+mode admits 4,801 of 5,155 programs, the existing target 4,828; 28,255
+boxes equal, 281 tighter, 124 wider (sums); 51 containment misses in 5
+programs, the same on both targets. With D the mode admits 4,816.
+
+The quiet re-timing (`retime-slow-at-87f8cf3e7.json`): 99 programs above 1.1
+times the existing target, 82 of them the accepted class of the run-time
+exponent; 20 above 1.25, 10 above 1.5, 3 above 3. The causes that are not
+accepted:
+
+- an integral with an infinite bound, which `_IA.integrate` answers with
+  `entire` at once, where the mode computes the invariants of the integrand
+  first (`neyret/thpezd39zq` #0 and #1, 5.3 and 2.8);
+- one element of a list that a function or a build makes, where the existing
+  target writes the element out (`ccoc40kfhj` #9 to #11 at about 2,
+  `cxlreu2mu9` #10, `1d8vyqtvoj` #0, and `pqflulcixs` #0 to #2 at 1.2 to 1.5
+  since D);
+- a result that is `entire` by a throw (`zrklhsz34x` #4, `n3nirm8khz` #4);
+- a boolean `If(c, b)` evaluated eagerly as `_IA.and` (`3qkygakl9m` #1,
+  2.2);
+- a comparison that the existing target proves at compile time
+  (`nbbj88wunw` #1, 155; recommended as an exception);
+- `g2vyb7i2oi` #4 (1.4, not diagnosed), programs under a microsecond, and
+  `buddhabrot` (an artefact of the sweep's list input).
+
+What only the existing target compiled on `87f8cf3e7`: 45 programs:
+recursion 17, the list results of D 16 (15 admitted since), `Break` 5
+(`ce-compiler`'s batch G23), and 7 others (a `Range` of a real step 2, arms
+of two types 2, an `indexed_collection` input 2, a list of no single
+length 1).
+
+**Decision 6 reversed (user, 2026-11-16).** A recursive function compiles in
+the mode in a bounded form: inside a function on a cycle of calls, a
+conditional whose verdict is undecided throws the undecided error, so the
+call answers `entire`; with every guard decided, the code follows the one
+path that every point of the box follows. In the shared lowering, a
+recursive function with no declared result is assumed to return a real
+scalar, and the body is checked after one lowering. The pass `cse` merges
+two equal calls of a function on a cycle that is not `effectful`, so a
+function that makes the same recursive call twice per level runs in a time
+proportional to the depth (`neyret/ndqj7hupta`: 20 calls where there were
+2^20). This batch is in the commit that adds this paragraph: 19 programs
+compile on JavaScript and 19 in the mode (`xvviql5z8f` 9, `ond0vgpslf` 3,
+`ndqj7hupta` 7, which the existing compilers decline); the recursive
+programs that both interval targets compile run at 0.7 to 0.9 times the
+existing target, with equal classes; a recursion that never ends answers
+`entire` in 1.5 ms (the existing target: 1.4 ms). Five programs still
+decline (`tdyz9z5uxb` #2 to #6: a recursive function that reads an input).
+
+The sweep on main `69c88b4e2` (with `ce-compiler`'s `Break` and `Continue`)
+plus this batch (`sweep-t12-rec-on-69c88b4e2`): the mode admits 4,840 of
+5,155 programs, the existing target 4,828; 13 programs compile only on the
+existing target and 25 only in the mode; 28,426 boxes equal, 295 tighter,
+124 wider; 51 containment misses in 5 programs, the same on both targets.

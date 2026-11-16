@@ -322,6 +322,9 @@ type UserFunction = {
   ir: IRFunction;
   inputs: Type[];
   called: boolean;
+  /** The first call of the function made while its body is lowered, when
+   *  it has no declared result: the call assumed a real scalar. */
+  guess?: Fn;
 };
 
 export function functionLowering(
@@ -337,6 +340,11 @@ export function functionLowering(
   let settled = new Map<string, Effect>();
   // The lowerings of a function begun (`cx.attempt()`).
   let begun = 0;
+  const noResult = (call: Fn): never =>
+    decline(
+      call,
+      `a recursive call of ${call.operator}, which has no declared result type (declare it, as (real) -> real)`
+    );
 
   /** A parameter `name` of the type `t` of the IR function `ir`. */
   const param = (ir: IRFunction, name: string, t: IRType, length = false) => {
@@ -462,6 +470,10 @@ export function functionLowering(
             ? cx.value(literal.ops[0])!
             : cx.scalar(literal.ops[0]);
         const t = type(body);
+        // A recursive call assumed a real scalar (`call()`): the body must
+        // be one, an integer widened.
+        if (fn.guess && (t.shape.length > 0 || !isSubLane(t.lane, 'real')))
+          noResult(fn.guess);
         // A list of elements of no stated type: a flat list of numbers or
         // booleans, or a list of points, of the lengths that it states.
         const axis = cx.tuples.get(body);
@@ -509,8 +521,9 @@ export function functionLowering(
             `a body of ${e.operator} that is not ${engineTypeToString(r!)}`
           );
         // A real body of a complex result is converted.
-        const v =
-          fn.result?.lane === 'complex' && type(body).lane !== 'boolean'
+        const v = fn.guess
+          ? cx.widen(body, 'real')
+          : fn.result?.lane === 'complex' && type(body).lane !== 'boolean'
             ? cx.widen(body, 'complex')
             : body;
         if (fn.result !== undefined && !isSubType(type(v), fn.result))
@@ -632,13 +645,18 @@ export function functionLowering(
       return [...length, v];
     });
     if (mapped) return mapOver(e, binding, fn, values);
-    if (fn.result === undefined)
-      decline(
-        e,
-        fn.list
-          ? `a recursive call of ${e.operator}, a function with a list or tuple result`
-          : `a recursive call of ${e.operator}, which has no declared result type (declare it, as (real) -> real)`
-      );
+    // A call of a function whose body is being lowered (on a cycle of
+    // calls) with no declared result assumes a real scalar, which
+    // `define()` checks against the body; a list or tuple result declines.
+    if (fn.result === undefined) {
+      if (fn.list)
+        decline(
+          e,
+          `a recursive call of ${e.operator}, a function with a list or tuple result`
+        );
+      fn.guess = e;
+      fn.result = { lane: 'real', shape: [] };
+    }
     // A call of a function being lowered (recursive) passes no input: it
     // declines when the function reads one (`capture()`).
     if (pending.get(e.operator) === fn) {
