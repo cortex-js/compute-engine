@@ -489,8 +489,9 @@ verdicts), `If`, `Which`, a `Block` with locals, user functions that are
 not recursive, `Sum` and `Product` with `Limits`, `Random()` and
 `WithRandomSeed` of a number seed, a root function literal, and the lists
 below, and integrals (below). `Haversine`, `Zeta` and the complex and
-colour operations have no spelling and decline; a `Loop` declines with the cause "the interval mode does not
-compile it yet" (`intervalRefusal()`; a cause of the mode ends with "on
+colour operations have no spelling and decline; a `Loop` declines in the
+lowering with the cause "the interval mode does not compile it yet", also
+one whose values are not read (a cause of the mode ends with "on
 interval-js"). A string seed and `Random` of a domain decline in the
 lowering.
 

@@ -14,6 +14,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import { BigDecimal } from '../../src/big-decimal';
 import { intervalQuadratureSize } from '../../src/compute-engine/compilation/interval-quadrature';
 import { compile } from '../../src/compile';
 import { createIntervalRuntime } from '../../src/compute-engine/compilation/interval-runtime';
@@ -361,6 +362,40 @@ describe('the interval mode, integrals: the code', () => {
     expect(r.code).toMatch(/_IA\.integrate\([^]*, 256\);/);
     const box = { x: { lo: 0.5, hi: 2 } };
     expect(r.run(box)).toEqual(existing(json).run(box));
+  });
+
+  test('a closed form that the mode cannot print is dropped and the enclosure stands alone', () => {
+    // The first test that reaches `dropClosedForms()`: at machine precision
+    // the closed form `2 Zeta(3)` is lowered as written, and `zeta` has no
+    // kernel of the mode.
+    // The engine writes the process-global precision of the big decimals.
+    const saved = BigDecimal.precision;
+    try {
+      const machine = new ComputeEngine();
+      machine.precision = 'machine';
+      const json = I(
+        ['Divide', ['Power', 't', 2], ['Subtract', ['Exp', 't'], 1]],
+        't',
+        0,
+        'PositiveInfinity'
+      );
+      const expr = machine.box(json as never);
+      const options = { to: 'interval-js', fallback: false };
+      const r = compile(expr, { ...options, profile: 'ir' } as never) as unknown as Compiled;
+      const old = compile(expr, options as never) as unknown as Compiled;
+      expect(r.success).toBe(true);
+      expect(`${r.preambleOnce}\n${r.code}`).not.toMatch(/integrateClosed|zeta/i);
+      expect(r.code).toMatch(/_IA\.integrate\(/);
+      // The enclosure over an infinite range is `entire`, as on the existing
+      // target: it contains 2ζ(3) = 2.4041138063191885.
+      const got = r.run({});
+      expect(got).toEqual({ kind: 'entire' });
+      expect(got).toEqual(old.run({}));
+      const v = Number(machine.box(['Multiply', 2, ['Zeta', 3]] as never).N().re);
+      expect(contains(got, { v, err: 0 }, '2ζ(3)')).toEqual([]);
+    } finally {
+      BigDecimal.precision = saved;
+    }
   });
 
   test('a closed form with a vars name reads the inputs object', () => {

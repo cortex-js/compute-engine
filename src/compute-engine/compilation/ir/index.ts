@@ -33,7 +33,6 @@ import { GLSL, printGlsl, type GlslResult } from './print-glsl.js';
 import {
   INTERVAL_ROWS,
   dropClosedForms,
-  intervalRefusal,
   JS_INTERVAL,
   printInterval,
   type IntervalPrinted,
@@ -79,7 +78,6 @@ export type { Program } from './ir.js';
 export type { PassOptions } from './passes.js';
 export type { JavaScriptResult } from './print-js.js';
 export type { GlslResult } from './print-glsl.js';
-export type { IntervalPrinted } from './print-interval.js';
 
 export type Target = 'javascript' | 'glsl';
 
@@ -591,9 +589,6 @@ export function sliceProgram(
       `${refused.cause} on ${where}`,
       refused.head
     );
-  const unsupported = interval ? intervalRefusal(p) : undefined;
-  if (unsupported !== undefined)
-    throw new Decline('program', `${unsupported} on ${where}`);
   return Object.assign(p, { warnings });
 }
 

@@ -1,31 +1,8 @@
 /**
  * The interval mode of the JavaScript target (`mode: 'interval'`): each IR
  * operation is spelled as the `_IA` kernel of the interval library that
- * encloses it, so the code is an abstract interpretation of the program
- * over intervals. A `real` or an `integer` value is an `Interval` or an
- * `IntervalResult`, a `boolean` a verdict (`'true'`, `'false'`, `'maybe'`).
- * Every kernel takes and gives the kinds `empty`, `entire`, `singular` and
- * `partial`, so the code never reads the kind of a value. An operation with
- * no kernel has no spelling, and the program declines (`admits()`).
- *
- * The code has the stored form of the existing interval target
- * (`StoredIntervalJavaScript`): `code`, an expression of the inputs object
- * `_` (for a root function literal, the function of its arguments), and
- * `preambleOnce`, the user functions. It reads `_IA` only. `run()` is the
- * function that `createIntervalRuntime().load()` builds from it, so `run()`
- * and stored code loaded elsewhere agree by construction.
- *
- * An `if` is printed with each arm once (`verdictIf`): the first arm unless
- * the condition is `'false'`, the second unless it is `'true'`, and each
- * result the hull of both for `'maybe'`. A counted loop runs over numbers
- * (the pass `plain`), and refuses to start, by the error of an undecided
- * condition (`run()` answers `entire`), when it has more passes than the
- * `iterationBudget`. `Random()` is the support `[0, 1]` of a draw, and a
- * random frame is its body. A list or a tuple is an array of the values of
- * the mode; its length and its indexes are numbers (the pass `plain`).
- *
- * A rule of the mode is here: `intervalRefusal()`, the constructs that the
- * mode does not compile yet.
+ * encloses it (README, "The interval mode"). An operation with no kernel
+ * has no spelling, and the program declines (`admits()`).
  */
 
 import { nextDown, nextUp } from '../../numerics/numeric.js';
@@ -57,7 +34,16 @@ import {
   type Region,
   type V,
 } from './ir.js';
-import { deepFreeze, OPERATORS, type OperatorRow } from './operators.js';
+import {
+  arith,
+  deepFreeze,
+  I,
+  list,
+  OPERATORS,
+  R,
+  row,
+  type OperatorRow,
+} from './operators.js';
 import { PLAIN_ROWS, PLAIN_SPELLINGS } from './plain.js';
 
 const ia = (kernel: string, arity = 1) =>
@@ -98,12 +84,7 @@ const loopOpen =
   ];
 
 /** The region `build` or `filter`: a loop over a number count that fills
- *  an array; a count of 2^32 or more, which no array holds, throws before
- *  the first element. The `iterationBudget` does not count the elements of
- *  a list (`CompilationOptions.iterationBudget`), as on the JavaScript
- *  target. A filter keeps an element for `'true'`, drops it for
- *  `'false'`, and for `'maybe'` the length of its result is not one
- *  number: it throws, and `run()` answers `entire`. */
+ *  an array (README, "The interval mode", "Lists"). */
 const fill =
   (op: 'build' | 'filter'): RegionSpelling =>
   ({ outs, args: [n], params: [k] }) => {
@@ -128,23 +109,8 @@ const fill =
     };
   };
 
-/**
- * The syntax of the mode: the statement forms of `JS`, and a spelling for
- * each operation that a kernel computes, with the operands in the order of
- * the row's `fold`. `pow` (and `pow.int`) is `_IA.powReal`, with the
- * digits of the reading of a float exponent fixed at the compilation
- * (`printInterval()`); the powers of a float literal that the lowering
- * reads are `_IA.powRealBranch` of the double (`pow.branch` for an odd
- * numerator, `pow.branch.even`) and `_IA.pow` of the double
- * (`pow.principal`, also of an exact rational exponent whose denominator
- * is a power of 2), as the existing target;
- * `root` `_IA.nthRootInterval`; `div.q` is `div`; `deg` the product by an
- * enclosure of π and the quotient by 180. A constant is a point, or for a
- * literal marked `inexact` the enclosure of that many ulps on each side;
- * NaN is `empty`; a boolean a verdict; a plain integer (`plain.ts`) a
- * number. `at` is `_IA.at` (the interpreter's `At` over an interval index),
- * `elem` the read of a number index, `rangecount` `_IA.rangeCount`.
- */
+/** The syntax of the mode: the statement forms of `JS`, and the kernel of
+ *  each operation (README, "The interval mode"). */
 export const JS_INTERVAL: Syntax = Object.freeze({
   ...JS,
   ops: {
@@ -179,10 +145,6 @@ export const JS_INTERVAL: Syntax = Object.freeze({
       body(index)
     );
   },
-  // No copy: `run()` copies the inputs and the result, and no kernel
-  // writes to an operand.
-  ret: (value) => `return ${value};`,
-  retTuple: (values) => `return [${values.join(', ')}];`,
   regions: {
     build: fill('build'),
     filter: fill('filter'),
@@ -214,7 +176,6 @@ export const JS_INTERVAL: Syntax = Object.freeze({
       close: (ys) => [...ys.map((y, j) => `  ${outs[j]} = ${y};`), '}'],
     }),
   },
-  helpers: {},
   verdictIf: {
     first: (c) => `if (${c} !== 'false') {`,
     second: (c) => `if (${c} !== 'true') {`,
@@ -225,75 +186,41 @@ export const JS_INTERVAL: Syntax = Object.freeze({
   constant: (l) =>
     l.lane === 'boolean'
       ? `'${l.value}'`
-      : l.lane === 'complex' || (l.lane === 'integer' && l.plain === true)
+      : l.lane === 'integer' && l.plain === true
         ? JS.constant(l)
         : Number.isNaN(Number(l.value))
           ? "{ kind: 'empty' }"
           : enclosure(
               Number(l.value),
-              l.lane === 'real' && Number.isFinite(l.value)
-                ? (l.inexact ?? 0)
-                : 0
+              l.lane === 'real' ? (l.inexact ?? 0) : 0
             ),
 });
 
-[JS_INTERVAL.ops, JS_INTERVAL.regions, JS_INTERVAL.helpers].forEach((t) =>
-  Object.freeze(t)
-);
+[JS_INTERVAL.ops, JS_INTERVAL.regions].forEach((t) => Object.freeze(t));
 
-/** The rows of the mode: `Binomial` and `Choose` with a real signature
- *  too (`_IA.binomial`; the other targets have the integer one only),
- *  `OPERATORS`, `square`, which the lowering makes of a power by the
- *  constant 2, the powers of a float exponent read at compile time (and
- *  `pow.principal` of a rational exponent whose denominator is a power of
- *  2), the
- *  clamps `atleast` and `atmost`, which the pass `narrow` makes, and the
- *  rows of the pass `plain`. */
-export const INTERVAL_ROWS: readonly OperatorRow[] = Object.freeze([
+/** The rows of the mode: `OPERATORS`, and the rows of the operations that
+ *  only the mode has (README, "The interval mode"). */
+export const INTERVAL_ROWS: readonly OperatorRow[] = deepFreeze([
   ...['Binomial', 'Choose'].map((head) =>
-    deepFreeze({
+    row(
       head,
-      arity: 2,
-      signatures: [
-        [['integer', 'integer'], 'integer', 'binomial'],
-        [['real', 'real'], 'real', 'binomial.real'],
+      2,
+      [
+        [[I, I], I, 'binomial'],
+        [[R, R], R, 'binomial.real'],
       ],
-      threads: false,
-      effect: 'pure',
-    } as OperatorRow)
+      list
+    )
   ),
   ...OPERATORS,
-  deepFreeze({
-    arity: 1,
-    signatures: [
-      [['integer'], 'integer', 'square.int'],
-      [['real'], 'real', 'square'],
-    ],
-    threads: true,
-    effect: 'pure',
-  } as OperatorRow),
+  row(undefined, 1, arith('square', 1), {}),
   // A power by a float literal that the lowering reads at compile time,
   // and `pow.principal` of a rational exponent whose denominator is a
   // power of 2.
   ...['pow.branch', 'pow.branch.even', 'pow.principal'].map((op) =>
-    deepFreeze({
-      arity: 2,
-      signatures: [[['real', 'real'], 'real', op]],
-      threads: true,
-      effect: 'pure',
-    } as OperatorRow)
+    row(undefined, 2, [[[R, R], R, op]], {})
   ),
-  ...['atleast', 'atmost'].map((op) =>
-    deepFreeze({
-      arity: 2,
-      signatures: [
-        [['integer', 'integer'], 'integer', `${op}.int`],
-        [['real', 'real'], 'real', op],
-      ],
-      threads: false,
-      effect: 'pure',
-    } as OperatorRow)
-  ),
+  ...['atleast', 'atmost'].map((op) => row(undefined, 2, arith(op, 2), list)),
   ...PLAIN_ROWS,
 ]);
 
@@ -320,77 +247,49 @@ export function dropClosedForms(
  *  kind and rounding (`interval/arithmetic.ts`); an inlined operand is
  *  pure, so the order of the two is not observed. */
 function subtractions(p: Program): Program {
-  const { uses, def } = useIndex(p);
-  const negation = (v: V) => {
-    const i = def.get(v);
-    return i?.k === 'op' &&
-      (i.op === 'neg' || i.op === 'neg.int') &&
-      uses.get(v) === 1
-      ? i
-      : undefined;
+  // The count of the pairs of `q`, rewritten in place with `rewrite`.
+  const pairs = (q: Program, rewrite: boolean): number => {
+    const { uses, def } = useIndex(q);
+    const negation = (v: V) => {
+      const i = def.get(v);
+      return i?.k === 'op' &&
+        (i.op === 'neg' || i.op === 'neg.int') &&
+        uses.get(v) === 1
+        ? i
+        : undefined;
+    };
+    const dropped = new Set<Instr>();
+    const walk = (r: Region): void => {
+      for (const i of r.body) {
+        regionsOf(i).forEach(walk);
+        if (i.k !== 'op' || (i.op !== 'add' && i.op !== 'add.int')) continue;
+        const k = negation(i.args[1]) ? 1 : negation(i.args[0]) ? 0 : -1;
+        if (k < 0) continue;
+        const n = negation(i.args[k])!;
+        dropped.add(n);
+        if (!rewrite) continue;
+        i.op = i.op === 'add' ? 'sub' : 'sub.int';
+        i.args = [i.args[1 - k], n.args[0]];
+      }
+      // A `neg` is in the region of its `add` or in an outer one.
+      if (rewrite) r.body = r.body.filter((i) => !dropped.has(i));
+    };
+    q.functions.forEach((f) => walk(f.body));
+    return dropped.size;
   };
-  const dropped = new Set<Instr>();
-  const subs = new Map<Instr, Instr>();
-  const walk = (r: Region): void => {
-    for (const i of r.body) {
-      regionsOf(i).forEach(walk);
-      if (i.k !== 'op' || (i.op !== 'add' && i.op !== 'add.int')) continue;
-      const k = negation(i.args[1]) ? 1 : negation(i.args[0]) ? 0 : -1;
-      if (k < 0) continue;
-      const n = negation(i.args[k])!;
-      dropped.add(n);
-      const op = i.op === 'add' ? 'sub' : 'sub.int';
-      subs.set(i, { ...i, op, args: [i.args[1 - k], n.args[0]] });
-    }
-  };
-  p.functions.forEach((f) => walk(f.body));
-  if (subs.size === 0) return p;
-  const copy = (r: Region): Region => ({
-    ...r,
-    body: r.body.filter((i) => !dropped.has(i)).map(instr),
-  });
-  const instr = (i: Instr): Instr =>
-    i.k === 'if'
-      ? { ...i, then: copy(i.then), else: copy(i.else) }
-      : i.k === 'loop'
-        ? { ...i, body: copy(i.body) }
-        : i.k === 'region'
-          ? { ...i, regions: i.regions.map(copy) }
-          : (subs.get(i) ?? i);
-  return {
-    ...p,
-    functions: p.functions.map((f) => ({ ...f, body: copy(f.body) })),
-  };
-}
-
-/** The construct of `p` that the mode does not compile yet (a `Loop`,
- *  whose passes the budget counts), or `undefined`. A region other than a
- *  random frame has no spelling (`admits()`). */
-export function intervalRefusal(p: Program): string | undefined {
-  const loop = (r: Region): boolean =>
-    r.body.some(
-      (i) => (i.k === 'loop' && i.passes === true) || regionsOf(i).some(loop)
-    );
-  return p.functions.some((f) => loop(f.body))
-    ? 'a Loop: the interval mode does not compile it yet'
-    : undefined;
+  if (pairs(p, false) === 0) return p;
+  const q = { ...p, functions: structuredClone(p.functions) };
+  pairs(q, true);
+  return q;
 }
 
 /** The pure rows whose kernel of the mode throws (`_IA.rangeCount()`). */
 const THROWS = new Set(['rangecount']);
 
-/**
- * The values of `p` that depend on no input, parameter, loop index or draw,
- * which the code computes once: a constant that is not a number or a
- * verdict and that an instruction computed at each call reads; a pure
- * operation or a list of such values (or of constants) anywhere; and at a
- * top level that runs at every call, an operation that can fail and a call
- * of a function that has no effect and is not on a cycle, of such values.
- * The top level of the entry runs at every call, and so does the top level
- * of a function that such a top level calls. `rank`: the rank of the
- * function of each value, the callees first; `late`: the values that can
- * throw or run a loop (a call), and those computed from them.
- */
+/** The values of `p` that the code computes once (README, "The interval
+ *  mode", "Values computed once"). `rank`: the rank of the function of each
+ *  value, the callees first; `late`: the values that can throw or run a
+ *  loop (a call), and those computed from them. */
 function computedOnce(
   p: Program,
   rows: readonly OperatorRow[]
@@ -486,20 +385,12 @@ export type IntervalPrinted = StoredIntervalJavaScript & {
   readonly printed: Printed;
 };
 
-/** `iterationBudget`: a loop of more passes than it throws before its
- *  first pass. The values of `computedOnce()` are computed after the
- *  functions (they can call them), those of a function before those of its
- *  callers: in `preambleOnce`, when the code is loaded, except the values
- *  that can throw or run a loop and those computed from them, which are
- *  computed at the first call, in a `try` of `preamblePerCall`, so that
- *  `compile()` and the load run no loop of the program. `_once` is
- *  `undefined` before, `null` after, or the error thrown, which each call
- *  throws again: it answers what it answers when the value is computed
- *  there. */
+/** The stored form of `p` in the mode and its `run()` (README, "The
+ *  interval mode"). */
 export function printInterval(
   p: Program,
   rows: readonly OperatorRow[],
-  syntax: Syntax = JS_INTERVAL,
+  syntax: Syntax,
   iterationBudget?: number
 ): IntervalPrinted {
   const limit = Math.min(Math.floor(iterationBudget ?? Infinity), 2 ** 32);
@@ -511,11 +402,7 @@ export function printInterval(
   const plan = computedOnce(q, rows);
   const printed = printProgram(
     q,
-    {
-      ...syntax,
-      ops: { ...syntax.ops, pow },
-      ...(limit < 2 ** 32 ? { loopOpen: loopOpen(limit) } : {}),
-    },
+    { ...syntax, ops: { ...syntax.ops, pow }, loopOpen: loopOpen(limit) },
     rows,
     plan.once
   );

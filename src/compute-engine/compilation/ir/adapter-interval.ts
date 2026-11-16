@@ -28,36 +28,19 @@ import {
   irTestExtension,
   optionDecline,
   sliceError,
-  type IR_OPTIONS,
+  IR_OPTIONS,
   type IrOptions,
 } from './adapter.js';
 
 /** The class of each option of `compile()` on `interval-js`, as
  *  `IR_OPTIONS`: `mapped`, `no-op`, or `declined` when given
- *  (`optionDecline()`; a `mode` other than `'strict'`). */
+ *  (`optionDecline()`; a `mode` other than `'strict'`). An option added to
+ *  `IR_OPTIONS` takes its JavaScript class here, with no type error. */
 const IR_INTERVAL_OPTIONS = {
-  to: 'mapped',
-  target: 'mapped',
-  profile: 'mapped',
-  fallback: 'mapped',
+  ...IR_OPTIONS,
   entryChecks: 'no-op',
-  iterationBudget: 'mapped',
-  symbolDeps: 'mapped',
-  varsObjectRefs: 'mapped',
-  cse: 'mapped',
-  constantFold: 'mapped',
   mode: 'declined',
-  storage: 'no-op',
   quadrature: 'no-op',
-  functions: 'declined',
-  vars: 'mapped',
-  symbolic: 'mapped',
-  inputs: 'mapped',
-  operators: 'declined',
-  imports: 'declined',
-  preamble: 'declined',
-  broadcast: 'no-op',
-  strictTypes: 'declined',
 } as const satisfies Record<
   keyof typeof IR_OPTIONS,
   'mapped' | 'no-op' | 'declined'

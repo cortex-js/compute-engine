@@ -1028,6 +1028,11 @@ export function lower(
       case 'Assign':
         return assign(e);
       case 'Loop':
+        if (interval)
+          throw new Decline(
+            'program',
+            'a Loop: the interval mode does not compile it yet on interval-js'
+          );
         return loop(e, want);
       case 'Integrate':
       case 'NIntegrate':
@@ -1952,16 +1957,16 @@ export function lower(
    *  conditional or integral, which can throw or run where the integrand
    *  would not). */
   const early = new WeakMap<Expression, boolean>();
+  /** The row of `x`, a library head that is not a construct or a reduction. */
+  const rowNode = (x: Fn) =>
+    isLibrary(x) && !CONSTRUCTS.has(x.operator) && !REDUCTIONS.has(x.operator)
+      ? rowOfHead(rows, x.operator)
+      : undefined;
   const speculatable = (x: Expression): boolean => {
     if (!isFunction(x)) return true;
     let known = early.get(x);
     if (known === undefined) {
-      known =
-        isLibrary(x) &&
-        !CONSTRUCTS.has(x.operator) &&
-        !REDUCTIONS.has(x.operator) &&
-        rowOfHead(rows, x.operator)?.effect === 'pure' &&
-        x.ops.every(speculatable);
+      known = rowNode(x)?.effect === 'pure' && x.ops.every(speculatable);
       early.set(x, known);
     }
     return known;
@@ -2047,10 +2052,7 @@ export function lower(
       else if (
         (x.operator === 'Block' && x.nops === 1) ||
         userBinding(x) !== undefined ||
-        (isLibrary(x) &&
-          !CONSTRUCTS.has(x.operator) &&
-          !REDUCTIONS.has(x.operator) &&
-          rowOfHead(rows, x.operator) !== undefined)
+        rowNode(x) !== undefined
       )
         x.ops.forEach(invariant);
     };

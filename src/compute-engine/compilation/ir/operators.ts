@@ -123,14 +123,14 @@ export function foldOf(
 
 const F = REAL_FUNCTIONS;
 const C: Lane = 'complex';
-const R: Lane = 'real';
-const I: Lane = 'integer';
+export const R: Lane = 'real';
+export const I: Lane = 'integer';
 const B: Lane = 'boolean';
 const K: Lane = 'color';
 
 type Options = Partial<Omit<OperatorRow, 'arity' | 'signatures'>>;
 
-function row(
+export function row(
   head: string | undefined,
   arity: Arity,
   signatures: Signature[],
@@ -141,7 +141,7 @@ function row(
 
 /** The integer and the real signature of an arithmetic operation `op`,
  *  and with `complex`, the complex one `c<op>`. */
-function arith(op: string, n: number, complex = false): Signature[] {
+export function arith(op: string, n: number, complex = false): Signature[] {
   const s: Signature[] = [
     [Array(n).fill(I), I, `${op}.int`],
     [Array(n).fill(R), R, op],
@@ -186,7 +186,7 @@ function frozenMap<K, T>(entries: [K, T][]): ReadonlyMap<K, T> {
 
 const angle: Options = { angle: 'operands' };
 const inverse: Options = { angle: 'result' };
-const list: Options = { threads: false };
+export const list: Options = { threads: false };
 
 // prettier-ignore
 export const OPERATORS: readonly OperatorRow[] = Object.freeze([

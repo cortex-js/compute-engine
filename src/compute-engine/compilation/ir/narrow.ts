@@ -1,12 +1,8 @@
 /**
- * The pass `narrow` of the interval mode (README, "The interval mode"),
- * run before the other passes. For an `if` whose condition is one
- * comparison `lt`, `le`, `gt` or `ge` of a value `v` with a constant `c`
- * (either side), the arm where `v ≥ c` holds reads `atleast(v, c)` in
- * place of `v`, and the arm where `v ≤ c` holds reads `atmost(v, c)`, the
- * clamps `_IA.atLeast` and `_IA.atMost`: in its body, its
- * nested regions and its yields (`dce` removes the operation from an arm
- * that does not read `v`).
+ * The pass `narrow` of the interval mode (README, "The interval mode",
+ * "Conditionals"), run before the other passes. The constant of the
+ * comparison is on either side, and an arm reads the clamp in its body, its
+ * nested regions and its yields.
  *
  * It is sound: the interpreter takes the arm only at a point where its `v`
  * satisfies the comparison, so its `v` is in the narrowed interval there.
