@@ -45,6 +45,7 @@ import { effects, effectTrace } from './effects.js';
 import {
   deepFreeze,
   OPERATORS,
+  regionRow,
   rowOfOp,
   type OperatorRow,
 } from './operators.js';
@@ -283,7 +284,12 @@ export function seededWarnings(
       }
       if (i.k === 'call' && fx.of(i) === 'effectful')
         why.push(`a call of ${i.fn}`);
-      if (i.k === 'op' && fx.of(i) === 'effectful') {
+      // A draw, or a region that draws by itself (`choice`).
+      if (
+        (i.k === 'op' ||
+          (i.k === 'region' && regionRow(i.op)?.effect === 'effectful')) &&
+        fx.of(i) === 'effectful'
+      ) {
         if (repeated) why.push('a draw in a loop or a per-element body');
         n += 1;
       }

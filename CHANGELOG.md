@@ -103,6 +103,24 @@
 
 ### Improvements
 
+- **The experimental profile `'ir'` compiles `Apply` of a function literal
+  over a list, and more list operators.** `Apply(k ↦ body, L)` of a literal of
+  one parameter over a flat list of numbers is compiled as `Map` is, as the
+  interpreter evaluates it: with `x: real`, `m: real`,
+  `compile(Min(Apply(k ↦ Which(k = m, 10^9, True, k), List(x^2, (x − 1)^2, (x − 2)^2))), { profile: 'ir' })`
+  gives 0.49 at `x = 0.3`, `m = 0.09` on JavaScript, and compiles for GLSL
+  and for `interval-js`.
+  On GLSL a `Map` over a list of 1 to 64 elements whose length is known at
+  compile time now compiles (the body is written once per element). `Min(x)`
+  and `Max(x)` of one number are `x`. On JavaScript the profile also compiles
+  `ListJoin`, `Zip`, a `Comprehension` of several clauses whose lists do not
+  read an earlier index, `Choose` and `Binomial` of integers,
+  `RandomShuffle` and `RandomChoice(Interval(0, 1), n)` (under
+  `WithRandomSeed` they give the interpreter's numbers), and `If` with a
+  boolean arm and no else arm (`False` where the condition is false, also on
+  GLSL). A nested list, a tuple or a list of points as the argument of
+  `Apply`, and a literal of several parameters with a list argument, are not
+  compiled by the profile.
 - **Code of the experimental profile `'ir'` runs lists and loops faster.**
   A list is built in one preallocated array, two element-wise operations
   in a row are one loop, and a loop checks its deadline once per 1,024

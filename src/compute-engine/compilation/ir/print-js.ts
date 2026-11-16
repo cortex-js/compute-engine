@@ -175,6 +175,8 @@ export const JS: Syntax = Object.freeze({
     elem: '$0[$1]',
     at: { text: '_at($0, $1)', helpers: ['_at'] },
     draw: '_SYS.drawNextRandomNumber()',
+    shuffle: '_SYS.shuffle($0)',
+    binomial: '_SYS.binomial($0, $1)',
     rangecount: '_SYS.rangeCount($0, $1, $2)',
     rangestep: '($1 >= $0 ? 1 : -1)',
     trunc: 'Math.trunc($0)',
@@ -212,6 +214,13 @@ export const JS: Syntax = Object.freeze({
     integrate: ({ outs: [out], args: [a, b], params: [t] }) => ({
       open: [`const ${out} = _SYS.irIntegrate((${t}) => {`],
       close: ([y]) => [`  return ${y};`, `}, ${a}, ${b});`],
+    }),
+    choice: ({ outs: [c, out], args: [n] }) => ({
+      open: [
+        `const ${out} = _SYS.randomChoice(_SYS.domainInterval('RandomChoice', 0, 1), ${n});`,
+        `const ${c} = ${out}.length;`,
+      ],
+      close: () => [],
     }),
     seeded: ({ outs, args: [seed] }) => ({
       open: [

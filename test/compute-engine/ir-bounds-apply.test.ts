@@ -371,15 +371,31 @@ describe('IR profile, batch G12: real bounds, real Ranges and Apply', () => {
     expect(ce.box(['Apply', 'F', 'x'] as never).operator).toBe('F');
   });
 
+  test('Apply of a list maps, as the interpreter (batch G18, CE-1344)', () => {
+    const points = [{ L: [1, 7, -2] }, { L: [0.5, 5, 6] }];
+    for (const json of [
+      ['Apply', fn(['Max', 'z', 5], 'z'), 'L'],
+      ['Apply', fn(7, 'z'), 'L'],
+    ]) {
+      check(json, points);
+      expect(glsl(json)).toMatchObject({ success: true });
+    }
+    // A list of points: JavaScript; GLSL has no list of points.
+    const point = [
+      'Apply',
+      fn(['Tuple', ['Cos', 'z'], ['Sin', 'z']], 'z'),
+      'L',
+    ];
+    check(point, points);
+    expect(failure(() => glsl(point))?.message).toMatch(/a list of rank 2/);
+  });
+
   // prettier-ignore
   test.each([
     ['Apply of a wrong number of arguments', ['Apply', fn(['Subtract', 'p', 'q'], 'p', 'q'), 'x'], /Apply of a value that is not a function literal/],
     ['Apply of a typed parameter', ['Apply', fn(['Add', 'z', 1], ['Typed', 'z', "'integer'"]), 'x'], /Apply of a value that is not a function literal/],
     ['a complex bound', ['Sum', 'k', ['Limits', 'k', 1, 'Z']], /a bound that is not a real number/],
     ['a complex Range', ['Range', 'Z', 5], /a Range of an operand that is not a real number/],
-    ['Apply of a list: the interpreter maps Max', ['Apply', fn(['Max', 'z', 5], 'z'), 'L'], /may map the function over it/],
-    ['Apply of a list: the interpreter maps a constant', ['Apply', fn(7, 'z'), 'L'], /may map the function over it/],
-    ['Apply of a list: the interpreter maps a point', ['Apply', fn(['Tuple', ['Cos', 'z'], ['Sin', 'z']], 'z'), 'L'], /may map the function over it/],
     ['Apply of a list and a scalar', ['Apply', fn(['Max', 'p', 'q'], 'p', 'q'), 'L', 'x'], /may map the function over it/],
     ['Apply of a tuple', ['Apply', fn(['Add', 'z', 1], 'z'), ['Tuple', 'x', 'y']], /may map the function over it/],
     ['an infinite upper bound', ['Sum', ['Divide', ['Power', 'x', 'k'], ['Factorial', 'k']], ['Limits', 'k', 0, 'PositiveInfinity']], /a bound that is a constant infinity or NaN/],

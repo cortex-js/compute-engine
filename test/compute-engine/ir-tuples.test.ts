@@ -499,14 +499,16 @@ describe('PointList and Comprehension', () => {
       ['Sum', ['Comprehension', ['Power', 'z', 2], ['Element', 'z', 'D']]],
       points
     );
-    expect(
-      declined([
+    // Two clauses: the flat Cartesian product (batch G17).
+    check(
+      [
         'Comprehension',
         ['Add', 'j', 'k'],
         ['Element', 'k', ['Range', 1, 2]],
         ['Element', 'j', ['Range', 1, 3]],
-      ])
-    ).toMatch(/of one clause/);
+      ],
+      points
+    );
   });
 });
 

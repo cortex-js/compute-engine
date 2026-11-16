@@ -816,14 +816,22 @@ describe('IR slice: lists of run-time length', () => {
       expect(d.message).toMatch(new RegExp(name));
       expect(d.message).toMatch(/on glsl/);
     }
+    // A Map of a list of a stated length is written out (batch G18); of a
+    // list of run-time length it declines.
+    expect(
+      compileSlice(
+        ce.box(['Map', ['Function', ['Sin', 'z'], 'z'], 'L'] as never),
+        { target: 'glsl' }
+      ).printed.body.join('\n')
+    ).toMatch(/return vec3\(sin\(/);
     expect(
       declineOf(() =>
         compileSlice(
-          ce.box(['Map', ['Function', ['Sin', 'z'], 'z'], 'L'] as never),
+          ce.box(['Map', ['Function', ['Sin', 'z'], 'z'], 'D'] as never),
           { target: 'glsl' }
         )
       ).message
-    ).toMatch(/region build \(a Map, a Filter or a Range\) on glsl/);
+    ).toMatch(/the list D has a run-time length/);
   });
 });
 

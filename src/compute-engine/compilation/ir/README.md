@@ -397,7 +397,8 @@ is exact on `bigint` values, with the helpers of the existing mode
 (`bigint-runtime.ts`, members of `_SYS`): `Add`, `Subtract`, `Negate`,
 `Multiply`, `Abs` (`babs`), `Mod` (`bfloorMod`), `Max`, `Min` (`bmax`, `bmin`),
 `Sign` (`bsign`), `Power` (`bpow`), `Factorial` (`bfactorial`), `Binomial`,
-`GCD`, `LCM` (`bbinomial`, `bgcd`, `blcm`, rows of the integer lane only), the
+`Choose`, `GCD`, `LCM` (`bbinomial`, `bgcd`, `blcm`, rows of the integer lane
+only), the
 comparisons, `And`, `Or`, `Not`, `If`, `Which`, `Block`, `Sum` and `Product`
 with integer bounds, `List`, `Range`, `Length`, `At` (`bat`), `Map`, `Filter`,
 `Reduce`, `Loop`, user functions with integer parameters (declared, as
@@ -428,8 +429,8 @@ value), `Floor(Sqrt(n))`, a division under an integer promise
 (`n < 7/2`); a `Power` whose exponent is not proved nonnegative (a constant
 `>= 0`, an `Abs`, an even power, a sum or a product of such values: `n^m` is a
 rational at `m < 0`); `Floor`, `Ceil`, `Round`, `Truncate` (the syntax does not
-spell them); `If` with no else and `Which` with no `True` clause (their value is
-`NaN`); `Max` and `Min` of a list (their identity is `±∞`); `Factorial2`
+spell them); `If` with no else of a number and `Which` with no `True` clause
+(their value is `NaN`); `Max` and `Min` of a list (their identity is `±∞`); `Factorial2`
 (`(−5)!!` is `1/3`); a `Sum` or a `Product` with an `iterationBudget` (its value
 over the budget is `NaN`); a random frame, a draw and an integral; and the
 option `vars`. A decline keeps the code `'outside-profile'` (the existing
@@ -492,8 +493,11 @@ lowering.
 
 Lists. What the lowering makes of a list (sections "Lists" and "Tuples") is
 printed with the spellings of the mode, and what it declines for JavaScript
-stays declined (`Linspace`, a seeded `RandomChoice`, a comprehension of two
-clauses, `At` of a list of tuples that can be out of range). A list literal
+stays declined (`Linspace`, `At` of a list of tuples that can be out of
+range); `RandomChoice`, `RandomShuffle`, a `Zip` of lists of run-time
+length and a comprehension of several clauses over a `Range` decline (a
+length that is not one number); `ListJoin` and a comprehension of several
+clauses over lists compile. A list literal
 is the array of its elements; an element-wise operation is the kernel at
 each index, a loop that fills an array (no `Array.from()`); a reduction is
 the loop of the lowering (`Max()` of no element is `empty`); `build` (`Map`,
@@ -774,9 +778,17 @@ literal, `$#0` in the spelling), and the fold turns an `At` of a constant index
 in range into an `elem`. A boolean or nested list that can be out of range
 declines. `build` and `filter` are region rows. A `Length`, a reduction, a `Map`
 or a `Filter` of a `Range` reads its count and the arithmetic of its elements,
-so `Length(Range(1, n))` makes no list. `Max` and `Min` fold from -∞ and +∞ over
-all their operands, and give NaN when the total count of elements and scalars is
-0; `ElementMax` and `ElementMin` are rows that thread (`ElementMax(D, 0.3)` is a
+so `Length(Range(1, n))` makes no list. On GLSL, which has no build, a `Map`
+(and a one-clause `Comprehension`) over a source of a constant length of 1 to 64
+(`SCALARIZE_LIMIT`) is the list of its elements, the body lowered once per
+element in order: a `vecN` or a `float[n]` (`Map(f, L)` of `L: list<real^3>`,
+`Map(f, List(a, b, c))`). The elements of such builds in one program are at most
+4,096; past that, a `Filter`, a `Range` and a list of a run-time length, the
+build declines on GLSL. `Max` and `Min` fold from -∞ and +∞ over all their
+operands, and give NaN when the total count of elements and scalars is 0;
+`Max(x)` and `Min(x)` of one real or integer scalar are `x` (of a boolean or a
+complex number they decline: the interpreter leaves them unevaluated);
+`ElementMax` and `ElementMin` are rows that thread (`ElementMax(D, 0.3)` is a
 list). An element-wise operation of lists of rank 1 has the length of its first
 list and reads the others at the same index. Lengths that are numbers and differ
 decline (`List(1, 2, 3)·D + List(4, 5)`); a length that is a value fits any
@@ -806,8 +818,35 @@ of `L` by `cond`, then a build of `body` over the elements kept. The
 interpreter's list is lazy: it evaluates the condition and the body of an
 element only when the element is read (`Length` reads none), so a condition or a
 body with an effect declines (`Length(Comprehension(Random(), Element(z, D)))`
-draws nothing in the interpreter). Two clauses or more (a Cartesian product,
-flattened) decline.
+draws nothing in the interpreter). Two clauses or more, `Element(i, L)` each,
+are the interpreter's flat list over the Cartesian product, the last index the
+fastest (`Comprehension(10k + j, Element(k, Range(1, 2)), Element(j, Range(1,
+3)))` is `[11, 12, 13, 21, 22, 23]`): one build over the product of the
+lengths, whose index `k` gives the index of clause `j` as
+`Floor(k / s_j) mod n_j`, with `s_j` the product of the lengths after it. A
+clause whose list reads an earlier index (`Element(j, Range(1, k))`), a
+clause with a condition, and an effect in a clause list or in the body
+decline (the interpreter evaluates a list once for each element of the
+clauses before it).
+
+`ListJoin(L1, …, Ln)` of lists and scalars (a scalar is an element) is a build
+over the sum of the lengths, whose element at `k` is read from the first list
+whose end is after `k` (a chain of `n − 1` tests per element); its lists are of
+numbers, or all of points. On GLSL it declines (a build).
+
+`RandomShuffle(L)` of a list of numbers is `_SYS.shuffle`, and
+`RandomChoice(Interval(0, 1), n)` (either end open or closed) is the region
+`choice`, `_SYS.randomChoice`, whose results are the count and the list: the
+members of the existing compiler, so the draws, their count and their order are
+the interpreter's (a count that is not one in 0..10^6 after `Math.round()`
+throws there; the interpreter gives an error). Each is one draw site
+("Effects"). `RandomChoice` of another domain, and `RandomShuffle` of a tuple,
+of a list of points or of booleans, decline; GLSL has neither.
+
+`Binomial(n, k)` and `Choose(n, k)` of integers are `_SYS.binomial` on
+JavaScript (exact below 2^53, the interpreter's value for every pair of
+integers: `Choose(5, 7)` is 0, `Choose(-3, 2)` is 6); a real operand declines,
+and GLSL has no spelling.
 
 ## Tuples
 
@@ -823,7 +862,10 @@ components; with list components it is the list of the tuples of their elements
 at each index, a scalar component in every tuple, as long as the shortest
 component, as in the interpreter: a stated length, one length value
 (`PointList(D, Map(f, D))`), or the `Min` of the lengths at run time
-(`PointList(A1, A2, A3)` of three inputs of type `list<real>`). A list of
+(`PointList(A1, A2, A3)` of three inputs of type `list<real>`). `Zip(A, B, …)`
+of lists of numbers is that value, as in the interpreter (a list of tuples as
+long as the shortest list), and is lowered as `PointList`; a list with an
+effect declines (the interpreter reads the lists up to the shortest). A list of
 tuples, a build of tuples (`Comprehension(Tuple(f(k), g(k)), Element(k, R))`)
 and the element of a list of tuples are tuples at their axis.
 
@@ -863,7 +905,9 @@ keep it. The missing arm of an `If` whose arm is a tuple of numbers is the tuple
 of NaN of its length, as the interpreter gives
 (`If(t ≤ W, Tuple(Cos(t), Sin(t)))` at `t > W` is `(NaN, NaN)`); a list arm, a
 boolean tuple and a `Which` with no `True` clause decline, as the interpreter
-gives `Missing` there. A tuple result of the root has `broadcastOutputs` of its
+gives `Missing` there. The missing arm of an `If` whose arm is a boolean of
+static type `boolean` is `False`, as in the interpreter (`maskedValue()`):
+`If(0 < x, 0 < y)` at `x = -1` is `False`. A tuple result of the root has `broadcastOutputs` of its
 type (`broadcastStrideOfType()`), so a batch with `outputs` gives its elements
 per cell. An input of a tuple type of scalars of one lane (`tuple<real, real>`;
 an integer among reals is a real) is the list of its elements, marked a tuple,
@@ -922,8 +966,12 @@ a loop, a `Map`, `Filter`, `Sum` or `Product` body, or a call of an effectful
 function) gives the interpreter's draws bit for bit: its draws start at index 0
 on entry of the frame. Any other frame compiles, in the compiler's order,
 deterministically, and the result carries a warning `seeded-draw-order` that
-names the frame and why. A draw is the engine's own (`makeRandomHelpers()` over
-the engine's frame slot): a compiled draw reads the frame it runs in.
+names the frame and why. A draw site is a `Random()`, a `RandomShuffle` or a
+`RandomChoice` (an effectful operation, or an effectful region row). A draw is
+the engine's own (`makeRandomHelpers()` over the engine's frame slot): a
+compiled draw reads the frame it runs in. A list of run-time length made in a
+frame (`WithRandomSeed(s, RandomChoice(…, n))`) has its length as a result of
+the frame too.
 
 ## Loops and the runtime
 
@@ -1065,15 +1113,21 @@ name. A recursive function that reads no input compiles.
 name, is the body with each parameter bound to its argument, the arguments
 lowered once, in order, before the body (as a `Block` of locals); a parameter
 shadows an input or a local of its name, and an argument reads the names
-outside. A list or a tuple argument declines (the interpreter maps a literal of
-scalar parameters over it, `applyLiteralMaps()`, and binds it whole when the
-literal's signature takes a collection), as do a typed parameter and another
-count of arguments; `Apply(g, x)` of a name is the call `g(x)` in the canonical
-form. A function value other than the literal of a `Map`, a `Filter`, an `Apply`
-or the root, and a list argument for a scalar parameter (the interpreter maps
-the function over the list) decline. A declared result `complex` of a real body
-is the body converted to the complex lane. A declared result `color` takes a
-body on the colour lane ("The colour lane"); a parameter `color` declines.
+outside. A flat list of numbers as the one argument of a literal of one
+parameter whose signature is scalar (`literalParamsMap()`, the test of the
+interpreter's `applyLiteralMaps()`, which maps the literal over the list) is
+`Map(literal, list)`:
+`Apply(k ↦ Which(k = m, 10^9, True, k), List(x^2, (x - 1)^2))`. Another list or
+tuple argument declines: a nested list (the interpreter maps to the leaves), a
+tuple and a list of points (atomic), a list of booleans, a list with several
+parameters, and a literal whose signature takes a collection (`k ↦ Length(k)`,
+which binds the list whole). A typed parameter and another count of arguments
+decline too; `Apply(g, x)` of a name is the call `g(x)` in the canonical form. A
+function value other than the literal of a `Map`, a `Filter`, an `Apply` or the
+root, and a list argument for a scalar parameter (the interpreter maps the
+function over the list) decline. A declared result `complex` of a real body is
+the body converted to the complex lane. A declared result `color` takes a body
+on the colour lane ("The colour lane"); a parameter `color` declines.
 
 A parameter declared a list of reals or integers
 (`(list<integer>, integer) -> integer`) is a list: of a stated length, which the
@@ -1165,10 +1219,10 @@ GLSL a result of a run-time length; one of a stated length is a `vecN` or a
   `At` of such a list is a loop or a read and compiles.
 - A loop or a build of 2^32 iterations or more throws on JavaScript; GLSL clamps
   its `int` bounds to ±2^30. GLSL has no run-time length, region, draw, frame or
-  recursion.
+  recursion; a build of a constant length is written out (at most 4,096 elements
+  in a program).
 - A list of lists of run-time length (other than an input's outer list), a
-  string seed, a list of run-time length made in a random frame, and `Random` of
-  a domain decline.
+  string seed and `Random` of a domain decline.
 - A copied list result is a `structuredClone`: two rows that are the same list
   in the result (`[L, L]`) stay one object in the copy.
 - A `real` local declared or assigned a value outside its type (NaN, a complex

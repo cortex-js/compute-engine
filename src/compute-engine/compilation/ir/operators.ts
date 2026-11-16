@@ -29,6 +29,7 @@
 
 import {
   elementType,
+  mapLengths,
   widensTo,
   type IRType,
   type Lane,
@@ -260,6 +261,7 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Factorial',    1,          [[[I], I, 'factorial.int'], [[R], R, 'factorial']], { fold: F.factorial }),
   // Rows of the integer lane only: the bigint mode spells them.
   row('Binomial',     2,          [[[I, I], I, 'binomial']],     list),
+  row('Choose',       2,          [[[I, I], I, 'binomial']],     list),
   row('GCD',          'variadic', [[[I], I, 'gcd']],             { ...list, fold: F.gcd }),
   row('LCM',          'variadic', [[[I], I, 'lcm']],             list),
   row('Factorial2',   1,          [[[R], R, 'factorial2']],      { fold: F.factorial2 }),
@@ -287,6 +289,9 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      2,          [[['list', I], 'element', 'elem']], part),
   // A draw of the active `WithRandomSeed` frame, or a live draw outside one.
   row('Random',       0,          [[[], R, 'draw']],             { ...list, effect: 'effectful' }),
+  // A shuffled copy of a list of numbers (`lower.ts` declines another
+  // list), drawn as the interpreter draws (`_SYS.shuffle`).
+  row('RandomShuffle', 1,         [[['list'], R, 'shuffle']],    { ...list, effect: 'effectful' }),
   // The number of elements of `Range(a, b, step)`: the engine's `rangeCount`
   // (of reals: `Range(1, 3.5)` is `[1, 2, 3]`).
   row(undefined,      3,          [[[R, R, R], I, 'rangecount']], { ...list, fold: rangeCount }),
@@ -317,7 +322,11 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
  * - `filter`: the elements whose first yield is true; the results are the
  *   count and the list.
  * - `seeded`: the region run in a new random frame of the seed; its yields
- *   are the results.
+ *   are the results, and a length that a yield names and that is a yield
+ *   is the result of that yield (the length of a list made in the frame).
+ * - `choice`: `RandomChoice(Interval(0, 1), n)`, the `n` draws of the
+ *   interpreter (its body is empty); the results are the count and the
+ *   list.
  *
  * `alias(j, yields)` gives the yields that the result `j` can be.
  */
@@ -329,7 +338,8 @@ export type RegionRow = {
   readonly results: (
     args: readonly V[],
     yields: readonly IRType[],
-    outs: readonly V[]
+    outs: readonly V[],
+    yieldValues?: readonly V[]
   ) => IRType[] | undefined;
   readonly alias: (j: number, yields: readonly V[]) => V[];
 };
@@ -367,8 +377,25 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
     effect: 'may-fail',
     args: [R],
     params: [],
-    results: (_, ys) => [...ys],
+    results: (_, ys, outs, vs = []) =>
+      ys.map((t) =>
+        mapLengths(t, (v) => (vs.includes(v) ? outs[vs.indexOf(v)] : v))
+      ),
     alias: (j, ys) => [ys[j]],
+  },
+  {
+    op: 'choice',
+    effect: 'effectful',
+    args: [R],
+    params: [],
+    results: (_, ys, [count]) =>
+      ys.length === 0
+        ? [
+            { lane: I, shape: [] },
+            { lane: R, shape: [{ v: count }] },
+          ]
+        : undefined,
+    alias: () => [],
   },
   // The engine's machine quadrature from `a` to `b` of the region's yield
   // at its parameter.

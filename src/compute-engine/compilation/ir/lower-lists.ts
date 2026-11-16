@@ -28,6 +28,7 @@ import {
   type Lowering,
   type Source,
 } from './lower-context.js';
+import { SCALARIZE_LIMIT } from './passes.js';
 
 /** The name of a parameter of a function literal: a symbol, or a symbol
  *  with a type (`Typed(z, "real")`). */
@@ -40,6 +41,8 @@ export function listLowering(cx: Lowering) {
   const { b, type } = cx;
   const op = (name: string) => rowOfOp(cx.rows, name)!.row;
   const integer = (n: number) => b.constant(n, 'integer');
+  // The elements of the builds written out on GLSL (`over()`).
+  let unrolled = 0;
 
   const listSource = (l: V): Source => {
     const n = type(l).shape[0];
@@ -60,7 +63,7 @@ export function listLowering(cx: Lowering) {
    *  tuple is a source only with `tuple` (`Length`, `Sum`, `Max`: the
    *  value on a tuple is the value on the list of its elements). */
   function source(e: Expression, scalars?: false, tuple?: boolean): Source;
-  function source(e: Expression, scalars: true, tuple: true): Source | V;
+  function source(e: Expression, scalars: true, tuple?: boolean): Source | V;
   function source(e: Expression, scalars = false, tuple = false): Source | V {
     // A host's `Range` (`hasOwnLowering()`) declines in `cx.value()`.
     if (
@@ -228,8 +231,13 @@ export function listLowering(cx: Lowering) {
     if (red.indexed && e.nops === 2 && isFunction(e.ops[1], 'Limits'))
       return aggregate(e, r);
     const items = e.ops.map((x) => source(x, true, true));
-    if (!red.indexed && items.every((x) => typeof x === 'number'))
+    if (!red.indexed && items.every((x) => typeof x === 'number')) {
+      // `Max(x)` of one real is `x`; of a boolean or a complex number the
+      // interpreter leaves it unevaluated (a decline of `apply()`).
+      const one = items.length === 1 && type(items[0] as V).lane;
+      if (one === 'real' || one === 'integer') return items[0] as V;
       return cx.apply(e, r, items as V[]);
+    }
     const lane = Number.isFinite(red.identity) ? 'integer' : 'real';
     return reduce(e, r, items, b.constant(red.identity, lane), red.empty);
   };
@@ -258,6 +266,22 @@ export function listLowering(cx: Lowering) {
     filter: boolean,
     site: Expression
   ): V => {
+    // A target with no list of a run-time length has no build (GLSL): a
+    // build of a constant length of at most `SCALARIZE_LIMIT` is the list
+    // of its elements, the body lowered once per element, in order.
+    const n = cx.runtimeLengths ? undefined : cx.constant(s.length);
+    if (!filter && n !== undefined && n >= 1 && n <= SCALARIZE_LIMIT) {
+      unrolled += n;
+      if (unrolled > SCALARIZE_LIMIT ** 2)
+        decline(e, `builds of more than ${SCALARIZE_LIMIT ** 2} elements`);
+      const elements = Array.from({ length: n }, (_, j) =>
+        cx.withFrame(true, (frame) => {
+          frame.names.set(name, { v: s.at(integer(j)), role: 'index' });
+          return cx.value(body)!;
+        })
+      );
+      return cx.list(e, elements);
+    }
     const k = b.newValue(scalarType('integer'));
     const outs = cx.region(
       filter ? 'filter' : 'build',
@@ -288,6 +312,7 @@ export function listLowering(cx: Lowering) {
    *  an effect declines. */
   const comprehension = (e: Fn): V => {
     const c = e.ops[1];
+    if (e.nops > 2) return product(e);
     if (
       e.nops !== 2 ||
       !isFunction(c, 'Element') ||
@@ -312,5 +337,108 @@ export function listLowering(cx: Lowering) {
     return v;
   };
 
-  return { source, listSource, reduce, reduction, build, comprehension };
+  /** A `Comprehension` of several clauses `Element(i, L)`, none of whose
+   *  lists reads an index: the flat list over the Cartesian product of the
+   *  lists, the last index the fastest, as in the interpreter. One build
+   *  over the product of the lengths, whose index `k` gives the index of
+   *  the clause `j` as `Floor(k / s_j) mod n_j`, `s_j` the product of the
+   *  lengths after it (exact for a total below 2^53). */
+  const product = (e: Fn): V => {
+    const names: string[] = [];
+    const before = b.effects;
+    const sources = e.ops.slice(1).map((c) => {
+      if (
+        !isFunction(c, 'Element') ||
+        c.nops !== 2 ||
+        !isSymbol(c.ops[0]) ||
+        (names.length > 0 && c.ops[1].has(names))
+      )
+        decline(
+          e,
+          'a Comprehension of several clauses that are not each Element(i, L) of a list that reads no index'
+        );
+      names.push(c.ops[0].symbol);
+      return source(c.ops[1]);
+    });
+    const mul = (x: V, y: V) => cx.apply(e, cx.row('Multiply'), [x, y]);
+    const strides = sources.reduceRight<V[]>(
+      (s, x, j) => (j === 0 ? s : [mul(x.length, s[0]), ...s]),
+      [integer(1)]
+    );
+    const k = b.newValue(scalarType('integer'));
+    const [v] = cx.region(
+      'build',
+      [mul(sources[0].length, strides[0])],
+      [k],
+      () =>
+        cx.withFrame(true, (frame) => {
+          sources.forEach((s, j) => {
+            const q = cx.apply(e, cx.row('Floor'), [
+              cx.apply(e, cx.row('Divide'), [k, strides[j]]),
+            ]);
+            const i = j === 0 ? q : cx.apply(e, cx.row('Mod'), [q, s.length]);
+            frame.names.set(names[j], { v: s.at(i), role: 'index' });
+          });
+          const y = cx.value(e.ops[0])!;
+          if (lengthValues(type(y)).length > 0)
+            decline(e, 'a list of lists of run-time length');
+          return [y];
+        }),
+      e
+    );
+    if (b.effects > before)
+      decline(
+        e,
+        'a Comprehension of several clauses with an effect (the interpreter evaluates a list once for each element of the clauses before it, and its elements lazily)'
+      );
+    return v;
+  };
+
+  /** `ListJoin(L1, …, Ln)` of lists and scalars (a scalar is a list of one
+   *  element): a build over the sum of the lengths, whose element at `k` is
+   *  the element of the first list whose end is after `k`. */
+  const join = (e: Fn): V => {
+    if (e.nops === 0) decline(e, 'ListJoin with no operand');
+    const parts = e.ops.map((x) => source(x, true));
+    const length = (x: Source | V) =>
+      typeof x === 'number' ? integer(1) : x.length;
+    const ends: V[] = [];
+    for (const x of parts)
+      ends.push(
+        ends.length === 0
+          ? length(x)
+          : cx.apply(e, cx.row('Add'), [ends[ends.length - 1], length(x)])
+      );
+    const k = b.newValue(scalarType('integer'));
+    const at = (j: number): V => {
+      const x = parts[j];
+      const read = () =>
+        typeof x === 'number'
+          ? x
+          : x.at(
+              j === 0 ? k : cx.apply(e, cx.row('Subtract'), [k, ends[j - 1]])
+            );
+      if (j === parts.length - 1) return read();
+      const inside = cx.apply(e, cx.row('Less'), [k, ends[j]]);
+      return cx.branch(e, inside, read, () => at(j + 1), true)!;
+    };
+    return cx.region(
+      'build',
+      [ends[ends.length - 1]],
+      [k],
+      () => [at(0)],
+      e
+    )[0];
+  };
+
+  return {
+    source,
+    listSource,
+    reduce,
+    reduction,
+    build,
+    over,
+    comprehension,
+    join,
+  };
 }

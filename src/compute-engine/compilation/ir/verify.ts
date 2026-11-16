@@ -204,7 +204,7 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
           fail(`${i.op}: the parameters of its region`);
         r.params.forEach((v, k) => sub(v, scalarType(row.params[k]), i.op));
         const expected =
-          row.results(i.args, r.yields.map(type), i.outs) ??
+          row.results(i.args, r.yields.map(type), i.outs, r.yields) ??
           fail(`${i.op}: its yields`);
         if (expected.length !== i.outs.length) fail(`${i.op}: its yields`);
         i.outs.forEach((o, k) => {

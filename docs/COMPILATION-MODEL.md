@@ -163,6 +163,11 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `javascript`, profile `ir` (crafted), `x: real`: `Zeta(x)` at
   `x = -171.5` gives `Infinity` (the machine kernel overflows below about
   `-171`); the interpreter at the default precision gives `4.739e172`.
+- `javascript`, profile `ir` (crafted), `p`, `q: tuple<real, real>`:
+  `Abs(p)` and `Distance(p, q)` are `Math.sqrt(x*x + y*y)`, which squares
+  the coordinates: at `p = (3e200, 4e200)`, `q = (0, 0)` both give
+  `Infinity`, and at `p = (3e-200, 4e-200)` both give `0`; the interpreter
+  gives `5e200` and `5e-200`.
 - `glsl`, profile `ir` (crafted), `x: real`, `y: real`: `Power(x, y)` with a
   negative `x` and a `y` that is not an integer gives `NaN` (`pow()` is
   undefined there in GLSL ES 3.00), also where the interpreter has a real

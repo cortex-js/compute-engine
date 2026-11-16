@@ -43,6 +43,10 @@ const C = (json: Json, centres?: number[]): Case => ({ json, centres });
 const x = 'x';
 const y = 'y';
 const T = (body: Json) => ['Function', body, 't'];
+/** A literal of one untyped parameter, which `Apply` maps over a flat list
+ *  as the interpreter does (CE-1344). */
+const K = (body: Json) => ['Function', body, 'k'];
+const squares = ['List', ['Power', x, 2], ['Power', ['Subtract', x, 1], 2], ['Power', ['Subtract', x, 2], 2]];
 const list3 = ['List', x, ['Multiply', 2, x], ['Power', x, 2]];
 
 // prettier-ignore
@@ -69,6 +73,14 @@ const CASES: Case[] = [
   C(['Sum', 'L']), C(['Product', 'L']), C(['Max', 'L']), C(['Min', 'L']),
   C(['Length', 'L']), C(['Max', 'L', x]), C(['Sum', 'V']), C(['Max', ['List', x, y, ['Multiply', x, y]]]),
   C(['Add', ['Sum', 'B'], x]),
+  // `ListJoin`: lists and scalars, read by `At` and `Sum`.
+  C(['ListJoin', 'L', 'V']), C(['ListJoin', 'L', x]), C(['ListJoin', x, 'L', y]),
+  C(['Sum', ['ListJoin', 'L', ['List', x, y]]]),
+  C(['At', ['ListJoin', list3, 'L'], ['Add', ['Floor', y], 1]], [0, 1, 3, 4, 6]),
+  // A `Comprehension` of two clauses over lists of inputs.
+  C(['Comprehension', ['Multiply', 'j', 'k', x], ['Element', 'j', 'V'], ['Element', 'k', 'V']]),
+  C(['Comprehension', ['Add', 'j', ['Multiply', 'k', x]], ['Element', 'j', 'L'], ['Element', 'k', 'V']]),
+  C(['Sum', ['Comprehension', ['Multiply', 'j', 'k', x], ['Element', 'j', 'V'], ['Element', 'k', 'L']]]),
   // Builds and filters.
   C(['Map', T(['Multiply', ['Sin', 't'], x]), 'L']),
   C(['Add', 'L', ['Map', T(['Sin', 't']), 'L']]),
@@ -91,6 +103,20 @@ const CASES: Case[] = [
   C(['PointList', 'L', ['Multiply', 2, 'L']]), C(['Map', T(['Greater', 't', x]), 'L']),
   C(['Sum', ['Multiply', ['At', 'L', 'k'], x], ['Limits', 'k', 1, 3]]),
   C(['At', 'L', ['Max', 1, ['Min', 4, ['Add', ['Floor', x], 1]]]], [0, 3, 4]),
+  // `Apply` of a literal of one untyped parameter over a flat list (the
+  // interpreter maps it; the path of `Map`), read by a reduction, by `At`,
+  // with a condition that is undecided over the box, and Tycho's witness of
+  // CE-1344 with its `Map` control. The existing target declines `Apply`
+  // over a list, so only the `Map` control is compared with it.
+  C(['Apply', K(['Multiply', 'k', x]), 'L']), C(['Apply', K(['Sin', 'k']), 'V']),
+  C(['Apply', K(['Multiply', 'k', x]), ['List', 1, 2, 3]]),
+  C(['Sum', ['Apply', K(['Power', 'k', 2]), 'L']]),
+  C(['Max', ['Apply', K(['If', ['Greater', 'k', x], 'k', x]), 'V']], [0]),
+  C(['At', ['Apply', K(['Multiply', 2, 'k']), 'L'], ['Add', ['Floor', x], 1]], [0, 3, 4]),
+  C(['Min', ['Apply', K(['Which', ['Equal', 'k', y], 1e9, 'True', 'k']), squares]], [0, 1, 2]),
+  C(['Min', ['Map', K(['Which', ['Equal', 'k', y], 1e9, 'True', 'k']), squares]], [0, 1, 2]),
+  // `Min` and `Max` of one scalar operand are the operand.
+  C(['Min', x]), C(['Max', ['Add', x, y]]), C(['Min', ['Apply', K(['Abs', 'k']), 'L']]),
   // Element-wise powers by a constant exponent.
   C(['Power', 'L', 3]), C(['Power', ['List', x, 2], 3]), C(['Power', 'L', 2]),
   C(['Power', 'L', -1], [0]),
@@ -429,8 +455,14 @@ describe('the interval mode, lists: declines', () => {
     [['Range', 0.5, x], /a Range of a real operand on interval-js/],
     [['At', 'Q', ['Floor', x]], /an index that can be out of range/],
     [['Linspace', 0, 1, 5], /the operator Linspace is not in the slice/],
-    [['RandomChoice', 'L', 2], /the operator RandomChoice is not in the slice/],
-    [['Comprehension', ['Multiply', 'j', 'k'], ['Element', 'j', ['Range', 1, 3]], ['Element', 'k', ['Range', 1, 3]]], /not of one clause/],
+    [['RandomChoice', 'L', 2], /RandomChoice of another domain than Interval\(0, 1\)/],
+    [['Comprehension', ['Multiply', 'j', 'k'], ['Element', 'j', ['Range', 1, 3]], ['Element', 'k', ['Range', 1, 3]]], /a list whose length is not one number/],
+    // `Apply` over a list still declines where the interpreter does not map
+    // a flat list: a nested list, a tuple, a literal of several parameters.
+    [['Apply', K(['Multiply', 'k', x]), ['List', ['List', 1, 2], ['List', 3, 4]]], /a list or a tuple argument of Apply/],
+    [['Apply', K(['Multiply', 'k', x]), 'P'], /a list or a tuple argument of Apply/],
+    [['Apply', K(['Multiply', 'k', x]), ['Tuple', x, y]], /a list or a tuple argument of Apply/],
+    [['Apply', ['Function', ['Add', 'j', 'k'], 'j', 'k'], 'L', x], /a list or a tuple argument of Apply/],
     [['Block', ['Declare', 'q', "'real'", 0], ['Loop', ['Assign', 'q', ['Add', 'q', 't']], ['Element', 't', 'L']], 'q'], /a Loop: the interval mode does not compile it yet on interval-js/],
   ])('%j', (json, cause) => {
     expect(() => mode(json)).toThrow(cause);

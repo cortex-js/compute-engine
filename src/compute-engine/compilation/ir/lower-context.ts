@@ -147,6 +147,8 @@ export type Lowering = {
     f: () => V[],
     site: Expression
   ): V[];
+  /** The list of `elements` (`List(…)`). */
+  list(e: Fn, elements: V[]): V;
   /** `e` is a call of the library operator of its name (not a user
    *  function, not a shadowed name). */
   isLibrary(e: Fn): boolean;

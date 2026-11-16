@@ -62,6 +62,7 @@ import {
   isShadowedSymbol,
   shadowsLibraryName,
 } from '../../library-shadowing.js';
+import { literalParamsMap } from '../../library/core.js';
 import {
   Builder,
   isSubLane,
@@ -218,7 +219,9 @@ export function lower(
     (i) =>
       i.k === 'op'
         ? rowOfOp(rows, i.op)?.row.effect === 'effectful'
-        : i.k === 'call' && fns.effect(i.fn) === 'effectful'
+        : i.k === 'call'
+          ? fns.effect(i.fn) === 'effectful'
+          : i.k === 'region' && regionRow(i.op)?.effect === 'effectful'
   );
   const frames: Frame[] = [{ names: new Map(), loop: false }];
   const memo = new Map<
@@ -694,7 +697,14 @@ export function lower(
     if (closed !== undefined) return closed;
     switch (e.operator) {
       case 'If':
-        return conditional(e, [[e.ops[0], e.ops[1]]], e.ops[2], want);
+        // The missing arm of a boolean is `False`, as in the interpreter
+        // (`maskedValue()`); of a number NaN (`conditional()`).
+        return conditional(
+          e,
+          [[e.ops[0], e.ops[1]]],
+          e.ops[2] ?? (e.ops[1].type.type === 'boolean' ? ce.False : undefined),
+          want
+        );
       case 'Which': {
         if (e.nops % 2 !== 0) decline(e, 'an odd number of operands');
         const clauses: [Expression, Expression][] = [];
@@ -735,6 +745,54 @@ export function lower(
         return pointList(e);
       case 'Comprehension':
         return lists.comprehension(e);
+      // The list of the tuples of the elements at each index, as long as
+      // the shortest list: the value of `PointList` of lists. The
+      // interpreter stops at the shortest list, so a list with an effect
+      // declines.
+      case 'Zip': {
+        const before = b.effects;
+        const v = pointList(e);
+        if (b.effects > before)
+          decline(
+            e,
+            'Zip of a list with an effect (the interpreter reads the lists up to the shortest)'
+          );
+        return v;
+      }
+      case 'ListJoin':
+        return lists.join(e);
+      case 'RandomChoice': {
+        // Of the unit interval only: the interpreter's draws are its own
+        // (`_SYS.randomChoice`), `lo + u·(hi − lo)` of each draw `u`.
+        const [d, n] = e.ops;
+        const end = (x: Expression) => (isFunction(x, 'Open') ? x.ops[0] : x);
+        if (
+          e.nops !== 2 ||
+          !isFunction(d, 'Interval') ||
+          d.nops !== 2 ||
+          !isNumber(end(d.ops[0])) ||
+          !end(d.ops[0]).isSame(0) ||
+          !isNumber(end(d.ops[1])) ||
+          !end(d.ops[1]).isSame(1)
+        )
+          decline(e, 'RandomChoice of another domain than Interval(0, 1)');
+        const count = scalar(n);
+        if (!isSubLane(type(count).lane, 'real'))
+          decline(n, 'a count that is not a real number');
+        return region('choice', [count], [], () => [], e)[1];
+      }
+      case 'RandomShuffle': {
+        const l = value(e.ops[0])!;
+        const t = type(l);
+        if (
+          e.nops !== 1 ||
+          tuples.has(l) ||
+          t.shape.length !== 1 ||
+          !isSubLane(t.lane, 'real')
+        )
+          decline(e, 'RandomShuffle of a value that is not a list of numbers');
+        return apply(e, row('RandomShuffle'), [l]);
+      }
       case 'At': {
         if (e.nops !== 2) decline(e, 'At with an index for each level');
         const [l, i] = [value(e.ops[0])!, scalar(e.ops[1])];
@@ -931,18 +989,37 @@ export function lower(
             e,
             'Apply of a value that is not a function literal of one untyped parameter per argument'
           );
-        // A list or a tuple argument declines: the interpreter maps a
-        // literal over it unless its signature takes a collection
-        // (`applyLiteralMaps()`).
+        // A list argument of a literal of one parameter whose signature
+        // is scalar is `Map(f, list)`, the interpreter's route
+        // (`applyLiteralMaps()`) for a flat list of numbers. Another list
+        // or tuple argument declines: the interpreter maps a nested list to
+        // its leaves, a tuple is atomic, and a signature that takes a
+        // collection binds the argument whole.
+        const maps = args.length === 1 && literalParamsMap(f.type.type);
         const values = args.map((a) => {
           const v = value(a)!;
-          if (type(v).shape.length > 0)
+          const t = type(v);
+          const flat =
+            t.shape.length === 1 &&
+            !tuples.has(v) &&
+            (t.lane === 'real' || t.lane === 'integer');
+          if (t.shape.length > 0 && !(maps && flat))
             decline(
               a,
               'a list or a tuple argument of Apply (the interpreter may map the function over it)'
             );
           return v;
         });
+        // The argument is lowered once: its effects run once.
+        if (maps && type(values[0]).shape.length > 0)
+          return lists.over(
+            e,
+            lists.listSource(values[0]),
+            names[0],
+            f.ops[0],
+            false,
+            f
+          );
         return withFrame(false, (frame) => {
           names.forEach((n, i) =>
             frame.names.set(n, { v: values[i], role: 'index' })
@@ -1516,17 +1593,21 @@ export function lower(
     const { region, result, after, bindings, before } = arm(f);
     const changed = bindings.filter((_, i) => after[i] !== before[i]);
     if (want && result === undefined) decline(node, 'a frame with no value');
-    // A value made in the frame is not visible after it.
-    if (
-      want &&
-      lengthValues(type(result!)).some(
-        (n) => n >= start && !inputLengths.has(n)
-      )
-    )
-      decline(node, 'a list of run-time length made in a random frame');
+    // A value made in the frame is not visible after it: the length of a
+    // list made in the frame is a result too (the row `seeded`).
+    const lengths = want
+      ? lengthValues(type(result!)).filter(
+          (n) => n >= start && !inputLengths.has(n)
+        )
+      : [];
     region.yields.push(...changed.map((x) => after[bindings.indexOf(x)]));
+    region.yields.push(...lengths);
     if (want) region.yields.push(result!);
-    const outs = region.yields.map((y) => keep(y, b.newValue(type(y))));
+    const ys = region.yields;
+    const outs = ys.map((y) => keep(y, b.newValue(type(y))));
+    regionRow('seeded')!
+      .results([seed], ys.map(type), outs, ys)!
+      .forEach((t, k) => (b.types[outs[k]] = t));
     b.emit({
       k: 'region',
       outs,
@@ -1964,6 +2045,7 @@ export function lower(
     branch,
     withFrame,
     region,
+    list,
     isLibrary,
     free,
     widen,

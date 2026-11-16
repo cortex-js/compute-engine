@@ -473,6 +473,17 @@ describe('the interval mode: verdicts', () => {
     expect(r.run({ x: { lo: -1, hi: 1 }, y: { lo: 0, hi: 0 } })).toBe('true');
     expect(r.run({ x: { lo: -1, hi: 1 }, y: { lo: 5, hi: 5 } })).toBe('false');
   });
+  test('an If of a boolean arm with no else arm is the And of the condition and the arm', () => {
+    // The interpreter gives `False` for the missing arm of a boolean.
+    const r = mode(['If', ['Less', 0, 'x'], ['Less', 0, 'y']]);
+    const boxes: [{ lo: number; hi: number }, string][] = [
+      [{ lo: -2, hi: -1 }, 'false'],
+      [{ lo: -1, hi: 1 }, 'maybe'],
+      [{ lo: 1, hi: 2 }, 'true'],
+    ];
+    for (const [x, c] of boxes)
+      for (const [y, a] of boxes) expect(r.run({ x, y })).toBe(and(c, a));
+  });
 });
 
 describe('the interval mode: loops at run time', () => {

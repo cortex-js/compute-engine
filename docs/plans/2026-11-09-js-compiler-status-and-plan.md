@@ -2048,6 +2048,86 @@ the next one is shared with session `ce-interval`, on a commit that holds
 several batches of both, with one request for one audit over the three
 seams.
 
+Batches G17 and G18, 2026-11-15, landed together on
+`817f3a87ce4cb10aac942ca465604d1d9d6bf0ad` (which holds the interval mode's
+batches 4 to 6).
+
+G17, list operators of Tycho's decline groups, JavaScript. `ListJoin` is one
+build over the sum of the lengths (the element at `k` is read from the first
+list whose end is after `k`). `Zip` is the value of `PointList`; a list with
+an effect declines. A `Comprehension` of several clauses is one build over
+the product of the lengths (index of clause `j`: `Floor(k / s_j) mod n_j`);
+a clause list that reads an earlier index, a clause with a condition, and an
+effect in a clause list or in the body decline. `Choose` is the row of
+`Binomial`, integer operands, `_SYS.binomial` on JavaScript.
+`RandomChoice(Interval(0, 1), n)` is a region row `choice`
+(`_SYS.randomChoice`) and `RandomShuffle` an effectful row (`_SYS.shuffle`):
+the interpreter's sequences under `WithRandomSeed`; the length of a list made
+in a seeded frame is a yield of the frame. An `If` with a boolean arm and no
+else arm gives `False` (also on GLSL). The witness "a list of points times a
+list of numbers" already compiled since G14 (Tycho's decline record predates
+it). Dual review: both reviewers found that the builder did not count the
+region `choice` as an effect (one `RandomChoice` node read twice drew once,
+and the effect checks of `Zip`, comprehensions and integrals missed it) and
+that a later clause list with an effect was read once where the interpreter
+reads it once per element of the earlier clauses; fixed, with `ListJoin()` of
+no operand (an internal error) and the test of the unit interval (`isSame`).
+
+G18, issue CE-1344 (`Apply` of a function literal over a scalar or a flat
+list, for Tycho's macro adoption). Three causes on the profile: (1) `Min(v)`
+and `Max(v)` of one real or integer scalar declined; they are `v`. (2)
+`Apply` of a literal of one parameter over one flat list of reals or integers,
+when `literalParamsMap()` holds (the interpreter's own test in
+`applyLiteralMaps()`), is the build of `Map` (`lists.over()`), on JavaScript
+and in the interval mode; the argument is lowered once. A nested list, a
+tuple, a list of points or booleans, several parameters and a typed parameter
+decline. (3) GLSL had no build: a `Map` (and a one-clause `Comprehension`)
+over a source of a constant length of 1 to 64 lowers its body once per
+element into a list (`vecN` or `float[n]`); at most 4,096 such elements per
+program; `Filter`, `Range` and run-time lengths decline. Values checked in
+WebGL 2. Dual review: Codex nothing; Claude found the argument lowered twice
+(a write or a draw in it ran twice): fixed. Tycho's instrument calls the
+default route: it is READY only with `profile: 'ir'`. Filed: CE-1345 and
+CE-1348 (the engine's construction of a shared graph of function literals,
+and `analyzeReferences()` on GLSL, double per level).
+
+Measured in a worktree at `817f3a87c` plus the two patches; 9,424 lines in
+`ir/`, the interval mode included:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 12,219 of 12,568 (97.2%) |
+| Every JavaScript compile | 19,122 of 30,401 (62.9%) |
+| Public JavaScript `compile()` calls | 6,898 of 17,830 (38.7%); 6,820 of the 15,029 that the existing compiler compiles (45.4%) |
+| GLSL `compile()` calls | 1,161 of 2,400 (48.4%); 1,094 of the 1,596 that the existing target compiles (68.5%) |
+| `interval-js` `compile()` calls | 1,470 of 2,663 (55.2%); 1,429 of the 2,131 that the existing target compiles (67.1%) |
+
+Both runs green (2,047 suites, 85,296 tests). Programs that the existing
+compiler declines and the profile admits: JavaScript 78 (76 before: the
+two-clause comprehension of `clause-scope-free-variables.test.ts`, compiled
+twice, with the interpreter's values), GLSL 67 (63: the four nested `Map`s of
+`ce-605-gpu-nested-map.test.ts`, checked in WebGL 2 against the
+interpreter), `interval-js` 41 (27: thirteen programs of the containment
+tests added with these batches, and one of the interval mode's batch 6).
+
+Census run 2 of the default (`CE_JS_PROFILE_PUBLIC=ir npm test`, at
+`77a218dc4`; record `_TASKS/2026-11-15-default-census/run2/`): the suite
+ends in 185 s with no hang; 1,676 tests fail (2,475 in run 1): 1,080 pin a
+text, 141 a result field; the 54 of the class "profile wrong" that still
+fail are the constants beyond 2^53 of group D2 (26), `Arcsin(2)` in strict
+(24, user decision) and the overflowing integrand (4, user decision). New
+contract items for the default: a run-time bound or step that is not finite
+throws a `RangeError` (existing: NaN or an empty list); `PointZ` of a list of
+2-D points is a list of NaN (existing: one NaN); a zip wider than the
+iteration budget is not capped.
+
+Build for Tycho (user, 2026-11-15): the joint audit runs on `3592da6cb`;
+CE-1344 goes to the session that adopts the macros as a local tarball,
+made without npm: in a worktree at the commit, the version set to
+`0.193.0-tycho.<short sha>`, `npm run clean && npm run build`, then
+`npm pack --ignore-scripts` (8 s; the release hooks of a plain `npm pack`
+check the npm login and run the full suite again).
+
 Found after the review, to settle before the default:
 
 - A hang, with the switch `CE_JS_PROFILE_PUBLIC=ir`:
