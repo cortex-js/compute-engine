@@ -513,14 +513,46 @@ export function sliceProgram(
     {
       ...passes,
       scalarize: !profile.elementwise,
-      ...(bigint ? { fold: false, hoist: false, invariants: false } : {}),
-      ...(interval ? { fold: false, strength: false } : {}),
+      ...(bigint
+        ? { fold: false, hoist: false, inline: false, invariants: false }
+        : {}),
+      // The interval mode also copies a call made twice by its caller.
+      ...(interval
+        ? {
+            fold: false,
+            strength: false,
+            inline: passes.inline && 'repeated',
+          }
+        : {}),
       ...(interval && Math.floor(options.iterationBudget ?? Infinity) < 2 ** 32
         ? { listLoops: false }
         : {}),
     },
     rows
   );
+  // A function that no call reaches from the entry (each of its calls is a
+  // copy, the pass `inline`) leaves the program: no call passes it a list in
+  // storage, so `holdStorage()` would leave its parameter an array. Its name
+  // stays a dependency of the code, in `captures`.
+  const reached = new Set([p.entry]);
+  const reach = (r: Region): void =>
+    r.body.forEach((i) => {
+      if (i.k === 'call') reached.add(i.fn);
+      regionsOf(i).forEach(reach);
+    });
+  for (const name of reached)
+    reach(p.functions.find((f) => f.name === name)!.body);
+  const dropped = p.functions.filter((f) => !reached.has(f.name));
+  if (dropped.length > 0) {
+    p.functions.splice(
+      0,
+      Infinity,
+      ...p.functions.filter((f) => reached.has(f.name))
+    );
+    Object.assign(p, {
+      captures: [...(p.captures ?? []), ...dropped.map((f) => f.source!)],
+    });
+  }
   if (interval) {
     const refused = plain(p);
     if (refused !== undefined)

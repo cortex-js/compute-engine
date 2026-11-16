@@ -19,6 +19,8 @@
  *   conditional becomes the `and` or `or` it is.
  * - `strength`: `pow` with a literal exponent 1 to 16 is a product: the
  *   definition of `pow` (`realPow()`).
+ * - `inline`: a call of a small user function is a copy of its body
+ *   (`inline` below), so that `cse` and `invariants` see the calls it makes.
  * - `cse`: an instruction that repeats an earlier mergeable one whose value
  *   is visible reads that value instead, and so does a call of a function
  *   that is not effectful and not on a cycle of calls (each of its results).
@@ -28,7 +30,8 @@
  * - `dce`: an instruction whose values are not read (by an instruction, a
  *   yield or a type) is removed, when it is removable.
  *
- * `fold`, `hoist`, `strength`, `cse`, `invariants` and `dce` run again while
+ * `fold`, `hoist`, `strength`, `inline`, `cse`, `invariants` and `dce` run
+ * again while
  * one of them changes the program: `cse` then merges a value moved out of
  * two loops. After each pass the program is verified, and its
  * effectful instructions must be the same, in the same regions and order,
@@ -70,6 +73,10 @@ export type PassOptions = {
   fold?: boolean;
   hoist?: boolean;
   strength?: boolean;
+  /** The calls that `inline` replaces: `'loop'`, a call in the body of a
+   *  `loop`, a `build` or a `filter`; `'repeated'`, also a call of a
+   *  function that its caller calls twice or more. */
+  inline?: 'loop' | 'repeated' | false;
   cse?: boolean;
   invariants?: boolean;
   /** `invariants` moves a loop over the elements of a list that exists out
@@ -84,10 +91,16 @@ export const ALL_PASSES: PassOptions = Object.freeze({
   fold: true,
   hoist: true,
   strength: true,
+  inline: 'loop',
   cse: true,
   invariants: true,
   dce: true,
 });
+
+/** The most instructions of a body that `inline` copies (arms included),
+ *  and of all its copies in one program. */
+export const INLINE_SIZE = 64;
+export const INLINE_BUDGET = 1000;
 
 /** A pass: whether it changed the program, and how it renamed values. */
 type Pass = (
@@ -116,11 +129,15 @@ export function runPasses(
     return changed;
   };
   if (options.scalarize) run('scalarize', scalarize);
+  const budget = { left: INLINE_BUDGET };
   for (let round = 0; round < 8; round++) {
     let changed = false;
     if (options.fold) changed = run('fold', fold) || changed;
     if (options.hoist) changed = run('hoist', hoist) || changed;
     if (options.strength) changed = run('strength', strength) || changed;
+    const where = options.inline;
+    if (where)
+      changed = run('inline', (q, r) => inline(q, r, where, budget)) || changed;
     if (options.cse) changed = run('cse', cse) || changed;
     if (options.invariants)
       changed =
@@ -457,6 +474,92 @@ const repeated = (i: Instr): Region | undefined =>
     : i.k === 'region' && (i.op === 'build' || i.op === 'filter')
       ? i.regions[0]
       : undefined;
+
+/** The number of instructions of `r`, nested regions included. */
+const size = (r: Region): number =>
+  r.body.reduce((n, i) => regionsOf(i).reduce((m, x) => m + size(x), n + 1), 0);
+
+/** The pass `inline` (README, "User functions", the rule): a call that
+ *  `where` names is a copy of its callee's body. */
+const inline = (
+  p: Program,
+  rows: readonly OperatorRow[],
+  where: 'loop' | 'repeated',
+  budget: { left: number }
+): ReturnType<Pass> => {
+  const fx = effects(p, rows);
+  const cyclic = recursiveFunctions(p.functions);
+  const byName = new Map(p.functions.map((f) => [f.name, f.body]));
+  // Each call: its function, and whether it is in a repeated body; the
+  // number of calls of each callee in each function.
+  type Site = { fn: string; loop: boolean };
+  const sites = new Map<Instr, Site>();
+  const counts = new Map<string, number>();
+  const site = (i: Instr & { k: 'call' }, s: Site) => {
+    sites.set(i, s);
+    counts.set(`${s.fn} ${i.fn}`, (counts.get(`${s.fn} ${i.fn}`) ?? 0) + 1);
+  };
+  const walk = (fn: string, r: Region, loop: boolean): void =>
+    r.body.forEach((i) => {
+      if (i.k === 'call') site(i, { fn, loop });
+      regionsOf(i).forEach((x) => walk(fn, x, loop || repeated(i) === x));
+    });
+  p.functions.forEach((f) => walk(f.name, f.body, false));
+  // The functions whose body, or the body of a function it calls, holds an
+  // `At`.
+  const reads = new Set<string>();
+  for (let more = true; more;) {
+    more = false;
+    for (const f of p.functions) {
+      const at = (z: Instr) =>
+        (z.k === 'op' && z.op === 'at') || (z.k === 'call' && reads.has(z.fn));
+      if (reads.has(f.name) || !f.body.body.some((x) => some(x, at))) continue;
+      reads.add(f.name);
+      more = true;
+    }
+  }
+  return rewrite(p, (i, { subst, constants }) => {
+    if (i.k !== 'call' || fx.of(i) === 'effectful' || cyclic.has(i.fn))
+      return undefined;
+    const g = byName.get(i.fn)!;
+    const s = sites.get(i)!;
+    const n = size(g);
+    const m = new Map(g.params.map((q, k) => [q, i.args[k]]));
+    const v = (x: V) => m.get(x) ?? x;
+    if (
+      n > Math.min(INLINE_SIZE, budget.left) ||
+      i.outs.length !== 1 ||
+      !sameLane(p, v(g.yields[0]), i.outs[0]) ||
+      g.body.some((x) => some(x, (z) => z.k === 'loop' || z.k === 'region')) ||
+      // An `At` whose index the copy makes a constant out of range declines
+      // on GLSL, where the call gives NaN.
+      (i.args.some((a) => constants.has(a)) && reads.has(i.fn)) ||
+      i.args.some(
+        (a, k) => p.types[a].shape.length > 0 && !sameLane(p, a, g.params[k])
+      ) ||
+      !(s.loop || (where === 'repeated' && counts.get(`${s.fn} ${i.fn}`)! > 1))
+    )
+      return undefined;
+    budget.left -= n;
+    const out = (x: V) => m.set(x, fresh(p, mapLengths(p.types[x], v))).get(x)!;
+    const copy = (r: Region): Region => ({
+      params: [],
+      body: r.body.map((x) => {
+        const c = { ...x };
+        mapDirectArgs(c, v);
+        if (c.k === 'if') [c.then, c.else] = [copy(c.then), copy(c.else)];
+        if (c.k === 'call') site(c, s);
+        if ('outs' in c) c.outs = c.outs.map(out);
+        else c.out = out(c.out);
+        return c;
+      }),
+      yields: r.yields.map(v),
+    });
+    const { body, yields } = copy(g);
+    subst.set(i.outs[0], yields[0]);
+    return body;
+  });
+};
 
 /**
  * An instruction at the top level of a repeated body that reads no

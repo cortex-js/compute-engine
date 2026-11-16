@@ -22,7 +22,7 @@ profile. A failure of the verifier or of the effect-trace check is a
 | `ir.ts`                        | Types, instructions, functions, the builder, the def-use index                 | Know a target                            |
 | `effects.ts`                   | The effect of an instruction and of a function; the eligibility queries; trace |                                          |
 | `verify.ts`                    | Definitions, dominance (of values and lengths), types from the tables, calls   | Re-derive a type rule                    |
-| `passes.ts`                    | `scalarize`, `fold`, `strength`, `hoist`, `cse`, `invariants`, `dce`           | Change the effect trace                  |
+| `passes.ts`                    | `scalarize`, `fold`, `strength`, `hoist`, `inline`, `cse`, `invariants`, `dce` | Change the effect trace                  |
 | `print.ts`                     | The shared statement printer and the inline policy                             | Decide anything that depends on a target |
 | `print-js.ts`, `print-glsl.ts` | A `Syntax`: spellings, types, statement forms; the stored code, `run()`        | Analyse the program                      |
 | `index.ts`                     | The target profiles and their one check (`admits()`); the frame warnings       |                                          |
@@ -410,8 +410,8 @@ Every value is an integer or a boolean, also a loop index, a list index and a
 length: a loop counts with a `bigint` counter, and the code converts with
 `Number()` where JavaScript reads a number (an element, `$0[Number($1)]`, the
 length of a build) and with `BigInt()` where it gives one (the length of an
-array, `BigInt(L.length)`). The mode runs with the passes `fold`, `hoist` and
-`invariants` off, also with `cse: false` or `constantFold: false`: a helper
+array, `BigInt(L.length)`). The mode runs with the passes `fold`, `hoist`,
+`inline` and `invariants` off, also with `cse: false` or `constantFold: false`: a helper
 throws at a pole (`Mod`, `At`, `Factorial`, `Power`, `Binomial`, and so a
 call), so no operation is evaluated before it is written, `hoist` would move a
 guarded arm out of its guard (`m != 0 ∧ Mod(n, m) = 1` at `m = 0` is `False`),
@@ -1321,6 +1321,46 @@ same call. A result that can be a parameter (`same(L) := L`) is the parameter.
 Declined: a recursive call of a function with a list result (its type is the
 body's), a list of lists, and on GLSL a result of a run-time length; one of a
 stated length is a `vecN` or a `float[n]` (`vec2 _fn_ir_u0_pt(float v0)`).
+
+The pass `inline` (`passes.ts`, before `cse` and `invariants`) replaces a call
+in the body of a `loop`, a `build` or a `filter` with a copy of the callee's
+lowered body, so that the passes see the calls it makes; in the interval mode
+also a call of a function that its caller calls twice or more (the pass option
+`inline`, `'loop'` or `'repeated'`, set in `sliceProgram()`). In Tycho's
+`voronoi-diagram`, `n(x, y, k)` is called at each pass of the loops of `Z`, `v`,
+`u` and `H`, and its copy leaves a call `F(x, y)` of no index, which
+`invariants` moves before the loop (from about 40 µs a call to about 6, the
+time of the existing compiler). The callee qualifies when it is not effectful
+and not on a cycle of calls, its body holds no `loop` and no region instruction
+(a function that loops stays a call, which `invariants` can move), it has at
+most `INLINE_SIZE` instructions, nested regions included, and one result of the
+lane of the call's result, each list argument has the lane of its parameter,
+and, when an argument is a constant, neither its body nor the body of a
+function that it calls holds an `At` (a constant index out of range declines
+on GLSL, where the call gives NaN: `la(A, 5)` of
+`la := Function(At(L, j), L, j)` and `A: list<real^3>`, and `nx(A, 4)` of
+`nx := Function(la(L, j + 1), L, j)`). A scalar integer argument of a
+real parameter is admitted: each operation of the copy is the one the callee
+selected (`Mod` of a real parameter stays the real `mod` on GLSL), and reads the
+integer as its call did. The copy is made after the lowering, so it has the
+callee's signatures, the types of its lifted inputs and its effect; each value
+of the copy is new, of the type of the original with its lengths renamed, and
+each parameter reads its argument. A call that the copy holds is copied in turn
+when it qualifies (it is in the loop of the call it replaces); a result that is
+a parameter is the argument, and a call stays when that argument has another
+lane than the call's result (`id(k)` of an integer index for a real `id`,
+whose value a build would read as an integer). The copies of a program are at
+most `INLINE_BUDGET` instructions; past it, calls stay, so a chain of functions
+each calling the previous three times stops there. A copied call of a function
+that runs a `Loop` can be moved out of the loop by `invariants`, so a program
+that threw `iteration-limit-exceeded` can give its value ("Effects" says it for
+a direct call): `hh := Function(k·LL(p), p, k)`, whose `LL` runs a `Loop` of
+100 passes (`s := s + p·i`), gives 9090 for `Sum(hh(x, k), Limits(k, 1, 3))`
+at x = 0.3 under a budget of 150, where it threw. After the passes, a function
+that no call reaches from the entry (its calls were copied, or removed with a
+value that nothing reads) leaves the program and is not printed, also when the
+pass is off; `symbolDeps` still names it (`captures`). The `bigint` mode does not run the pass (it serves
+`invariants`, which is off there).
 
 ## How to add
 

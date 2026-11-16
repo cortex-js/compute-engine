@@ -1918,7 +1918,9 @@ describe('cse merges two calls of a user function with no effect', () => {
   test('a call in an arm or in a loop body is not read after it', () => {
     const arm = ['List', ['If', ['Greater', 'x', 0], ['f', 'x'], 0], ['f', 'x']];
     expect(calls(againstInterpreter(e, arm, points), 'f')).toBe(2);
-    expect(calls(run(arm, { to: 'interval-js' }), 'f')).toBe(2);
+    // The interval mode copies a function that its caller calls twice (the
+    // pass `inline`): no call is left.
+    expect(calls(run(arm, { to: 'interval-js' }), 'f')).toBe(0);
     const loop = [
       'List',
       ['Sum', ['Multiply', 'j', ['f', 'x']], ['Limits', 'j', 1, 'n']],
@@ -1928,8 +1930,11 @@ describe('cse merges two calls of a user function with no effect', () => {
       { x: 0.3, n: 3 },
       { x: -1, n: 0 },
     ]);
-    expect(calls(r, 'f')).toBe(2);
-    expect(calls(run(loop, { to: 'interval-js' }), 'f')).toBe(2);
+    // The call in the loop body is a copy of the body of `f` (the pass
+    // `inline`), computed before the loop: one call, after it. The interval
+    // mode copies that call too, and `cse` merges the two copies.
+    expect(calls(r, 'f')).toBe(1);
+    expect(calls(run(loop, { to: 'interval-js' }), 'f')).toBe(0);
   });
   test('a call with two results, a list and its length', () => {
     const json = ['Add', ['Sum', ['L', 'n']], ['Length', ['L', 'n']], ['Max', ['L', 'n']]];
@@ -2071,7 +2076,9 @@ describe('invariants: an instruction of a loop body that reads nothing of the bo
       }
     }
     // In B, the calls of F, v and u read no index: they are before the
-    // loop; q and p read it. In the interval mode the sum of B is written
+    // loop; q and p read it, and are copies of their bodies (the pass
+    // `inline`), whose sines and cosines `cse` merges with those of B's
+    // own term. In the interval mode the sum of B is written
     // out (its bounds are constants): one call of each, and no loop.
     const written = functionText(textOf(run(['B', 'x', 'y'], { to: 'interval-js' })), 'B');
     expect(written).not.toMatch(/for \(/);
@@ -2084,7 +2091,7 @@ describe('invariants: an instruction of a loop body that reads nothing of the bo
         expect([g, before.match(new RegExp(`u\\d+_${g}\\(`, 'g'))?.length]).toEqual([g, 1]);
         expect([g, new RegExp(`u\\d+_${g}\\(`).test(inside)]).toEqual([g, false]);
       }
-      for (const g of ['q', 'p']) expect(new RegExp(`u\\d+_${g}\\(`).test(inside)).toBe(true);
+      for (const g of ['q', 'p']) expect([g, new RegExp(`u\\d+_${g}\\(`).test(b)]).toEqual([g, false]);
     }
   });
 
