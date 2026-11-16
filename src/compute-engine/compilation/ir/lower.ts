@@ -1314,6 +1314,16 @@ export function lower(
         'a symbol with a value that is not a number or a list of numbers (or a tuple of numbers), or a colour of three numbers'
       );
     if (!held(name)!.library) b.captures.add(name);
+    // The interval mode: a constant of the library whose value is not exact
+    // (`EulerGamma`, `CatalanConstant`) holds the double nearest to a number
+    // that is not a double: an enclosure of one ulp on each side, as on the
+    // existing interval target. A decimal of the program is its double
+    // (`literalUlps()`).
+    else if (interval && isNumber(v) && v.im === 0 && Number.isFinite(v.re)) {
+      const nv = v.numericValue;
+      if (typeof nv === 'number' ? !Number.isInteger(nv) : !nv.isExact)
+        return number(v, 1)!;
+    }
     return value(v)!;
   };
 

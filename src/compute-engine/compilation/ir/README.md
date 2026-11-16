@@ -675,7 +675,11 @@ is a double
 (`exactDoubleValue()`: `1/2`, `5`); another exact number takes one ulp per
 rounding of its double (`exactValueDoubleRoundings()`: `1/3` is
 `[0.33333333333333326, 0.33333333333333337]`). `Pi` and `ExponentialE` take
-one ulp, the factor of an angular unit two. A closed node is the value of
+one ulp, and so does every other constant of the library whose value is
+not exact (`EulerGamma`, `CatalanConstant`: the engine holds the double
+nearest to a number that is not a double; `MachineEpsilon` too, though it
+is `2^-52`), while a decimal that a name of the program holds is its
+double; the factor of an angular unit takes two. A closed node is the value of
 `evaluate()` when it is an exact number that is a double, or a safe integer
 computed in big decimals (`Mod(1, 1/10)` is 0, `Floor(100π)` is 314); else
 the value of `N()` with one ulp (`Sin(1)`), when `N()` computes in big

@@ -686,6 +686,53 @@ describe('the interval mode: batch 4, results', () => {
     expect(atMachine((m) => inlined(both(m, json)[0]))).toBe(code);
   });
 
+  test.each(['CatalanConstant', 'EulerGamma'])(
+    'a library constant that is not a double keeps its enclosure: %s',
+    (name) => {
+      // Its value is not the double that the engine holds for it, unlike a
+      // decimal of the program: one ulp on each side, as the existing target.
+      const json = ['Add', 'x', name];
+      for (const engine of [defaultEngine, undefined]) {
+        const [r, old] = engine
+          ? both(engine(), json)
+          : atMachine((m) => both(m, json));
+        const got = r.run({ x: 0 }) as { value: { lo: number; hi: number } };
+        expect(got.value.lo).toBeLessThan(got.value.hi);
+        expect(got).toEqual(old.run({ x: 0 }));
+      }
+      // The JavaScript code reads the double, as before.
+      const js = compile(defaultEngine().box(json as never), {
+        profile: 'ir',
+        fallback: false,
+      } as never) as unknown as { run: (x: object) => number };
+      const point = js.run({ x: 0 });
+      const mode = both(defaultEngine(), json)[0].run({ x: 0 }) as {
+        value: { lo: number; hi: number };
+      };
+      expect(mode.value.lo).toBeLessThan(point);
+      expect(mode.value.hi).toBeGreaterThan(point);
+    }
+  );
+
+  test('the values that stay points: a decimal held by a name of the program, and Half', () => {
+    const engine = defaultEngine();
+    engine.declare('g', 'real');
+    engine.assign('g', 0.5772156649015329);
+    const point = (v: number) => ({ kind: 'interval', value: { lo: v, hi: v } });
+    expect(both(engine, ['Add', 'x', 'g'])[0].run({ x: 0 })).toEqual(
+      point(0.5772156649015329)
+    );
+    expect(both(engine, ['Add', 'x', 'Half'])[0].run({ x: 0 })).toEqual(point(0.5));
+    // `MachineEpsilon` is 2^-52 exactly, but the engine holds it as a
+    // number that is not exact: an enclosure of one ulp, where the existing
+    // target, which names it, gives the point.
+    const [r, old] = both(engine, ['Add', 'x', 'MachineEpsilon']);
+    const eps = r.run({ x: 0 }) as { value: { lo: number; hi: number } };
+    expect(eps.value.lo).toBeLessThan(Number.EPSILON);
+    expect(eps.value.hi).toBeGreaterThan(Number.EPSILON);
+    expect(old.run({ x: 0 })).toEqual(point(Number.EPSILON));
+  });
+
   test('a decimal literal is a point: a pole of 1 / (0.5·Sin(2x) + 0.5) at the edge', () => {
     const json = ['Divide', 1, ['Add', ['Multiply', 0.5, ['Sin', ['Multiply', 2, 'x']]], 0.5]];
     const box = { x: { lo: -1.88, hi: 8.12 } };
