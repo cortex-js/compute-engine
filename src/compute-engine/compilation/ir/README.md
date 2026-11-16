@@ -1381,8 +1381,11 @@ when it qualifies (it is in the loop of the call it replaces); a result that is
 a parameter is the argument, and a call stays when that argument has another
 lane than the call's result (`id(k)` of an integer index for a real `id`,
 whose value a build would read as an integer). The copies of a program are at
-most `INLINE_BUDGET` instructions; past it, calls stay, so a chain of functions
-each calling the previous three times stops there. A copied call of a function
+most `INLINE_BUDGET` instructions, 1,000 by the rule `'loop'` and 4,000 by the
+rule `'repeated'` (the interval mode's, where the sums written out multiply
+the sites: a function read at the 16 terms of each of four sums needs about
+1,900); past it, calls stay, so a chain of functions each calling the previous
+three times stops there. A copied call of a function
 that runs a `Loop` can be moved out of the loop by `invariants`, so a program
 that threw `iteration-limit-exceeded` can give its value ("Effects" says it for
 a direct call): `hh := Function(k·LL(p), p, k)`, whose `LL` runs a `Loop` of

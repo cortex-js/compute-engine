@@ -98,9 +98,11 @@ export const ALL_PASSES: PassOptions = Object.freeze({
 });
 
 /** The most instructions of a body that `inline` copies (arms included),
- *  and of all its copies in one program. */
+ *  and of all its copies in one program, by the rule of the sites. The
+ *  rule `'repeated'` is the interval mode's, where the sums written out
+ *  multiply the sites: a function read at 16 terms of each of four sums. */
 export const INLINE_SIZE = 64;
-export const INLINE_BUDGET = 1000;
+export const INLINE_BUDGET = { loop: 1000, repeated: 4000 } as const;
 
 /** A pass: whether it changed the program, and how it renamed values. */
 type Pass = (
@@ -129,7 +131,7 @@ export function runPasses(
     return changed;
   };
   if (options.scalarize) run('scalarize', scalarize);
-  const budget = { left: INLINE_BUDGET };
+  const budget = { left: options.inline ? INLINE_BUDGET[options.inline] : 0 };
   for (let round = 0; round < 8; round++) {
     let changed = false;
     if (options.fold) changed = run('fold', fold) || changed;

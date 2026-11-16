@@ -349,7 +349,38 @@ describe('IR profile, batch G21: a call that stays a call', () => {
     const left = calls(r, 's1');
     expect(left).toBeGreaterThan(0);
     expect(left).toBeLessThan(80);
-    expect(80 - left).toBeLessThanOrEqual(INLINE_BUDGET);
+    expect(80 - left).toBeLessThanOrEqual(INLINE_BUDGET.loop);
+  });
+
+  test('the budget of the rule of repeated calls is larger', () => {
+    // The interval mode's shape: a small function that calls one with a
+    // loop, read at the 16 written-out terms of each of four sums. With the
+    // budget of the rule 'loop' the copies stop in the second sum (16 calls
+    // of `h` stay); with the one of 'repeated' no call of `h` stays, and
+    // `cse` leaves one call of `G`, the function with the loop.
+    // prettier-ignore
+    const sum = (w: number) => ['Sum', ['Multiply', w, ['h', 'x', 'k']], ['Limits', 'k', 1, 16]];
+    const json = ['Add', sum(2), sum(3), sum(5), sum(7)];
+    const p = compileSlice(box(json), {
+      target: 'javascript',
+      mode: 'interval',
+      passes: ALL_PASSES,
+    });
+    const text = `${p.preambleOnce}\n${p.preamblePerCall ?? ''}\n${p.code}`;
+    const callsOf = (name: string) =>
+      (text.match(new RegExp(`\\bu\\d+_${name}\\(`, 'g')) ?? []).length;
+    expect(callsOf('h')).toBe(0);
+    expect(callsOf('G')).toBe(1);
+    const r = interval(json);
+    expect(r).toMatchObject({ success: true });
+    const at = r.run!({ x: { lo: 0.3, hi: 0.3 } }) as {
+      kind: string;
+      value: { lo: number; hi: number };
+    };
+    const w = interpreted(json, { x: 0.3 });
+    expect(at.kind).toBe('interval');
+    expect(at.value.lo).toBeLessThanOrEqual(w);
+    expect(at.value.hi).toBeGreaterThanOrEqual(w);
   });
 
   test('a call that is not in a loop', () => {
