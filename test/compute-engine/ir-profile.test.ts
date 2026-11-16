@@ -1806,8 +1806,9 @@ describe('cse merges two calls of a user function with no effect', () => {
     const json = ['Multiply', 1000, ['Add', ['Divide', ['Arctan', 'x'], ['a_2', 'x']], -1]];
     const r = againstInterpreter(e, json, points);
     expect([calls(r, 'a_1'), calls(r, 'a_0')]).toEqual([1, 1]);
+    // The five calls are equal nodes: the lowering lowers them once.
     const plain = run(json, { cse: false });
-    expect([calls(plain, 'a_1'), calls(plain, 'a_0')]).toEqual([5, 5]);
+    expect([calls(plain, 'a_1'), calls(plain, 'a_0')]).toEqual([1, 1]);
     for (const point of points) {
       const i = interval(json, point);
       expect([calls(i, 'a_1'), calls(i, 'a_0')]).toEqual([1, 1]);
@@ -1819,8 +1820,21 @@ describe('cse merges two calls of a user function with no effect', () => {
     expect(calls(interval(json, points[0]), 'f')).toBe(1);
     const glsl = run(json, { to: 'glsl' });
     expect(glsl.code.match(/_fn_ir_u\d+_f\(/g)).toHaveLength(1);
+    // Two equal nodes, which the lowering lowers once; an argument of
+    // another node with the same value is merged by `cse` only.
     expect(
       run(json, { to: 'glsl', cse: false }).code.match(/_fn_ir_u\d+_f\(/g)
+    ).toHaveLength(1);
+    // prettier-ignore
+    const other = ['Add', ['f', 'x'], ['Multiply', 2, ['f', ['At', ['Tuple', 'x', 'y'], 1]]]];
+    const at = points.map((p) => ({ ...p, y: 1 }));
+    expect(calls(againstInterpreter(e, other, at), 'f')).toBe(1);
+    expect(calls(run(other, { cse: false }), 'f')).toBe(2);
+    expect(
+      run(other, { to: 'glsl' }).code.match(/_fn_ir_u\d+_f\(/g)
+    ).toHaveLength(1);
+    expect(
+      run(other, { to: 'glsl', cse: false }).code.match(/_fn_ir_u\d+_f\(/g)
     ).toHaveLength(2);
   });
   test('different arguments are two calls', () => {
@@ -1882,7 +1896,8 @@ describe('cse merges two calls of a user function with no effect', () => {
     const json = ['Add', ['Sum', ['L', 'n']], ['Length', ['L', 'n']], ['Max', ['L', 'n']]];
     const r = againstInterpreter(e, json, [{ n: 4 }, { n: 7 }, { n: 1 }]);
     expect(calls(r, 'L')).toBe(1);
-    expect(calls(run(json, { cse: false }), 'L')).toBe(3);
+    // Three equal nodes `L(n)`: the lowering lowers them once.
+    expect(calls(run(json, { cse: false }), 'L')).toBe(1);
     expect((r.run as (x: object) => number)({ n: 4 })).toBe(50);
     const i = interval(json, { n: 4 });
     expect(calls(i, 'L')).toBe(1);
@@ -2194,5 +2209,242 @@ describe('invariants: an instruction of a loop body that reads nothing of the bo
     expect(list.code.match(/for \(/g)).toHaveLength(2);
     const cond = run(['Sum', ['Multiply', 'k', ['If', ['Less', 'x', 0], ['Sin', 'y'], ['Cos', 'y']]], ['Limits', 'k', 1, 'n']], { to: 'glsl' });
     expect(cond.code.indexOf('if (')).toBeLessThan(cond.code.indexOf('for ('));
+  });
+});
+
+describe('equal sub-expressions written as separate nodes are lowered once', () => {
+  // Tycho's document `neyret/51a4237846`: each level reads the points of the
+  // level below five times, as five copies of its MathJSON, so the copies of
+  // the innermost `PointList` are 5^levels separate nodes.
+  // prettier-ignore
+  const pointStep = (p: Json): Json => ['PointList', ['Subtract', 'D', ['Multiply', ['Add', ['Multiply', 'y', ['PointX', p]], ['Multiply', ['Subtract', 1, 'y'], ['PointY', p]]], ['PointY', p]]], ['Add', ['Multiply', ['Rational', 1, 100], ['Power', ['PointY', p], 2]], ['PointX', p]], 'D'];
+  // The same recurrence on a point of two scalars, which every target
+  // compiles.
+  // prettier-ignore
+  const tupleStep = (p: Json): Json => ['Tuple', ['Subtract', 'x', ['Multiply', ['Add', ['Multiply', 'y', ['At', p, 1]], ['Multiply', ['Subtract', 1, 'y'], ['At', p, 2]]], ['At', p, 2]]], ['Add', ['Multiply', ['Rational', 1, 100], ['Power', ['At', p, 2], 2]], ['At', p, 1]]];
+  /** `levels` applications of `step` to `start`, with every operand a copy
+   *  of its own (no two JSON arrays are shared, so no two nodes are). */
+  const nest = (step: (p: Json) => Json, start: Json, levels: number): Json => {
+    let p = start;
+    for (let i = 0; i < levels; i++) p = step(JSON.parse(JSON.stringify(p)));
+    return JSON.parse(JSON.stringify(p));
+  };
+  const tuples = (levels: number): Json => [
+    'Add',
+    ['At', nest(tupleStep, ['Tuple', 'x', 'y'], levels), 1],
+    ['At', nest(tupleStep, ['Tuple', 'x', 'y'], levels), 2],
+  ];
+  /** The number of instructions, and of region instructions (a build, a
+   *  reduction), in the entry of the IR with no pass. */
+  const counts = (json: Json, options: Record<string, unknown> = {}) => {
+    const c = { instrs: 0, regions: 0 };
+    const walk = (r: { body: any[] }) => {
+      for (const i of r.body) {
+        c.instrs++;
+        if (i.k === 'region') {
+          c.regions++;
+          i.regions.forEach(walk);
+        }
+        if (i.k === 'if') [i.then, i.else].forEach(walk);
+        if (i.k === 'loop') walk(i.body);
+      }
+    };
+    const p = sliceProgram(box(json), {
+      target: 'javascript',
+      passes: false,
+      ...options,
+    } as never);
+    walk(p.functions.find((f) => f.name === p.entry)!.body);
+    return c;
+  };
+  const point = { x: 0.3, y: 0.7, D: [0.1, 0.2, 0.5], E: [0.4, -0.3, 0.9] };
+
+  test('the points of five levels: one build per distinct sub-tree', () => {
+    const json = nest(pointStep, ['PointList', 'D', 'E', 'D'], 5);
+    // The `PointList` of each level and its `PointX` and `PointY`, and the
+    // innermost `PointList`: 16, where each copy was lowered (7,811).
+    expect(counts(json).regions).toBe(16);
+    againstInterpreter(ce, nest(pointStep, ['PointList', 'D', 'E', 'D'], 2), [
+      point,
+    ]);
+    againstInterpreter(ce, json, [point]);
+  });
+
+  test('a recurrence of scalars: linear in its levels on every target', () => {
+    // 5^5 copies of the innermost `Tuple`: more than 50,000 nodes to lower
+    // when each copy is lowered.
+    const json = tuples(5);
+    expect(counts(json).instrs).toBeLessThan(100);
+    expect(counts(json, { mode: 'interval' }).instrs).toBeLessThan(100);
+    expect(counts(json, { target: 'glsl' }).instrs).toBeLessThan(100);
+    againstInterpreter(ce, json, [point, { x: -0.8, y: 0.2 }]);
+    const r = compile(box(json), {
+      ...IR,
+      to: 'interval-js',
+      fallback: false,
+    } as never);
+    const v = (r.run as (x: object) => any)({
+      x: { lo: 0.3, hi: 0.3 },
+      y: { lo: 0.7, hi: 0.7 },
+    });
+    const expected = interpret(ce, box(json), { x: 0.3, y: 0.7 }) as number;
+    expect(v.value.lo <= expected && expected <= v.value.hi).toBe(true);
+    expect(
+      compile(box(json), { ...IR, to: 'glsl', fallback: false } as never)
+        .success
+    ).toBe(true);
+  });
+
+  // The two tests below are kept apart by the frame check of the memo (the
+  // names a copy reads, against their bindings), which sees the local and
+  // the index; the definition in the id is a second guard there. Two equal
+  // leaves that differ by their definition alone do not reach the lowering:
+  // `compile()` refuses a name read with two definitions, and a function
+  // body declines a capture of another definition than its own.
+  test('a copy under a Block that declares a local of the name it reads (the frame check)', () => {
+    // prettier-ignore
+    const json = ['Add', ['Sin', ['Multiply', 2, 'x']], ['Block', ['Declare', 'x', "'real'", 5], ['Sin', ['Multiply', 2, 'x']]]];
+    againstInterpreter(ce, json, [{ x: 0.3 }, { x: -2 }]);
+    expect(
+      (compile(box(json), IR).run as (x: object) => number)({ x: 0.3 })
+    ).toBeCloseTo(Math.sin(0.6) + Math.sin(10), 14);
+  });
+
+  test('a call of a name that two scopes define with different bodies', () => {
+    const engine = makeEngine();
+    engine.assign('g', box(['Function', ['Add', 't', 1], 't'], engine));
+    engine.pushScope();
+    engine.declare('g', '(real) -> real');
+    engine.assign('g', box(['Function', ['Multiply', 't', 10], 't'], engine));
+    const inner = box(['g', ['Sin', 'x']], engine);
+    engine.popScope();
+    const outer = box(['g', ['Sin', 'x']], engine);
+    const root = engine.function('Add', [outer, inner]);
+    const r = compile(root, { ...IR, fallback: false } as never);
+    for (const x of [0.3, -1.2]) {
+      const want = Math.sin(x) + 1 + 10 * Math.sin(x);
+      expect((r.run as (p: object) => number)({ x })).toBeCloseTo(want, 14);
+      expect(
+        agrees(
+          (r.run as (p: object) => number)({ x }),
+          interpret(engine, root, { x })
+        )
+      ).toBe(true);
+    }
+  });
+
+  test('two equal draws are two draws, in the interpreter’s order', () => {
+    const choice = ['Sum', ['RandomChoice', ['Interval', 0, ['Open', 1]], 3]];
+    // prettier-ignore
+    const json = ['WithRandomSeed', 5, ['List', ['Random'], ['Random'], choice, choice]];
+    const r = compile(box(json), { ...IR, fallback: false } as never);
+    const v = (r.run as () => number[])();
+    expect(agrees(v, interpret(ce, box(json), {}))).toBe(true);
+    expect(v[0]).not.toBe(v[1]);
+    expect(v[2]).not.toBe(v[3]);
+  });
+
+  test('a copy in each arm of an If: each arm holds its own lowering', () => {
+    const arm = (h: string) => [h, ['PointX', ['PointList', 'D', 'E']]];
+    const json = ['If', ['Greater', 'x', 0], arm('Min'), arm('Max')];
+    const p = sliceProgram(box(json), {
+      target: 'javascript',
+      passes: false,
+    } as never);
+    const branch = p.functions[0].body.body.find((i) => i.k === 'if') as {
+      then: { body: { k: string }[] };
+      else: { body: { k: string }[] };
+    };
+    for (const r of [branch.then, branch.else])
+      expect(r.body.filter((i) => i.k === 'region').length).toBeGreaterThan(0);
+    againstInterpreter(ce, json, [
+      { x: 0.3, D: [1, 2, 3], E: [4, 5, 6] },
+      { x: -0.3, D: [1, 2, 3], E: [4, 5, 6] },
+    ]);
+  });
+
+  test('a copy inside a Sum whose index has the name that the copy outside reads (the frame check)', () => {
+    // prettier-ignore
+    const json = ['Add', ['Sin', ['Multiply', 2, 'n']], ['Sum', ['Sin', ['Multiply', 2, 'n']], ['Limits', 'n', 1, 3]]];
+    againstInterpreter(ce, json, [{ n: 5 }, { n: -2 }]);
+  });
+
+  test('a rational and the decimal of the same double are two leaves in the interval mode', () => {
+    // The interval mode encloses the exact 1/10, whose double is not its
+    // value, and takes the decimal 0.1 as the point at its double: two
+    // `exp` of two different sums.
+    const x = (d: Json) => ['Exp', ['Add', 'x', d]];
+    const json = ['Add', x(['Rational', 1, 10]), x(0.1)];
+    const p = sliceProgram(box(json), {
+      target: 'javascript',
+      mode: 'interval',
+      passes: false,
+    } as never);
+    const ops = p.functions[0].body.body.flatMap((i) =>
+      i.k === 'op' ? [i.op] : []
+    );
+    expect(ops.filter((op) => op === 'exp')).toHaveLength(2);
+    const r = compile(box(json), {
+      ...IR,
+      to: 'interval-js',
+      fallback: false,
+    } as never);
+    for (const at of [0.3, -2.5]) {
+      const v = (r.run as (x: object) => any)({ x: { lo: at, hi: at } });
+      const expected = interpret(ce, box(json), { x: at }) as number;
+      expect([at, v.value.lo <= expected && expected <= v.value.hi]).toEqual([
+        at,
+        true,
+      ]);
+    }
+  });
+
+  test('a call that a Sum binds again compiles: the copy is the first lowering', () => {
+    // The body of `g` reads `x` where `g` is defined (the input `x`). The
+    // copy of `g(1)` in the `Sum` is equal to the first one and reuses its
+    // lowering, as one shared node does; lowered again in the `Sum`, where
+    // `x` is the index, the call declined (a call of g, which reads the
+    // input x, where x is a local or a parameter).
+    const engine = new ComputeEngine();
+    engine.declare('x', 'real');
+    // prettier-ignore
+    engine.assign('g', box(['Function', ['Add', 't', ['Multiply', 100, 'x']], 't'], engine));
+    const json = ['List', ['g', 1], ['Sum', ['g', 1], ['Limits', 'x', 1, 3]]];
+    const r = againstInterpreter(engine, json, [{ x: 0.5 }, { x: -2 }]);
+    expect((r.run as (p: object) => number[])({ x: 0.5 })).toEqual([51, 153]);
+    const i = compile(box(json, engine), {
+      ...IR,
+      to: 'interval-js',
+      fallback: false,
+    } as never);
+    expect(
+      (i.run as (p: object) => { value: { lo: number; hi: number } }[])({
+        x: { lo: 0.5, hi: 0.5 },
+      }).map((v) => [v.value.lo, v.value.hi])
+    ).toEqual([
+      [51, 51],
+      [153, 153],
+    ]);
+  });
+
+  test('two equal function literals are two, and their equal arguments one', () => {
+    // The parameter of each literal has a definition of its own.
+    const arg = ['PointX', ['PointList', 'D', 'E']];
+    const lit = ['Function', ['Multiply', 'k', 2], 'k'];
+    const json = [
+      'Add',
+      ['Sum', ['Map', lit, arg]],
+      ['Max', ['Map', lit, arg]],
+    ];
+    // The builds: `PointList` and `PointX` once, and one `Map` each.
+    expect(counts(json).regions).toBe(4);
+    againstInterpreter(ce, json, [{ D: [1, 2, 3], E: [4, 5, 6] }]);
+  });
+
+  test('a decline in a copy is reported', () => {
+    // prettier-ignore
+    const json = ['Add', ['Sin', ['Multiply', 2, ['Foo', 'x']]], ['Sin', ['Multiply', 2, ['Foo', 'x']]]];
+    const o = outcome(box(json));
+    expect('message' in o && o.message).toMatch(/Foo is an unknown operator/);
   });
 });

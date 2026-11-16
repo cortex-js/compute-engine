@@ -43,6 +43,9 @@ import { typeToString as engineTypeToString } from '../../../common/type/seriali
 import type { Type } from '../../../common/type/types.js';
 import type { Expression } from '../../global-types.js';
 import type { NumericValue } from '../../numeric-value/types.js';
+import { BigNumericValue } from '../../numeric-value/big-numeric-value.js';
+import { ExactNumericValue } from '../../numeric-value/exact-numeric-value.js';
+import { MachineNumericValue } from '../../numeric-value/machine-numeric-value.js';
 import { BigDecimal } from '../../../big-decimal/index.js';
 import {
   exactDoubleValue,
@@ -50,6 +53,7 @@ import {
 } from '../../numeric-value/exact-integer-value.js';
 import { realPowerBranchTerms } from '../../numerics/real-power.js';
 import {
+  freeBinding,
   isDictionary,
   isFunction,
   isNumber,
@@ -168,11 +172,11 @@ type Facts = {
  *  depth. A larger node is lowered, and its parts are folded. */
 const CLOSED_SIZE = 10_000;
 
-/** The most nodes that one compilation lowers. A shared node is lowered
- *  once per region (the memo of `value()`), so the two arms of an `If` that
- *  both read a shared graph lower it once each, and a chain of such `If`s
- *  takes a time and gives a text exponential in its depth. Over the limit
- *  the program declines. */
+/** The most nodes that one compilation lowers. A shared node, and the nodes
+ *  equal to it, are lowered once per region (the memo of `value()`), so
+ *  the two arms of an `If` that both read a shared graph lower it once
+ *  each, and a chain of such `If`s takes a time and gives a text
+ *  exponential in its depth. Over the limit the program declines. */
 const NODE_LIMIT = 50_000;
 
 /** `fold: false` (the `constantFold: false` option of the profile `ir`):
@@ -224,10 +228,51 @@ export function lower(
           : i.k === 'region' && regionRow(i.op)?.effect === 'effectful'
   );
   const frames: Frame[] = [{ names: new Map(), loop: false }];
+  // The memo of `value()`, keyed by the structural id of a node (`idOf()`),
+  // so that equal sub-expressions that the source writes as separate nodes
+  // are lowered once.
   const memo = new Map<
-    Expression,
+    number,
     { v: V; region: Region; reads: [string, V | undefined][] }
   >();
+  // The id of a node, and of a definition: equal ids for two nodes of the
+  // same operator, definition and operands, of the same kind and value of a
+  // number, of the same string, of the same name and definition (and type,
+  // for a name with no definition); a new id for every other node.
+  const ids = new WeakMap<object, number>();
+  const interned = new Map<string, number>();
+  let lastId = 0;
+  const objectId = (x: object): number => {
+    let k = ids.get(x);
+    if (k === undefined) ids.set(x, (k = ++lastId));
+    return k;
+  };
+  const definitionKey = (e: Expression): string => {
+    const free = freeBinding(e) as { value?: object; operator?: object };
+    const d =
+      e.valueDefinition ??
+      e.operatorDefinition ??
+      free?.value ??
+      free?.operator;
+    return d === undefined ? `t${e.type.toString()}` : `d${objectId(d)}`;
+  };
+  const idOf = (e: Expression): number => {
+    let k = ids.get(e);
+    if (k !== undefined) return k;
+    const key = isFunction(e)
+      ? `f${e.operator}\u001f${definitionKey(e)}\u001f${e.ops.map(idOf).join()}`
+      : isSymbol(e)
+        ? `s${e.symbol}\u001f${definitionKey(e)}`
+        : isNumber(e)
+          ? numberKey(e.numericValue)
+          : isString(e)
+            ? `"${e.string}`
+            : undefined;
+    k = key === undefined ? ++lastId : interned.get(key);
+    if (k === undefined) interned.set(key!, (k = ++lastId));
+    ids.set(e, k);
+    return k;
+  };
   const known = new WeakMap<Expression, Facts>();
   const inputLengths = new Set<V>();
   // The names read as inputs of the compilation (of the entry, lifted into
@@ -616,9 +661,12 @@ export function lower(
 
   /** Lower `e`. With `want` false its value is not used (a statement). */
   const value = (e: Expression, want = true): V | undefined => {
-    const shared = want && isFunction(e) && facts(e).writes.size === 0;
+    // The root `Tuple` is lowered where it is (`rootParts`).
+    const shared =
+      want && isFunction(e) && e !== rootTuple && facts(e).writes.size === 0;
+    const id = shared ? idOf(e) : 0;
     if (shared) {
-      const m = memo.get(e);
+      const m = memo.get(id);
       if (
         m !== undefined &&
         b.isOpen(m.region) &&
@@ -640,7 +688,7 @@ export function lower(
         n,
         bound(n),
       ]);
-      memo.set(e, { v, region, reads });
+      memo.set(id, { v, region, reads });
     }
     return v;
   };
@@ -2096,6 +2144,22 @@ export function lower(
     const v = value(root)!;
     return rootParts ?? v;
   });
+}
+
+/** The key of a number for `idOf()`: its kind and its exact value (a
+ *  double, the parts of a complex double, of a big decimal, of an exact
+ *  number); `undefined` for another kind, such as a numeric value of a
+ *  class of another copy of the library, which is then not merged. */
+function numberKey(nv: number | NumericValue): string | undefined {
+  const d = (x: number) => (Object.is(x, -0) ? '-0' : String(x));
+  const q = ([n, m]: readonly (number | bigint)[]) =>
+    `${typeof n}${n}/${typeof m}${m}`;
+  if (typeof nv === 'number') return `m${d(nv)}`;
+  if (nv instanceof MachineNumericValue) return `c${d(nv.decimal)},${d(nv.im)}`;
+  if (nv instanceof BigNumericValue) return `b${nv.decimal},${nv.imDecimal}`;
+  if (nv instanceof ExactNumericValue)
+    return `q${q(nv.rational)}r${nv.radical},${q(nv.imRational)}r${nv.imRadical}`;
+  return undefined;
 }
 
 /**

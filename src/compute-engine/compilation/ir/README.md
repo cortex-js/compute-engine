@@ -950,8 +950,9 @@ declines.
 
 `pure` (merged, removed, moved, folded, evaluated where it was not written),
 `may-fail` (removed when unused; shared by the lowering with an evaluation of
-the same node that dominates it, and by `cse` for a call; nothing else),
-`effectful` (keeps its place, count and order). The effect of a user function
+the same or an equal node that dominates it, and by `cse` for a call; nothing
+else), `effectful` (keeps its place, count and order). The effect of a user
+function
 is the least fixed point over
 its calls, from `pure`, and from `may-fail` for a function on a cycle of calls:
 a recursive function may not terminate, so it and its callers are at least
@@ -961,7 +962,11 @@ an effectful instruction is lowered again at each use; a `may-fail` lowering (a
 loop, a build, a call of a recursive function) is shared, because the evaluation
 that dominates the use fails first if it fails. So the budget counts the passes
 that run, and a `Loop` whose carried values are not read is removed and counts
-none. The operands of `And`, `Or` and a chain are lowered lazily, in arms; the
+none. The memo is keyed by the structure of a node: the operator, the definition
+that a name or a head resolves to, the kind and value of a number and the
+operands, so a sub-expression that the source writes several times as separate
+nodes is lowered once per region; a node of another kind is equal only to
+itself. The operands of `And`, `Or` and a chain are lowered lazily, in arms; the
 `hoist` pass makes a speculatable arm a plain `and` or `or`. After each pass a
 check compares the sequence of effectful instructions (operation, operands,
 results and region); the same check runs over the printer's order.

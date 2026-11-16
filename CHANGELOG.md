@@ -235,6 +235,15 @@
   through a call, and is not recursive. A function `a_1(x)` that calls
   `a_0(x)` five times calls it once, so a chain of such functions runs in a
   time proportional to its length, not exponential in it.
+- **With the profile `'ir'`, equal sub-expressions are compiled once** on
+  every target, also when the expression writes them as separate copies (as
+  a MathJSON tree does): two copies are equal when they have the same
+  operators, operands and numbers, and each name resolves to the same
+  definition. A recurrence of points in which each of five levels reads the
+  level below five times compiled in 4.5 s to code of 4.2 MB that took 36 ms
+  per call; it now compiles in 43 ms to code of 11 KB that takes 2.7 µs per
+  call (the default compiler: 10 µs). A sub-expression that draws a random
+  number is still computed at each place it is written.
 - **The interval library has the kernels `atLeast(v, c)` and
   `atMost(v, c)`** (the value `v` with its lower end raised to that of `c`,
   or its upper end lowered to that of `c`), **`number(x)`** (the number of

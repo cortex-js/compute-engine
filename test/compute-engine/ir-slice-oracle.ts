@@ -625,6 +625,11 @@ export const PROGRAMS: Json[] = [
   ['f', 'x', 2], ['f', 'n', 'y'], ['g', 'x'], ['g', 'n'], ['h2', 'x'], ['Add', ['g', 'x'], ['g', 'y']],
   ['fact', ['Mod', 'n', 7]], ['fact', 0], ['Sum', ['g', 'k'], ['Limits', 'k', 1, 'n']],
   ['Map', ['Function', ['f', 'z', 'z'], 'z'], 'D'], ['If', ['Less', ['g', 'x'], 1], ['f', 'x', 'y'], 0],
+  // Equal sub-expressions written as separate nodes, one lowering; a copy
+  // that reads an index of the name it reads outside
+  ['Max', ['Add', ['Sin', 'x'], ['Cos', 'y']], ['Multiply', 2, ['Add', ['Sin', 'x'], ['Cos', 'y']]], ['Add', ['Sin', 'x'], ['Cos', 'y'], 1]],
+  ['Add', ['Sin', ['Multiply', 2, 'n']], ['Sum', ['Sin', ['Multiply', 2, 'n']], ['Limits', 'n', 1, 3]]],
+  ['Add', ['If', ['Less', 'x', 0], ['g', ['Sin', 'x']], 1], ['g', ['Sin', 'x']]],
 ];
 
 /**
