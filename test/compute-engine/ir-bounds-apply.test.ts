@@ -419,8 +419,9 @@ describe('IR profile, batch G12: real bounds, real Ranges and Apply', () => {
     // prettier-ignore
     const json = ['Multiply', ['P', ['Multiply', 0.1, 'x'], ['Multiply', 6000, ['Range', 0, 1, 0.1]]], ['Power', 10, -12]];
     check(json, [{ x: 0.5 }, { x: -3 }]);
-    // On GLSL the length of the Range is not a constant of the lowering.
-    expect(failure(() => glsl(json))?.message).toMatch(/the region build/);
+    // A Range of constants is the list of its elements, of a constant
+    // length on GLSL too.
+    expect(glsl(json).success).toBe(true);
   });
 
   test('GLSL: nested loops of run-time counts still decline (neyret/4hi9use9t2)', () => {

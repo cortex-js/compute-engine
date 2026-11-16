@@ -357,11 +357,16 @@ export function runtimeOf(ce?: ComputeEngine): SysHelpers {
 /** The lists of constants (and of such lists) of at least 16 constants in
  *  all, and the lists that they hold, in any function and region, which the
  *  code computes once, when it is loaded (below 16, the literal at each call
- *  is as fast); and every pure colour operation of such values and of
- *  constants, with the lists it reads. No code writes to a list or to a
+ *  is as fast); and every pure colour operation and element-wise operation
+ *  of lists of constants, of such values and of constants, with the lists
+ *  it reads. No code writes to a list or to a
  *  colour; a result can be such a value, which every call shares (results
  *  are read-only). */
-function onceLists(p: Program, rows: readonly OperatorRow[]): Set<V> {
+function onceLists(
+  p: Program,
+  rows: readonly OperatorRow[],
+  elementwise: boolean
+): Set<V> {
   const size = new Map<V, number>();
   const lists: (Instr & { k: 'list' })[] = [];
   const once = new Set<V>();
@@ -372,7 +377,8 @@ function onceLists(p: Program, rows: readonly OperatorRow[]): Set<V> {
       if (i.k === 'const') size.set(i.out, 1);
       if (
         i.k === 'op' &&
-        p.types[i.out].lane === 'color' &&
+        (p.types[i.out].lane === 'color' ||
+          (elementwise && p.types[i.out].shape.length > 0)) &&
         rowOfOp(rows, i.op)?.row.effect === 'pure' &&
         i.args.every(known)
       ) {
@@ -425,7 +431,9 @@ export function printJavaScript(
           ],
         },
     rows,
-    onceLists(p, rows)
+    // Not under an `entry` wrapper (the bigint mode): a value computed once
+    // is outside its catch of a pole.
+    onceLists(p, rows, syntax.entry === undefined)
   );
   const entry = entryOf(p);
   const n = argumentIndex(entry, entry.positional ?? 0);

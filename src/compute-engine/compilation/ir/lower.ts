@@ -112,6 +112,7 @@ import {
 } from './lower-context.js';
 import { toBigint } from '../../boxed-expression/numerics.js';
 import { listLowering, literalList, parameterName } from './lower-lists.js';
+import { SCALARIZE_LIMIT } from './passes.js';
 import {
   integralClosedForm,
   intervalQuadratureRefusal,
@@ -319,6 +320,8 @@ export function lower(
     return to;
   };
   const type = (v: V) => b.typeOf(v);
+  // The elements of the `Range` nodes lowered as literal lists.
+  let rangeElements = 0;
   const constant = (v: V) => {
     const c = b.constants.get(v);
     return typeof c === 'number' ? c : undefined;
@@ -1018,7 +1021,34 @@ export function lower(
       case 'Length':
         return lists.source(e.ops[0], false, true).length;
       case 'Range': {
+        const effects = b.effects;
         const s = lists.source(e);
+        // A list value of constant operands: the engine's elements, as a
+        // literal list (README, "closedValue()"); a consumer that iterates
+        // a `Range` reads it by `lists.source()` and never comes here. An
+        // operand with no effect and no write is lowered again from the memo
+        // or as a pure copy; at most 4,096 elements in all.
+        const closed =
+          options.fold !== false &&
+          b.effects === effects &&
+          facts(e).writes.size === 0 &&
+          e.ops.every((x) => constant(value(x)!) !== undefined);
+        const r = closed ? e.evaluate() : undefined;
+        if (
+          r?.isFiniteCollection &&
+          rangeElements + Number(r.count) <= SCALARIZE_LIMIT ** 2
+        ) {
+          rangeElements += Number(r.count);
+          const l = ce.function('ListFrom', [r]).N();
+          if (
+            isFunction(l, 'List') &&
+            l.nops > 0 &&
+            l.ops.every(
+              (x) => isNumber(x) && x.im === 0 && Number.isFinite(x.re)
+            )
+          )
+            return value(l)!;
+        }
         return lists.built(e, s.length, s.at);
       }
       case 'Map':

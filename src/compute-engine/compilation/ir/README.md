@@ -59,6 +59,30 @@ targets, as the interpreter converts them (`ANGLE_FACTORS`, the row field
 `angle`). Like every engine setting, the compiled code holds the factor of the
 unit at the time of the compilation.
 
+`closedValue()` gives a number only. A `Range` lowered as a list value (an
+operand of an element-wise row, an argument, the value of a name, an element of
+a `List`, the result) whose operands lower to constants (no input, local,
+parameter or index; a name with a value is its value, a name of `vars` or
+`symbolic` an input), and whose evaluation by the engine is a list of 1 to 4,096
+finite real numbers, is the literal list of those numbers, as a `List` of them
+would be (`Range(0, 1, 0.1)` is the 11 doubles of the interpreter,
+`0.30000000000000004` included; integers on the integer lane): on JavaScript a
+literal or, from 16 elements, a list computed once; on GLSL a constant array; in
+the interval mode a list of point intervals. A `Range` that a consumer iterates
+(`Length`, `Sum`, `Product`, `Max`, `Min`, `Map`, `Filter`, `Reduce`, a
+`Comprehension` or a `Loop` clause) is read as a source, its count and the
+arithmetic of its elements, with no list, as before; so is a `Range` of more
+than 4,096 elements, of an empty list, with `constantFold: false`, and every
+`Range` past 4,096 literal elements in the compilation (the elements of all the
+literal ranges count). The operands are lowered once: a `Range` whose operands
+have an effect or a write is not a literal. Two lists of different stated
+lengths under an element-wise operation decline, also where a `Range` had a
+length known at run time only before (`Add(Range(1, 3), Range(1, 4))` gave
+`[2, 4, 6]`; the interpreter gives `incompatible-dimensions`). A list computed
+once that is the result of the program is one array that every call shares
+(results are read-only). At 4,096 elements the compilation takes 40 to 75 ms and
+the text is 24 to 83 kB.
+
 A root `Function` literal compiles to a function of positional parameters, then
 the inputs object for its free names: `run(3, 4, { x: 1.5 })`.
 
@@ -940,11 +964,15 @@ result can be an input (`Q` is `_.Q`), hold a part of one (`List(A, B)` holds
 the input points), or be a constant that every call shares. A list of at least
 16 constants of any lane (counting the constants of the lists it holds) is
 computed once, when the code is loaded, in `preambleOnce` (`onceLists()` of
-`print-js.ts`); below 16 the array literal at each call is as fast. No code
-writes to an input or to such a list: an operation builds a new array, a write
-to an element is an error of the canonical form and a write to a list local
-declines. GLSL and the interval mode compute no list once this way; the
-interval mode's `run()` copies its inputs and its result.
+`print-js.ts`); below 16 the array literal at each call is as fast. An
+element-wise operation of lists of constants (of any length), of such values and
+of constants is computed once there too (`2·List(1, 2, 3)`, `Range(1, 10)/40`),
+with the lists it reads, also with `constantFold: false`; not in the `bigint`
+mode, whose catch of a pole is in the entry. No code writes to an input or to
+such a list: an operation builds a new array, a write to an element is an error
+of the canonical form and a write to a list local declines. GLSL and the
+interval mode compute no list once this way; the interval mode's `run()` copies
+its inputs and its result.
 
 `Comprehension(body, Element(i, L))` is a build of `body` over the source of `L`
 (a list, a `Range`); with a condition, `Element(i, L, cond)`, it is a `filter`
