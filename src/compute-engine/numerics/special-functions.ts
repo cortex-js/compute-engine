@@ -4933,6 +4933,9 @@ export function besselY(n: number, x: number): number {
   let yk = y1;
   for (let k = 1; k < n; k++) {
     const yp1 = ((2 * k) / x) * yk - ym1;
+    // Past an overflow the next step is ∞ − ∞ = NaN. |Y_k| grows with k
+    // from here and keeps its sign, so Y_n overflows with the same sign.
+    if (!Number.isFinite(yp1)) return yp1;
     ym1 = yk;
     yk = yp1;
   }

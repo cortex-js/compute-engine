@@ -66,6 +66,11 @@
 
 ### Bug Fixes
 
+- **`BesselY(n, x)` at machine precision is `-oo` or `+oo` when its value
+  overflows a double.** `BesselY(200, 1)` was `NaN`: the recurrence on the
+  order reached an infinite value and the next step computed `∞ − ∞`. It is
+  now `-oo` (its value is about `-2.02e432`), and `BesselY(-201, 1)` is
+  `+oo`.
 - **`Rationalize(x, tolerance)` keeps a tolerance below double precision.**
   The convergents were computed with doubles, so
   `Rationalize(0.12345678901234567890123, 10^-25)` gave `4115227/33333339`,

@@ -42,4 +42,15 @@ describe('REAL BESSEL KERNELS', () => {
   test.each(rows)('Y_%p(%p)', (n, x, _, y) => {
     expect(error(besselY(n, x), y, x)).toBeLessThan(2e-14);
   });
+
+  // Y_200(1) is about -2.02·10⁴³²: the recurrence overflows a double and
+  // gives -∞, not ∞ − ∞ = NaN at the next step.
+  test.each([
+    [200, 1, -Infinity],
+    [-200, 1, -Infinity],
+    [-201, 1, Infinity],
+    [170, 1, -Infinity],
+  ])('Y_%p(%p) overflows to %p', (n, x, y) => {
+    expect(besselY(n, x)).toBe(y);
+  });
 });
