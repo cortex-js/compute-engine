@@ -54,6 +54,17 @@
 
 ### Bug Fixes
 
+- **`Beta(a, b)` is 0 where `a + b` is a pole of Γ and `a`, `b` are not
+  integers**
+  ([#590](https://github.com/cortex-js/compute-engine/issues/590)).
+  `Beta(-1/2, -1/2)` and `Beta(-5/2, 1/2)` stayed unevaluated under
+  `evaluate()`, and their `.N()` and `Beta(-2.5, 0.5)` gave `NaN`; they now
+  give `0`, also at a precision above the machine precision and in compiled
+  code. `Beta(1/3, -4/3).N()` gives `0`, not `-2.4e-30`. Compiled
+  `Beta(x, y)` at a negative integer and a positive integer whose poles
+  cancel gives the value of the interpreter, not `NaN`: `1/6` at
+  `x = 2, y = -3` and at `x = -3, y = 2`, `-1` at `x = -1, y = 1`.
+
 - **`.N()` of a divergent infinite sum whose terms overflow in doubles
   returns.** `\sum_{k=0}^{\infty} \frac{k + k!}{k!}`, whose terms tend to 1,
   did not return in minutes: each term computed the exact `k!` up to

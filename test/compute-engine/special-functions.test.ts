@@ -1,6 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import {
+  beta,
+  bigBeta,
   bigGamma,
   digamma,
   erfInv,
@@ -418,6 +420,92 @@ describe('BETA FUNCTION', () => {
     const r = ce.expr(['Beta', 2.5, 2]).evaluate();
     expect(numericized(r)).toBe(true);
     expect(r.re).toBeCloseTo(1 / (2.5 * 3.5), 12);
+  });
+});
+
+// CE-1297 and CE-1227: B(a, b) = Γ(a)Γ(b)/Γ(a + b) at a pole of Γ(a + b).
+// With a and b not integers the value is 0; with an integer pair −n, m
+// (n ≥ m > 0) the poles cancel and the value is finite.
+describe('BETA FUNCTION AT A POLE OF Γ(a + b)', () => {
+  const half = (n: number) => ['Rational', n, 2];
+
+  test('B(-1/2, -1/2) and B(-5/2, 1/2) are 0 under evaluate and N', () => {
+    for (const [a, b] of [
+      [half(-1), half(-1)],
+      [half(-5), half(1)],
+      [['Rational', 1, 3], ['Rational', -4, 3]],
+    ]) {
+      expect(ce.expr(['Beta', a, b]).evaluate().toString()).toBe('0');
+    }
+    expect(ce.expr(['Beta', half(-1), half(-1)]).N().re).toBe(0);
+    expect(ce.expr(['Beta', half(-5), half(1)]).N().re).toBe(0);
+    // Under N() the handler reads the operands as written: the rounded
+    // values of 1/3 and -4/3 do not sum to -1.
+    const thirds = ['Beta', ['Rational', 1, 3], ['Rational', -4, 3]];
+    expect(ce.expr(thirds).N().re).toBe(0);
+    const big = new ComputeEngine();
+    big.precision = 50;
+    expect(big.expr(thirds).N().re).toBe(0);
+  });
+
+  test('B(-2.5, 0.5) is 0 under evaluate, and at 50 digits', () => {
+    expect(ce.expr(['Beta', -2.5, 0.5]).evaluate().re).toBe(0);
+    const big = new ComputeEngine();
+    big.precision = 50;
+    expect(big.expr(['Beta', -2.5, 0.5]).N().re).toBe(0);
+    expect(big.expr(['Beta', half(-1), half(-1)]).N().re).toBe(0);
+  });
+
+  test('the double and bignum kernels', () => {
+    expect(beta(-0.5, -0.5)).toBe(0);
+    expect(beta(-2.5, 0.5)).toBe(0);
+    // The doubles nearest -2.3 and 0.3 do not sum to -2: no pole.
+    expect(beta(-2.3, 0.3)).toBeCloseTo(-1.9225e-15, 18);
+    expect(beta(-2.3, 0.3)).not.toBe(0);
+    // The doubles nearest -0.1 and -1.9 have a rounded sum of -2 and an
+    // exact sum of -2 + e: B is about Γ(a)Γ(b)·2!·e, not NaN. The value is
+    // that of a 60-digit bigBeta of the two doubles.
+    expect(beta(-0.1, -1.9)).toBeCloseTo(-9.900859259768432e-15, 27);
+    expect(beta(-1.3, 0.3)).toBeCloseTo(5.527234051434306e-16, 28);
+    // B(-n, m) = (-1)^m B(m, n - m + 1) for an integer pair.
+    expect(beta(-3, 2)).toBeCloseTo(1 / 6, 15);
+    expect(beta(2, -3)).toBeCloseTo(1 / 6, 15);
+    expect(beta(3, -3)).toBeCloseTo(-1 / 3, 15);
+    expect(beta(-1, 1)).toBe(-1);
+    // A large n does not lose n - m + 1 to rounding.
+    expect(beta(-1e20, 1)).toBe(-1e-20);
+    expect(beta(2, -1e20)).toBeCloseTo(1e-40, 50);
+    // Above m = 100 the reflection: B(-200, 150) = B(150, 51).
+    expect(beta(-200, 150) / beta(150, 51)).toBeCloseTo(1, 12);
+    // Above k = 170 the near-pole value is NaN, not an overflow.
+    expect(beta(-0.1, -171.9)).toBeNaN();
+    // A pole of B (n < m, or both non-positive) stays NaN.
+    expect(beta(-1, 2)).toBeNaN();
+    expect(beta(0, 2)).toBeNaN();
+    expect(beta(-1, -1)).toBeNaN();
+    const big = new ComputeEngine();
+    const bd = (x: number) => new BigDecimal(x);
+    expect(bigBeta(big, bd(-0.5), bd(-0.5)).isZero()).toBe(true);
+    expect(bigBeta(big, bd(-3), bd(2)).toNumber()).toBeCloseTo(1 / 6, 15);
+    expect(bigBeta(big, bd(3), bd(-3)).toNumber()).toBeCloseTo(-1 / 3, 15);
+    expect(bigBeta(big, bd(-1), bd(2)).isNaN()).toBe(true);
+  });
+
+  test('compiled Beta at the pole of Γ(a + b)', () => {
+    const local = new ComputeEngine();
+    local.declare('x', 'real');
+    local.declare('y', 'real');
+    const f = compile(local.expr(['Beta', 'x', 'y']));
+    expect(f.success).toBe(true);
+    const run = (x: number, y: number) => f.run!({ x, y }) as number;
+    expect(run(-2.5, 0.5)).toBe(0);
+    expect(run(-0.5, -0.5)).toBe(0);
+    expect(run(-0.1, -1.9)).toBeCloseTo(-9.900859259768432e-15, 27);
+    expect(run(2, -3)).toBeCloseTo(1 / 6, 15);
+    expect(run(-3, 2)).toBeCloseTo(1 / 6, 15);
+    expect(run(3, -3)).toBeCloseTo(-1 / 3, 15);
+    expect(run(-1, 1)).toBe(-1);
+    expect(run(-2.5, 2)).toBeCloseTo(1 / (-2.5 * -1.5), 15);
   });
 });
 

@@ -10173,6 +10173,31 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               [a, b],
               numericApproximation ? reduced.N() : reduced
             );
+          // Two rationals that are not integers with a sum that is a
+          // non-positive integer: Γ(a + b) is a pole and Γ(a), Γ(b) are
+          // finite, so B(a, b) = 0, as B(−1/2, −1/2). Under `.N()` the
+          // operands are already rounded and their sum is not an integer
+          // (B(1/3, −4/3)), so the test reads the operands as written. A
+          // name that holds a rational is not read: `.N()` of B(1/3, x)
+          // with x = −4/3 is the kernel's value at the rounded operands.
+          const [xa, xb] =
+            numericApproximation &&
+            options.expression !== undefined &&
+            isFunction(options.expression) &&
+            options.expression.nops === 2
+              ? options.expression.ops
+              : [a, b];
+          if (xa.isInteger === false && xb.isInteger === false) {
+            const ra = asRational(xa);
+            const rb = asRational(xb);
+            if (ra !== undefined && rb !== undefined) {
+              const num =
+                BigInt(ra[0]) * BigInt(rb[1]) + BigInt(rb[0]) * BigInt(ra[1]);
+              const den = BigInt(ra[1]) * BigInt(rb[1]);
+              if (num <= 0n && num % den === 0n)
+                return numericApproximation ? engine.Zero.N() : engine.Zero;
+            }
+          }
           // Two positive half-integers: B(a, b) = Γ(a)Γ(b)/Γ(a + b) is a
           // rational multiple of π, as B(1/2, 1/2) = π (DLMF 5.12.1).
           if (!numericApproximation) {

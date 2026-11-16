@@ -1948,9 +1948,26 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
 
 /**
  * Bignum Beta function B(a, b) = Γ(a)Γ(b)/Γ(a+b)
- * Uses bigGamma directly.
+ * Uses bigGamma directly. The poles of Γ(a + b) are answered as in `beta()`.
  */
 export function bigBeta(ce: ComputeEngine, a: BigNum, b: BigNum): BigNum {
+  if (a.isInteger() && b.isInteger()) {
+    const [n, m] =
+      !a.isPositive() && b.isPositive()
+        ? [a.neg(), b]
+        : !b.isPositive() && a.isPositive()
+          ? [b.neg(), a]
+          : [];
+    if (n !== undefined && m !== undefined) {
+      if (n.lt(m)) return BigDecimal.NAN;
+      const r = bigBeta(ce, m, n.sub(m).add(BigDecimal.ONE));
+      return m.toBigInt() % 2n === 0n ? r : r.neg();
+    }
+  }
+  // `add()` is exact, so an integer sum is a pole of Γ(a + b).
+  const s = a.add(b);
+  if (s.isInteger() && !s.isPositive() && !a.isInteger() && !b.isInteger())
+    return BigDecimal.ZERO;
   return withGuardDigits(SPECIAL_FN_GUARD, () =>
     gammaCore(ce, a)
       .mul(gammaCore(ce, b))
@@ -4345,6 +4362,44 @@ function factorial(n: number): number {
  * Uses gamma directly for small args (more accurate) and gammaln for large.
  */
 export function beta(a: number, b: number): number {
+  // An integer pair −n, m with n ≥ m > 0: the poles of Γ(−n) and Γ(m − n)
+  // cancel, and B(−n, m) = (m − 1)!/(−n(1 − n)…(m − 1 − n)) =
+  // (−1)^m B(m, n − m + 1). For n < m, Γ(m − n) is finite and B is a pole.
+  // The product is used up to m = 100, as in the interpreter: the
+  // reflection loses n − m + 1 to rounding for a large n (B(−1e20, 1)).
+  if (Number.isInteger(a) && Number.isInteger(b)) {
+    const [n, m] = a <= 0 && b > 0 ? [-a, b] : b <= 0 && a > 0 ? [-b, a] : [];
+    if (n !== undefined && m !== undefined) {
+      if (n < m) return NaN;
+      if (m <= 100) {
+        let r = -1 / n;
+        for (let k = 1; k < m; k++) r *= k / (k - n);
+        return r;
+      }
+      const r = beta(m, n - m + 1);
+      return m % 2 === 0 ? r : -r;
+    }
+  }
+  // Γ(a + b) is a pole where a + b is a non-positive integer −k. When neither
+  // a nor b is an integer, Γ(a) and Γ(b) are finite and B(a, b) = 0. When
+  // the rounded sum is −k but the exact sum is −k + e (the two-sum error,
+  // as for the doubles nearest −0.1 and −1.9), Γ is not evaluated at its
+  // pole: 1/Γ(−k + e) ≈ (−1)^k k! e, the first term of its series at −k.
+  // Above k = 170, k! is not a double, and the value is NaN.
+  const s = a + b;
+  if (
+    Number.isInteger(s) &&
+    s <= 0 &&
+    !Number.isInteger(a) &&
+    !Number.isInteger(b)
+  ) {
+    const bv = s - a;
+    const e = a - (s - bv) + (b - bv);
+    if (e === 0) return 0;
+    const k = -s;
+    if (k > 170) return NaN;
+    return gamma(a) * gamma(b) * (k % 2 === 0 ? 1 : -1) * factorial(k) * e;
+  }
   // For large arguments, use gammaln to avoid overflow
   if (a > 100 || b > 100 || a + b > 100) {
     return Math.exp(gammaln(a) + gammaln(b) - gammaln(a + b));
