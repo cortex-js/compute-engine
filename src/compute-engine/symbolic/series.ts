@@ -596,6 +596,78 @@ function composeOuter(
  * rewriting it to exponential form (`e^0 = 1`) — see `unaryTaylor`. */
 const HYPERBOLIC = new Set(['Sinh', 'Cosh', 'Tanh', 'Sech', 'Csch', 'Coth']);
 
+const ALGEBRAIC_OPS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+  'Power',
+  'Root',
+  'Sqrt',
+  'Square',
+]);
+
+/** True when `e` is built only from numbers, symbols and `ALGEBRAIC_OPS`. */
+function isAlgebraicIn(e: Expression): boolean {
+  if (!isFunction(e)) return true;
+  return ALGEBRAIC_OPS.has(e.operator) && e.ops.every(isAlgebraicIn);
+}
+
+/**
+ * Taylor coefficients of `F = op(v)` around `b0`, by integrating the series of
+ * `F'` term by term: `c0 = F(b0)` and `c(k+1) = d(k)/(k+1)`.
+ *
+ * Differentiating `F` W times is exponential in W when `F'` is a different
+ * function (the unsimplified k-th derivative of `Arctan` is a rational
+ * function that grows with k), whereas the series of `F'` costs a few
+ * coefficient products. Applies only when `F'` is built from algebraic
+ * operators (`Arctan`, `Arcsin`, `Arsinh`, `Ln`, …). A `F'` that calls another
+ * function (`Sin`/`Cos` are each other's derivative, `Exp` its own) keeps the
+ * derivative loop, which also keeps this from recursing into `unaryTaylor`.
+ * Returns `null` (the caller falls back to the loop) when `F'` cannot be
+ * expanded or `F(b0)` is not a usable value.
+ */
+function integrateDerivativeTaylor(
+  ce: ComputeEngine,
+  g: Expression,
+  v: string,
+  b0: Expression,
+  W: number
+): Coeffs | null {
+  // `Sqrt`'s derivative calls `Sqrt`, which would recurse forever
+  if (W < 1 || (isFunction(g) && ALGEBRAIC_OPS.has(g.operator))) return null;
+  checkDeadline(ce._deadlineFrame);
+  const gd = differentiate(g, v);
+  if (gd === undefined) return null;
+  const fp = gd.canonical;
+  if (!isAlgebraicIn(fp)) return null;
+
+  const c0 = g.subs({ [v]: b0 }).evaluate();
+  if (
+    !c0.isValid ||
+    c0.isNaN === true ||
+    c0.isInfinity === true ||
+    hasIndeterminateZeroPower(c0) ||
+    hasHiddenSingularity(c0) ||
+    holdsInertLibraryDerivative(c0)
+  )
+    return null;
+
+  const d = expandViaSeeds(fp, v, b0, ce, W - 1);
+  if (!d) return null;
+
+  const coeffs: Coeffs = [ce.function('Divide', [c0, ce.One])];
+  for (let k = 0; k < W; k++) {
+    checkDeadline(ce._deadlineFrame);
+    const dk = d[k];
+    if (!dk || !dk.isValid || dk.isNaN === true || dk.isInfinity === true)
+      return null;
+    coeffs.push(ce.function('Divide', [dk, ce.number(k + 1)]));
+  }
+  return coeffs;
+}
+
 function unaryTaylor(
   ce: ComputeEngine,
   op: string,
@@ -609,6 +681,8 @@ function unaryTaylor(
   const v = ce.temporaryName('s', b0, op);
   const reduceHyp = HYPERBOLIC.has(op);
   let g: Expression = ce.function(op, [ce.symbol(v)]).canonical;
+  const integrated = integrateDerivativeTaylor(ce, g, v, b0, W);
+  if (integrated) return integrated;
   const coeffs: Coeffs = [];
   for (let k = 0; k <= W; k++) {
     checkDeadline(ce._deadlineFrame);

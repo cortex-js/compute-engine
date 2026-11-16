@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Improvements
+
+- **`Series` of `Arctan`, `Arcsin`, `Arccos`, `Arccot`, `Arsinh` and `Artanh`
+  no longer takes time exponential in the order.** `Series(Arctan(x), x, 0, 11)`
+  took 21 s (and ran past the time limit on a slower machine) and now takes
+  under 0.1 s; order 7 went from about 1 s to under 0.1 s. The expansion
+  differentiated the function once per order, and the k-th derivative of
+  `Arctan` grows with k. When the derivative of the function is built from
+  algebraic operators, its series is now expanded and integrated term by term.
+  A singular expansion point, or a derivative that calls another function
+  (`Tan`, `Exp`, `Sin`), keeps the previous route.
+  (#588, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.191.0 _2026-11-15_
 
 ### Breaking Changes
