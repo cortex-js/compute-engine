@@ -426,6 +426,54 @@ describe('the interval mode: recursive functions', () => {
     });
   });
 
+  test('a recursive function that reads an input passes it to its recursive call', () => {
+    // prettier-ignore
+    {
+      ce.assign('rI', ce.box(['Function', ['Add', ['Multiply', 'y', 'u'], ['Sin', 'v']], 'u', 'v'] as never));
+      ce.assign('rJ', ce.box(['Function', ['Which', ['Equal', 'm', 0], 'z', 'True', ['rI', 'z', ['rJ', ['Add', 'm', -1], 'z']]], 'm', 'z'] as never));
+    }
+    const json = ['rJ', 'n', 'x'];
+    const r = mode(json);
+    expect(r.preambleOnce).toMatch(
+      /u\d+_rJ\(_IA\.add\(v\d+, v\d+\), v\d+, v\d+\)/
+    );
+    // The input y is not a parameter of the expression: give it a value.
+    const read = (point: Record<string, number>) =>
+      ce.withValues(
+        Object.fromEntries(
+          Object.entries(point).map(([k, v]) => [k, ce.number(v)])
+        ),
+        () => ce.box(json as never).evaluate().N().re
+      );
+    const v = r.run({
+      n: 3,
+      x: { lo: 0.1, hi: 0.4 },
+      y: { lo: 0.5, hi: 0.7 },
+    }) as any;
+    expect(v.kind).toBe('interval');
+    for (const [x, y] of [
+      [0.1, 0.5],
+      [0.4, 0.7],
+      [0.25, 0.6],
+      [0.1, 0.7],
+    ]) {
+      const value = read({ n: 3, x, y });
+      expect([x, y, v.value.lo <= value && value <= v.value.hi]).toEqual([
+        x,
+        y,
+        true,
+      ]);
+    }
+    expect(r.run({ n: 0, x: 0.3, y: 2 })).toEqual({
+      kind: 'interval',
+      value: { lo: 0.3, hi: 0.3 },
+    });
+    // A counter that is not a point: the first guard is undecided.
+    expect(r.run({ n: { lo: 2, hi: 3 }, x: 0.3, y: 2 })).toEqual({
+      kind: 'entire',
+    });
+  });
+
   test("an if of the entry runs both arms, the recursive call in one", () => {
     const json = ['If', ['Greater', 'x', 0], ['rs', 'x', 2], 0];
     const v = mode(json).run({ x: { lo: -0.5, hi: 0.5 } });

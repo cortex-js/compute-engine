@@ -1358,13 +1358,17 @@ and the call checks it against the parameter: with `f(t) := a·t` and
 is admitted). An occurrence of an input of another type than the input's
 declines. A `vars` name whose text reads the inputs object (`readsVarsObject()`:
 `_.P`, `_['Q']`) is passed the same way: each call in the entry reads the text.
-Declined: a recursive call of a function that reads an input, also through a
-cycle of calls (`P(j) = If(j > 0, Q(j - 1), n)` and
+A recursive call in the function's own body passes the function's input
+parameters, which `define()` adds to each such call (`UserFunction.self`) when
+the body is lowered, so the body can read an input before or after the call
+(`J(n, x) := Which(n = 0, x, True, I(x, J(n − 1, x)))`, where `I` reads `a`).
+Declined: a function that reads an input on a cycle of calls through another
+function (`P(j) = If(j > 0, Q(j - 1), n)` and
 `Q(j) = If(j > 0, P(j - 1), 1)`); a call where the name is a local or a
 parameter, or has a value; an input of a list of a run-time length or of
 booleans; a name with a value read in the body whose binding where the call is
 compiled is not the body's (see the values of free names above); another `vars`
-name. A recursive function that reads no input compiles.
+name.
 `Apply(Function(body, p1, …), a1, …)` with one parameter per argument, each a
 name, is the body with each parameter bound to its argument, the arguments
 lowered once, in order, before the body (as a `Block` of locals); a parameter

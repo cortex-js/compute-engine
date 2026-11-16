@@ -298,7 +298,9 @@ function signatureTypes(e: Fn, literal: Fn) {
  *  type (absent while its body is lowered, when it is not declared). The
  *  inputs of the compilation that its body reads are parameters after
  *  `params` (`capture()`), in the order of their first read; `called` when
- *  a call of it was made while its body is lowered. */
+ *  a call of it was made in another body while its body is lowered;
+ *  `self`, the arguments of each call of it in its own body, which take the
+ *  inputs when the body is lowered. */
 type UserFunction = {
   key: object;
   params: {
@@ -322,6 +324,7 @@ type UserFunction = {
   ir: IRFunction;
   inputs: Type[];
   called: boolean;
+  self: V[][];
   /** The first call of the function made while its body is lowered, when
    *  it has no declared result: the call assumed a real scalar. */
   guess?: Fn;
@@ -450,6 +453,7 @@ export function functionLowering(
       ir,
       inputs: [],
       called: false,
+      self: [],
     };
     functions.set(key, fn);
     pending.set(e.operator, fn);
@@ -539,6 +543,8 @@ export function functionLowering(
     }
     fn.result ??= type(ir.body.yields[0]);
     ir.results.push(fn.result);
+    // A call in the body passes the inputs, parameters of the body.
+    for (const a of fn.self) a.push(...ir.body.params.slice(fn.own));
     pending.delete(e.operator);
     // A `Comprehension` in the body of a function being lowered reads the
     // effect of a function it calls (`flips` in `moves`).
@@ -657,18 +663,22 @@ export function functionLowering(
       fn.guess = e;
       fn.result = { lane: 'real', shape: [] };
     }
-    // A call of a function being lowered (recursive) passes no input: it
-    // declines when the function reads one (`capture()`).
-    if (pending.get(e.operator) === fn) {
+    // A call of a function being lowered, in its own body, passes the
+    // inputs when the body is lowered (`define()`); in another body (a
+    // cycle of calls), none: it declines when the function reads one
+    // (`capture()`).
+    const cyclic = pending.get(e.operator) === fn;
+    const self = cyclic && cx.inFunction === e.operator;
+    if (cyclic && !self) {
       if (fn.inputs.length > 0)
         decline(
           e,
-          `a recursive call of ${e.operator}, which reads the input ${fn.ir.paramNames[fn.own]} (a function on a cycle of calls reads no input)`
+          `a recursive call of ${e.operator}, which reads the input ${fn.ir.paramNames[fn.own]} (a function on a cycle of calls through another function reads no input)`
         );
       fn.called = true;
     }
     // The inputs that the body reads, read here (`free()`).
-    const inputs = fn.inputs.map((t, j) => {
+    const inputs = (self ? [] : fn.inputs).map((t, j) => {
       const k = fn.own + j;
       const p = type(fn.ir.body.params[k]);
       const v = cx.widen(cx.free(e, fn.ir.paramNames[k], t), p.lane);
@@ -692,12 +702,9 @@ export function functionLowering(
           }
         : fn.result
     );
-    b.emit({
-      k: 'call',
-      outs: [...outs, out],
-      fn: fn.ir.name,
-      args: [...args, ...inputs],
-    });
+    const all = [...args, ...inputs];
+    if (self) fn.self.push(all);
+    b.emit({ k: 'call', outs: [...outs, out], fn: fn.ir.name, args: all });
     const axis = cx.tuples.get(fn.ir.body.yields[0]);
     if (axis !== undefined) cx.tuples.set(out, axis);
     return out;
@@ -766,7 +773,7 @@ export function functionLowering(
     if (fn.called)
       decline(
         e,
-        `a recursive call of ${fn.ir.source}, which reads the input ${name} (a function on a cycle of calls reads no input)`
+        `a recursive call of ${fn.ir.source}, which reads the input ${name} (a function on a cycle of calls through another function reads no input)`
       );
     // A scalar, or a list or a tuple (a point) of reals or integers of a
     // stated length.

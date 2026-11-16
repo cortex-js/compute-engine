@@ -372,7 +372,11 @@
   When the result is neither declared nor inferred, it is taken as a real
   number, and such a function whose body is a complex number, a boolean, a
   list or a tuple is not compiled by the profile; GLSL declines a recursive
-  function. As with the existing compiler, a
+  function. A recursive function can read an input of the compilation, also
+  through a function that it calls (`J(n, x) := Which(n = 0, x, True,
+  I(x, J(n − 1, x)))` with `I(u, v) := a·u + Sin(v)`); two functions that call
+  each other and read an input are not compiled by the profile. As with the
+  existing compiler, a
   recursion that does not reach its base case (`s(x, 2.5)`) throws a
   `RangeError` at the end of the JavaScript stack, where the interpreter
   throws a `CancellationError` at its recursion limit; a depth past that

@@ -973,7 +973,7 @@ describe('a user function that reads an input of the compilation', () => {
     expect(r.preambleOnce.match(/const u\d+_Fs =/g)).toHaveLength(1);
     expect(r.code.match(/_Fs\([^)]*_\.m_s\)/g)).toHaveLength(2);
   });
-  test('a recursive function that reads an input declines; with no input it compiles', () => {
+  test('a recursive function that reads an input passes it to its recursive call', () => {
     const e = engine();
     e.declare('k', 'integer');
     const recursive = (name: string, base: Json, step: Json) => {
@@ -995,13 +995,90 @@ describe('a user function that reads an input of the compilation', () => {
         )
       );
     };
+    // The input read before the recursive call, and in one arm only.
     recursive('R', 'n', 'n');
-    const o = outcome(box(['R', 'k'], e));
-    expect('message' in o && o.message).toMatch(
-      /a recursive call of R, which reads the input n/
-    );
+    const r = againstInterpreter(e, ['R', 'k'], [
+      { k: 4, n: 1.5 },
+      { k: 0, n: -2 },
+    ]);
+    expect(r.preambleOnce).toMatch(/u\d+_R\(\(v\d+ \+ \(-1\)\), v\d+\)/);
     recursive('R0', 1.5, 2);
     againstInterpreter(e, ['R0', 'k'], [{ k: 4 }, { k: 0 }]);
+    // Read after it, through a function called with the recursive call
+    // (`neyret/tdyz9z5uxb`), and two inputs.
+    e.assign(
+      'Sc',
+      box(['Function', ['Add', ['Multiply', 'y', 'u'], 'n'], 'u'], e)
+    );
+    recursive('Ra', 'x', ['Sc', ['Ra', ['Subtract', 'j', 1]]]);
+    againstInterpreter(e, ['Ra', 'k'], [
+      { k: 3, x: 0.7, y: 1.5, n: -0.25 },
+      { k: 0, x: -2, y: 3, n: 1 },
+    ]);
+  });
+  test('a recursive function that reads a list or a point input', () => {
+    const e = engine();
+    e.declare('k', 'integer');
+    e.declare('L', 'list<real^3>');
+    e.declare('Pt', 'tuple<real, real>');
+    const fn = (name: string, body: Json) => {
+      e.declare(name, '(integer) -> real');
+      e.assign(name, box(['Function', body, 'j'], e));
+    };
+    // prettier-ignore
+    fn('Rl', ['If', ['LessEqual', 'j', 0], 0, ['Add', ['Rl', ['Subtract', 'j', 1]], ['At', 'L', ['Add', ['Mod', 'j', 3], 1]]]]);
+    againstInterpreter(e, ['Rl', 'k'], [
+      { k: 7, L: [0.5, -1, 2] },
+      { k: 0, L: [1, 2, 3] },
+    ]);
+    // prettier-ignore
+    fn('Rp', ['If', ['LessEqual', 'j', 0], ['At', 'Pt', 1], ['Multiply', ['Rp', ['Subtract', 'j', 1]], ['At', 'Pt', 2]]]);
+    const r = compile(box(['Rp', 'k'], e), { ...IR, fallback: false });
+    // The interpreter reads a tuple input that the test cannot give it.
+    for (const [k, p] of [
+      [3, [0.5, -1]],
+      [0, [3, 4]],
+    ] as const)
+      expect(r.run!({ k, Pt: p } as never)).toBe(p[0] * p[1] ** k);
+  });
+  test('a recursive function that reads inputs, called from the entry and from a function that reads another', () => {
+    const e = engine();
+    e.declare('k', 'integer');
+    e.declare('Rc', '(integer) -> real');
+    e.declare('Gc', '(integer) -> real');
+    // prettier-ignore
+    {
+      e.assign('Rc', box(['Function', ['If', ['LessEqual', 'j', 0], 'n', ['Add', ['Multiply', 'y', ['Rc', ['Subtract', 'j', 1]]], 'n']], 'j'], e));
+      e.assign('Gc', box(['Function', ['Add', ['Multiply', 'x', ['Rc', 'i']], 'y'], 'i'], e));
+    }
+    againstInterpreter(
+      e,
+      [
+        'Add',
+        ['Rc', 'k'],
+        ['Rc', ['Add', 'k', 1]],
+        ['Gc', ['Subtract', 'k', 1]],
+      ],
+      [
+        { k: 3, n: 1.5, x: 2, y: 0.5 },
+        { k: 1, n: -2, x: 3, y: 2 },
+        { k: 4, n: 0.3, x: -1, y: -0.7 },
+      ]
+    );
+  });
+  test('a recursive function that reads a vars name of the inputs object', () => {
+    const e = engine();
+    e.declare('k', 'integer');
+    e.declare('Rv', '(integer) -> real');
+    // prettier-ignore
+    e.assign('Rv', box(['Function', ['If', ['LessEqual', 'j', 0], 1, ['Add', ['Rv', ['Subtract', 'j', 1]], 'P']], 'j'], e));
+    e.declare('P', 'real');
+    const r = againstInterpreter(e, ['Rv', 'k'], [{ k: 3, P: 1.5 }], {
+      vars: { P: '_.P' },
+      inputs: { P: 'real', k: 'integer' },
+    });
+    // Read once at the entry and passed down.
+    expect(r.code.match(/_\.P/g)).toHaveLength(1);
   });
   test('a cycle whose input is read after the recursive call declines', () => {
     const e = engine();
@@ -1022,7 +1099,14 @@ describe('a user function that reads an input of the compilation', () => {
     e.assign('Q', step('P', 1));
     const o = outcome(box(['P', 'k'], e));
     expect('message' in o && o.message).toMatch(
-      /a recursive call of P, which reads the input n/
+      /a recursive call of P, which reads the input n \(a function on a cycle of calls through another function reads no input\)/
+    );
+    // P reads n before the call of Q: the call of P in Q declines.
+    e.assign('P', box(['Function', ['Add', 'n', ['Q', 'j']], 'j'], e));
+    e.assign('Q', step('P', 1));
+    const first = outcome(box(['P', 'k'], e));
+    expect('message' in first && first.message).toMatch(
+      /P\(Add\(j, -1\)\): a recursive call of P, which reads the input n \(a function on a cycle of calls through another function reads no input\)/
     );
   });
   test('a name that holds a value in a body is that value; a local of the name at the call declines', () => {
@@ -1085,6 +1169,8 @@ describe('a recursive function with no declared result is a real scalar', () => 
       fn('Bb', ['If', ['LessEqual', 'n', 0], 1, ['If', ['Greater', ['Ba', ['Add', 'n', -1]], 0], 1, 0]], 'n');
       // The same recursive call twice in the body (`neyret/ndqj7hupta`).
       fn('Tw', ['Which', ['Equal', 'n', 0], 0, 'True', ['Add', ['Tw', ['Add', 'n', -1], 'x'], ['Multiply', 0.5, ['Sin', ['Multiply', 'x', ['Tw', ['Add', 'n', -1], 'x']]]]]], 'n', 'x');
+      // The same, reading the input t.
+      fn('Tt', ['Which', ['Equal', 'n', 0], 0, 'True', ['Add', ['Tt', ['Add', 'n', -1], 'x'], ['Multiply', 't', ['Sin', ['Multiply', 'x', ['Tt', ['Add', 'n', -1], 'x']]]]]], 'n', 'x');
       // A draw at each level.
       fn('Rd', ['If', ['LessEqual', 'n', 0], ['Random'], ['Add', ['Rd', ['Add', 'n', -1]], ['Random']]], 'n');
     }
@@ -1157,6 +1243,13 @@ describe('a recursive function with no declared result is a real scalar', () => 
     const v = (i.run as (x: object) => any)({ x: { lo: 0.3, hi: 0.3 } });
     const expected = box(['Tw', 12, 0.3], e).N().re;
     expect(v.value.lo <= expected && expected <= v.value.hi).toBe(true);
+    // With an input that each call passes: still one call.
+    const t = againstInterpreter(e, ['Tt', 12, 'x'], [
+      { x: 0.3, t: 0.5 },
+      { x: -1.7, t: -2 },
+    ]);
+    const tt = t.preambleOnce!.match(/const u\d+_Tt = [\s\S]*?\n};/)![0];
+    expect(calls(tt, 'Tt')).toBe(1);
   });
   test('a recursive call in a Sum is neither copied nor moved out of the loop', () => {
     for (const to of ['javascript', 'interval-js']) {
