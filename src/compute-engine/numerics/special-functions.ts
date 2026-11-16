@@ -14,10 +14,10 @@ import { lambertWNearBranchPoint } from './lambert-w-complex.js';
 // The machine kernels of the error functions live in their own module; they
 // are re-exported here, where the other special-function kernels are.
 export { erf, erfc, erfi, dawson } from './error-functions.js';
-// Likewise for the kernels of Ei, Si, Ci, Shi and Chi.
-import { expIntegralEi } from './exponential-integrals.js';
+// Likewise for the kernels of Ei, li, Si, Ci, Shi and Chi.
 export {
   expIntegralEi,
+  logIntegral,
   sinIntegral,
   cosIntegral,
   sinhIntegral,
@@ -6059,18 +6059,6 @@ function bigErfiAsymptotic(x: BigNum, tolDigits: number): BigNum {
 }
 
 const EULER_GAMMA = 0.5772156649015328606; // Euler–Mascheroni constant γ
-
-/**
- * Logarithmic integral li(x) = PV ∫₀ˣ dt/ln t, for x > 0, x ≠ 1.
- * Equivalent to Ei(ln x). li(0) = 0, li(1) = −∞.
- */
-export function logIntegral(x: number): number {
-  if (Number.isNaN(x)) return NaN;
-  if (x === 0) return 0;
-  if (x === 1) return -Infinity;
-  if (x < 0) return NaN; // li is real only for x ≥ 0
-  return expIntegralEi(Math.log(x));
-}
 
 /**
  * Bignum complementary error function.

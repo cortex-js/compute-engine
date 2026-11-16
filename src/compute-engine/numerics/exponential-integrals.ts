@@ -1,7 +1,8 @@
 /**
- * Machine-precision kernels of the exponential integral Ei and of the sine,
- * cosine, hyperbolic sine and hyperbolic cosine integrals Si, Ci, Shi and
- * Chi, for a real argument.
+ * Machine-precision kernels of the exponential integral Ei, the logarithmic
+ * integral li, and the sine, cosine, hyperbolic sine and hyperbolic cosine
+ * integrals Si, Ci, Shi and Chi, for a real argument. li(x) = Ei(ln x) is
+ * described at `logIntegral()`.
  *
  * Methods, with a = |x|:
  * - a ≤ 2: the Maclaurin series (DLMF 6.6.5 and 6.6.6 for Si and Ci; the
@@ -777,6 +778,61 @@ export function expIntegralEi(x: number): number {
     if (term < EPS * sum) break;
   }
   return sum + Math.log(x) + EULER_GAMMA;
+}
+
+/**
+ * Logarithmic integral li(x) = PV ∫₀ˣ dt/ln t = Ei(ln x), for real x ≥ 0.
+ *   li(0) = 0, li(1) = −∞, li(+∞) = +∞, and NaN for x < 0 (li is complex
+ *   there).
+ *
+ * For x < 7.5 (ln x < 2.015): Ei(ln x). From 7.5 on: li(x) = x·S(L), with
+ * L = ln x and S(L) = e^{−L}·Ei(L) as in `eiScaled()`. Ei(ln x) would carry
+ * the rounding error of ln x multiplied by L, because e^L turns an absolute
+ * error of L into the same relative error of the result: about 100 ulps at
+ * x = 10³⁰⁰. Here x is exact and L is a double-double (`logDD()`). S is
+ * evaluated at the high part of L, and its low part adds
+ * L_lo·S′(L) = L_lo·(1/L − S(L)). S(L) changes by about −1 times a relative
+ * change of L, so the error of S is about that of the polynomial.
+ */
+export function logIntegral(x: number): number {
+  if (Number.isNaN(x)) return NaN;
+  if (x === 0) return 0;
+  if (x === 1) return -Infinity;
+  if (x < 0) return NaN;
+  if (x < 7.5) return expIntegralEi(Math.log(x));
+  if (x === Infinity) return Infinity;
+  const l = logDD(x);
+  const lLo = out[LOW];
+  let s: number;
+  if (l < 32) {
+    let k: number;
+    let t: number;
+    if (l < 4) {
+      k = 0;
+      t = l - 3;
+    } else if (l < 8) {
+      k = 1;
+      t = (l - 6) / 2;
+    } else if (l < 16) {
+      k = 2;
+      t = (l - 12) / 4;
+    } else {
+      k = 3;
+      t = (l - 24) / 8;
+    }
+    s = polynomialDD(EI_SCALED[k], t);
+  } else {
+    const ls = polynomialDD(EI_SCALED[4], 64 / l - 1);
+    s = ddDivide(ls, out[LOW], l, 0);
+  }
+  const sLo = out[LOW] + lLo * (1 / l - s);
+  // Past 2⁹⁹⁶ Dekker's product overflows: scale x by 2⁻⁶⁴ (exact).
+  if (x >= TWO_POW_996) {
+    const p = ddMultiply(x * 5.421010862427522e-20, 0, s, sLo);
+    return (p + out[LOW]) * 18446744073709551616;
+  }
+  const p = ddMultiply(x, 0, s, sLo);
+  return p + out[LOW];
 }
 
 /**

@@ -66,6 +66,14 @@
 
 ### Bug Fixes
 
+- **`LogIntegral(x)` at machine precision is accurate for a large `x`.** It
+  was computed as `ExpIntegralEi(ln(x))`, so the rounding error of `ln(x)`
+  was multiplied by `ln(x)`: `LogIntegral(1e300)` was
+  `1.4497500526693022e+297`, with a relative error of `2.3e-14` (about 100
+  units in the last place). The largest error measured from `7.5` to the
+  largest double is now 1.6 units in the last place: `LogIntegral(1e300)` is
+  `1.4497500526693365e+297`, and the correctly rounded value is
+  `1.4497500526693362e+297`. Compiled JavaScript code gets the same values.
 - **`BesselY(n, x)` at machine precision is `-oo` or `+oo` when its value
   overflows a double.** `BesselY(200, 1)` was `NaN`: the recurrence on the
   order reached an infinite value and the next step computed `∞ − ∞`. It is

@@ -4,9 +4,10 @@ import {
   sinhIntegral,
   coshIntegral,
   expIntegralEi,
+  logIntegral,
 } from '../../src/compute-engine/numerics/special-functions';
 
-// Machine kernels of Si, Ci, Shi, Chi and Ei
+// Machine kernels of Si, Ci, Shi, Chi, Ei and li
 // (`numerics/exponential-integrals.ts`).
 //
 // The reference values are mpmath at 50 digits, rounded to the nearest
@@ -180,5 +181,37 @@ describe('HYPERBOLIC SINE AND COSINE INTEGRAL KERNELS AND Ei', () => {
     expect(sinhIntegral(5e-324)).toBe(5e-324);
     for (const f of [sinhIntegral, coshIntegral, expIntegralEi])
       expect(f(NaN)).toBeNaN();
+  });
+});
+
+// [x, li(x)]: the reference values are the bignum kernel at 40 digits,
+// rounded to the nearest double. From x = 7.5 on, li(x) = x·S(ln x) with
+// ln x in double-double; Ei(Math.log(x)) was 100 ulps away at 10³⁰⁰.
+const LI_ROWS: [number, number][] = [
+  [7.5, 5.009500143078375],
+  [8, 5.2537182995589315],
+  [100, 30.12614158407963],
+  [1e10, 455055614.5866231],
+  [3.5e40, 3.790130969816162e38],
+  [1e100, 4.361971987140703e97],
+  [1e300, 1.4497500526693362e297],
+  [2 ** 996, 9.714519518292574e296],
+  [1.5 * 2 ** 1000, 2.3207856927945652e298],
+  [Number.MAX_VALUE, 2.536315701167842e305],
+];
+
+describe('LOGARITHMIC INTEGRAL KERNEL', () => {
+  // Largest error measured against the bignum kernel on 5,300 points from
+  // 7.5 to the largest double: 1.6 ulps.
+  test.each(LI_ROWS)('li(%p)', (x, li) => {
+    expect(ulps(logIntegral(x), li)).toBeLessThanOrEqual(1.6);
+  });
+
+  test('special values', () => {
+    expect(logIntegral(0)).toBe(0);
+    expect(logIntegral(1)).toBe(-Infinity);
+    expect(logIntegral(Infinity)).toBe(Infinity);
+    expect(logIntegral(-1)).toBeNaN();
+    expect(logIntegral(NaN)).toBeNaN();
   });
 });
