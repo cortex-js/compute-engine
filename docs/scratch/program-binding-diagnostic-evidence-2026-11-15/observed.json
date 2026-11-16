@@ -1,0 +1,878 @@
+{
+  "cases": {
+    "literal": {
+      "source": "let k = (n: integer) => n + 1\nk(1.5)",
+      "check": [
+        {
+          "kind": "static-type-error",
+          "code": "incompatible-type",
+          "range": [
+            32,
+            35,
+            32
+          ]
+        }
+      ],
+      "value": [
+        "Error",
+        [
+          "ErrorCode",
+          "'incompatible-type'",
+          "'integer'",
+          "'1.5'"
+        ],
+        1.5,
+        [
+          "ErrorTrace",
+          [
+            "ErrorFrame",
+            "'k'",
+            1
+          ]
+        ]
+      ],
+      "diagnostics": [
+        {
+          "kind": "static-type-error",
+          "code": "incompatible-type",
+          "range": [
+            32,
+            35,
+            32
+          ]
+        }
+      ],
+      "k": {
+        "kind": "value",
+        "type": "(n: integer) -> integer",
+        "constant": false
+      },
+      "g": null,
+      "x": null
+    },
+    "replacement": {
+      "source": "let k = (n: integer) => n\nk = (s: string) => s\nk(\"a\")",
+      "check": [],
+      "value": "'a'",
+      "diagnostics": [],
+      "k": {
+        "kind": "operator",
+        "type": "(s: string) -> string"
+      },
+      "g": null,
+      "x": null
+    },
+    "replacementBadCall": {
+      "source": "let k = (n: integer) => n\nk = (s: string) => s\nk(1)",
+      "check": [
+        {
+          "kind": "static-type-error",
+          "code": "incompatible-type",
+          "range": [
+            49,
+            50,
+            49
+          ]
+        }
+      ],
+      "value": [
+        "Error",
+        [
+          "ErrorCode",
+          "'incompatible-type'",
+          "'string'",
+          "'1'"
+        ],
+        1,
+        [
+          "ErrorTrace",
+          [
+            "ErrorFrame",
+            "'k'",
+            1
+          ]
+        ]
+      ],
+      "diagnostics": [
+        {
+          "kind": "static-type-error",
+          "code": "incompatible-type",
+          "range": [
+            49,
+            50,
+            49
+          ]
+        }
+      ],
+      "k": {
+        "kind": "operator",
+        "type": "(s: string) -> string"
+      },
+      "g": null,
+      "x": null
+    },
+    "secondReplacement": {
+      "source": "let k = (n: integer) => n\nk = (s: string) => s\nk = (n: integer) => n\nk(\"a\")",
+      "check": [],
+      "value": "'a'",
+      "diagnostics": [
+        {
+          "kind": "runtime-error",
+          "code": "expected `(s: string) -> integer`, got `(n: integer) -> integer` at `k`",
+          "range": [
+            47,
+            68
+          ]
+        }
+      ],
+      "k": {
+        "kind": "operator",
+        "type": "(s: string) -> string"
+      },
+      "g": null,
+      "x": null
+    },
+    "constWrite": {
+      "source": "const k = (n: integer) => n + 1\nk = (s: string) => s\nk(\"a\")",
+      "check": [
+        {
+          "kind": "static-type-error",
+          "code": "constant-assignment",
+          "range": [
+            32,
+            52,
+            32
+          ]
+        },
+        {
+          "kind": "static-type-error",
+          "code": "incompatible-type",
+          "range": [
+            55,
+            58,
+            55
+          ]
+        }
+      ],
+      "value": [
+        "Error",
+        [
+          "ErrorCode",
+          "'incompatible-type'",
+          "'integer'",
+          "'string'"
+        ],
+        "'a'",
+        [
+          "ErrorTrace",
+          [
+            "ErrorFrame",
+            "'k'",
+            1
+          ]
+        ]
+      ],
+      "diagnostics": [
+        {
+          "kind": "static-type-error",
+          "code": "constant-assignment",
+          "range": [
+            32,
+            52,
+            32
+          ]
+        },
+        {
+          "kind": "static-type-error",
+          "code": "incompatible-type",
+          "range": [
+            55,
+            58,
+            55
+          ]
+        }
+      ],
+      "k": {
+        "kind": "value",
+        "type": "(n: integer) -> integer",
+        "constant": true
+      },
+      "g": null,
+      "x": null
+    },
+    "aliasBefore": {
+      "source": "let k = (n: integer) => n\nlet g = k\nk = (s: string) => s\ng(2)",
+      "check": [],
+      "value": 2,
+      "diagnostics": [],
+      "k": {
+        "kind": "operator",
+        "type": "(s: string) -> string"
+      },
+      "g": {
+        "kind": "value",
+        "type": "(n: integer) -> integer",
+        "constant": false
+      },
+      "x": null
+    },
+    "aliasAfter": {
+      "source": "let k = (n: integer) => n\nk = (s: string) => s\nlet g = k\ng(\"a\")",
+      "check": [],
+      "value": "'a'",
+      "diagnostics": [],
+      "k": {
+        "kind": "operator",
+        "type": "(s: string) -> string"
+      },
+      "g": {
+        "kind": "value",
+        "type": "(s: string) -> string",
+        "constant": false
+      },
+      "x": null
+    },
+    "aliasAfterBad": {
+      "source": "let k = (n: integer) => n\nk = (s: string) => s\nlet g = k\ng(1)",
+      "check": [
+        {
+          "kind": "static-type-error",
+          "code": "incompatible-type",
+          "range": [
+            59,
+            60,
+            59
+          ]
+        }
+      ],
+      "value": [
+        "Error",
+        [
+          "ErrorCode",
+          "'incompatible-type'",
+          "'string'",
+          "'1'"
+        ],
+        1,
+        [
+          "ErrorTrace",
+          [
+            "ErrorFrame",
+            "'k'",
+            1
+          ]
+        ]
+      ],
+      "diagnostics": [
+        {
+          "kind": "static-type-error",
+          "code": "incompatible-type",
+          "range": [
+            59,
+            60,
+            59
+          ]
+        }
+      ],
+      "k": {
+        "kind": "operator",
+        "type": "(s: string) -> string"
+      },
+      "g": {
+        "kind": "value",
+        "type": "(s: string) -> string",
+        "constant": false
+      },
+      "x": null
+    },
+    "literalEvidence": {
+      "source": "let k = (n: integer) => n + 1\nlet x = 1.5\nk(x)",
+      "check": [
+        {
+          "kind": "static-type-error",
+          "code": "incompatible-type",
+          "range": [
+            44,
+            45,
+            44
+          ]
+        }
+      ],
+      "value": [
+        "Error",
+        [
+          "ErrorCode",
+          "'incompatible-type'",
+          "'integer'",
+          "'1.5'"
+        ],
+        1.5,
+        [
+          "ErrorTrace",
+          [
+            "ErrorFrame",
+            "'k'",
+            1
+          ]
+        ]
+      ],
+      "diagnostics": [
+        {
+          "kind": "static-type-error",
+          "code": "incompatible-type",
+          "range": [
+            44,
+            45,
+            44
+          ]
+        }
+      ],
+      "k": {
+        "kind": "value",
+        "type": "(n: integer) -> integer",
+        "constant": false
+      },
+      "g": null,
+      "x": {
+        "kind": "value",
+        "type": "real",
+        "constant": false
+      }
+    },
+    "annotatedEvidence": {
+      "source": "let k = (n: integer) => n + 1\nlet x: number = 1.5\nk(x)",
+      "check": [
+        {
+          "kind": "static-type-error",
+          "code": "incompatible-type",
+          "range": [
+            52,
+            53,
+            52
+          ]
+        }
+      ],
+      "value": [
+        "Error",
+        [
+          "ErrorCode",
+          "'incompatible-type'",
+          "'integer'",
+          "'1.5'"
+        ],
+        1.5,
+        [
+          "ErrorTrace",
+          [
+            "ErrorFrame",
+            "'k'",
+            1
+          ]
+        ]
+      ],
+      "diagnostics": [
+        {
+          "kind": "static-type-error",
+          "code": "incompatible-type",
+          "range": [
+            52,
+            53,
+            52
+          ]
+        }
+      ],
+      "k": {
+        "kind": "value",
+        "type": "(n: integer) -> integer",
+        "constant": false
+      },
+      "g": null,
+      "x": {
+        "kind": "value",
+        "type": "number",
+        "constant": false
+      }
+    },
+    "unknownEvidence": {
+      "source": "let k = (n: integer) => n + 1\nlet x = g()\nk(x)",
+      "check": [],
+      "value": [
+        "k",
+        [
+          "g"
+        ]
+      ],
+      "diagnostics": [],
+      "k": {
+        "kind": "value",
+        "type": "(n: integer) -> integer",
+        "constant": false
+      },
+      "g": null,
+      "x": {
+        "kind": "value",
+        "type": "unknown",
+        "constant": false
+      }
+    },
+    "scalarReplacement": {
+      "source": "let x = 1\nx = \"a\"\nx",
+      "check": [],
+      "value": "'a'",
+      "diagnostics": [],
+      "k": null,
+      "g": null,
+      "x": {
+        "kind": "value",
+        "type": "string",
+        "constant": false
+      }
+    },
+    "blockReplacement": {
+      "source": "do { let k = (n: integer) => n; k = (s: string) => s; k = (n: integer) => n; k(2) }",
+      "check": [],
+      "value": 2,
+      "diagnostics": [],
+      "k": null,
+      "g": null,
+      "x": null
+    }
+  },
+  "runs": [
+    {
+      "scenario": "letRerun",
+      "steps": [
+        {
+          "source": "let k = (n: integer) => n\nk(2)",
+          "before": null,
+          "afterCheck": null,
+          "sameAfterCheck": true,
+          "check": [],
+          "value": 2,
+          "diagnostics": [],
+          "after": {
+            "kind": "value",
+            "type": "(n: integer) -> integer",
+            "constant": false
+          },
+          "sameAfterRun": false,
+          "g": null
+        },
+        {
+          "source": "let k = (s: string) => s\nk(\"b\")",
+          "before": {
+            "kind": "value",
+            "type": "(n: integer) -> integer",
+            "constant": false
+          },
+          "afterCheck": {
+            "kind": "value",
+            "type": "(n: integer) -> integer",
+            "constant": false
+          },
+          "sameAfterCheck": true,
+          "check": [
+            {
+              "kind": "static-type-error",
+              "code": "incompatible-type",
+              "range": [
+                27,
+                30,
+                27
+              ]
+            }
+          ],
+          "value": "'b'",
+          "diagnostics": [
+            {
+              "kind": "static-type-error",
+              "code": "incompatible-type",
+              "range": [
+                27,
+                30,
+                27
+              ]
+            }
+          ],
+          "after": {
+            "kind": "value",
+            "type": "(s: string) -> string",
+            "constant": false
+          },
+          "sameAfterRun": false,
+          "g": null
+        }
+      ]
+    },
+    {
+      "scenario": "constRerun",
+      "steps": [
+        {
+          "source": "const k = (n: integer) => n\nk(2)",
+          "before": null,
+          "afterCheck": null,
+          "sameAfterCheck": true,
+          "check": [],
+          "value": 2,
+          "diagnostics": [],
+          "after": {
+            "kind": "value",
+            "type": "(n: integer) -> integer",
+            "constant": true
+          },
+          "sameAfterRun": false,
+          "g": null
+        },
+        {
+          "source": "const k = (s: string) => s\nk(\"b\")",
+          "before": {
+            "kind": "value",
+            "type": "(n: integer) -> integer",
+            "constant": true
+          },
+          "afterCheck": {
+            "kind": "value",
+            "type": "(n: integer) -> integer",
+            "constant": true
+          },
+          "sameAfterCheck": true,
+          "check": [
+            {
+              "kind": "static-type-error",
+              "code": "incompatible-type",
+              "range": [
+                29,
+                32,
+                29
+              ]
+            }
+          ],
+          "value": "'b'",
+          "diagnostics": [
+            {
+              "kind": "static-type-error",
+              "code": "incompatible-type",
+              "range": [
+                29,
+                32,
+                29
+              ]
+            }
+          ],
+          "after": {
+            "kind": "value",
+            "type": "(s: string) -> string",
+            "constant": true
+          },
+          "sameAfterRun": false,
+          "g": null
+        }
+      ]
+    },
+    {
+      "scenario": "replaceAcrossCells",
+      "steps": [
+        {
+          "source": "let k = (n: integer) => n",
+          "before": null,
+          "afterCheck": null,
+          "sameAfterCheck": true,
+          "check": [],
+          "value": [
+            "Function",
+            [
+              "Block",
+              "n"
+            ],
+            [
+              "Typed",
+              "n",
+              "'integer'"
+            ]
+          ],
+          "diagnostics": [],
+          "after": {
+            "kind": "value",
+            "type": "(n: integer) -> integer",
+            "constant": false
+          },
+          "sameAfterRun": false,
+          "g": null
+        },
+        {
+          "source": "k = (s: string) => s",
+          "before": {
+            "kind": "value",
+            "type": "(n: integer) -> integer",
+            "constant": false
+          },
+          "afterCheck": {
+            "kind": "value",
+            "type": "(n: integer) -> integer",
+            "constant": false
+          },
+          "sameAfterCheck": true,
+          "check": [],
+          "value": [
+            "Function",
+            [
+              "Block",
+              "s"
+            ],
+            [
+              "Typed",
+              "s",
+              "'string'"
+            ]
+          ],
+          "diagnostics": [],
+          "after": {
+            "kind": "operator",
+            "type": "(s: string) -> string"
+          },
+          "sameAfterRun": true,
+          "g": null
+        },
+        {
+          "source": "k = (n: integer) => n",
+          "before": {
+            "kind": "operator",
+            "type": "(s: string) -> string"
+          },
+          "afterCheck": {
+            "kind": "operator",
+            "type": "(s: string) -> string"
+          },
+          "sameAfterCheck": true,
+          "check": [],
+          "value": [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-type'",
+              "'(s: string) -> integer'",
+              "'(n: integer) -> integer'"
+            ],
+            "'k'"
+          ],
+          "diagnostics": [],
+          "after": {
+            "kind": "operator",
+            "type": "(s: string) -> string"
+          },
+          "sameAfterRun": true,
+          "g": null
+        },
+        {
+          "source": "k(\"b\")",
+          "before": {
+            "kind": "operator",
+            "type": "(s: string) -> string"
+          },
+          "afterCheck": {
+            "kind": "operator",
+            "type": "(s: string) -> string"
+          },
+          "sameAfterCheck": true,
+          "check": [],
+          "value": "'b'",
+          "diagnostics": [],
+          "after": {
+            "kind": "operator",
+            "type": "(s: string) -> string"
+          },
+          "sameAfterRun": true,
+          "g": null
+        }
+      ]
+    },
+    {
+      "scenario": "annotatedAcrossCells",
+      "steps": [
+        {
+          "source": "let k: (integer) -> integer = (n) => n",
+          "before": null,
+          "afterCheck": null,
+          "sameAfterCheck": true,
+          "check": [],
+          "value": [
+            "Function",
+            [
+              "Block",
+              "n"
+            ],
+            "n"
+          ],
+          "diagnostics": [],
+          "after": {
+            "kind": "value",
+            "type": "(integer) -> integer",
+            "constant": false
+          },
+          "sameAfterRun": false,
+          "g": null
+        },
+        {
+          "source": "k = (s: string) => s",
+          "before": {
+            "kind": "value",
+            "type": "(integer) -> integer",
+            "constant": false
+          },
+          "afterCheck": {
+            "kind": "value",
+            "type": "(integer) -> integer",
+            "constant": false
+          },
+          "sameAfterCheck": true,
+          "check": [],
+          "value": [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-type'",
+              "'(integer) -> integer'",
+              "'(s: string) -> string'"
+            ],
+            "'k: its body computes a value of type \"string\", which has no value in common with the declared result \"integer\"'"
+          ],
+          "diagnostics": [],
+          "after": {
+            "kind": "value",
+            "type": "(integer) -> integer",
+            "constant": false
+          },
+          "sameAfterRun": true,
+          "g": null
+        },
+        {
+          "source": "k(2)",
+          "before": {
+            "kind": "value",
+            "type": "(integer) -> integer",
+            "constant": false
+          },
+          "afterCheck": {
+            "kind": "value",
+            "type": "(integer) -> integer",
+            "constant": false
+          },
+          "sameAfterCheck": true,
+          "check": [],
+          "value": 2,
+          "diagnostics": [],
+          "after": {
+            "kind": "value",
+            "type": "(integer) -> integer",
+            "constant": false
+          },
+          "sameAfterRun": true,
+          "g": null
+        }
+      ]
+    },
+    {
+      "scenario": "aliasAcrossCells",
+      "steps": [
+        {
+          "source": "let k = (n: integer) => n\nlet g = k",
+          "before": null,
+          "afterCheck": null,
+          "sameAfterCheck": true,
+          "check": [],
+          "value": [
+            "Function",
+            [
+              "Block",
+              "n"
+            ],
+            [
+              "Typed",
+              "n",
+              "'integer'"
+            ]
+          ],
+          "diagnostics": [],
+          "after": {
+            "kind": "value",
+            "type": "(n: integer) -> integer",
+            "constant": false
+          },
+          "sameAfterRun": false,
+          "g": {
+            "kind": "value",
+            "type": "(n: integer) -> integer",
+            "constant": false
+          }
+        },
+        {
+          "source": "let k = (s: string) => s",
+          "before": {
+            "kind": "value",
+            "type": "(n: integer) -> integer",
+            "constant": false
+          },
+          "afterCheck": {
+            "kind": "value",
+            "type": "(n: integer) -> integer",
+            "constant": false
+          },
+          "sameAfterCheck": true,
+          "check": [],
+          "value": [
+            "Function",
+            [
+              "Block",
+              "s"
+            ],
+            [
+              "Typed",
+              "s",
+              "'string'"
+            ]
+          ],
+          "diagnostics": [],
+          "after": {
+            "kind": "value",
+            "type": "(s: string) -> string",
+            "constant": false
+          },
+          "sameAfterRun": false,
+          "g": {
+            "kind": "value",
+            "type": "(n: integer) -> integer",
+            "constant": false
+          }
+        },
+        {
+          "source": "g(2)",
+          "before": {
+            "kind": "value",
+            "type": "(s: string) -> string",
+            "constant": false
+          },
+          "afterCheck": {
+            "kind": "value",
+            "type": "(s: string) -> string",
+            "constant": false
+          },
+          "sameAfterCheck": true,
+          "check": [],
+          "value": 2,
+          "diagnostics": [],
+          "after": {
+            "kind": "value",
+            "type": "(s: string) -> string",
+            "constant": false
+          },
+          "sameAfterRun": true,
+          "g": {
+            "kind": "value",
+            "type": "(n: integer) -> integer",
+            "constant": false
+          }
+        }
+      ]
+    }
+  ]
+}
