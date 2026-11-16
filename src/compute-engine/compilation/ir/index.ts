@@ -359,7 +359,17 @@ export type SliceOptions = {
   /** GLSL: the list inputs that the host holds in a `sampler2D`
    *  (`compile()`'s `storage`; `holdStorage()`). */
   readonly storage?: readonly string[];
+  /** JavaScript: a `Sum` or a `Product` of constant bounds of at most
+   *  `MAX_UNROLLED_SUM` passes is written out (`LowerOptions.unrollSums`).
+   *  Default: in the interval mode only; never on GLSL, whose compiler
+   *  unrolls a constant loop itself. Not an option of `compile()`.
+   *  @internal */
+  readonly unrollSums?: boolean;
 };
+
+/** The most passes of a `Sum` or a `Product` written out: the limit of the
+ *  existing targets (`MAX_UNROLLED_CONSTANT_LIST_WIDTH`). */
+const MAX_UNROLLED_SUM = 100;
 
 /**
  * Mark the inputs `names` and the parameters of the functions they are
@@ -492,6 +502,19 @@ export function sliceProgram(
     // (`printInterval()`).
     iterationBudget: interval ? undefined : options.iterationBudget,
     runtimeLengths: profile.runtimeLengths,
+    // Not past the `iterationBudget`: such a loop is NaN, or refuses to
+    // start in the interval mode. Not in the complex mode, where a real
+    // term of a constant index is in a loop a complex one.
+    unrollSums:
+      options.target === 'javascript' &&
+      !bigint &&
+      options.mode !== 'complex' &&
+      (options.unrollSums ?? interval)
+        ? Math.min(
+            MAX_UNROLLED_SUM,
+            Math.floor(options.iterationBudget ?? Infinity)
+          )
+        : 0,
     vars: Object.keys(options.vars ?? {}),
     objectVars: Object.keys(options.vars ?? {}).filter((n) =>
       readsVarsObject(options.vars![n])

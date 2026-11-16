@@ -558,7 +558,7 @@ describe('the interval mode: plain integers', () => {
     expect(mode(['Power', 'x', 3]).code).toBe('_IA.pow(_.x, 3)');
     expect(mode(['Power', 'x', -2]).code).toBe('_IA.pow(_.x, (-2))');
     expect(mode(['Power', 'x', 2]).code).toBe('_IA.square(_.x)');
-    expect(mode(['Sum', ['Power', 'x', 'k'], ['Limits', 'k', 1, 3]]).code).toMatch(
+    expect(mode(['Sum', ['Power', 'x', 'k'], ['Limits', 'k', 1, 101]]).code).toMatch(
       /_IA\.pow\(_\.x, v\d+\)/
     );
   });
@@ -570,12 +570,13 @@ describe('the interval mode: plain integers', () => {
   test('a product of indexes whose bound reaches 2^53 is not plain', () => {
     const r = mode([
       'Sum',
-      ['Sum', ['Multiply', 'j', 'k', 'x'], ['Limits', 'k', 1, 3]],
+      ['Sum', ['Multiply', 'j', 'k', 'x'], ['Limits', 'k', 1, 101]],
       ['Limits', 'j', 1, 3],
     ]);
     // 2^32 · 2^32: each index is made a point, and the kernel multiplies.
+    // (An inner sum of more than 100 passes is a loop, and so is the outer.)
     expect(r.code).toMatch(/_IA\.mul\(\{ lo: v\d+, hi: v\d+ \}, \{ lo: v\d+, hi: v\d+ \}\)/);
-    expect(r.run({ x: 1 })).toEqual({ kind: 'interval', value: { lo: 36, hi: 36 } });
+    expect(r.run({ x: 1 })).toEqual({ kind: 'interval', value: { lo: 30906, hi: 30906 } });
   });
   test('a product of an input integer by the constant 0 is not plain', () => {
     // The bound of `0 · Floor(x)` is 0, and `Floor(x)` is not one number.
@@ -1170,6 +1171,11 @@ describe('the interval mode: batch 7, the order of a sum', () => {
       fallback: false,
     } as never) as unknown as Result;
   const ascending = /for \(let (v\d+) = \1_lo; \1 <= \1_hi; \1\+\+\) \{/;
+  /** The indices of the terms of a sum written out (`term` matches a term
+   *  and captures its index), in the order of the additions. */
+  const terms = (r: Result, term: RegExp) =>
+    [...inlined(r).matchAll(term)].map((m) => Number(m[1]));
+  const upTo = (n: number) => Array.from({ length: n }, (_, k) => k + 1);
 
   // The README of `ir/`, "The interval mode": a sum is a loop from the
   // lower bound up, which contains the value of the scalar code adding
@@ -1189,7 +1195,11 @@ describe('the interval mode: batch 7, the order of a sum', () => {
       const e = machine.box(json as never);
       const x = -11.491009020837964;
       const r = compile(e, { ...IR, fallback: false } as never) as unknown as Result;
-      expect(r.code).toMatch(ascending);
+      // Written out (at most 100 passes), from the identity and the first
+      // term.
+      expect(r.code).not.toMatch(ascending);
+      expect(inlined(r)).toMatch(/^[^]*?_IA\.add\(\{ lo: 0, hi: 0 \}, /);
+      expect(terms(r, /_IA\.div\(_IA\.sin\(_IA\.mul\(\{ lo: (\d+),/g)).toEqual(upTo(100));
       const want = machine.withValues({ x: machine.number(x) } as never, () =>
         e.evaluate().N()
       ).re;
@@ -1207,10 +1217,79 @@ describe('the interval mode: batch 7, the order of a sum', () => {
     });
   });
 
-  test('a sum of two constant bounds is a loop from the lower bound up', () => {
+  test('a sum of two constant bounds is added from the lower bound up', () => {
     const r = mode(['Sum', ['Divide', 'x', 'i'], ['Limits', 'i', 1, 100]]);
+    expect(terms(r, /_IA\.div\(_\.x, \{ lo: (\d+),/g)).toEqual(upTo(100));
+    // Of more than 100 passes, a loop from the lower bound up.
+    const loop = mode(['Sum', ['Divide', 'x', 'i'], ['Limits', 'i', 1, 101]]);
+    expect(loop.code).toMatch(ascending);
+    expect(loop.code).not.toMatch(/--\)/);
+  });
+
+  test('a sum of constant bounds of at most 100 passes is written out, on the interval mode only', () => {
+    const json = ['Sum', ['Divide', ['Sin', ['Multiply', 'k', 'x']], 'k'], ['Limits', 'k', 1, 3]];
+    const r = mode(json);
+    expect(r.code).toBe(
+      '_IA.add(_IA.add(_IA.add(v2, _IA.div(_IA.sin(_IA.mul(v0, _.x)), v0)), _IA.div(_IA.sin(_IA.mul(v8, _.x)), v8)), _IA.div(_IA.sin(_IA.mul(v1, _.x)), v1))'
+    );
+    expect(r.preambleOnce).toBe(
+      'const v0 = { lo: 1, hi: 1 };\nconst v1 = { lo: 3, hi: 3 };\nconst v2 = { lo: 0, hi: 0 };\nconst v8 = { lo: 2, hi: 2 };'
+    );
+    // The JavaScript and GLSL code keep the loop.
+    const js = compile(ce.box(json as never), { profile: 'ir', fallback: false } as never) as unknown as Result;
+    expect(js.code).toContain('v10 = (v10 + (Math.sin((v3 * _.x)) / v3));');
+    const glsl = compile(ce.box(json as never), { to: 'glsl', profile: 'ir', fallback: false } as never) as unknown as Result;
+    expect(glsl.code).toContain('v13 = (v13 + (sin((v6 * x)) / v6));');
+    // A part that reads only the index is computed once, in `preambleOnce`.
+    const alt = mode(['Sum', ['Multiply', ['Divide', ['Power', -1, 'k'], 'k'], ['Sin', ['Multiply', 'k', 'x']]], ['Limits', 'k', 1, 3]]);
+    expect(alt.code).toBe(
+      '_IA.add(_IA.add(_IA.add(v2, _IA.mul(v5, _IA.sin(_IA.mul(v0, _.x)))), _IA.mul(v13, _IA.sin(_IA.mul(v11, _.x)))), _IA.mul(v19, _IA.sin(_IA.mul(v1, _.x))))'
+    );
+    expect(alt.preambleOnce).toContain('const v5 = _IA.div(v4, v0);');
+    expect(alt.preambleOnce).toContain('const v18 = _IA.pow({ lo: -1, hi: -1 }, 3);');
+    // Under an iterationBudget below the count, the loop, which refuses to
+    // start: `entire`.
+    const budget = mode(json, { iterationBudget: 2 });
+    expect(budget.code).toMatch(ascending);
+    expect(budget.run({ x: 0.5 }).kind).toBe('entire');
+  });
+
+  test('a term that declines or is complex keeps the loop of a sum of constant bounds', () => {
+    // Codex's witness: at k = -1 both arms are lowered and Floor(Sqrt(-1))
+    // declines; the loop guards the root at run time.
+    const guarded = ['Sum', ['If', ['Less', 'k', 0], 'x', ['Floor', ['Sqrt', 'k']]], ['Limits', 'k', -1, 3]];
+    const r = mode(guarded);
     expect(r.code).toMatch(ascending);
-    expect(r.code).not.toMatch(/--\)/);
+    for (const x of [-0.5, 0.5]) {
+      const want = ce.box(guarded as never).subs({ x }).N().re;
+      const { value } = r.run({ x });
+      expect(value.lo <= want && want <= value.hi).toBe(true);
+    }
+    // `Sqrt(-2)` of a constant is complex; the loop's kernel gives `empty`,
+    // as 101 passes do.
+    const direct = mode(['Sum', ['Multiply', ['Sqrt', 'k'], 'x'], ['Limits', 'k', -2, 1]]);
+    expect(direct.code).toMatch(ascending);
+    expect(direct.run({ x: 0.5 })).toEqual(
+      mode(['Sum', ['Multiply', ['Sqrt', 'k'], 'x'], ['Limits', 'k', -2, 98]]).run({ x: 0.5 })
+    );
+    expect(direct.run({ x: 0.5 }).kind).toBe('empty');
+    // A complex value inside a term whose value is real or boolean: the
+    // loop, which 101 passes give too. (The loop's real kernels give NaN
+    // where the interpreter's value is complex: `Arcsin(2)` is no number,
+    // so `If(Abs(Arcsin(k)) > 1, x, 1)` is 1 at k = 2 and 3.)
+    const sum = (body: unknown, lo: number, hi: number) => ['Sum', body, ['Limits', 'k', lo, hi]];
+    const abs = ['Multiply', ['Abs', ['Sqrt', 'k']], 'x'];
+    const branch = ['If', ['Greater', ['Abs', ['Arcsin', 'k']], 1], 'x', 1];
+    const shifted = ['Abs', ['Add', 'x', ['Sqrt', 'k']]];
+    for (const [body, lo, hi] of [[abs, -2, 1], [branch, 0, 3], [shifted, -1, 1]] as const) {
+      const r4 = mode(sum(body, lo, hi));
+      expect(r4.code).toMatch(ascending);
+      const r101 = mode(sum(body, lo, lo + 100));
+      expect(r4.run({ x: 0.7 }).kind).toBe(r101.run({ x: 0.7 }).kind);
+    }
+    expect(mode(sum(abs, -2, 1)).run({ x: 0.7 })).toEqual({ kind: 'empty' });
+    const { value } = mode(sum(branch, 0, 3)).run({ x: 0.7 });
+    expect(value.lo <= 3.7 && 3.7 <= value.hi).toBe(true);
   });
 
   test('a sum of a list is added from the first element, as the existing target', () => {
@@ -1344,7 +1423,9 @@ describe('the interval mode: a subtraction and a power of a rational exponent', 
     });
 
     test('a negation in a loop body, and one outside the loop read in it', () => {
-      const inLoop = within(['Sum', ['Add', ['Negate', ['Sin', 'x']], 'k'], ['Limits', 'k', 1, 3]]);
+      // 101 passes: a sum of at most 100 is written out, and its negation is
+      // then read once per term.
+      const inLoop = within(['Sum', ['Add', ['Negate', ['Sin', 'x']], 'k'], ['Limits', 'k', 1, 101]]);
       // The pass `invariants` computes `sin(x)` before the loop, and the
       // negation with it: the subtraction reads it there.
       expect(inLoop.code).toContain('const v5 = _IA.sin(_.x);');
@@ -1353,7 +1434,7 @@ describe('the interval mode: a subtraction and a power of a rational exponent', 
       const outside = within([
         'Block',
         ['Declare', 't', "'real'", ['Negate', ['Sin', 'x']]],
-        ['Sum', ['Add', 't', 'k'], ['Limits', 'k', 1, 3]],
+        ['Sum', ['Add', 't', 'k'], ['Limits', 'k', 1, 101]],
       ]);
       expect(outside.code).toContain('const v1 = _IA.sin(_.x);');
       expect(outside.code).toContain('_IA.sub({ lo: v6, hi: v6 }, v1)');

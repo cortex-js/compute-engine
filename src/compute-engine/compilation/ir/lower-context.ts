@@ -8,7 +8,7 @@ import type { Expression, FunctionInterface } from '../../global-types.js';
 import type { Type } from '../../../common/type/types.js';
 import { resolveTypeAlias } from '../../../common/type/utils.js';
 import { isFunction } from '../../boxed-expression/type-guards.js';
-import type { Builder, IRType, Lane, V } from './ir.js';
+import type { Builder, IRType, Lane, Region, V } from './ir.js';
 import type { OperatorRow } from './operators.js';
 import { STANDARD_LIBRARIES } from '../../library/library.js';
 
@@ -166,6 +166,25 @@ export type Lowering = {
   readonly budget?: number;
   /** The target holds a list of a run-time length (`LowerOptions`). */
   readonly runtimeLengths: boolean;
+  /** The most passes of a `Sum` or a `Product` of constant bounds that is
+   *  written out (`LowerOptions`). */
+  readonly unrollSums: number;
+  /** The value that `f` lowers in a region of its own, whose instructions
+   *  then go to the current region. When `f` gives no value or declines
+   *  (`Decline`), or `accept` refuses the region, the region is discarded
+   *  with the effects that it counted, and the result is `undefined`; the
+   *  nodes and what `refund` restores are given back only when no user
+   *  function began to be lowered in `f` (it stays registered), and a
+   *  decline after that begins is the program's. `f` reads the nodes it has
+   *  lowered (`spent()`) and the nodes left before the limit (`left`). The
+   *  entries of the memo and of the builder's constants written in an
+   *  accepted region name it, a closed region: a sub-expression lowered in
+   *  `f` is lowered again after it (a constant is emitted again). */
+  attempt(
+    f: (spent: () => number, left: number) => V | undefined,
+    accept: (r: Region) => boolean,
+    refund: () => void
+  ): V | undefined;
   /** The values that are a tuple, or hold tuples: the index in the shape
    *  of the axis that is a tuple (0 for a `Tuple`, 1 for a list of them).
    *  An operator whose value on a tuple differs from its value on a list

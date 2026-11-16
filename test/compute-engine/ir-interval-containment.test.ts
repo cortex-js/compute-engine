@@ -176,6 +176,14 @@ const CASES: Case[] = [
   C(['If', ['Greater', x, 0], ['Sum', ['Power', x, 'k'], ['Limits', 'k', 1, 4]], ['Negate', x]], [0]),
   C(['Sum', ['Multiply', ['Power', -1, 'k'], ['Divide', ['Power', x, 'k'], 'k']], ['Limits', 'k', 1, 6]]),
   C(['Power', x, 7]), C(['Power', 'n', 3]), C(['Add', ['Floor', x], 1], [1]),
+  // A sum of constant bounds of at most 100 passes is written out: the
+  // parts that read only the index are constants of `preambleOnce`.
+  C(['Sum', ['Multiply', ['Divide', ['Power', -1, 'i'], 'i'], ['Sin', ['Multiply', 'i', x]]], ['Limits', 'i', 1, 100]]),
+  C(['Sum', ['Multiply', ['Cos', ['Divide', ['Multiply', 'Pi', 'n'], 6]], ['Sin', ['Add', ['Multiply', 'n', x], ['Sin', ['Multiply', 1000, 'n']]]]], ['Limits', 'n', 0, 12]]),
+  C(['Sum', ['If', ['Equal', ['Mod', 'i', 2], 0], ['Sin', x], ['Cos', ['Multiply', 'i', x]]], ['Limits', 'i', 1, 4]]),
+  C(['Sum', ['g', x], ['Limits', 'i', 1, 3]]), C(['Sum', ['Multiply', ['g', 'k'], x], ['Limits', 'k', 1, 3]]),
+  C(['Sum', ['Sum', ['Multiply', 'i', 'j', x], ['Limits', 'j', 1, 3]], ['Limits', 'i', 1, 3]]),
+  C(['Product', ['Add', ['Divide', x, 'k'], 1], ['Limits', 'k', 1, 8]]),
   // Batch 4: a decimal literal is its double
   C(['Add', x, 1.8]), C(['Subtract', y, 1.8]), C(['Multiply', 1.8, x, y]),
   C(['Add', ['Multiply', 0.3, x], 0.7]), C(['Less', x, 1.8], [1.8]),
@@ -232,6 +240,10 @@ const EXCEPTIONS: string[] = [
   JSON.stringify(['Sum', ['Multiply', ['Power', -1, 'k'], ['Divide', ['Power', x, 'k'], 'k']], ['Limits', 'k', 1, 6]]),
   `machine ${JSON.stringify(['Sum', ['Multiply', ['Power', -1, 'k'], ['Divide', ['Power', x, 'k'], 'k']], ['Limits', 'k', 1, 6]])}`,
   JSON.stringify(FOURIER.json), `machine ${JSON.stringify(FOURIER.json)}`,
+  // The same order when the sum is written out (at most 4.4e-14 apart).
+  JSON.stringify(['Sum', ['Multiply', ['Divide', ['Power', -1, 'i'], 'i'], ['Sin', ['Multiply', 'i', x]]], ['Limits', 'i', 1, 100]]),
+  `machine ${JSON.stringify(['Sum', ['Multiply', ['Divide', ['Power', -1, 'i'], 'i'], ['Sin', ['Multiply', 'i', x]]], ['Limits', 'i', 1, 100]])}`,
+  JSON.stringify(['Sum', ['Multiply', ['Cos', ['Divide', ['Multiply', 'Pi', 'n'], 6]], ['Sin', ['Add', ['Multiply', 'n', x], ['Sin', ['Multiply', 1000, 'n']]]]], ['Limits', 'n', 0, 12]]),
   // The existing target computes x^(p/q); the mode x^e with the double e,
   // as the interpreter at machine precision and the JavaScript code: at
   // x = 1e300, x^0.2 is 1.0000000000000077e60, the existing target gives

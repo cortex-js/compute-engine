@@ -11,8 +11,12 @@ import type { Expression } from '../../global-types.js';
 import {
   elementType,
   lengthValues,
+  outsOf,
+  recursiveFunctions,
+  regionsOf,
   scalarType,
   type Lane,
+  type Region,
   type V,
 } from './ir.js';
 import {
@@ -41,8 +45,15 @@ export function listLowering(cx: Lowering) {
   const { b, type } = cx;
   const op = (name: string) => rowOfOp(cx.rows, name)!.row;
   const integer = (n: number) => b.constant(n, 'integer');
-  // The elements of the builds written out on GLSL (`over()`).
+  // The bodies written out in the program: the elements of the builds on
+  // GLSL (`over()`) and the terms of the sums (`writtenOut()`).
   let unrolled = 0;
+  /** `f()` in a loop frame where `name` is the index `k`. */
+  const indexed = <T>(name: string, k: V, f: () => T): T =>
+    cx.withFrame(true, (frame) => {
+      frame.names.set(name, { v: k, role: 'index' });
+      return f();
+    });
 
   const listSource = (l: V): Source => {
     const n = type(l).shape[0];
@@ -138,6 +149,65 @@ export function listLowering(cx: Lowering) {
     return out;
   };
 
+  /** The fold of `r` from `init` over the terms at the indices from `lo` to
+   *  `hi`, in ascending order, each term lowered with its index a constant:
+   *  the loop's operations, with no loop. `undefined`, and the loop runs,
+   *  for bounds that are not constants, a count of passes below 1 or above
+   *  `cx.unrollSums`, bodies written out in the program past
+   *  `SCALARIZE_LIMIT ** 2` or past half the nodes left, a term that is not
+   *  a number, and a body with an effect (n copies of a draw are n draw
+   *  sites), a `Loop` or a call of a function on a cycle of calls. */
+  const writtenOut = (
+    e: Fn,
+    r: OperatorRow,
+    init: V,
+    lo: V,
+    hi: V,
+    term: (k: V) => V
+  ): V | undefined => {
+    const [a, z] = [cx.constant(lo), cx.constant(hi)];
+    const n = a === undefined || z === undefined ? 0 : z - a + 1;
+    if (n < 1 || !(n <= cx.unrollSums) || unrolled + n > SCALARIZE_LIMIT ** 2)
+      return undefined;
+    const before = unrolled;
+    unrolled += n;
+    // A body that holds a loop (a `Loop`, an inner sum of a count that is
+    // not written out) keeps the loop: in a nest, the inner sums are
+    // written out, and the outer one when they all are. So does a complex
+    // value: a constant read directly by a row that leaves the reals
+    // (`Sqrt(k)` at k = -1), where the loop's real kernel gives NaN (the
+    // complex mode keeps every loop, `sliceProgram()`).
+    const accept = (region: Region): boolean => {
+      const cyclic = recursiveFunctions(b.functions);
+      const straight = (r: Region): boolean =>
+        r.body.every(
+          (i) =>
+            i.k !== 'loop' &&
+            !(i.k === 'call' && cyclic.has(i.fn)) &&
+            outsOf(i).every((o) => type(o).lane !== 'complex') &&
+            regionsOf(i).every(straight)
+        );
+      return straight(region);
+    };
+    const v = cx.attempt(
+      (spent, left) => {
+        const effects = b.effects;
+        let acc = init;
+        for (let j = 0; j < n; j++) {
+          if (j > 0 && (spent() * (j + 1)) / j > left / 2) return undefined;
+          const t = term(integer(a! + j));
+          if (type(t).shape.length > 0 || !signatureOf(r, [type(acc), type(t)]))
+            return undefined;
+          acc = cx.apply(e, r, [acc, t]);
+        }
+        return b.effects === effects ? acc : undefined;
+      },
+      accept,
+      () => (unrolled = before)
+    );
+    return v;
+  };
+
   /** `Sum(body, Limits(k, a, b))`: a loop from the identity of `r`. */
   const aggregate = (e: Fn, r: OperatorRow): V => {
     const limits = e.ops[1] as Fn;
@@ -162,13 +232,10 @@ export function listLowering(cx: Lowering) {
       return v;
     });
     const init = integer(REDUCTIONS.get(e.operator)!.identity);
-    const run = () =>
-      accumulate(e, r, init, lo, hi, (k) =>
-        cx.withFrame(true, (frame) => {
-          frame.names.set(index.symbol, { v: k, role: 'index' });
-          return cx.scalar(e.ops[0]);
-        })
-      );
+    const term = (k: V) => indexed(index.symbol, k, () => cx.scalar(e.ops[0]));
+    const written = writtenOut(e, r, init, lo, hi, term);
+    if (written !== undefined) return written;
+    const run = () => accumulate(e, r, init, lo, hi, term);
     if (cx.budget === undefined || !Number.isFinite(cx.budget)) return run();
     // `iterationBudget`: a loop of more passes than the budget is NaN
     // (`CompilationOptions.iterationBudget`), `hi - lo < budget` otherwise.
@@ -289,10 +356,7 @@ export function listLowering(cx: Lowering) {
       if (unrolled > SCALARIZE_LIMIT ** 2)
         decline(e, `builds of more than ${SCALARIZE_LIMIT ** 2} elements`);
       const elements = Array.from({ length: n }, (_, j) =>
-        cx.withFrame(true, (frame) => {
-          frame.names.set(name, { v: s.at(integer(j)), role: 'index' });
-          return cx.value(body)!;
-        })
+        indexed(name, s.at(integer(j)), () => cx.value(body)!)
       );
       return cx.list(e, elements);
     }

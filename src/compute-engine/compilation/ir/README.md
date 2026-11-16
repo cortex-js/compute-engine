@@ -652,9 +652,11 @@ A loop writes no deadline check, and the lowering writes no NaN test of the
 `iterationBudget` (NaN reads as `empty`): a loop of more passes than the
 budget (2^32 without one) throws the error of `_IA.decided()` before its
 first pass (`_IA.undecided()`), so the result is `entire`; so does a
-`build` or a `filter` of more elements, before its first element. A sum is
-a loop from the lower bound up, so that its result contains the value that
-the scalar code computes by adding upward in doubles (each `_IA.add` rounds
+`build` or a `filter` of more elements, before its first element. A sum of
+constant bounds of at most 100 passes within the budget is written out
+("Lists"), with no loop and no such test. A sum is a loop from the lower
+bound up (or, written out, added in that order), so that its result contains
+the value that the scalar code computes by adding upward in doubles (each `_IA.add` rounds
 outward). The existing target writes a sum of constant bounds out and adds
 from the last term: narrower (4.5 times for `Sum(x/i, i = 1..100)` at
 `x = -1.623107644263655`), but it misses that value at some points: at 169
@@ -808,7 +810,28 @@ reduction (`Sum`, `Max`, `Min`) of one literal `List` of at least one element,
 each of a number type, is the reduction of its elements, with no array and no
 loop: `Max(List(x, y, x·y))` is `Max(x, y, x·y)`, and `Sum(List(a, b))` is
 `(0 + a) + b`, the fold of the loop (`Product(List(…))` is `Reduce` in the
-canonical form and keeps the loop);
+canonical form and keeps the loop). In the interval mode (on JavaScript by an
+internal switch, `SliceOptions.unrollSums`, off by default; never on GLSL), a
+`Sum` or a `Product` with `Limits` of two integer constant bounds and 1 to 100
+passes is written out: its body is lowered once per index, the index bound to
+the constant, and the terms are folded from the identity in ascending order,
+the operations of the loop (`Sum(sin(k·x)/k, k = 1..3)` is
+`((0 + sin(1·x)/1) + sin(2·x)/2) + sin(3·x)/3`), so that a part that reads
+only the index is a constant (`(-1)^i/i`, computed once). A term that reads
+no index is one value, added once per pass. The sum keeps its loop when its
+body has an effect (a draw, a read of `vars`: n copies would be n draw sites),
+holds a loop (a `Loop`, an inner sum that is not written out) or calls a
+function on a cycle of calls, when a term computes a complex value
+(`Sqrt(k)` of the constant -1, also under `Abs`, where the loop's real kernel
+gives NaN; the complex mode keeps every loop) or declines (`If(k < 0, x, Floor(Sqrt(k)))` at k = -1, whose
+comparison of constants is still an operation), past the `iterationBudget`,
+and when the bodies written out in the program would pass 4,096 (the budget
+of the builds of GLSL, shared) or half the nodes left to lower: in a nest of
+constant sums the inner ones are written out, and the outer one when they all
+are. A decline in a term after a user function began to be lowered is the
+program's: the function stays registered. An input read for the first time in
+a term that is refused or declines stays a parameter of the entry: the loop
+reads it too;
 `ElementMax` and `ElementMin` are rows that thread (`ElementMax(D, 0.3)` is a
 list). An element-wise operation of lists of rank 1 has the length of its first
 list and reads the others at the same index. Lengths that are numbers and differ
@@ -1091,8 +1114,10 @@ R3 of `docs/COMPILATION-MODEL.md`). The count is in the runtime; the entry
 starts with `_SYS.resetLoopPasses()` when the code counts passes. A `Sum` or a
 `Product` with `Limits` whose count of passes is more than the budget is NaN
 (`hi - lo < budget` is false), each loop by its own count: the lowering writes
-that test as an `if`. A `Loop` in an integrand counts its passes once per sample
-of the quadrature, whose number of samples is unspecified. A build, a `Filter`
+that test as an `if`. A sum written out ("Lists": at most 100 passes, within
+the budget) has no loop: its passes are not counted by the deadline or
+charged to a step budget. A `Loop` in an integrand counts its passes once per
+sample of the quadrature, whose number of samples is unspecified. A build, a `Filter`
 and a reduction of a list count no pass. GLSL has no deadline and counts no
 `Loop` pass at run time: its budget is the option or 10,000 (the existing GLSL
 target's default), a `Sum` or a `Product` over it is NaN as above, and the

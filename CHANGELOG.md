@@ -260,7 +260,13 @@
   reads no input is computed once: each constant when the code is loaded
   (`preambleOnce`), and a call of constant arguments that runs at every
   call (`b(3π)`) at the first call; if it throws there, every call is
-  `entire`, as when it is computed at each call. An integral of one
+  `entire`, as when it is computed at each call. A `Sum` or a `Product` of
+  integer constant bounds and at most 100 passes is written out, term by
+  term in ascending order, so that a part that reads only the index is
+  computed once: `2/π · Sum((-1)^i/i · sin(i·x), i = 1..100) + 3` takes 34 µs per
+  call, where it took 75 µs in a loop (the existing target: 32 µs). A body
+  with a random draw, with a `Loop` or with a call of a recursive function
+  keeps the loop. An integral of one
   variable (`Integrate` with one `Limits`, `NIntegrate`) is the enclosure
   of the existing target, with the same number of pieces, or the closed
   form of the engine's antiderivative where the existing target uses one

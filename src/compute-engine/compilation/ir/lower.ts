@@ -204,6 +204,10 @@ export type LowerOptions = {
   /** `false` (GLSL): a list parameter of a user function of no stated
    *  length takes the stated length of its argument at the first call. */
   readonly runtimeLengths?: boolean;
+  /** A `Sum` or a `Product` of constant bounds of at most this many passes
+   *  is written out, its body lowered once per index (`aggregate()` of
+   *  `lower-lists.ts`). Default 0: none. */
+  readonly unrollSums?: number;
 };
 
 /** The IR operation of the read of the `vars` name of index `k` on the
@@ -2119,6 +2123,38 @@ export function lower(
     wide: options.mode === 'complex' ? 'complex' : 'real',
     budget: options.iterationBudget,
     runtimeLengths: options.runtimeLengths ?? true,
+    unrollSums: options.unrollSums ?? 0,
+    attempt: (f, accept, refund) => {
+      const [nodes, effects, begun, outer] = [
+        lowered,
+        b.effects,
+        fns.begun(),
+        quadrature,
+      ];
+      let v: V | undefined;
+      const r = b.region([], () => {
+        try {
+          v = f(() => lowered - nodes, NODE_LIMIT - nodes);
+        } catch (error) {
+          // A user function whose lowering began stays registered.
+          if (!(error instanceof Decline) || fns.begun() !== begun)
+            throw error;
+          quadrature = outer;
+        }
+        return v === undefined ? [] : [v];
+      });
+      b.effects = effects;
+      if (v === undefined || !accept(r)) {
+        // A function lowered in the attempt is called again by the loop.
+        if (fns.begun() === begun) {
+          lowered = nodes;
+          refund();
+        }
+        return undefined;
+      }
+      r.body.forEach((i) => b.emit(i));
+      return v;
+    },
     tuples,
   };
   const lists = listLowering(cx);

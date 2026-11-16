@@ -2032,8 +2032,13 @@ describe('invariants: an instruction of a loop body that reads nothing of the bo
       }
     }
     // In B, the calls of F, v and u read no index: they are before the
-    // loop; q and p read it.
-    for (const r of [run(['B', 'x', 'y']), run(['B', 'x', 'y'], { to: 'interval-js' })]) {
+    // loop; q and p read it. In the interval mode the sum of B is written
+    // out (its bounds are constants): one call of each, and no loop.
+    const written = functionText(textOf(run(['B', 'x', 'y'], { to: 'interval-js' })), 'B');
+    expect(written).not.toMatch(/for \(/);
+    for (const g of ['F', 'v', 'u'])
+      expect([g, written.match(new RegExp(`u\\d+_${g}\\(`, 'g'))?.length]).toEqual([g, 1]);
+    for (const r of [run(['B', 'x', 'y'])]) {
       const b = functionText(textOf(r), 'B');
       const [before, inside] = [b.slice(0, b.indexOf('for (')), b.slice(b.indexOf('for ('))];
       for (const g of ['F', 'v', 'u']) {
@@ -2446,5 +2451,258 @@ describe('equal sub-expressions written as separate nodes are lowered once', () 
     const json = ['Add', ['Sin', ['Multiply', 2, ['Foo', 'x']]], ['Sin', ['Multiply', 2, ['Foo', 'x']]]];
     const o = outcome(box(json));
     expect('message' in o && o.message).toMatch(/Foo is an unknown operator/);
+  });
+});
+
+describe('a Sum or a Product of constant bounds written out (the internal switch unrollSums on JavaScript)', () => {
+  const e = new ComputeEngine();
+  e.declare('x', 'real');
+  e.assign('g', e.box(['Function', ['Add', ['Power', 't', 2], 1], 't'] as never));
+  e.declare('fact', '(integer) -> integer');
+  e.assign(
+    'fact',
+    e.box([
+      'Function',
+      ['If', ['LessEqual', 'k', 0], 1, ['Multiply', 'k', ['fact', ['Subtract', 'k', 1]]]],
+      'k',
+    ] as never)
+  );
+  type Slice = { run: (x: object) => unknown; warnings: unknown[] };
+  const slice = (json: Json, unrollSums: boolean, options: object = {}) =>
+    compileSlice(box(json, e), {
+      target: 'javascript',
+      unrollSums,
+      ...options,
+    } as never) as unknown as Slice;
+  /** The number of loops of the program, in every region. */
+  const loopCount = (json: Json, options: object = {}): number => {
+    const p = sliceProgram(box(json, e), {
+      target: 'javascript',
+      unrollSums: true,
+      ...options,
+    } as never);
+    type R = { body: { k: string; body?: R; then?: R; else?: R; regions?: R[] }[] };
+    const count = (r: R): number =>
+      r.body.reduce(
+        (n, i) =>
+          n +
+          (i.k === 'loop' ? 1 : 0) +
+          [i.body, i.then, i.else, ...(i.regions ?? [])]
+            .filter((x): x is R => x !== undefined)
+            .reduce((m, x) => m + count(x), 0),
+        0
+      );
+    return p.functions.reduce((n, f) => n + count(f.body as R), 0);
+  };
+  const points = Array.from({ length: 200 }, (_, k) => ({
+    x: Math.sin(k * 12.9898 + 0.5) * 7,
+  }));
+  /** The same value as the loop, bit for bit, at every point. */
+  const sameAsLoop = (json: Json, options: object = {}) => {
+    const [on, off] = [slice(json, true, options), slice(json, false, options)];
+    for (const point of points) expect(Object.is(on.run(point), off.run(point))).toBe(true);
+    return on;
+  };
+
+  test('three sums, one of terms of mixed magnitude, and a product are the loop bit for bit', () => {
+    const sums = [
+      ['Sum', ['Divide', ['Sin', ['Multiply', 'k', 'x']], 'k'], ['Limits', 'k', 1, 3]],
+      ['Sum', ['Divide', ['Power', 'x', 'k'], ['Factorial', 'k']], ['Limits', 'k', 0, 20]],
+      ['Sum', ['Multiply', ['Divide', ['Power', -1, 'i'], 'i'], ['Sin', ['Multiply', 'i', 'x']]], ['Limits', 'i', 1, 100]],
+      ['Product', ['Add', 'x', 'k'], ['Limits', 'k', 1, 5]],
+    ];
+    for (const json of sums) {
+      sameAsLoop(json);
+      expect(loopCount(json)).toBe(0);
+    }
+  });
+
+  test('100 passes are written out, 101 are a loop; an empty range is the loop', () => {
+    const sum = (hi: number, lo = 1) => ['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', lo, hi]];
+    expect(loopCount(sum(100))).toBe(0);
+    expect(loopCount(sum(101))).toBe(1);
+    expect(loopCount(sum(1, 3))).toBe(1);
+    expect(slice(sum(1, 3), true).run({ x: 2 })).toBe(0);
+    expect(loopCount(sum(3, 3))).toBe(0);
+    for (const json of [sum(100), sum(101), sum(1, 3)]) sameAsLoop(json);
+  });
+
+  test('a term that reads no index is added once per pass', () => {
+    const json = ['Sum', ['g', 'x'], ['Limits', 'i', 1, 3]];
+    expect(loopCount(json)).toBe(0);
+    expect(slice(json, true).run({ x: 2 })).toBe(15);
+    sameAsLoop(json);
+  });
+
+  test('a condition on the index, a local of an enclosing Block, a call of the index', () => {
+    for (const json of [
+      ['Sum', ['If', ['Equal', ['Mod', 'i', 2], 0], ['Sin', 'x'], ['Cos', ['Multiply', 'i', 'x']]], ['Limits', 'i', 1, 4]],
+      ['Block', ['Declare', 'c', 'real', ['Sin', 'x']], ['Sum', ['Multiply', 'c', 'k'], ['Limits', 'k', 1, 3]]],
+      ['Sum', ['Multiply', ['g', 'k'], 'x'], ['Limits', 'k', 1, 3]],
+    ]) {
+      expect(loopCount(json)).toBe(0);
+      sameAsLoop(json);
+    }
+  });
+
+  test('a body with a draw keeps the loop, its draws and its warnings', () => {
+    const json = ['WithRandomSeed', 7, ['Sum', ['Multiply', ['Random'], 'x'], ['Limits', 'k', 1, 3]]];
+    expect(loopCount(json)).toBe(1);
+    const [on, off] = [slice(json, true), slice(json, false)];
+    for (const point of points.slice(0, 10)) expect(on.run(point)).toBe(off.run(point));
+    expect(on.warnings).toEqual(off.warnings);
+  });
+
+  test('a body with a Loop, or a call of a function on a cycle of calls, keeps the loop', () => {
+    const withLoop = [
+      'Sum',
+      [
+        'Block',
+        ['Declare', 's', 'real', 0],
+        ['Loop', ['Assign', 's', ['Add', 's', 'j']], ['Element', 'j', ['Range', 1, 3]]],
+        ['Multiply', 's', 'k', 'x'],
+      ],
+      ['Limits', 'k', 1, 3],
+    ];
+    expect(loopCount(withLoop)).toBe(2);
+    sameAsLoop(withLoop);
+    const recursive = ['Sum', ['Multiply', ['fact', 'k'], 'x'], ['Limits', 'k', 1, 3]];
+    expect(loopCount(recursive)).toBe(1);
+    sameAsLoop(recursive);
+  });
+
+  test('nested sums: the inner ones written out, and the outer when they all are', () => {
+    const nest = (inner: number) => [
+      'Sum',
+      ['Sum', ['Multiply', 'i', 'j', 'x'], ['Limits', 'j', 1, inner]],
+      ['Limits', 'i', 1, 100],
+    ];
+    // 100 inner sums of 100 terms would be 10,000 bodies, past the budget
+    // of 4,096: the outer sum is a loop, its inner sum written out.
+    expect(loopCount(nest(100))).toBe(1);
+    sameAsLoop(nest(100));
+    // 100 + 100 · 3 bodies.
+    expect(loopCount(nest(3))).toBe(0);
+    sameAsLoop(nest(3));
+  });
+
+  test('a Sum in the body of a user function is written out; a Sum over a Range is a loop', () => {
+    e.assign('u', e.box(['Function', ['Sum', ['Multiply', 'k', 't'], ['Limits', 'k', 1, 3]], 't'] as never));
+    const call = ['u', 'x'];
+    expect(loopCount(call)).toBe(0);
+    sameAsLoop(call);
+    const range = ['Sum', ['Multiply', 'x', ['Range', 1, 5]]];
+    expect(loopCount(range)).toBe(1);
+    sameAsLoop(range);
+  });
+
+  test('an iterationBudget below the count keeps the NaN of the loop', () => {
+    const json = ['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 1, 10]];
+    expect(slice(json, true, { iterationBudget: 9 }).run({ x: 2 })).toBeNaN();
+    sameAsLoop(json, { iterationBudget: 9 });
+    // 10 passes within a budget of 10: written out.
+    expect(loopCount(json, { iterationBudget: 10 })).toBe(0);
+    expect(slice(json, true, { iterationBudget: 10 }).run({ x: 2 })).toBe(110);
+  });
+
+  test('a term that declines gives the loop: the If of a guarded Sqrt', () => {
+    const json = ['Sum', ['If', ['Less', 'k', 0], 'x', ['Floor', ['Sqrt', 'k']]], ['Limits', 'k', -1, 3]];
+    expect(loopCount(json)).toBe(1);
+    sameAsLoop(json);
+    for (const x of [-0.5, 0.5]) {
+      const want = e.box(json as never).subs({ x }).N().re;
+      expect(slice(json, true).run({ x })).toBe(want);
+    }
+  });
+
+  test('a complex term of a constant index keeps the loop; an operation on it is written out', () => {
+    // `Sqrt(-1)` of a constant is complex; the loop's real kernel is NaN.
+    const direct = ['Sum', ['Multiply', ['Sqrt', 'k'], 'x'], ['Limits', 'k', -2, 1]];
+    expect(loopCount(direct)).toBe(1);
+    expect(slice(direct, true).run({ x: 0.5 })).toBeNaN();
+    // A complex value inside a term whose value is real or boolean.
+    for (const inner of [
+      ['Sum', ['Multiply', ['Abs', ['Sqrt', 'k']], 'x'], ['Limits', 'k', -2, 1]],
+      ['Sum', ['If', ['Greater', ['Abs', ['Arcsin', 'k']], 1], 'x', 1], ['Limits', 'k', 0, 3]],
+      ['Sum', ['Abs', ['Add', 'x', ['Sqrt', 'k']]], ['Limits', 'k', -1, 1]],
+    ]) {
+      expect(loopCount(inner)).toBe(1);
+      sameAsLoop(inner);
+    }
+    const shifted = ['Sum', ['Sqrt', ['Subtract', 'k', 2]], ['Limits', 'k', 1, 3]];
+    expect(loopCount(shifted)).toBe(0);
+    expect(slice(shifted, true).run({})).toBeNaN();
+    sameAsLoop(shifted);
+    // The complex mode keeps every loop: a real term there is complex in
+    // the loop.
+    const real = ['Sum', ['Sqrt', 'k'], ['Limits', 'k', 1, 3]];
+    expect(loopCount(real, { mode: 'complex' })).toBe(1);
+  });
+
+  test('a decline after a user function began to be lowered is the program\'s', () => {
+    e.assign('bad', e.box(['Function', ['Multiply', ['Foo', 't'], 2], 't'] as never));
+    const json = ['Sum', ['Multiply', ['bad', 'k'], 'x'], ['Limits', 'k', 1, 3]];
+    const message = (on: boolean) => {
+      try {
+        slice(json, on);
+      } catch (error) {
+        return (error as Error).message;
+      }
+      return undefined;
+    };
+    expect(message(true)).toMatch(/Foo is an unknown operator/);
+    expect(message(true)).toBe(message(false));
+  });
+
+  test('the node limit reached in an attempt gives the loop, or the decline of the loop', () => {
+    // A body of about 30,000 nodes: two of them pass the half of the limit.
+    const big = (n: number) => [
+      'Sum',
+      ['Add', ...Array.from({ length: n }, (_, i) => ['Multiply', i + 2, 'k', ['Sin', ['Add', 'x', i + 1]]])],
+      ['Limits', 'k', 1, 2],
+    ];
+    const fits = big(4000);
+    expect(loopCount(fits)).toBe(1);
+    const text = (json: Json) => compileSlice(box(json, e), { target: 'javascript', unrollSums: true } as never).code;
+    expect(text(fits)).toBe(text(fits));
+    // A body past the limit by itself: the loop's decline, on and off.
+    const over = big(12000);
+    const message = (on: boolean) => {
+      try {
+        slice(over, on);
+      } catch (error) {
+        return (error as Error).message;
+      }
+      return undefined;
+    };
+    expect(message(true)).toMatch(/more than 50000 nodes/);
+    expect(message(true)).toBe(message(false));
+  });
+
+  test('a function lowered in a refused attempt keeps its bodies in the budget', () => {
+    // Each helper holds a sum of 100 terms, first called in a sum with a
+    // draw (a refused attempt): 45 helpers would be 4,500 bodies.
+    const terms: Json[] = [];
+    for (let i = 0; i < 45; i++) {
+      e.assign(`hb${i}`, e.box(['Function', ['Sum', ['Multiply', 'j', ['Add', 't', i]], ['Limits', 'j', 1, 100]], 't'] as never));
+      terms.push(['Sum', ['Add', [`hb${i}`, 'k'], ['Random']], ['Limits', 'k', 1, 3]]);
+    }
+    const json = ['Add', ...terms];
+    const p = sliceProgram(box(json, e), { target: 'javascript', unrollSums: true } as never);
+    const hasLoop = (r: { body: { k: string }[] }) => r.body.some((i) => i.k === 'loop');
+    const helpers = p.functions.filter((f) => f.source?.startsWith('hb'));
+    expect(helpers).toHaveLength(45);
+    const looped = helpers.filter((f) => hasLoop(f.body)).length;
+    // At most 4,096 bodies written out: 40 helpers of 100 terms.
+    expect(looped).toBeGreaterThanOrEqual(5);
+    expect(45 - looped).toBeLessThanOrEqual(40);
+  });
+
+  test('off by default on JavaScript, and never on GLSL', () => {
+    const json = ['Sum', ['Divide', ['Sin', ['Multiply', 'k', 'x']], 'k'], ['Limits', 'k', 1, 3]];
+    expect(compileSlice(box(json, e), { target: 'javascript' }).code).toMatch(/for \(/);
+    expect(
+      compileSlice(box(json, e), { target: 'glsl', unrollSums: true } as never).code
+    ).toMatch(/for \(/);
   });
 });

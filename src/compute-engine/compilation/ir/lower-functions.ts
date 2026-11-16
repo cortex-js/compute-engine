@@ -305,6 +305,8 @@ export function functionLowering(cx: Lowering) {
    *  before the definition is). */
   const pending = new Map<string, UserFunction>();
   let settled = new Map<string, Effect>();
+  // The lowerings of a function begun (`cx.attempt()`).
+  let begun = 0;
 
   /** The IR function of the user function of `key`, lowered once. `args`:
    *  the arguments of the first call, whose stated lengths a list parameter
@@ -316,6 +318,7 @@ export function functionLowering(cx: Lowering) {
     sig: ReturnType<typeof signatureTypes>,
     args?: V[]
   ): UserFunction => {
+    begun += 1;
     const { names, result, list, tuple, r, open, points } = sig;
     const params = sig.params.map((p, i) => {
       const n = args?.[i] === undefined ? undefined : type(args[i]).shape[0];
@@ -670,5 +673,7 @@ export function functionLowering(cx: Lowering) {
     /** The effect of the IR function `name`: effectful while it is not
      *  lowered (a function being lowered). */
     effect: (name: string): Effect => settled.get(name) ?? 'effectful',
+    /** The count of the lowerings of a function begun. */
+    begun: () => begun,
   };
 }
