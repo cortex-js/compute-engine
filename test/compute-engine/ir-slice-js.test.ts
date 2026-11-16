@@ -415,15 +415,14 @@ describe('IR slice: determinism and inputs', () => {
       }
     }
   });
-  test('a list result that is an input is a copy', () => {
+  test('a list result that is an input is the input (results are read-only)', () => {
     const L = [1, 2, 3];
     const r = js(['If', 'p', 'L', 'M']).run({
       p: true,
       L,
       M: [4, 5, 6],
     }) as number[];
-    r[0] = 99;
-    expect(L).toEqual([1, 2, 3]);
+    expect(r).toBe(L);
   });
   test('input names that are not identifiers, or Object properties', () => {
     const engine = new ComputeEngine();
@@ -757,17 +756,18 @@ describe('IR slice: functions and calls', () => {
 });
 
 describe('IR slice: lists of run-time length', () => {
-  test('inputs are not changed, and a list result is not an input', () => {
-    for (const json of [
-      ['Map', ['Function', ['Multiply', 'z', 2], 'z'], 'D'],
-      ['Filter', 'D', ['Function', ['Greater', 'z', 0], 'z']],
-      ['If', 'p', 'D', ['Add', 'D', 1]],
-      ['Add', 'D', 0],
-    ]) {
+  test('inputs are not changed; a built list is new, an input is itself', () => {
+    for (const [json, input] of [
+      [['Map', ['Function', ['Multiply', 'z', 2], 'z'], 'D'], false],
+      [['Filter', 'D', ['Function', ['Greater', 'z', 0], 'z']], false],
+      [['If', 'p', 'D', ['Add', 'D', 1]], true],
+      // `D + 0` is `D` in the canonical form.
+      [['Add', 'D', 0], true],
+    ] as [unknown, boolean][]) {
       const D = [1, -2, 3];
       const r = js(json).run({ D, p: true }) as number[];
       expect(D).toEqual([1, -2, 3]);
-      expect(r).not.toBe(D);
+      expect(r === D).toBe(input);
     }
   });
   test('At follows the interpreter: from 1, from the end, NaN outside', () => {
@@ -1089,7 +1089,7 @@ describe('IR slice: bindings before heads', () => {
   });
 });
 
-describe('IR slice: a result does not alias an input', () => {
+describe('IR slice: a result can hold a part of an input (read-only)', () => {
   test.each([
     [['Map', ['Function', 'r', 'r'], 'Q']],
     [['Filter', 'Q', ['Function', 'True', 'r']]],
@@ -1103,8 +1103,9 @@ describe('IR slice: a result does not alias an input', () => {
       [1, 2],
       [3, 4],
     ]);
-    r[0][0] = 99;
-    r[1] = [0, 0];
+    // A new outer array that holds the rows of the input.
+    expect(r).not.toBe(Q);
+    expect(r[0]).toBe(Q[0]);
     expect(Q).toEqual([
       [1, 2],
       [3, 4],

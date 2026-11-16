@@ -94,9 +94,6 @@ export type OperatorRow = {
    *  (`operands`), or the result is one, multiplied by the units of a
    *  radian (`result`), as the interpreter converts them. */
   readonly angle?: 'operands' | 'result';
-  /** `operand`: the result can be (a part of) its list operand, so it can
-   *  alias an input; otherwise the result is a new value. */
-  readonly alias?: 'operand';
   /** The row can leave the reals: in `mode: 'complex'` it takes its
    *  complex signature unless the operand `nonnegative` is proved `>= 0`
    *  or the operand `integer` is on the integer lane; in `mode: 'strict'`
@@ -190,7 +187,6 @@ function frozenMap<K, T>(entries: [K, T][]): ReadonlyMap<K, T> {
 const angle: Options = { angle: 'operands' };
 const inverse: Options = { angle: 'result' };
 const list: Options = { threads: false };
-const part: Options = { threads: false, alias: 'operand' };
 
 // prettier-ignore
 export const OPERATORS: readonly OperatorRow[] = Object.freeze([
@@ -284,9 +280,9 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Not',          1,          [[[B], B, 'not']],             { fold: (a: boolean) => !a, ...list }),
   // The interpreter's `At`: from 1, from the end when negative, NaN for an
   // index that is 0, not an integer, or out of range.
-  row('At',           2,          [[['list', R], 'element', 'at']], part),
+  row('At',           2,          [[['list', R], 'element', 'at']], list),
   // An element from 0, at an index in range where the lowering puts it.
-  row(undefined,      2,          [[['list', I], 'element', 'elem']], part),
+  row(undefined,      2,          [[['list', I], 'element', 'elem']], list),
   // A draw of the active `WithRandomSeed` frame, or a live draw outside one.
   row('Random',       0,          [[[], R, 'draw']],             { ...list, effect: 'effectful' }),
   // A shuffled copy of a list of numbers (`lower.ts` declines another
@@ -328,7 +324,6 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
  *   interpreter (its body is empty); the results are the count and the
  *   list.
  *
- * `alias(j, yields)` gives the yields that the result `j` can be.
  */
 export type RegionRow = {
   readonly op: string;
@@ -341,15 +336,12 @@ export type RegionRow = {
     outs: readonly V[],
     yieldValues?: readonly V[]
   ) => IRType[] | undefined;
-  readonly alias: (j: number, yields: readonly V[]) => V[];
 };
 
 const listOf = (element: IRType, n: Length): IRType => ({
   lane: element.lane,
   shape: [n, ...element.shape],
 });
-
-const last = (_: number, ys: readonly V[]) => [ys[ys.length - 1]];
 
 export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
   {
@@ -359,7 +351,6 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
     params: [I],
     results: ([n], ys) =>
       ys.length === 1 ? [listOf(ys[0], { v: n })] : undefined,
-    alias: last,
   },
   {
     op: 'filter',
@@ -370,7 +361,6 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
       ys.length === 2 && ys[0].lane === B && ys[0].shape.length === 0
         ? [{ lane: I, shape: [] }, listOf(ys[1], { v: count })]
         : undefined,
-    alias: last,
   },
   {
     op: 'seeded',
@@ -381,7 +371,6 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
       ys.map((t) =>
         mapLengths(t, (v) => (vs.includes(v) ? outs[vs.indexOf(v)] : v))
       ),
-    alias: (j, ys) => [ys[j]],
   },
   {
     op: 'choice',
@@ -395,7 +384,6 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
             { lane: R, shape: [{ v: count }] },
           ]
         : undefined,
-    alias: () => [],
   },
   // The engine's machine quadrature from `a` to `b` of the region's yield
   // at its parameter.
@@ -408,7 +396,6 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
       ys.length === 1 && ys[0].shape.length === 0 && widensTo(ys[0].lane, R)
         ? [{ lane: R, shape: [] }]
         : undefined,
-    alias: () => [],
   },
 ]);
 

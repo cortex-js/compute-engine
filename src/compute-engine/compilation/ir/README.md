@@ -14,7 +14,7 @@ profile. A failure of the verifier or of the effect-trace check is a
 
 | File                           | Does                                                                           | Does not                                 |
 | ------------------------------ | ------------------------------------------------------------------------------ | ---------------------------------------- |
-| `operators.ts`                 | One row per operator (arity, signatures, effect, fold, alias); region rows     | Name a target                            |
+| `operators.ts`                 | One row per operator (arity, signatures, effect, fold); region rows            | Name a target                            |
 | `lower.ts`                     | The one walk: the head's binding, the constructs, scopes and arms              | Optimize; spell                          |
 | `lower-lists.ts`               | List sources (an input, a `Range`, a build), reductions, `Max` and `Min`       |                                          |
 | `lower-functions.ts`           | User functions by definition, signatures, the fixed point of their effects     |                                          |
@@ -23,7 +23,7 @@ profile. A failure of the verifier or of the effect-trace check is a
 | `effects.ts`                   | The effect of an instruction and of a function; the eligibility queries; trace |                                          |
 | `verify.ts`                    | Definitions, dominance (of values and lengths), types from the tables, calls   | Re-derive a type rule                    |
 | `passes.ts`                    | `scalarize`, `fold`, `strength`, `hoist`, `cse`, `invariants`, `dce`           | Change the effect trace                  |
-| `print.ts`                     | The shared statement printer, the inline policy, the copy of a result          | Decide anything that depends on a target |
+| `print.ts`                     | The shared statement printer and the inline policy                             | Decide anything that depends on a target |
 | `print-js.ts`, `print-glsl.ts` | A `Syntax`: spellings, types, statement forms; the stored code, `run()`        | Analyse the program                      |
 | `index.ts`                     | The target profiles and their one check (`admits()`); the frame warnings       |                                          |
 
@@ -241,9 +241,8 @@ a list or a tuple (`Declare(H, {value: Comprehension(…)})`) is that value; an
 A root `Tuple`, or the last operand of a root `Block` that is one, whose
 elements are tuples or are not of one shape (`Tuple(H)` of a list of run-time
 length, `Tuple(D, x)`) is no value of the program: the entry yields each element
-(`IRFunction.tuple`) and the JavaScript code returns the array of them, each
-element that can be an input copied (`Tuple(x, Less(x, 0), D)` is
-`[x, boolean, copy of D]`). Such a result has no `broadcastOutputs`; GLSL
+(`IRFunction.tuple`) and the JavaScript code returns the array of them
+(`Tuple(x, Less(x, 0), D)` is `[x, boolean, D]`, with `D` the input). Such a result has no `broadcastOutputs`; GLSL
 declines it.
 
 ## The complex lane
@@ -831,8 +830,20 @@ operands of a `Range` are reals or integers: its elements are `lo + k·step` for
 `k` from 0, of the count of `rangeCount`, the interpreter's (`Range(1, N)` at
 `N = 3.5` is `[1, 2, 3]`, `Range(-h, h)` at `h = 2.5` is
 `[-2.5, -1.5, …, 2.5]`), integers when the first element and the step are. GLSL
-has no spelling of a run-time count. Whether a list result can hold an input is
-read from the rows (`alias`): such a result is returned as a copy.
+has no spelling of a run-time count.
+
+A JavaScript result is read-only, as the contract of `run()` states
+(`docs/COMPILATION-MODEL.md`, "inputs of the shape the compiled code reads,
+results read-only"): the code returns the value it built, with no copy, so a
+result can be an input (`Q` is `_.Q`), hold a part of one (`List(A, B)` holds
+the input points), or be a constant that every call shares. A list of at least
+16 constants of any lane (counting the constants of the lists it holds) is
+computed once, when the code is loaded, in `preambleOnce` (`onceLists()` of
+`print-js.ts`); below 16 the array literal at each call is as fast. No code
+writes to an input or to such a list: an operation builds a new array, a write
+to an element is an error of the canonical form and a write to a list local
+declines. GLSL and the interval mode compute no list once this way; the
+interval mode's `run()` copies its inputs and its result.
 
 `Comprehension(body, Element(i, L))` is a build of `body` over the source of `L`
 (a list, a `Range`); with a condition, `Element(i, L, cond)`, it is a `filter`
@@ -1234,11 +1245,10 @@ run-time length of the result is a value of the body: the call has two results,
 the length and then the list, and the JavaScript code reads the length of the
 returned array (`.length`); the function returns one value, as any other. The
 verifier checks that the type of the list result names the length result of the
-same call. A result that can be a parameter (`same(L) := L`) is returned as a
-copy, so the result of a call is a new list. Declined: a recursive call of a
-function with a list result (its type is the body's), a list of lists, and on
-GLSL a result of a run-time length; one of a stated length is a `vecN` or a
-`float[n]` (`vec2 _fn_ir_u0_pt(float v0)`).
+same call. A result that can be a parameter (`same(L) := L`) is the parameter.
+Declined: a recursive call of a function with a list result (its type is the
+body's), a list of lists, and on GLSL a result of a run-time length; one of a
+stated length is a `vecN` or a `float[n]` (`vec2 _fn_ir_u0_pt(float v0)`).
 
 ## How to add
 
@@ -1250,7 +1260,7 @@ GLSL a result of a run-time length; one of a stated length is a `vecN` or a
 - A list-reading operator: a row with a `'list'` operand (as `At`), or a
   reduction in `REDUCTIONS` (it reads its list through a source).
 - A construct: one case in `lower.ts`. A construct with a body is a region row
-  in `REGION_ROWS` (arguments, parameters, result types, alias) and a region
+  in `REGION_ROWS` (arguments, parameters, result types) and a region
   spelling per target; no new instruction kind.
 - A pass: a function over `rewrite()` that asks `effects.ts` first.
 - A target: a `Syntax` (operation spellings, region spellings, types, statement
@@ -1282,8 +1292,6 @@ GLSL a result of a run-time length; one of a stated length is a `vecN` or a
   in a program).
 - A list of lists of run-time length (other than an input's outer list), a
   string seed and `Random` of a domain decline.
-- A copied list result is a `structuredClone`: two rows that are the same list
-  in the result (`[L, L]`) stay one object in the copy.
 - A `real` local declared or assigned a value outside its type (NaN, a complex
   number) is an error of the interpreter; the compiled code goes on with the
   value, and can overwrite it (`Block(Declare(t, real, Sqrt(x)), t := 2, t)`

@@ -32,6 +32,18 @@
 
 ### Behavior Changes
 
+- **In the experimental profile `'ir'`, a list or tuple result on JavaScript
+  is no longer a copy.** `run()` returns the value as the code built it, as
+  the default compiler does and as the contract of `run()` states (results
+  are read-only): with `Q: list<real>`, `compile(Q, { profile: 'ir' }).run({
+  Q })` is the array `Q` itself, where it was a `structuredClone` of it, and
+  `List(A, B)` of two point inputs holds the two input arrays. A list of 16
+  or more constants is built once when the code is loaded, not at each call,
+  and a result can be that shared list. Compiled code still never writes to
+  an input. Measured on the programs of a host's documents: a list or point
+  result took 6 to 13 times the default compiler's time and now takes the
+  same; a program that reads a table of 9,500 numbers took 150 times and now
+  takes 0.7 times. `to: 'interval-js'` still returns a copy.
 - **The experimental profile `'ir'` refuses an input that has no type.** An
   input typed `unknown` or `any` was read as a real number. It is now
   refused, on every target and in every mode, with the diagnostic of the

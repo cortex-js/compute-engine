@@ -2128,6 +2128,102 @@ made without npm: in a worktree at the commit, the version set to
 `npm pack --ignore-scripts` (8 s; the release hooks of a plain `npm pack`
 check the npm login and run the full suite again).
 
+The local replay of Tycho's corpus, 2026-11-15. Tycho's joint audit on
+`3592da6cb` was stopped by the user: the interval mode had no loop-invariant
+motion, and one showcase document took 1,843 s. `tycho-desk` made a dump
+instead, with the existing compiler only:
+`~/dev/compute-engine-recovery/interval-dump/t12-javascript-glsl-document-definitions.json`
+(755 documents, 13,966 distinct programs: 9,974 JavaScript and 3,992 GLSL,
+each with its options, the declared types of its free names and the
+definitions of its document). The replay runs on any tree of the engine and
+asks Tycho for nothing: `_TASKS/2026-11-14-ir-batches/replay-t12.mts`
+(admission with the cause, values at six sample points on JavaScript, time
+per `run()` call; `CE_ROOT=<tree>`), `replay-summary.mjs`,
+`replay-compare.mjs <base> <new>` (program by program), `replay-slow.mjs`,
+`replay-one.mts` (one program: both codes, both values, the interpreter's),
+`replay-glsl-validity.mts` (WebGL 2 with the engine's driver). Records in
+`_TASKS/2026-11-14-ir-batches/replay-t12/`. On main
+`641dbcc11aad526d1569b61fe46189031852acae`:
+
+| Measure | JavaScript | GLSL |
+| --- | --- | --- |
+| Programs | 9,974 | 3,992 |
+| The existing compiler compiles | 9,474 | 3,837 |
+| The profile admits | 9,020; 9,018 of the existing's (95.2%) | 3,721; 3,704 of the existing's (96.5%) |
+| Internal errors | 0 | 0 |
+
+- Largest causes of a decline among those the existing compiler compiles,
+  JavaScript: a symbol whose colour value is not `Hsv` of three reals 100; a
+  list where a scalar is required 52; a symbol with a value that is not a
+  number or a list 38; an index that can be out of range (a list of booleans,
+  of complex numbers, of lists) 37; a list or tuple argument of `Apply` 29;
+  `Repeat` 23. GLSL: the colour symbol 40; loops that can run more passes
+  than the `iterationBudget` 36; a symbol with a value 20; a `vars` entry 12.
+- Values on JavaScript: 8,823 of 8,859 compared programs the same. Five
+  finite differences, none a defect of the profile: in `neyret/ofbyu53cz8`
+  #9 and #10, `neyret/wsne0l2tcv` #2 and `neyret/fqiid6jhrd` #0 the profile
+  gives the interpreter's value and the existing compiler does not; in
+  `neyret/lfvstlsdsp` #8 two ulps are amplified by a cancellation. The rest:
+  21 lists of two lengths in the sample or `Arccos` outside its domain
+  (decided), 7 throws on a `Range` whose bound is NaN (the existing compiler
+  gives an empty list), 3 at non-finite values.
+- Shader validity: 3,697 of the 3,721 admitted GLSL programs compile and
+  link in WebGL 2 (24 use a host's `vars` names and are not wrapped).
+- Time per call on JavaScript, 8,826 programs: median profile/existing 0.68;
+  4,177 programs more than 1.5 times faster; 299 above 1.5, 28 above 10.
+  The classes of the 299: 233 a list or point result copied with
+  `structuredClone` (batch G19); 8 a constant list literal rebuilt at each
+  call (G19); 14 nested loops (`showcase/voronoi-diagram` 65 times: no
+  loop-invariant motion, a pass of session `ce-interval`;
+  `neyret/51a4237846` up to 1,356 times and 5.8 s to compile: 3,125 copies
+  of one sub-tree each lowered, a structural memo of `ce-interval`); 8
+  integrals (the existing compiler compiles the closed form:
+  `neyret/7mo1pzvuqb` #1 2.4 ms against 0.09 µs; batch G20, not started);
+  the rest sample artefacts and small ratios under a microsecond.
+
+Batch G19, 2026-11-15: results with no copy, constant lists computed once.
+The contract of `run()` on JavaScript (`docs/COMPILATION-MODEL.md`, user
+decision of 2026-10-13) is "results read-only": a result comes back as the
+code built it, with no copy, and can be a value kept for every later call.
+The pipeline copied a list result that could hold an input, since its first
+commit and with no contract asking for it. The first form of the batch made
+the copy cheaper (by level, with `slice()`); both reviewers then found that a
+constant list of complex numbers computed once shared its cells with a
+result, and the contract was read again. Final form: the copy is deleted
+(`mayAliasInput()`, the `alias` members of the operator rows and region rows,
+the copy flags of `ret`/`retTuple`: 17 lines fewer in `ir/` than before the
+batch), and `onceLists()` in `ir/print-js.ts` binds once, in the preamble,
+every list of constants of 16 constants or more (below 16 the literal at each
+call is as fast: measured). Compiled code never writes to an input or to
+such a list (tests). The interval mode keeps the copy of its own adapter.
+Alternative, not taken: the cheap copy (61 lines more, complex lists not
+computed once, `List(A, B, C, A)` still 2.5 times the existing compiler).
+On the six witness documents no program is above 1.5 times the existing
+compiler (`neyret/1a9de333a1` median 150 to 0.68; `List(A, B, C, D)` 13.9 to
+0.87). Tests: `ir-js-results.test.ts`; six tests that pinned the copy now pin
+the contract (`ir-slice-js`, `ir-tuples`, `ir-slice-random`).
+Dual review: Codex and Claude on the first form (the shared complex cells),
+Codex on the final form (nothing); no second Claude round, the final form
+being a deletion whose in-place writes the first round had probed. Measured
+in a worktree at `b3fc5a4a2ca93bec286fe0f52f2903b936eea896` (which holds the
+loop-invariant pass, the structural memo and the interval kernel choices of
+`ce-interval`) plus the patch: both suite runs green (2,049 suites, 85,446
+tests); engine compilations 12,229 of 12,576 admitted (97.2%); public
+JavaScript 6,844 of the 15,054 that the existing compiler compiles (45.5%);
+GLSL 1,094 of 1,596 (68.5%); `interval-js` 1,467 of 2,169 (67.6%); programs
+that the existing compiler declines and the profile admits unchanged (78,
+67, 41), no message moves. Shader validity of the corpus on that tree: 3,697
+of 3,697 wrapped programs compile in WebGL 2. `ir/` is 9,735 lines (the
+pass and the memo added about 240).
+
+Split of the remaining causes with `ce-interval` (its design note, section
+18): the loop-invariant pass, the structural memo, a value common to the
+arms of an `if`, the unroll of a `Sum` of constant bounds (JavaScript only if
+the replay gains) are its batches, reviewed here with a replay each; mine:
+G21, inlining at the lowering a small non-recursive function called inside a
+loop (what is left of voronoi, 6 times, after the pass), and G20, the closed
+form of an integral on JavaScript.
+
 Found after the review, to settle before the default:
 
 - A hang, with the switch `CE_JS_PROFILE_PUBLIC=ir`:

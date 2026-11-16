@@ -4,12 +4,12 @@
  * of each statement form. The printer makes no decision that depends on a
  * target. It writes every instruction in order, as a statement that binds
  * its values, except the values of `inlinedValues()`, which it writes at
- * their use. A result that may alias an input (`mayAliasInput()`) is
- * returned as a copy.
+ * their use. A result is returned as it is: it can be an input, hold a
+ * part of one, or be a value of `once` that every call shares.
  */
 
 import { effects, type Effects, type TraceEntry } from './effects.js';
-import { regionRow, rowOfOp, type OperatorRow } from './operators.js';
+import { rowOfOp, type OperatorRow } from './operators.js';
 import {
   argsOf,
   argumentIndex,
@@ -100,12 +100,10 @@ export type Syntax = {
    *  iteration budget counts. */
   loopOpen(k: string, lo: string, hi: string, passes: boolean): string[];
   readonly close: string;
-  /** `copy`: the value can be (or hold) an input. */
-  ret(value: string, type: IRType, copy: boolean): string;
-  /** The return of the array of `values` (an entry `tuple`); `copy[k]`:
-   *  the value `k` can be (or hold) an input. Absent: the target declines
-   *  such an entry. */
-  retTuple?(values: string[], copy: boolean[]): string;
+  ret(value: string, type: IRType): string;
+  /** The return of the array of `values` (an entry `tuple`). Absent: the
+   *  target declines such an entry. */
+  retTuple?(values: string[]): string;
   call(fn: string, args: string[]): string;
   /** A function other than the entry. */
   fn(
@@ -220,41 +218,6 @@ const fuses = (
   JSON.stringify(p.types[outsOf(i)[0]].shape) ===
     JSON.stringify(p.types[outsOf(user)[0]].shape);
 
-/**
- * Whether the list value `v` can be an input of the entry or share an
- * element with one: a parameter; the result of an operation whose row
- * says it is a part of its operand (`alias`), of a list literal, an `if`,
- * or a region whose row says which yields it can be, that holds such a
- * list. Any other result is a new list.
- */
-export function mayAliasInput(
-  p: Program,
-  rows: readonly OperatorRow[],
-  index = useIndex(p)
-): (v: V) => boolean {
-  const memo = new Map<V, boolean>();
-  const sources = (i: Instr, v: V): V[] => {
-    const j = outsOf(i).indexOf(v);
-    if (i.k === 'if') return [i.then.yields[j], i.else.yields[j]];
-    if (i.k === 'region') return regionRow(i.op)!.alias(j, i.regions[0].yields);
-    if (i.k === 'list') return i.args;
-    if (i.k === 'op' && rowOfOp(rows, i.op)?.row.alias === 'operand')
-      return i.args;
-    return [];
-  };
-  const alias = (v: V): boolean => {
-    if (p.types[v].shape.length === 0) return false;
-    const known = memo.get(v);
-    if (known !== undefined) return known;
-    memo.set(v, false);
-    const i = index.def.get(v);
-    const r = i === undefined || sources(i, v).some(alias);
-    memo.set(v, r);
-    return r;
-  };
-  return alias;
-}
-
 /** `once`: the values that the target computes once, out of the
  *  functions, each bound to its name (`Printed.once`). */
 export function printProgram(
@@ -268,7 +231,6 @@ export function printProgram(
   const inlined = inlinedValues(p, syntax, rows, fx, index);
   once?.forEach((v) => inlined.delete(v));
   const onceText = new Map<V, readonly [string, string]>();
-  const alias = mayAliasInput(p, rows, index);
   const names = new Map<V, string>();
   const helpers = new Set<string>();
   const order: Omit<TraceEntry, 'region'>[] = [];
@@ -481,17 +443,11 @@ export function printProgram(
   const returned = (f: IRFunction): string[] => {
     const ys = f.body.yields;
     if (f.tuple === true && syntax.retTuple !== undefined)
-      return [
-        ...body(f.body, 1),
-        '  ' + syntax.retTuple(ys.map(use), ys.map(alias)),
-      ];
+      return [...body(f.body, 1), '  ' + syntax.retTuple(ys.map(use))];
     if (f.results.length !== 1)
       throw new Error('slice printer: a function with several results');
     const y = f.body.yields[0];
-    return [
-      ...body(f.body, 1),
-      '  ' + syntax.ret(use(y), f.results[0], alias(y)),
-    ];
+    return [...body(f.body, 1), '  ' + syntax.ret(use(y), f.results[0])];
   };
   // The entry first: `order` follows `p.functions`, whose first is the entry.
   const main = returned(entry);

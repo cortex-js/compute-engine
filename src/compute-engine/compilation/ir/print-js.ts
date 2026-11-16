@@ -12,8 +12,8 @@
  * Each operation is spelled with the double arithmetic that the `fold` of
  * its row computes. An element-wise operation is an array of its length
  * filled by a `for` loop, one loop for a chain of such operations of one
- * shape. A list result that can be (or hold) an input is a copy, so that
- * the host cannot change the input through it.
+ * shape. A result is read-only: it can be an input, hold a part of one, or
+ * be a list of constants that every call shares.
  *
  * A power, a `Mod` and the functions of `REAL_FUNCTIONS` and
  * `COMPLEX_FUNCTIONS` (a complex value is a `{ re, im }` object) call
@@ -39,7 +39,15 @@ import {
   twoStageRunner,
   type SysHelpers,
 } from '../javascript-runtime.js';
-import { argumentIndex, entryOf, type Program } from './ir.js';
+import {
+  argumentIndex,
+  entryOf,
+  regionsOf,
+  type Instr,
+  type Program,
+  type Region,
+  type V,
+} from './ir.js';
 import {
   COMPLEX_FUNCTIONS,
   REAL_FUNCTIONS,
@@ -263,10 +271,8 @@ export const JS: Syntax = Object.freeze({
   elseOpen: '} else {',
   loopOpen: loopOpen(NUMBERS),
   close: '}',
-  ret: (value, _type, copy) =>
-    `return ${copy ? `structuredClone(${value})` : value};`,
-  retTuple: (values, copy) =>
-    `return [${values.map((v, k) => (copy[k] ? `structuredClone(${v})` : v)).join(', ')}];`,
+  ret: (value) => `return ${value};`,
+  retTuple: (values) => `return [${values.join(', ')}];`,
   call: (fn, args) => `${fn}(${args.join(', ')})`,
   fn: (name, params, _result, body) =>
     [
@@ -368,6 +374,35 @@ export function runtimeOf(ce?: ComputeEngine): SysHelpers {
     : makeSysHelpers(engineRuntimeSource(ce));
 }
 
+/** The lists of constants (and of such lists) of at least 16 constants in
+ *  all, and the lists that they hold, in any function and region, which the
+ *  code computes once, when it is loaded (below 16, the literal at each call
+ *  is as fast). No code writes to a list; a result can be such a list, which
+ *  every call shares (results are read-only). */
+function onceLists(p: Program): Set<V> {
+  const size = new Map<V, number>();
+  const lists: (Instr & { k: 'list' })[] = [];
+  const walk = (r: Region): void =>
+    r.body.forEach((i) => {
+      regionsOf(i).forEach(walk);
+      if (i.k === 'const') size.set(i.out, 1);
+      if (i.k !== 'list' || !i.args.every((a) => size.has(a))) return;
+      size.set(
+        i.out,
+        i.args.reduce((n, a) => n + size.get(a)!, 0)
+      );
+      lists.push(i);
+    });
+  p.functions.forEach((f) => walk(f.body));
+  const once = new Set<V>();
+  for (const i of lists.reverse())
+    if (once.has(i.out) || size.get(i.out)! >= 16) {
+      once.add(i.out);
+      i.args.forEach((a) => p.types[a].shape.length > 0 && once.add(a));
+    }
+  return once;
+}
+
 export function printJavaScript(
   p: Program,
   rows: readonly OperatorRow[],
@@ -390,7 +425,8 @@ export function printJavaScript(
             ...(passes ? [`  _SYS.countLoopPass(${budget});`] : []),
           ],
         },
-    rows
+    rows,
+    onceLists(p)
   );
   const entry = entryOf(p);
   const n = argumentIndex(entry, entry.positional ?? 0);
@@ -398,7 +434,11 @@ export function printJavaScript(
     n === 0
       ? '_'
       : `${Array.from({ length: n }, (_, k) => `a${k}`).join(', ')}, _ = {}`;
-  const preambleOnce = [...printed.helpers, ...printed.functions].join('\n');
+  const preambleOnce = [
+    ...printed.helpers,
+    ...[...printed.once.values()].map(([x, value]) => `const ${x} = ${value};`),
+    ...printed.functions,
+  ].join('\n');
   // The count starts again at each call of the entry.
   const counts = [preambleOnce, ...printed.body].some((s) =>
     s.includes('_SYS.countLoopPass(')

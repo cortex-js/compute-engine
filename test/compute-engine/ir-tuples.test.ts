@@ -625,12 +625,12 @@ describe('Prelude statements of a list or a tuple', () => {
     );
     expect(r.run!({ x: -1, D: [3] } as never)).toEqual([-1, true, [3]]);
   });
-  test('a root Tuple of a list and a scalar: an input list is copied', () => {
+  test('a root Tuple of a list and a scalar: an input list is itself', () => {
     const r = check(['Tuple', 'D', 'x'], [{ D: [1, 2, 3], x: 0.5 }]);
     const D = [1, 2];
     const got = r.run!({ D, x: 1 } as never) as unknown[];
     expect(got).toEqual([[1, 2], 1]);
-    expect(got[0]).not.toBe(D);
+    expect(got[0]).toBe(D);
     expect(r.broadcastOutputs).toBeUndefined();
   });
   test('a list local that is not written; one that is written declines', () => {
@@ -671,9 +671,9 @@ describe('Prelude statements of a list or a tuple', () => {
     expect(inner(['Declare', 'H', value(['List', 5, 6])], 'H')).toMatch(
       /static type error/
     );
-    expect(
-      declined(['Block', ['Declare', 't', "'real'", 'D'], 0])
-    ).toMatch(/a list value for a local declared real/);
+    expect(declined(['Block', ['Declare', 't', "'real'", 'D'], 0])).toMatch(
+      /a list value for a local declared real/
+    );
   });
   test('GLSL declines a root Tuple of several shapes', () => {
     expect(() =>
@@ -741,10 +741,10 @@ describe('list results of user functions', () => {
       TYCHO
     );
   });
-  test('a function that returns its list parameter: the result is a copy', () => {
+  test('a function that returns its list parameter: the result is the input', () => {
     const r = check(['same', 'D'], [{ D: [1, 2, 3] }, { D: [4] }]);
     const D = [1, 2];
-    expect(r.run!({ D } as never)).not.toBe(D);
+    expect(r.run!({ D } as never)).toBe(D);
   });
   test('a fixed-length list or tuple result; a complex list result declines', () => {
     const points = [{ x: 0.5 }, { x: -2 }];

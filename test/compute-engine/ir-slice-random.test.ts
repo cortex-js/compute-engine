@@ -379,11 +379,8 @@ describe('IR slice: random programs against the interpreter', () => {
         const off = run(false);
         if (on === 'thrown') continue;
         if (!sameBits(on, off)) bitDifferences.push(JSON.stringify(json));
-        // A list result is not an input, nor holds one.
-        const scribble = (v: unknown) =>
-          Array.isArray(v) &&
-          v.forEach((x, i) => (Array.isArray(x) ? scribble(x) : (v[i] = 999)));
-        scribble(off);
+        // The code writes to no input (a result is read-only, and can be
+        // an input or hold one).
         if (JSON.stringify(point) !== before) changedInputs.push(text);
         compared += 1;
         if (warnings.length > 0) continue;
