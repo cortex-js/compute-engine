@@ -508,17 +508,23 @@ export function sliceProgram(
   const passes = options.passes === false ? {} : (options.passes ?? ALL_PASSES);
   // The bigint mode: a helper throws at a pole (`Mod`, `At`, `Factorial`,
   // `Power`, `Binomial`, a call), so no operation is evaluated before it is
-  // written: no `hoist` (it moves a guarded arm out of its guard), and no
+  // written: no `hoist` (it moves a guarded arm out of its guard), no
+  // `invariants` (it moves an operation out of a loop of no pass), and no
   // `fold` (the folds of the rows compute with doubles).
   // The interval mode: no `fold` (a double is not an enclosure) and no
-  // `strength` (`x·x` is wider than `x^2` over an interval).
+  // `strength` (`x·x` is wider than `x^2` over an interval); with an
+  // `iterationBudget` below 2^32, no `listLoops` (the limit of its loops
+  // refuses a loop over a list longer than the budget, `printInterval()`).
   runPasses(
     p,
     {
       ...passes,
       scalarize: !profile.elementwise,
-      ...(bigint ? { fold: false, hoist: false } : {}),
+      ...(bigint ? { fold: false, hoist: false, invariants: false } : {}),
       ...(interval ? { fold: false, strength: false } : {}),
+      ...(interval && Math.floor(options.iterationBudget ?? Infinity) < 2 ** 32
+        ? { listLoops: false }
+        : {}),
     },
     rows
   );

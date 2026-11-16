@@ -551,6 +551,14 @@ export const PROGRAMS: Json[] = [
   ['Sum', 'k', ['Limits', 'k', 'n', 'm']],
   ['Sum', ['Multiply', 'k', 'k', 'k'], ['Limits', 'k', 1, 1000]],
   ['Product', ['Divide', 'k', ['Add', 'k', 1]], ['Limits', 'k', 1, 'n']],
+  // A loop invariant computed before the loop (the pass `invariants`): a
+  // conditional, a list and the loop over it, an inner loop, a reduction
+  // of a list of run-time length, a call
+  ['Sum', ['Multiply', 'k', ['If', ['Less', 'x', 0], ['Sin', 'y'], ['Cos', 'y']]], ['Limits', 'k', 1, 'n']],
+  ['Sum', ['Multiply', 'k', ['Max', ['Add', 'L', 'x']]], ['Limits', 'k', 1, 4]],
+  ['Sum', ['Multiply', 'k', ['Product', ['Add', 'j', 'x'], ['Limits', 'j', 1, 3]]], ['Limits', 'k', 1, 4]],
+  ['Sum', ['Max', ['Max', 'D'], 'k'], ['Limits', 'k', 1, 'n']],
+  ['Sum', ['Multiply', 'k', ['g', 'x']], ['Limits', 'k', 1, 5]],
   // Block, Declare, Assign
   ['Block', ['Declare', 't', 'real', 0], ['Assign', 't', ['Add', 't', 'x']], 't'],
   ['Block', ['Declare', 't', 'real', 0], ['If', ['Less', 0, 'x'], ['Assign', 't', 'x'], ['Assign', 't', ['Negate', 'x']]], 't'],

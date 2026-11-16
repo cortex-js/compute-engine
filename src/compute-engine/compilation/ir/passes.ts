@@ -23,11 +23,14 @@
  *   is visible reads that value instead, and so does a call of a function
  *   that is not effectful and not on a cycle of calls (each of its results).
  *   No value is moved.
+ * - `invariants`: an instruction of a loop body that reads nothing that the
+ *   body computes is computed once, before the loop (`invariants` below).
  * - `dce`: an instruction whose values are not read (by an instruction, a
  *   yield or a type) is removed, when it is removable.
  *
- * `fold`, `hoist`, `strength`, `cse` and `dce` run again while one of them
- * changes the program. After each pass the program is verified, and its
+ * `fold`, `hoist`, `strength`, `cse`, `invariants` and `dce` run again while
+ * one of them changes the program: `cse` then merges a value moved out of
+ * two loops. After each pass the program is verified, and its
  * effectful instructions must be the same, in the same regions and order,
  * on the same operands (renamed by the pass).
  */
@@ -66,6 +69,12 @@ export type PassOptions = {
   hoist?: boolean;
   strength?: boolean;
   cse?: boolean;
+  invariants?: boolean;
+  /** `invariants` moves a loop over the elements of a list that exists out
+   *  of a loop that can run no pass: off where such a loop can fail (the
+   *  interval mode with an `iterationBudget`, whose limit refuses a loop of
+   *  more passes). */
+  listLoops?: boolean;
   dce?: boolean;
 };
 
@@ -74,6 +83,8 @@ export const ALL_PASSES: PassOptions = Object.freeze({
   hoist: true,
   strength: true,
   cse: true,
+  invariants: true,
+  listLoops: true,
   dce: true,
 });
 
@@ -110,6 +121,11 @@ export function runPasses(
     if (options.hoist) changed = run('hoist', hoist) || changed;
     if (options.strength) changed = run('strength', strength) || changed;
     if (options.cse) changed = run('cse', cse) || changed;
+    if (options.invariants)
+      changed =
+        run('invariants', (q, r) =>
+          invariants(q, r, options.listLoops !== false)
+        ) || changed;
     if (options.dce) changed = run('dce', dce) || changed;
     if (!changed) break;
   }
@@ -462,6 +478,156 @@ const cse: Pass = (p, rows) => {
       scopes.pop();
     }
   );
+};
+
+/** Whether `test` holds for `i` or for an instruction of its regions. */
+const some = (i: Instr, test: (x: Instr) => boolean): boolean =>
+  test(i) || regionsOf(i).some((r) => r.body.some((x) => some(x, test)));
+
+/**
+ * An instruction at the top level of the body of a `loop`, a `build` or a
+ * `filter` moves to just before it when nothing in it reads a parameter of
+ * the body (the index, a carried value) or a value of the body that stays,
+ * in the order of the body; the loops inside it first, so a value moves
+ * out of a nest as far as it is invariant. An inner loop, a build or an
+ * `if` moves as a whole. What moves:
+ * - a pure instruction out of every loop, unless it holds a call or an
+ *   operation that the pass `plain` of the interval mode makes throw: a
+ *   `rangecount` (`_IA.rangeCount()`), and a `rangestep` or an `elem` of an
+ *   index that is not a constant or a loop index (`_IA.number()` of an
+ *   interval that is not a point);
+ * - one that can fail, or a call of a function that is not effectful and
+ *   not on a cycle of calls, only out of a loop that runs at least one pass
+ *   (constant bounds, a constant length) and is not a `Loop` (which counts
+ *   its passes), and only before the first effectful instruction of the
+ *   body: it failed in the first pass if it fails before the loop;
+ * - out of a loop that can run no pass, a build with a pure body over the
+ *   elements of a list that exists (an input, a result of a call or of a
+ *   filter, or the shortest of such lists), which cannot fail, and with
+ *   `listLoops` a loop over them, whose limit of passes it does not reach:
+ *   each runs once where the program ran it no time, no longer than the
+ *   list took to make, and on JavaScript it ticks the deadline then.
+ */
+const invariants = (
+  p: Program,
+  rows: readonly OperatorRow[],
+  listLoops: boolean
+): ReturnType<Pass> => {
+  const fx = effects(p, rows);
+  const cyclic = recursiveFunctions(p.functions);
+  const constants = new Map<V, Constant>();
+  const defs = new Map<V, Instr>();
+  // The index of each loop, build and filter.
+  const indices = new Set<V>();
+  // The lengths of the lists that exist where the length is visible.
+  const lengths = new Set<V>();
+  const ofLists = (vs: V[]) =>
+    vs.forEach((v) =>
+      lengthValues(p.types[v]).forEach((n) => {
+        if (vs.includes(n)) lengths.add(n);
+      })
+    );
+  const index = (r: Region) =>
+    r.body.forEach((i) => {
+      outsOf(i).forEach((o) => defs.set(o, i));
+      if (i.k === 'const') constants.set(i.out, i.value.value);
+      if (i.k === 'call' || i.k === 'region') ofLists(i.outs);
+      // The shortest of such lists (`PointList(A, B)`).
+      if (
+        i.k === 'op' &&
+        i.op === 'min.int' &&
+        i.args.every((a) => lengths.has(a))
+      )
+        lengths.add(i.out);
+      if (i.k === 'loop') indices.add(i.body.params[0]);
+      if (i.k === 'region' && (i.op === 'build' || i.op === 'filter'))
+        indices.add(i.regions[0].params[0]);
+      regionsOf(i).forEach(index);
+    });
+  for (const f of p.functions) {
+    ofLists(f.body.params);
+    index(f.body);
+  }
+  const integer = (v: V) => {
+    const c = constants.get(v);
+    return typeof c === 'number' ? c : undefined;
+  };
+  const pure = (r: Region) => r.body.every((x) => fx.of(x) === 'pure');
+  const hazard = (x: Instr) =>
+    x.k === 'call' ||
+    (x.k === 'op' &&
+      (x.op === 'rangecount' ||
+        x.op === 'rangestep' ||
+        (x.op === 'elem' &&
+          integer(x.args[1]) === undefined &&
+          !indices.has(x.args[1]))));
+  /** A loop or a build over the elements of a list that exists. */
+  const overList = (x: Instr): boolean => {
+    if (x.k === 'region') return x.op === 'build' && lengths.has(x.args[0]);
+    if (!listLoops || x.k !== 'loop' || x.passes === true) return false;
+    if (integer(x.lo) !== 0) return false;
+    const hi = defs.get(x.hi);
+    return (
+      hi?.k === 'op' &&
+      hi.op === 'sub.int' &&
+      lengths.has(hi.args[0]) &&
+      integer(hi.args[1]) === 1
+    );
+  };
+  let changed = false;
+  /** The instructions that move out of `body`, the body of `loop`. */
+  const moveOut = (loop: Instr, body: Region): Instr[] => {
+    const counted = loop.k === 'loop' && loop.passes === true;
+    const lo = loop.k === 'loop' ? integer(loop.lo) : 1;
+    const hi = integer(loop.k === 'loop' ? loop.hi : argsOf(loop)[0]);
+    const runs = lo !== undefined && hi !== undefined && lo <= hi;
+    const variant = new Set<V>(body.params);
+    const inBody = (v: V) => variant.has(v);
+    const reads = (x: Instr) =>
+      argsOf(x).some(inBody) ||
+      outsOf(x).some((o) => lengthValues(p.types[o]).some(inBody)) ||
+      regionsOf(x).some((r) => r.yields.some(inBody));
+    let effect = false;
+    const moved: Instr[] = [];
+    const kept: Instr[] = [];
+    for (const x of body.body) {
+      const e = fx.of(x);
+      const free = !some(x, reads);
+      const risky = some(x, hazard);
+      const ok =
+        free &&
+        ((e === 'pure' && !risky) ||
+          (e !== 'effectful' &&
+            !effect &&
+            !counted &&
+            !some(x, (y) => y.k === 'call' && cyclic.has(y.fn)) &&
+            (runs || (overList(x) && !risky && regionsOf(x).every(pure)))));
+      if (ok) moved.push(x);
+      else {
+        kept.push(x);
+        outsOf(x).forEach((o) => variant.add(o));
+        if (e === 'effectful') effect = true;
+      }
+    }
+    if (moved.length > 0) {
+      changed = true;
+      body.body = kept;
+    }
+    return moved;
+  };
+  const visit = (r: Region) => {
+    const out: Instr[] = [];
+    for (const i of r.body) {
+      regionsOf(i).forEach(visit);
+      if (i.k === 'loop') out.push(...moveOut(i, i.body));
+      else if (i.k === 'region' && (i.op === 'build' || i.op === 'filter'))
+        out.push(...moveOut(i, i.regions[0]));
+      out.push(i);
+    }
+    r.body = out;
+  };
+  p.functions.forEach((f) => visit(f.body));
+  return { changed, resolve: (v) => v };
 };
 
 /** One backward pass per region: an instruction is kept when one of its

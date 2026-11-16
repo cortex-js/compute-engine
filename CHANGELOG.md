@@ -151,6 +151,26 @@
   41 µs before, 0.85 µs now (the default compiler: 6.1 µs);
   `Sum(Sin(L)·x)` over 1,000 elements 47 µs, 5.6 µs (6.0 µs);
   `Sum(k·x, k = 1..200)` 240 ns, 126 ns (155 ns). The values are the same.
+- **Code of the experimental profile `'ir'` computes the invariant part of a
+  loop once.** A part of the body of a `Sum`, a `Product`, a `Loop`, a `Map`
+  or a `Filter` that does not depend on the index is computed before the
+  loop, on JavaScript, on GLSL and in the interval mode: in
+  `Sum(Max(Max(L), k), k = 1..n)`, `Max(L)` is computed once. A part that
+  can fail (a call of a user function, an inner loop, a `Filter`) moves only
+  out of a loop of constant bounds that runs at least once, so a loop of no
+  pass at run time calls no function; a loop or a `Map` over the elements of
+  a list that exists (`Max(L)`) moves out of any loop and then runs once
+  where the loop has no pass (in the interval mode with an
+  `iterationBudget`, a loop over a list does not move).
+  Measured per call: that sum with 1,000 elements in `L`
+  and `n = 1000`, 449 µs before, 2.0 µs now (the default compiler: 5.4 µs);
+  Tycho's `voronoi-diagram`, whose `B(x, y)` called three functions that do
+  not read its index in a sum of 16 terms, 0.43 ms, 0.054 ms on JavaScript
+  (0.014 ms), and 41 ms, 4.2 ms in the interval mode (the existing interval
+  target: 0.72 ms). The values are the same, except under an
+  `iterationBudget`: a moved call counts the passes of its `Loop`s once, so
+  `Sum(f(x)·k, k = 1..3)`, whose `f` runs a `Loop` of 100 passes, gives its
+  value under a budget of 150, where it threw.
 - **The experimental profile `'ir'` compiles an input that is a list of
   points on JavaScript.** An input of type `list<tuple<real, real>>` (or of
   three or more numbers per tuple, with a stated or a run-time length) is

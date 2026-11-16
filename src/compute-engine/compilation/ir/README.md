@@ -22,7 +22,7 @@ profile. A failure of the verifier or of the effect-trace check is a
 | `ir.ts`                        | Types, instructions, functions, the builder, the def-use index                 | Know a target                            |
 | `effects.ts`                   | The effect of an instruction and of a function; the eligibility queries; trace |                                          |
 | `verify.ts`                    | Definitions, dominance (of values and lengths), types from the tables, calls   | Re-derive a type rule                    |
-| `passes.ts`                    | `scalarize`, `fold`, `strength`, `hoist`, `cse`, `dce`                         | Change the effect trace                  |
+| `passes.ts`                    | `scalarize`, `fold`, `strength`, `hoist`, `cse`, `invariants`, `dce`           | Change the effect trace                  |
 | `print.ts`                     | The shared statement printer, the inline policy, the copy of a result          | Decide anything that depends on a target |
 | `print-js.ts`, `print-glsl.ts` | A `Syntax`: spellings, types, statement forms; the stored code, `run()`        | Analyse the program                      |
 | `index.ts`                     | The target profiles and their one check (`admits()`); the frame warnings       |                                          |
@@ -411,11 +411,12 @@ Every value is an integer or a boolean, also a loop index, a list index and a
 length: a loop counts with a `bigint` counter, and the code converts with
 `Number()` where JavaScript reads a number (an element, `$0[Number($1)]`, the
 length of a build) and with `BigInt()` where it gives one (the length of an
-array, `BigInt(L.length)`). The mode runs with the passes `fold` and `hoist`
-off, also with `cse: false` or `constantFold: false`: a helper throws at a pole
-(`Mod`, `At`, `Factorial`, `Power`, `Binomial`, and so a call), so no operation
-is evaluated before it is written, and `hoist` would move a guarded arm out of
-its guard (`m != 0 ∧ Mod(n, m) = 1` at `m = 0` is `False`); the folds of the
+array, `BigInt(L.length)`). The mode runs with the passes `fold`, `hoist` and
+`invariants` off, also with `cse: false` or `constantFold: false`: a helper
+throws at a pole (`Mod`, `At`, `Factorial`, `Power`, `Binomial`, and so a
+call), so no operation is evaluated before it is written, `hoist` would move a
+guarded arm out of its guard (`m != 0 ∧ Mod(n, m) = 1` at `m = 0` is `False`),
+and `invariants` an operation out of a loop of no pass; the folds of the
 rows compute with doubles, and the lowering has folded the closed nodes exactly
 already. `cse` reads a value that dominates its use, and `strength` rewrites the
 real `pow` only.
@@ -974,6 +975,38 @@ call is merged because the visible call failed if the second would. So
 `a_1(x) = g(a_0(x), a_0(x), …)` calls `a_0` once, and a chain of such functions
 runs in a time proportional to its length. A function that draws, directly or
 through a call, is `effectful` and is called each time.
+
+The pass `invariants` computes once, before the loop, an instruction at the top
+level of the body of a `loop`, a `build` or a `filter` that reads no parameter
+of the body (the index, a carried value) and no value of the body that stays,
+decided in the order of the body, the inner loops first; an inner loop, a build
+or an `if` moves as a whole, and an instruction in an arm of the body stays. A
+`pure` instruction moves out of every loop, unless it holds a call or an
+operation that the pass `plain` of the interval mode makes throw: a `rangecount`
+(`_IA.rangeCount()`), and a `rangestep` or an `elem` whose index is not a
+constant or a loop index (`_IA.number()` of an interval that is not a point). A
+`may-fail` instruction, or a call of a function that is not `effectful` and not
+on a cycle of calls, moves only out of a loop of constant bounds, or a build of
+a constant length, of at least one pass, which is not a `Loop` (a `loop` with
+`passes`), and only when no effectful instruction of the body is before it: if
+it fails before the loop, it failed in the first pass. Out of a loop of a
+run-time count, a build with a pure body over the elements of a list that exists
+(a parameter, the result of a call or of a `filter`, or the shortest of such
+lists, the length of `PointList(A, B)`) moves too, and so does a loop over them,
+except in the interval mode with an `iterationBudget` below 2^32, whose limit
+refuses a loop over a list longer than the budget (the option `listLoops`); a
+`filter` does not (it throws for an undecided condition in the interval mode).
+Such a build or loop runs once where the program ran it no time, no longer than
+the list took to make; on JavaScript its passes then tick the deadline. So in
+`Sum(Max(Max(L), k), Limits(k, 1, n))` the loop of `Max(L)` runs once, also at
+`n = 0`, and a call in the loop of `Sum(f(x)·k, Limits(k, 1, n))` stays there,
+so that a loop of no pass runs no call. In Tycho's `voronoi-diagram`, the loop
+of `B` (`Sum(…, k = 1..16)`) called `F(x, y)`, `v(x, y)` and `u(x, y)` at each
+pass; they are called once. A moved call counts the passes of its `Loop`s once
+(`iterationBudget`): `Sum(f(x)·k, Limits(k, 1, 3))`, whose `f` runs a `Loop` of
+100 passes, gives its value under a budget of 150, where it threw. Nothing
+effectful moves, so the draws of a seeded
+frame and its warnings do not change. The `bigint` mode does not run the pass.
 
 A `WithRandomSeed` frame whose body has one draw site evaluated once (not under
 a loop, a `Map`, `Filter`, `Sum` or `Product` body, or a call of an effectful

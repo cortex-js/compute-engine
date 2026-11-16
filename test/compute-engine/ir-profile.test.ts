@@ -20,7 +20,11 @@ import {
   type StoredJavaScript,
 } from '../../src/compute-engine/compilation/javascript-runtime';
 import { JS } from '../../src/compute-engine/compilation/ir/print-js';
-import { compileSlice } from '../../src/compute-engine/compilation/ir';
+import {
+  compileSlice,
+  sliceProgram,
+} from '../../src/compute-engine/compilation/ir';
+import { ALL_PASSES } from '../../src/compute-engine/compilation/ir/passes';
 import { hasOwnLowering } from '../../src/compute-engine/compilation/ir/lower-context';
 import { rangeCount } from '../../src/compute-engine/numerics/range-count';
 import {
@@ -1897,5 +1901,298 @@ describe('cse merges two calls of a user function with no effect', () => {
       e
     );
     expect(calls(compile(sum, { ...IR, fallback: false }), 'f')).toBe(2000);
+  });
+});
+
+describe('invariants: an instruction of a loop body that reads nothing of the body is computed before the loop', () => {
+  const e = new ComputeEngine();
+  e.precision = 'machine';
+  e.declare('x', 'real');
+  e.declare('y', 'real');
+  e.declare('T', 'real<-10..10>');
+  e.declare('n', 'integer');
+  e.declare('L', 'list<real>');
+  e.declare('V', 'list<real^3>');
+  const fn = (name: string, body: Json, ...params: string[]) =>
+    e.assign(name, box(['Function', body, ...params], e));
+  // The functions of Tycho's document `showcase/voronoi-diagram` (its `n`
+  // is `nj` here). `d2` is the squared distance of (a, b) to the seed j,
+  // which F, B and nj compute.
+  const sq = ['Sqrt', ['Add', 'j', -0.5]];
+  const d2 = (a: Json, b: Json): Json => [
+    'Add',
+    ['Power', ['Add', a, ['Multiply', -0.14, ['Cos', ['Add', 'T', ['Multiply', 1.9, 'j']]]], ['Multiply', -0.3625, ['Cos', ['Multiply', 2.4, 'j']], sq]], 2],
+    ['Power', ['Add', b, ['Multiply', -0.1, ['Sin', ['Add', ['Multiply', 2, 'T'], ['Multiply', 2.7, 'j']]]], ['Multiply', -0.2375, ['Sin', ['Multiply', 2.4, 'j']], sq]], 2],
+  ];
+  const sixteen = ['Limits', 'j', 1, 16];
+  fn('F', ['Block', ['Min', ['Comprehension', d2('a', 'b'), ['Element', 'j', ['Range', 1, 16]]]]], 'a', 'b');
+  fn('nj', ['Block', ['Power', 'ExponentialE', ['Multiply', -5000, ['Add', d2('a', 'b'), ['Negate', ['F', 'a', 'b']]]]]], 'a', 'b', 'j');
+  fn('Z', ['Block', ['Sum', ['nj', 'a', 'b', 'j'], sixteen]], 'a', 'b');
+  const root = ['Sqrt', ['Multiply', ['Rational', 1, 16], ['Add', 'j', -0.5]]];
+  fn('q', ['Block', ['Add', ['Multiply', 0.1, ['Sin', ['Add', ['Multiply', 2, 'T'], ['Multiply', 2.7, 'j']]]], ['Multiply', 0.95, ['Sin', ['Multiply', 2.4, 'j']], root]]], 'j');
+  fn('p', ['Block', ['Add', ['Multiply', 0.14, ['Cos', ['Add', 'T', ['Multiply', 1.9, 'j']]]], ['Multiply', 1.45, ['Cos', ['Multiply', 2.4, 'j']], root]]], 'j');
+  const mean = (w: Json): Json => ['Block', ['Multiply', ['Divide', 1, ['Z', 'a', 'b']], ['Sum', ['Multiply', w, ['nj', 'a', 'b', 'j']], sixteen]]];
+  fn('v', mean(['q', 'j']), 'a', 'b');
+  fn('u', mean(['p', 'j']), 'a', 'b');
+  fn('H', mean(['Mod', ['Multiply', 0.567, 'j'], 1]), 'a', 'b');
+  fn('B', ['Block', ['Sum', ['Power', 'ExponentialE', ['Negate', ['Divide',
+    ['Add', d2('a', 'b'), ['Negate', ['F', 'a', 'b']]],
+    ['Multiply', 0.015, ['Sqrt', ['Add',
+      ['Power', ['Add', ['Negate', ['v', 'a', 'b']], ['q', 'j']], 2],
+      ['Power', ['Add', ['Negate', ['u', 'a', 'b']], ['p', 'j']], 2], 0.0004]]]]]], sixteen]], 'a', 'b');
+  const voronoi = ['Which', ['Less', ['F', 'x', 'y'], 0.0008], 0, ['Less', 1.3, ['B', 'x', 'y']], 0, 'True', ['Add', ['Multiply', 0.8, ['H', 'x', 'y']], 0.12]];
+  // A function that fails: a Loop of 100 passes, over a budget of 50.
+  fn('f', ['Block', ['Declare', 's', 'real', 0], ['Loop', ['Assign', 's', ['Add', 's', 'w']], ['Element', 'i', ['Range', 1, 100]]], 's'], 'w');
+  // A function that can fail (a loop) and that draws nothing.
+  fn('g', ['Sum', ['Sin', ['Multiply', 'w', 'i']], ['Limits', 'i', 1, 4]], 'w');
+
+  const run = (json: Json, options: Record<string, unknown> = {}) =>
+    compile(box(json, e), { ...IR, ...options, fallback: false } as never);
+  const textOf = (r: { code: string; preamble?: string }) =>
+    `${r.preamble ?? ''}\n${r.code}`;
+  /** The text of the user function `name` in the text `t`. */
+  const functionText = (t: string, name: string) =>
+    new RegExp(`const u\\d+_${name} = [\\s\\S]*?\\n};`).exec(t)![0];
+  /** The compilation with the pass on and off: the same results. */
+  const sameWithout = (json: Json, points: object[], options: object = {}) => {
+    const slice = (invariants: boolean) =>
+      compileSlice(box(json, e), {
+        target: 'javascript',
+        passes: { ...ALL_PASSES, invariants },
+        ...options,
+      } as never) as unknown as { run: (x: object) => unknown; warnings: unknown[] };
+    const [on, off] = [slice(true), slice(false)];
+    for (const point of points) expect(on.run(point)).toEqual(off.run(point));
+    expect(on.warnings).toEqual(off.warnings);
+    return on;
+  };
+  /** The instructions of the entry of `json`, and of its loops' bodies. */
+  const entry = (json: Json, options: object = {}) =>
+    sliceProgram(box(json, e), { target: 'javascript', ...options } as never)
+      .functions[0].body.body;
+  const ops = (body: { k: string; op?: string }[]) =>
+    body.filter((i) => i.k === 'op').map((i) => i.op);
+  /** The loops of `body`, also those in the arms of its conditionals (the
+   *  test of the `iterationBudget`), not those in a loop body. */
+  const loops = (body: { k: string }[]): {
+    body: { body: { k: string; op?: string; fn?: string; then?: { body: { op?: string }[] } }[] };
+  }[] =>
+    body.flatMap((i) => {
+      if (i.k === 'loop') return [i as never];
+      const arms = i as { then?: { body: { k: string }[] }; else?: { body: { k: string }[] } };
+      return i.k === 'if' ? [...loops(arms.then!.body), ...loops(arms.else!.body)] : [];
+    });
+
+  const points = [
+    { x: 0.15, y: 0.35, T: 0.5 },
+    { x: -0.4, y: 0.2, T: 1.3 },
+    { x: 0.6, y: -0.5, T: -2 },
+    { x: 0.05, y: 0.1, T: 0 },
+  ];
+
+  test('the voronoi witness: the calls of B that read no index are before its loop, on JavaScript and in the interval mode', () => {
+    for (const json of [voronoi, ['B', 'x', 'y']]) {
+      const old = compile(box(json, e), { fallback: false });
+      const r = run(json);
+      for (const point of points) {
+        const want = (old.run as (x: object) => number)(point);
+        expect([point, agrees((r.run as (x: object) => number)(point), want)]).toEqual([point, true]);
+      }
+      sameWithout(json, points);
+      const oldInterval = compile(box(json, e), { to: 'interval-js', fallback: false });
+      const interval = run(json, { to: 'interval-js' });
+      const at = (p: Record<string, number>, h = 0) =>
+        Object.fromEntries(Object.entries(p).map(([k, c]) => [k, { lo: c, hi: c + h }]));
+      for (const point of points) {
+        const scalar = (r.run as (x: object) => number)(point);
+        const got = (interval.run as (x: object) => any)(at(point));
+        const want = (oldInterval.run as (x: object) => any)(at(point));
+        expect([point, got.value.lo <= scalar && scalar <= got.value.hi]).toEqual([point, true]);
+        for (const end of ['lo', 'hi'])
+          expect([point, end, Math.abs(got.value[end] - want.value[end]) <= 1e-9 * Math.max(1, Math.abs(want.value[end]))]).toEqual([point, end, true]);
+        // A box: the same enclosure as the existing target, within rounding.
+        const box2 = (interval.run as (x: object) => any)(at(point, 0.01));
+        const old2 = (oldInterval.run as (x: object) => any)(at(point, 0.01));
+        expect(box2.kind).toBe(old2.kind);
+      }
+    }
+    // In B, the calls of F, v and u read no index: they are before the
+    // loop; q and p read it.
+    for (const r of [run(['B', 'x', 'y']), run(['B', 'x', 'y'], { to: 'interval-js' })]) {
+      const b = functionText(textOf(r), 'B');
+      const [before, inside] = [b.slice(0, b.indexOf('for (')), b.slice(b.indexOf('for ('))];
+      for (const g of ['F', 'v', 'u']) {
+        expect([g, before.match(new RegExp(`u\\d+_${g}\\(`, 'g'))?.length]).toEqual([g, 1]);
+        expect([g, new RegExp(`u\\d+_${g}\\(`).test(inside)]).toEqual([g, false]);
+      }
+      for (const g of ['q', 'p']) expect(new RegExp(`u\\d+_${g}\\(`).test(inside)).toBe(true);
+    }
+  });
+
+  test("ce-compiler's witness: Max(L) is computed before the loop of a run-time count", () => {
+    const json = ['Sum', ['Max', ['Max', 'L'], 'k'], ['Limits', 'k', 1, 'n']];
+    const L = [0.5, -2, 3.25];
+    const r = againstInterpreter(e, json, [{ L, n: 0 }, { L, n: 1 }, { L, n: 5 }]);
+    const text = textOf(r);
+    // The loop over L ends before the loop of k starts.
+    expect(text.indexOf('_.L[')).toBeLessThan(text.indexOf('_.n'));
+    expect(loops(entry(json))).toHaveLength(2);
+    sameWithout(json, [{ L, n: 0 }, { L: [], n: 3 }, { L, n: 4 }]);
+  });
+
+  test('a loop of no pass at run time runs no call that can fail', () => {
+    const budget = { iterationBudget: 50 };
+    const json = ['Sum', ['Multiply', ['f', 'x'], 'k'], ['Limits', 'k', 1, 'n']];
+    const r = run(json, budget);
+    expect((r.run as (x: object) => number)({ x: 2, n: 0 })).toBe(0);
+    expect(() => (r.run as (x: object) => number)({ x: 2, n: 1 })).toThrow(CancellationError);
+    // The call stays in the loop.
+    expect(loops(entry(json, budget))[0].body.body.some((i) => i.k === 'call')).toBe(true);
+    // The interval mode: a call of a function whose Sum is over the budget.
+    const interval = run(['Sum', ['Multiply', ['g', 'x'], 'k'], ['Limits', 'k', 1, 'n']], { to: 'interval-js', iterationBudget: 3 });
+    const at = (n: number) => ({ x: { lo: 2, hi: 2 }, n: { lo: n, hi: n } });
+    expect((interval.run as (x: object) => unknown)(at(0))).toEqual({ kind: 'interval', value: { lo: 0, hi: 0 } });
+    expect((interval.run as (x: object) => unknown)(at(1))).toEqual({ kind: 'entire' });
+  });
+
+  test('a loop of constant bounds: a call that can fail is before it, and fails as before', () => {
+    const json = ['Sum', ['Multiply', ['f', 'x'], 'k'], ['Limits', 'k', 1, 3]];
+    const r = run(json, { iterationBudget: 50 });
+    let thrown: unknown;
+    try {
+      (r.run as (x: object) => number)({ x: 2 });
+    } catch (err) {
+      thrown = err;
+    }
+    expect((thrown as CancellationError).cause).toBe('iteration-limit-exceeded');
+    const body = entry(json, { iterationBudget: 50 });
+    expect(body.some((i) => i.k === 'call')).toBe(true);
+    expect(loops(body)[0].body.body.some((i) => i.k === 'call')).toBe(false);
+    // The moved call counts its 100 passes once.
+    expect((run(json, { iterationBudget: 150 }).run as (x: object) => number)({ x: 2 })).toBe(1200);
+    againstInterpreter(e, ['Sum', ['Multiply', ['g', 'x'], 'k'], ['Limits', 'k', 1, 3]], [{ x: 0.3 }, { x: -2 }]);
+  });
+
+  test('draws before and after an invariant: the same draws and warnings', () => {
+    // A draw, `k·sin(x)`, then a second draw and `g(x)`.
+    const json = ['WithRandomSeed', 7, ['Sum', ['Block', ['Declare', 'r', 'real', ['Random']],
+      ['Add', 'r', ['Multiply', 'k', ['Sin', 'x']], ['Multiply', ['Random'], ['g', 'x']]]], ['Limits', 'k', 1, 3]]];
+    const on = sameWithout(json, [{ x: 0.5 }, { x: -1 }]);
+    expect(on.warnings.length).toBeGreaterThan(0);
+    const frame = entry(json).find((i) => i.k === 'region') as unknown as { regions: { body: { k: string }[] }[] };
+    const [loop] = loops(frame.regions[0].body);
+    // `sin` reads nothing of the body and moves; the call of `g`, which
+    // can fail, is after a draw and stays.
+    expect(ops(loop.body.body)).not.toContain('sin');
+    expect(loop.body.body.some((i) => i.k === 'call')).toBe(true);
+    // Without the first draw, the call is before every draw and moves.
+    const first = ['WithRandomSeed', 7, ['Sum', ['Add', ['Multiply', 'k', ['g', 'x']], ['Random']], ['Limits', 'k', 1, 3]]];
+    sameWithout(first, [{ x: 0.5 }]);
+    const frame2 = entry(first).find((i) => i.k === 'region') as unknown as { regions: { body: { k: string }[] }[] };
+    expect(frame2.regions[0].body.some((i) => i.k === 'call')).toBe(true);
+  });
+
+  test('a nested loop: an inner loop that reads nothing of the outer body moves as a whole', () => {
+    const whole = ['Sum', ['Multiply', 'k', ['Product', ['Add', 'j', 'x'], ['Limits', 'j', 1, 3]]], ['Limits', 'k', 1, 4]];
+    againstInterpreter(e, whole, [{ x: 0.5 }, { x: -2 }]);
+    expect(loops(entry(whole))).toHaveLength(2);
+    // sin(k·x) reads k: it moves out of the inner loop, not out of the outer.
+    const inner = ['Sum', ['Sum', ['Multiply', 'j', ['Sin', ['Multiply', 'k', 'x']]], ['Limits', 'j', 1, 3]], ['Limits', 'k', 1, 'n']];
+    againstInterpreter(e, inner, [{ x: 0.5, n: 0 }, { x: 0.5, n: 4 }]);
+    const [outer] = loops(entry(inner));
+    expect(ops(outer.body.body)).toContain('sin');
+    expect(ops(loops(outer.body.body as { k: string }[])[0].body.body)).not.toContain('sin');
+    sameWithout(inner, [{ x: 0.5, n: 4 }]);
+  });
+
+  test('an invariant in an arm, and a value of the previous pass, stay', () => {
+    const arm = ['Sum', ['If', ['Greater', 'k', 2], ['Sin', 'x'], 0], ['Limits', 'k', 1, 'n']];
+    againstInterpreter(e, arm, [{ x: 0.5, n: 4 }]);
+    const [loop] = loops(entry(arm));
+    const branch = loop.body.body.find((i) => i.k === 'if')!;
+    expect(ops(branch.then!.body as { k: string; op?: string }[])).toContain('sin');
+    // `sin(s)` reads the value of the previous pass.
+    const carried = ['Block', ['Declare', 's', 'real', 1], ['Loop', ['Assign', 's', ['Add', ['Sin', 's'], 'x']], ['Element', 'k', ['Range', 1, 3]]], 's'];
+    againstInterpreter(e, carried, [{ x: 0.5 }]);
+    expect(ops(loops(entry(carried))[0].body.body)).toContain('sin');
+  });
+
+  test('the body of a build and of a filter', () => {
+    e.declare('D', 'list<real>');
+    const map = ['Map', ['Function', ['Multiply', 'z', ['Sin', 'x']], 'z'], 'D'];
+    const filter = ['Filter', 'D', ['Function', ['Greater', 'z', ['Cos', 'x']], 'z']];
+    for (const [json, op] of [[map, 'sin'], [filter, 'cos']] as const) {
+      againstInterpreter(e, json, [{ x: 0.5, D: [] }, { x: 0.5, D: [1, -2, 3] }]);
+      const body = entry(json);
+      expect(ops(body)).toContain(op);
+      const region = body.find((i) => i.k === 'region') as unknown as { regions: { body: { k: string; op?: string }[] }[] };
+      expect(ops(region.regions[0].body)).not.toContain(op);
+    }
+    // A list read in a build that does not read its index (the shape of
+    // `neyret/51a4237846`): PointList(P1, P2), as long as the shorter of
+    // P1 and P2, its PointX and their Sum are computed before the Map.
+    e.declare('P1', 'list<real>');
+    e.declare('P2', 'list<real>');
+    const list = ['Map', ['Function', ['Multiply', 'z', ['Sum', ['PointX', ['PointList', 'P1', 'P2']]]], 'z'], 'D'];
+    const at = { D: [1, -2, 3], P1: [0.5, 2, -1], P2: [4, 5] };
+    againstInterpreter(e, list, [at, { ...at, D: [] }, { ...at, P1: [] }]);
+    sameWithout(list, [at, { ...at, D: [] }]);
+    const body = entry(list);
+    const regions = body.filter((i) => i.k === 'region') as unknown as { regions: { body: { k: string }[] }[] }[];
+    // Two builds (the points, their x) and the loop of the Sum are out.
+    expect([regions.length, loops(body).length]).toEqual([3, 1]);
+    expect(regions[2].regions[0].body.some((i) => i.k === 'region' || i.k === 'loop')).toBe(false);
+  });
+
+  test('the interval mode: what can throw there stays in a loop of no pass', () => {
+    e.declare('m', 'integer');
+    e.declare('G3', 'list<real>');
+    const zero = { kind: 'interval', value: { lo: 0, hi: 0 } };
+    const G3 = [0.5, 0.2, 0.9];
+    const cases: [Json, object, object][] = [
+      // `rangestep` and `rangecount` read `_IA.number(m)`, which throws.
+      [['Sum', ['Multiply', 'k', ['Length', ['Range', 1, 'm']]], ['Limits', 'k', 1, 'n']], { m: { lo: 1, hi: 5 } }, {}],
+      // A filter of an undecided condition throws.
+      [['Sum', ['Multiply', 'k', ['Length', ['Filter', 'G3', ['Function', ['Greater', 'z', 'x'], 'z']]]], ['Limits', 'k', 1, 'n']], { x: { lo: 0, hi: 1 }, G3 }, {}],
+      // The loop of Max(G3) is refused by the limit of 2 passes.
+      [['Sum', ['Max', ['Max', 'G3'], 'k'], ['Limits', 'k', 1, 'n']], { G3 }, { iterationBudget: 2 }],
+    ];
+    for (const [json, inputs, options] of cases) {
+      const at = { ...inputs, n: { lo: 0, hi: 0 } };
+      const r = run(json, { to: 'interval-js', ...options });
+      expect([json, (r.run as (x: object) => unknown)(at)]).toEqual([json, zero]);
+      const on = sameWithout(json, [at], { mode: 'interval', ...options });
+      expect(on.run(at)).toEqual(zero);
+    }
+  });
+
+  test('a Loop keeps a call that can fail; a loop of constant bounds and no pass runs no call', () => {
+    const loop = ['Block', ['Declare', 's', 'real', 0], ['Loop', ['Assign', 's', ['Add', 's', ['g', 'x']]], ['Element', 'i', ['Range', 1, 3]]], 's'];
+    againstInterpreter(e, loop, [{ x: 0.3 }]);
+    expect(loops(entry(loop))[0].body.body.some((i) => i.k === 'call')).toBe(true);
+    // 3..1 is no pass: f, over the budget of 50, is not called.
+    const none = ['Sum', ['Multiply', ['f', 'x'], 'k'], ['Limits', 'k', 3, 1]];
+    expect((run(none, { iterationBudget: 50 }).run as (x: object) => number)({ x: 2 })).toBe(0);
+    expect(entry(none, { iterationBudget: 50 }).some((i) => i.k === 'call')).toBe(false);
+  });
+
+  test('a loop over the length of a list made in the same body stays', () => {
+    e.declare('G4', 'list<real>');
+    // The filter reads k, so its count, the bound of the inner Sum, stays.
+    const json = ['Sum', ['Sum', 'i', ['Limits', 'i', 1, ['Length', ['Filter', 'G4', ['Function', ['Greater', 'z', 'k'], 'z']]]]], ['Limits', 'k', 1, 'n']];
+    const G4 = [0.5, 1.5, 2.5, 3.5];
+    againstInterpreter(e, json, [{ G4, n: 0 }, { G4, n: 3 }]);
+    sameWithout(json, [{ G4, n: 0 }, { G4, n: 3 }]);
+    const [outer] = loops(entry(json));
+    expect(outer.body.body.some((i) => i.k === 'region')).toBe(true);
+    expect(loops(outer.body.body as { k: string }[])).toHaveLength(1);
+  });
+
+  test('GLSL: a list and a conditional are declared before the for', () => {
+    const list = run(['Sum', ['Multiply', 'k', ['Max', ['Add', 'V', 'x']]], ['Limits', 'k', 1, 4]], { to: 'glsl' });
+    expect(list.code.indexOf('vec3 ')).toBeLessThan(list.code.indexOf('for ('));
+    expect(list.code.match(/for \(/g)).toHaveLength(2);
+    const cond = run(['Sum', ['Multiply', 'k', ['If', ['Less', 'x', 0], ['Sin', 'y'], ['Cos', 'y']]], ['Limits', 'k', 1, 'n']], { to: 'glsl' });
+    expect(cond.code.indexOf('if (')).toBeLessThan(cond.code.indexOf('for ('));
   });
 });
