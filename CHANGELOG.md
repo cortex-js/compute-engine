@@ -195,6 +195,16 @@
 
 ### Improvements
 
+- **`HarmonicNumber(r)` evaluates at a rational with an exact digamma**
+  ([#598](https://github.com/cortex-js/compute-engine/issues/598)).
+  `HarmonicNumber(1/2)` stayed unevaluated and is `2 − 2 ln 2`,
+  `HarmonicNumber(1/3)` is `3 − (3/2) ln 3 − π√3/6`: for a rational `r` whose
+  `Digamma(r + 1)` has an exact value (denominators 1 to 4),
+  `H(r) = ψ(r + 1) + γ` (DLMF 5.15.2). Another rational (`1/5`) and the
+  generalized `HarmonicNumber(r, 2)` stay unevaluated under `evaluate()`;
+  `N()` is unchanged. (PR #604, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 - **`Series` of a function whose derivative is algebraic (`Arctan`, `Arcsin`,
   `Arccos`, `Arccot`, `Arsinh`, `Arcosh`, `Artanh`, `Arcoth`, `Arsech`, `Ln`)
   no longer takes time exponential in the order.**

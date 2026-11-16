@@ -6867,6 +6867,9 @@ function harmonicNumberExact(
  *   declined past `MAX_EXACT_HARMONIC_WORK`; n = 0 is the empty sum, 0.
  * - A negative integer n is a pole (`~∞`, as Wolfram) in the one-argument
  *   form and for Re(r) > 0; for another r the value is left symbolic.
+ * - A rational `n` (and `r` absent or 1) whose `ψ(n + 1)` has an exact value
+ *   (`digammaAtExactRational`) is that value plus γ: `H(1/2)` is
+ *   `2 − 2 ln 2`. Another rational stays symbolic.
  * - Elsewhere, under `N()` or with an inexact operand, the analytic
  *   continuation: H_z = ψ(z+1) + γ (DLMF 5.15.2) and, for r ≠ 1,
  *   H_z^(r) = ζ(r) − ζ(r, z+1) (DLMF 25.11.1), through `Digamma` and
@@ -6908,11 +6911,19 @@ function evaluateHarmonicNumber(
     if (exact !== undefined) return numeric(engine.number(exact));
   }
 
-  if (!shouldNumericize(numericApproximation, n, r)) return undefined;
-  if (!isNumber(n) || (r !== undefined && !isNumber(r))) return undefined;
-
-  const one = r === undefined || (!r.isComplex && r.re === 1);
+  const one = r === undefined || (isNumber(r) && !r.isComplex && r.re === 1);
   const shifted = engine.function('Add', [n, engine.One]);
+  const numericize = shouldNumericize(numericApproximation, n, r);
+  if (!numericize && (r === undefined || r.isSame(1)) && isNumber(n)) {
+    const psi = digammaAtExactRational(engine, shifted.evaluate());
+    if (psi !== undefined)
+      return engine
+        .function('Add', [psi, engine.symbol('EulerGamma')])
+        .evaluate();
+  }
+
+  if (!numericize) return undefined;
+  if (!isNumber(n) || (r !== undefined && !isNumber(r))) return undefined;
   const value = one
     ? engine.function('Add', [
         engine.function('Digamma', [shifted]),
