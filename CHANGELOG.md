@@ -364,7 +364,9 @@
   compiled by the profile. A parameter that
   the body reads as a list (`Sum(p·List(Cos(φ), Sin(φ)))`) takes a list
   argument of a length known at compile time whole, as the interpreter binds
-  it.
+  it. A body whose length is known at compile time, as `PointX` of a list of
+  three points, gives a call of that length, so a function whose body maps
+  over such a call (`Map(f, d(x, y))`) compiles.
 - **The experimental profile `'ir'` compiles a recursive user function
   whose result is not declared**, as a function assigned with no declaration:
   with `s(x, n) := Which(n = 1, Sin(x), True, Sin(s(x, n − 1)))`, `s(x, 3)`

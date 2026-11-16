@@ -541,7 +541,17 @@ export function functionLowering(
       cx.frames.splice(0, cx.frames.length, ...outer);
       cx.inFunction = caller;
     }
-    fn.result ??= type(ir.body.yields[0]);
+    // A length value of the body that is a constant is its number: a call
+    // then has one result of that length.
+    if (fn.result === undefined) {
+      const t = type(ir.body.yields[0]);
+      fn.result = {
+        ...t,
+        shape: t.shape.map((n) =>
+          typeof n === 'number' ? n : (cx.constant(n.v) ?? n)
+        ),
+      };
+    }
     ir.results.push(fn.result);
     // A call in the body passes the inputs, parameters of the body.
     for (const a of fn.self) a.push(...ir.body.params.slice(fn.own));

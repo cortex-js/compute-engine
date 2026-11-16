@@ -1775,6 +1775,62 @@ describe('a user function whose result is a list of elements of no stated type: 
   ])('%s declines', (_, json, cause) => {
     expect(message(json)).toMatch(cause);
   });
+
+  test('a body whose length is a value of constant content: a call has that number as its length', () => {
+    // Tycho's neyret/62urmx2dcm: `PointX` of a list of three points has a
+    // length value of constant content; a call of `d` in a `Map` of `d2`
+    // had a run-time length, and `d2` declined ("a body of d2 that is not
+    // vector<3>").
+    const g = engine();
+    g.declare('h', 'real');
+    const fn = (name: string, body: Json, ...params: string[]) =>
+      g.assign(name, box(['Function', body, ...params], g));
+    fn('P', ['Tuple', 'a', 'b'], 'a', 'b');
+    // prettier-ignore
+    fn('V', ['List', ['P', ['Subtract', 'a', 'h'], 'b'], ['P', 'a', 'b'], ['P', ['Add', 'a', 'h'], 'b']], 'a', 'b');
+    // prettier-ignore
+    fn('d', ['Add', ['Power', ['Subtract', 'x', ['PointX', ['V', 'x', 'y']]], 2], ['Power', ['Subtract', 'y', ['PointY', ['V', 'x', 'y']]], 2]], 'x', 'y');
+    fn('m', ['Min', ['d', 'x', 'y']], 'x', 'y');
+    // prettier-ignore
+    fn('d2', ['Map', ['Function', ['Which', ['Equal', 't', ['m', 'x', 'y']], 1e9, 'True', 't'], 't'], ['d', 'x', 'y']], 'x', 'y');
+    expect(box(['d2', 'x', 'y'], g).type.toString()).toBe('vector<3>');
+    const at = [
+      { x: 0.3, y: -0.7, h: 0.25 },
+      { x: -1.5, y: 2, h: 1 },
+      { x: 4, y: 0.5, h: -0.125 },
+    ];
+    againstInterpreter(g, ['Min', ['d2', 'x', 'y']], at);
+    againstInterpreter(g, ['Sum', ['d2', 'x', 'y']], at);
+    // A caller that reads the length.
+    // prettier-ignore
+    againstInterpreter(g, ['Add', ['Length', ['d2', 'x', 'y']], ['At', ['d2', 'x', 'y'], 2]], at);
+    // The interval mode: the result for a box contains the interpreter's
+    // value at points of the box.
+    const r = compile(box(['Min', ['d2', 'x', 'y']], g), {
+      ...IR,
+      to: 'interval-js',
+      fallback: false,
+    } as never);
+    const got = r.run!({
+      x: { lo: 0.25, hi: 0.5 },
+      y: { lo: -1, hi: -0.5 },
+      h: { lo: 0.25, hi: 0.25 },
+    } as never) as { kind: string; value?: { lo: number; hi: number } };
+    for (const [x, y] of [
+      [0.25, -1],
+      [0.4, -0.7],
+      [0.5, -0.5],
+    ]) {
+      const v = interpret(g, box(['Min', ['d2', 'x', 'y']], g), {
+        x,
+        y,
+        h: 0.25,
+      }) as number;
+      expect(got.kind).toBe('interval');
+      expect(got.value!.lo).toBeLessThanOrEqual(v);
+      expect(got.value!.hi).toBeGreaterThanOrEqual(v);
+    }
+  });
 });
 
 describe('Degrees and Cot', () => {
