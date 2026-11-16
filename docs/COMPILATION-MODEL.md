@@ -132,6 +132,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
 
 - `javascript`, `x: real`: `Digamma(x)` at `x = +Infinity` gives `NaN`. The
   interpreter gives `+Infinity`.
+- `plausible?` — `javascript`, and every other target that compiles the
+  closed form, `x: real`: `Apply(Derivative(EllipticK), x)`
+  at `x = 0` gives `NaN`, the `0/0` of the closed form
+  `(E(x) − (1 − x)K(x))/(2x(1 − x))`; the interpreter gives `π/8`
+  (`symbolic/removable-points.ts`). The same holds for the derivatives of
+  `EllipticE`, `LambertW`, `PolyLog(s, x)` and `LerchPhi(x, s, a)` at 0.
 - `javascript` (crafted), `x: real`, `g` assigned `0.75` with no declared
   type, `angularUnit = 'deg'`, the `complex` mode: in
   `Block(Declare(t, real, x), Assign(t, Block(Declare(b0, unknown, g), Arctan(b0))), t)`

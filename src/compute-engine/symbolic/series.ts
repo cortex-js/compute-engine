@@ -13,6 +13,10 @@ import { asSmallInteger, asRational } from '../boxed-expression/numerics.js';
 import { bernoulliRational } from '../numerics/bernoulli.js';
 import { differentiate, isEngineAuthoredDefinition } from './derivative.js';
 import { trigToExp } from './trig-rewrite.js';
+import {
+  removablePointCoefficients,
+  removablePointSlot,
+} from './removable-points.js';
 import { getFunctionProperties } from '../function-properties/index.js';
 import { exactComplexParts, exactZeroVerdict } from './contour.js';
 import { BigDecimal } from '../../big-decimal/index.js';
@@ -773,7 +777,24 @@ function expandViaSeeds(
       const outer = powerOuter(ce, ce.number(1).div(ce.number(m)), bs[0], W);
       return outer ? composeOuter(ce, outer, bs, W) : null;
     }
-    default:
+    default: {
+      // A special function at a point where the closed form of its
+      // derivative is `0/0` (`K′(m)` at `m = 0`): the coefficients come from
+      // its series there (`removablePointCoefficients()`).
+      const slot = removablePointSlot(expr);
+      if (slot !== undefined && ops.every((o, i) => i === slot || !o.has(x))) {
+        const inner = expandViaSeeds(ops[slot], x, x0, ce, W);
+        if (!inner) return null;
+        const outer = removablePointCoefficients(
+          expr,
+          foldZeroCoeff(ce, inner[0]),
+          W
+        );
+        if (outer) return composeOuter(ce, outer, inner, W);
+        if (ops.length !== 1) return null;
+        const unary = unaryTaylor(ce, op, inner[0], W);
+        return unary ? composeOuter(ce, unary, inner, W) : null;
+      }
       if (ops.length === 1) {
         const inner = expandViaSeeds(ops[0], x, x0, ce, W);
         if (!inner) return null;
@@ -781,6 +802,7 @@ function expandViaSeeds(
         return outer ? composeOuter(ce, outer, inner, W) : null;
       }
       return null;
+    }
   }
 }
 

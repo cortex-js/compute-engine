@@ -391,7 +391,10 @@ import {
   isUnresolvedMappableOperand,
   refusedLiteralArgumentError,
 } from '../boxed-expression/boxed-function.js';
-import { numericDerivativeOfApply } from './calculus.js';
+import {
+  numericDerivativeOfApply,
+  removableDerivativeOfApply,
+} from './calculus.js';
 import {
   isNumber,
   isSymbol,
@@ -7460,6 +7463,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { numericApproximation, engine, expression }) => {
         const term = subscriptedTerm(engine, expression, ops.slice(1));
         if (term !== undefined) return term.evaluate({ numericApproximation });
+        const removable = removableDerivativeOfApply(expression, ops.slice(1));
+        if (removable !== undefined)
+          return numericApproximation ? removable.N() : removable;
         const before = applyBeforeApplication(
           engine,
           ops,
@@ -7493,6 +7499,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const term = subscriptedTerm(engine, expression, ops.slice(1));
         if (term !== undefined)
           return term.evaluateAsync(awaitedOperandOptions(options));
+        const removable = removableDerivativeOfApply(expression, ops.slice(1));
+        if (removable !== undefined)
+          return numericApproximation ? removable.N() : removable;
         const before = applyBeforeApplication(
           engine,
           ops,

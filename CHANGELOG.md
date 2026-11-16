@@ -54,6 +54,19 @@
 
 ### Bug Fixes
 
+- **The derivatives of `EllipticK`, `EllipticE`, `LambertW`, `PolyLog` and
+  `LerchPhi` have a value at 0, and their series at 0 is computed**
+  ([#591](https://github.com/cortex-js/compute-engine/issues/591)).
+  `Apply(Derivative(EllipticK), 0)` gave `NaN` and now gives `π/8`;
+  `Apply(Derivative(EllipticK, 2), 0)` gives `9π/64`, and
+  `Apply(Derivative(EllipticE, 2), 0)` gives `-3π/64`, not `~oo`. The
+  derivative in `z` of `x ↦ PolyLog(s, x)` and `x ↦ LerchPhi(x, s, a)` at 0
+  has a value too. `Series(EllipticK(m), m, 0, 3)` is
+  `π/2 + πm/8 + 9πm²/128 + 25πm³/512 + O(m⁴)`, and the series of
+  `EllipticE`, `PolyLog(2, x)` and `LambertW(x)` at 0 are no longer left
+  unevaluated. The value of the closed form `D(EllipticK(m), m)` after the
+  substitution `m = 0` is still `NaN`, and so is the compiled
+  `Apply(Derivative(EllipticK), x)` at `x = 0`.
 - **`Beta(a, b)` is 0 where `a + b` is a pole of Γ and `a`, `b` are not
   integers**
   ([#590](https://github.com/cortex-js/compute-engine/issues/590)).

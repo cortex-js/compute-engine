@@ -141,6 +141,7 @@ import {
   differentiate,
   derivativeKeyUseCount,
   isDifferentiating,
+  isEngineAuthoredDefinition,
   blockValue,
   literalBodyOverHoles,
   memoizedDerivativeResult,
@@ -244,6 +245,10 @@ import { hasNonRealConstant, symbolicLimit } from '../symbolic/limit.js';
 import { residue } from '../symbolic/residue.js';
 import { computeSeries, normalStrip } from '../symbolic/series.js';
 import {
+  removablePointDerivative,
+  removablePointSlot,
+} from '../symbolic/removable-points.js';
+import {
   canonicalLimits,
   canonicalLimitsSequence,
   canonicalWithEscapingReturn,
@@ -256,6 +261,7 @@ import {
 } from '../boxed-expression/integration-variables.js';
 import { holdsKindValue } from '../boxed-expression/residue-class.js';
 import {
+  isLibraryOperator,
   libraryNamesShadowedIn,
   libraryRuleBlocked,
   shadowsLibraryOperator,
@@ -5991,6 +5997,61 @@ export function numericDerivativeOfApply(
   if (Number.isNaN(x)) return undefined;
 
   return stencilDerivativeAt(ce, lit, x, order);
+}
+
+/**
+ * The exact value of `Apply(Derivative(f, n), a)` when `f` is a special
+ * function whose closed-form derivative is `0/0` at `a` and the derivative
+ * exists there (`removablePointDerivative()`): `EllipticK′(0)` is `π/8`,
+ * where the closed form `(E(m) − (1 − m)K(m))/(2m(1 − m))` gives `NaN`.
+ *
+ * `f` is an operator symbol of one operand (`EllipticK`, `EllipticE`,
+ * `LambertW`), or a function literal of one parameter whose body is a call
+ * of such a function with the parameter at the slot of the variable and no
+ * other operand that holds the parameter (`x ↦ PolyLog(2, x)`). `a` is the
+ * evaluated argument. `undefined` for any other expression.
+ */
+export function removableDerivativeOfApply(
+  expr: Expression | undefined,
+  args: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (expr === undefined || !isFunction(expr, 'Apply')) return undefined;
+  if (expr.nops !== 2 || args.length !== 1) return undefined;
+  const callee = expr.op1;
+  // A user function named `Derivative` is another function.
+  if (!isFunction(callee, 'Derivative') || !isLibraryOperator(callee))
+    return undefined;
+  if (callee.nops > 2) return undefined;
+  const order = callee.nops === 2 ? callee.ops[1].re : 1;
+  if (!Number.isInteger(order) || order < 1 || order > 100) return undefined;
+  const ce = expr.engine;
+  const f = callee.op1;
+  let call: Expression | undefined;
+  if (isSymbol(f)) {
+    // The binding of `f` where it was written, not the one where it is
+    // evaluated: `EllipticK` shadowed in a scope that is gone is the user's.
+    if (!isEngineAuthoredDefinition(f)) return undefined;
+    // A placeholder operand: the slot of the variable is not read.
+    call = ce._fn(f.symbol, [ce.Zero]);
+    if (removablePointSlot(call) !== 0) return undefined;
+  } else if (isFunction(f, 'Function') && f.nops === 2) {
+    const param = functionLiteralParameterName(f.ops[1]);
+    if (param === '') return undefined;
+    let body = f.op1;
+    if (isFunction(body, 'Block') && body.nops === 1) body = body.op1;
+    const slot = removablePointSlot(body);
+    if (slot === undefined || !isFunction(body)) return undefined;
+    const variable = body.ops[slot];
+    if (!isSymbol(variable) || variable.symbol !== param) return undefined;
+    if (body.ops.some((op, i) => i !== slot && op.has(param))) return undefined;
+    call = body;
+  }
+  if (call === undefined) return undefined;
+  // A float 0 (`0.0`) gives the float of the exact value.
+  const at = args[0];
+  if (isNumber(at) && !at.isExact && at.re === 0 && at.im === 0)
+    return removablePointDerivative(call, ce.Zero, order)?.N();
+  return removablePointDerivative(call, at, order);
 }
 
 /**
