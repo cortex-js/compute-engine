@@ -579,8 +579,8 @@ and `Random` of a domain decline in the lowering.
 Lists. What the lowering makes of a list (sections "Lists" and "Tuples") is
 printed with the spellings of the mode, and what it declines for JavaScript
 stays declined (`Linspace`, `At` of a list of tuples that can be out of
-range); `RandomChoice`, `RandomShuffle`, a `Zip` of lists of run-time
-length and a comprehension of several clauses over a `Range` decline (a
+range); `RandomChoice`, `RandomShuffle`, a `Zip` or a `Map` of several
+lists of run-time length and a comprehension of several clauses over a `Range` decline (a
 length that is not one number); `ListJoin` and a comprehension of several
 clauses over lists compile. A list literal
 is the array of its elements; an element-wise operation is the kernel at
@@ -1027,6 +1027,32 @@ clauses before it).
 over the sum of the lengths, whose element at `k` is read from the first list
 whose end is after `k` (a chain of `n − 1` tests per element); its lists are of
 numbers, or all of points. On GLSL it declines (a build).
+
+`Map(f, L1, …, Ln)` of two lists or more is the interpreter's list as long as
+the shortest list (`Map((a, b) ↦ a + b, [1, 2, 3], [10, 20])` is `[11, 22]`): a
+build over the `Min` of the lengths (the least stated length, and the length
+values; on GLSL a constant, so the elements are written out as for one list)
+whose body binds each parameter to the element of its list at the index. The
+callback is a function literal of `n` parameters of distinct names (a named
+function such as `Map(Add, A, B)` declines, and so does a name written twice,
+of which the interpreter binds the first; the canonical form makes a literal
+of another arity and a scalar source an error); a tuple source and a list with an effect decline
+(the interpreter reads the lists up to the shortest). In the interval mode lists
+of run-time lengths decline, as for `Zip`. `ListFrom(L)` of one list (a list of
+numbers, of points, of colours; a `Range`, a `Map`, a `Filter`, a `Zip`, a call)
+is `L`: every list of the slice is listed. Of a scalar, a tuple, a string or
+several operands (a list of one element, of the elements, of the characters, the
+concatenation, in the interpreter) it declines. `At(L, I)` of a list of numbers
+`L` and a list of numbers `I` (not a tuple; a list of booleans is a mask,
+which declines) is the build of `At(L, i)` over `I`,
+each index under the rule of `At`, as the interpreter's
+(`At([10, 20, 30], [1, -1, 0, 2.5])` is `[10, 30, NaN, NaN]`); of a list of
+points, booleans or lists it declines. `Clamp(x, lo, hi)` is
+`ElementMin(ElementMax(x, lo), hi)`, the interpreter's `min(max(x, lo), hi)`:
+`hi` when `lo > hi` (on GLSL `min(max(…))`, not `clamp()`, whose value is
+undefined there), integers stay integers, and each operand threads over a list
+(`At(L, Clamp(Floor(I), 0, +∞))` is the floored index of each element of `I`,
+NaN below 1).
 
 `RandomShuffle(L)` of a list of numbers is `_SYS.shuffle`, and
 `RandomChoice(Interval(0, 1), n)` (either end open or closed) is the region

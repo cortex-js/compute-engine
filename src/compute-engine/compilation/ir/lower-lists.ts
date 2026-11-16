@@ -363,6 +363,55 @@ export function listLowering(cx: Lowering) {
     return over(e, source(l), param, f.ops[0], filter, f);
   };
 
+  /** `Map(f, L1, …, Ln)` of two lists or more and a function literal of
+   *  `n` parameters: a build over the shortest length, as the interpreter's,
+   *  whose body reads the element of each list at the index. The lists are
+   *  lowered once; one with an effect declines (the interpreter reads them
+   *  up to the shortest). */
+  const mapLists = (e: Fn): V => {
+    const [f, ...ls] = e.ops;
+    const names = isFunction(f, 'Function')
+      ? f.ops.slice(1).map(parameterName)
+      : [];
+    // A name written twice: the interpreter binds the first.
+    if (
+      names.length !== ls.length ||
+      names.includes(undefined) ||
+      new Set(names).size !== names.length
+    )
+      decline(
+        e,
+        `Map of ${ls.length} lists and a function that is not a literal of ${ls.length} parameters of distinct names`
+      );
+    const before = b.effects;
+    const sources = ls.map((l) => source(l));
+    if (b.effects > before)
+      decline(
+        e,
+        'Map of a list with an effect (the interpreter reads the lists up to the shortest)'
+      );
+    const fixed = sources.flatMap((s) => cx.constant(s.length) ?? []);
+    const length = [
+      ...(fixed.length > 0 ? [integer(Math.min(...fixed))] : []),
+      ...new Set(
+        sources.flatMap((s) =>
+          cx.constant(s.length) === undefined ? [s.length] : []
+        )
+      ),
+    ].reduce((m, n) => cx.apply(e, 'Min', [m, n]));
+    // The source's element is the index: `over()` binds it to the first
+    // name, which the frame of the body binds again to its element.
+    const index: Source = { length, at: (k) => k };
+    const body = (k: V) =>
+      cx.withFrame(true, (frame) => {
+        names.forEach((n, j) =>
+          frame.names.set(n!, { v: sources[j].at(k), role: 'index' })
+        );
+        return cx.value((f as Fn).ops[0])!;
+      });
+    return over(e, index, names[0]!, body, false, f);
+  };
+
   /** A build (with `filter`, a filter) over `s` of `body`, which reads the
    *  element as `name`, or of `body(x)` for the element `x`. */
   const over = (
@@ -538,6 +587,7 @@ export function listLowering(cx: Lowering) {
     reduce,
     reduction,
     build,
+    mapLists,
     over,
     comprehension,
     join,

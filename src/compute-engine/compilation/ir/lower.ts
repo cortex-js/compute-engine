@@ -872,8 +872,27 @@ export function lower(
       }
       case 'At': {
         if (e.nops !== 2) decline(e, 'At with an index for each level');
-        const [l, i] = [value(e.ops[0])!, scalar(e.ops[1])];
+        const [l, i] = [value(e.ops[0])!, value(e.ops[1])!];
         const [t, k] = [type(l), constant(i)];
+        // A list of indexes into a list of numbers: the list of the `At` of
+        // each index, as the interpreter's.
+        const flat = (v: V) => type(v).shape.length === 1 && !tuples.has(v);
+        if (
+          flat(i) &&
+          flat(l) &&
+          isSubLane(t.lane, 'real') &&
+          isSubLane(type(i).lane, 'real')
+        )
+          return lists.over(
+            e,
+            lists.listSource(i),
+            '',
+            (x) => apply(e, 'At', [l, x]),
+            false,
+            e
+          );
+        if (type(i).shape.length > 0)
+          decline(e.ops[1], 'a list where a scalar is required');
         const n = t.shape[0];
         // Out of range, the interpreter gives NaN for a number, `Missing`
         // for a boolean or a list, and `_at` gives the number NaN, which
@@ -1056,8 +1075,26 @@ export function lower(
         return lists.built(e, s.length, s.at);
       }
       case 'Map':
-        if (e.nops !== 2) decline(e, 'Map of more than one list');
+        if (e.nops > 2) return lists.mapLists(e);
+        if (e.nops !== 2) decline(e, 'Map with no list');
         return lists.build(e, e.ops[1], e.ops[0], false);
+      // Every list of the slice is listed: `ListFrom(L)` is `L`.
+      case 'ListFrom': {
+        const v = e.nops === 1 ? value(e.ops[0])! : undefined;
+        if (
+          v === undefined ||
+          tuples.get(v) === 0 ||
+          type(v).shape.length === 0
+        )
+          decline(e, 'ListFrom of other than one list');
+        return v;
+      }
+      // `min(max(x, lo), hi)`, the interpreter's: `hi` when `lo > hi`.
+      case 'Clamp': {
+        if (e.nops !== 3) decline(e, 'Clamp with other than three operands');
+        const [x, lo, hi] = e.ops.map((o) => value(o)!);
+        return apply(e, 'ElementMin', [apply(e, 'ElementMax', [x, lo]), hi]);
+      }
       case 'Filter':
         if (e.nops !== 2)
           decline(e, 'Filter with more than a list and a predicate');
