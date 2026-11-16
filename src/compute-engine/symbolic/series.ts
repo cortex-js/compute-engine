@@ -20,6 +20,7 @@ import {
 import { getFunctionProperties } from '../function-properties/index.js';
 import { exactComplexParts, exactZeroVerdict } from './contour.js';
 import { BigDecimal } from '../../big-decimal/index.js';
+import { isLibraryOperator } from '../library-shadowing.js';
 import {
   isExactConstantExpression,
   refineExactConstants,
@@ -434,6 +435,114 @@ function callsOnlyPureLibraryOperators(
  * which is read as a singularity. */
 function foldZeroCoeff(ce: ComputeEngine, c: Expression): Expression {
   return !c.isSame(0) && zeroVerdict(c) === true ? ce.Zero : c;
+}
+
+/**
+ * Whether `f` holds a library `Hypergeometric2F1` whose argument is a real
+ * number `≥ 1`, or is not finite, at the expansion point `x0`. At 1 the
+ * function has a branch point (its series runs in `(1 − z)^(c − a − b)`,
+ * with logarithms for an integer `c − a − b`), and past it lies the cut, so
+ * the derivatives there are not Taylor coefficients (`₂F₁(1, 1; 3; z)` about
+ * `z = 1`). An exact argument that is not a number literal (`π`) is decided
+ * by its numeric value. An argument with no value at `x0` (NaN or not finite
+ * after substitution, as `1/x` or `(1 − cos x)/x²` at 0) also declines, even
+ * when its limit is inside the disk.
+ */
+function holdsHypergeometricOnCut(
+  f: Expression,
+  x: string,
+  x0: Expression
+): boolean {
+  return f.getSubexpressions('Hypergeometric2F1').some((h) => {
+    if (
+      !isFunction(h) ||
+      !isLibraryOperator(h, 'Hypergeometric2F1') ||
+      h.nops !== 4 ||
+      !h.ops[3].has(x)
+    )
+      return false;
+    const at = h.ops[3].subs({ [x]: x0 });
+    const z = at.evaluate();
+    if (isNumber(z) && z.im === 0 && z.re >= 1) return true;
+    const zN = at.N();
+    if (zN.isNaN === true || zN.isFinite === false) return true;
+    return isNumber(zN) && zN.im === 0 && zN.re >= 1;
+  });
+}
+
+/** The longest terminating `Hypergeometric2F1` that is written out as a
+ * polynomial. */
+const MAX_TERMINATING_DEGREE = 64;
+
+/**
+ * `f` with each terminating `Hypergeometric2F1(a, b; c; z)` (`a` or `b` a
+ * non-positive integer `−n`) written as its polynomial
+ * `Σₖ₌₀ⁿ (a)ₖ(b)ₖ/((c)ₖ k!) zᵏ` (DLMF 15.2.4), so that the expansion about
+ * any point is exact. `undefined` when a `c` that is a non-positive integer
+ * `−m` meets a series that does not terminate at a degree `≤ m`: the function
+ * is not defined there (the library's evaluation gives NaN), and the
+ * expansion declines.
+ */
+function expandTerminatingHypergeometrics(
+  ce: ComputeEngine,
+  f: Expression,
+  x: string
+): Expression | undefined {
+  if (!isFunction(f)) return f;
+  let changed = false;
+  const ops: Expression[] = [];
+  for (const op of f.ops) {
+    const r = expandTerminatingHypergeometrics(ce, op, x);
+    if (r === undefined) return undefined;
+    if (r !== op) changed = true;
+    ops.push(r);
+  }
+  const g = changed ? ce.function(f.operator, ops) : f;
+  if (
+    !isLibraryOperator(f, 'Hypergeometric2F1') ||
+    ops.length !== 4 ||
+    !f.has(x)
+  )
+    return g;
+  const [a, b, c, z] = ops;
+  const isNonPositiveInteger = (e: Expression): boolean => {
+    const k = asSmallInteger(e);
+    return k !== null && k <= 0;
+  };
+  const degrees = [a, b]
+    .filter(isNonPositiveInteger)
+    .map((e) => -(asSmallInteger(e) as number));
+  const n = degrees.length === 0 ? Infinity : Math.min(...degrees);
+  if (isNonPositiveInteger(c) && n > -(asSmallInteger(c) as number))
+    return undefined;
+  if (n > MAX_TERMINATING_DEGREE) return g;
+  const terms: Expression[] = [];
+  let coeff: Expression = ce.One;
+  for (let k = 0; k <= n; k++) {
+    terms.push(
+      k === 0
+        ? ce.One
+        : ce.function('Multiply', [
+            coeff,
+            ce.function('Power', [z, ce.number(k)]),
+          ])
+    );
+    if (k < n)
+      coeff = ce
+        .function('Divide', [
+          ce.function('Multiply', [
+            coeff,
+            ce.function('Add', [a, ce.number(k)]),
+            ce.function('Add', [b, ce.number(k)]),
+          ]),
+          ce.function('Multiply', [
+            ce.function('Add', [c, ce.number(k)]),
+            ce.number(k + 1),
+          ]),
+        ])
+        .evaluate();
+  }
+  return ce.function('Add', terms);
 }
 
 /** Whether `e` holds an `Add` or a `Subtract` at any depth. */
@@ -2266,6 +2375,9 @@ function computeSeriesInCall(
 ): Expression | undefined {
   n = Math.max(0, Math.min(n, MAX_SERIES_ORDER));
   const W = Math.min(n + BIGO_LOOKAHEAD, MAX_SERIES_ORDER);
+  const expanded = expandTerminatingHypergeometrics(ce, f, x);
+  if (expanded === undefined) return undefined;
+  f = expanded;
 
   // Expansion at ±∞: substitute x = 1/s and expand at s = 0⁺ (or 0⁻).
   // `DirectedInfinity(±1)` is ±∞ written as a call. `ComplexInfinity` reports
@@ -2287,6 +2399,7 @@ function computeSeriesInCall(
 
   // A non-finite, non-±∞ point (NaN, unsigned ∞): cannot expand.
   if (x0.isNaN) return undefined;
+  if (holdsHypergeometricOnCut(f, x, x0)) return undefined;
 
   const xExpr = ce.symbol(x);
   const t = x0.isSame(0) ? xExpr : ce.function('Subtract', [xExpr, x0]);

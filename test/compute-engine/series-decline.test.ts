@@ -115,7 +115,6 @@ describe('SERIES WITH A DERIVATIVE THE ENGINE CANNOT EVALUATE', () => {
     ['2F1(1,1;3;x) at 1', ['Hypergeometric2F1', 1, 1, 3, 'x'], 1],
     ['2F1(1,2;5;x) at 1', ['Hypergeometric2F1', 1, 2, 5, 'x'], 1],
     ['2F1(1,1;1;x) at 1', ['Hypergeometric2F1', 1, 1, 1, 'x'], 1],
-    ['2F1(1,1;3;x) at 0', ['Hypergeometric2F1', 1, 1, 3, 'x'], 0],
     ['1F1(1;2;x) at 0', ['Hypergeometric1F1', 1, 2, 'x'], 0],
   ];
   for (const [name, f, point] of cases) {

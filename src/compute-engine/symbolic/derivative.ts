@@ -580,6 +580,8 @@ const DERIVATIVES_TABLE = {
  * - `LogBarnesG`, `BarnesG`: `(ln G)′(z) = (z − 1)ψ(z) − z + ½(1 + ln 2π)`.
  * - `EllipticK`, `EllipticE` (one operand, the parameter `m`):
  *   `E′ = (E − K)/(2m)` and `K′ = (E − (1 − m)K)/(2m(1 − m))` (DLMF 19.4.1).
+ * - `Hypergeometric2F1(a, b, c, z)` in `z`: `(ab/c)·₂F₁(a + 1, b + 1; c + 1; z)`
+ *   (DLMF 15.5.1); the parameters keep the inert partial.
  * - `ClausenCl(n, θ)` for a literal order (`θ` in radians in every angular
  *   unit): `Cl₁′ = −½cot(θ/2)`, and
  *   `Clₙ′ = Clₙ₋₁` for an even `n`, `−Clₙ₋₁` for an odd one.
@@ -656,6 +658,20 @@ const SPECIAL_FUNCTION_PARTIALS: Record<
             logBarnesGPrime(ce, ops[0]),
           ]),
         ],
+  Hypergeometric2F1: (ce, ops) => {
+    if (ops.length !== 4) return undefined;
+    const [a, b, c, z] = ops;
+    return [
+      undefined,
+      undefined,
+      undefined,
+      ce.expr([
+        'Multiply',
+        ['Divide', ['Multiply', a, b], c],
+        ['Hypergeometric2F1', ['Add', a, 1], ['Add', b, 1], ['Add', c, 1], z],
+      ]),
+    ];
+  },
   EllipticK: (ce, ops) => {
     if (ops.length !== 1) return undefined;
     const m = ops[0];
