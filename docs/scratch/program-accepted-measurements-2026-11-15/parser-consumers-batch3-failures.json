@@ -1,0 +1,51 @@
+{
+  "test/compute-engine/design-d-callback-contract.test.ts": [
+    "phase 1: `FlatMap` \u2014 R-D2\u2032 result inference \u203a a PROVABLY DISJOINT named callback is rejected at canonicalization"
+  ],
+  "test/epsil/parallel-for.test.ts": [
+    "the static rules: calls, local writes, and checks that cannot decide \u203a rule 2, a call of a variable bound to a function literal has no diagnostic",
+    "the static rules: calls, local writes, and checks that cannot decide \u203a the rules, also the effect rule, apply when the statement cannot be boxed",
+    "rule 2: programs that the checker accepts \u203a a pipeline of library functions and a literal",
+    "rule 2: programs that the checker accepts \u203a a library function with a parameter that can be a function (`partition`) is valid in a loop with no accumulator",
+    "rule 2: programs that the checker accepts \u203a a constant that holds a function literal is valid in a loop with no accumulator"
+  ],
+  "test/compute-engine/spread-literal-result-kind.test.ts": [
+    "Compilation of a consumer of a join over an inferred collection \u203a the result of a call, in a function body"
+  ],
+  "test/epsil/assign-to-list-element.test.ts": [
+    "a write that does not give a list is an error, and the variable keeps its value \u203a a string gives the list that replaceAt gives",
+    "a write that does not give a list is an error, and the variable keeps its value \u203a a tuple gives the list that replaceAt gives",
+    "a write that does not give a list is an error, and the variable keeps its value \u203a a tuple inside the list gives the list that replaceAt gives",
+    "a write that does not give a list is an error, and the variable keeps its value \u203a a string position past its last character is out-of-range"
+  ],
+  "test/epsil/declare-type.test.ts": [
+    "EPSIL RECURSIVE TYPES \u203a a self-recursive JSON alias \u203a rejects a function with a type error, not a stack overflow",
+    "EPSIL RECURSIVE TYPES \u203a a mutually recursive JSON alias \u203a rejects a function with a type error, not a stack overflow"
+  ],
+  "test/epsil/binder-sites-of.test.ts": [
+    "binderSitesOf from the Epsil entry \u203a in \"let L: any = [1, 2]\\nlimit(total(L)*t, 1)\" the limit binds t",
+    "binderSitesOf from the Epsil entry \u203a in \"const a = 5\\nlet r = g()\\nfunction g() { f() }\\nfunction f() { limit(a + h, 1) }\" the declaration does not tell",
+    "binderSitesOf from the Epsil entry \u203a in \"const a = 5\\nlet r = g()\\ntype T = integer\\nfunction g() { limit(a + h, 1) }\" the declaration does not tell",
+    "binderSitesOf from the Epsil entry \u203a the engine values of the programs whose declaration does not tell",
+    "binderSitesOf from the Epsil entry \u203a a `const` in a function body boxed early is a variable"
+  ],
+  "test/epsil/multi-clause.test.ts": [
+    "EPSIL MULTI-CLAUSE \u2014 accumulation and dispatch \u203a a declared function type is a contract with and without an initial value"
+  ],
+  "test/compute-engine/protocol-properties.test.ts": [
+    "assignment to a property is a STORE \u203a the assignment evaluates to the ASSIGNED VALUE, not the setter result",
+    "assignment to a property is a STORE \u203a a NON-variable root STORES: `xs[1].tag = v` reaches the element",
+    "P6: the qualified property form `p.(P.name)` \u203a qualified ASSIGNMENT stores through the named protocol",
+    "an unqualified write resolves against the RECEIVER, every time \u203a the write follows the receiver, not any earlier resolution",
+    "an unqualified write resolves against the RECEIVER, every time \u203a a receiver no protocol answers for is refused",
+    "an unqualified write resolves against the RECEIVER, every time \u203a \u2026and the Epsil spelling of that qualified write agrees",
+    "a `set` handler\u2019s result is DISCARDED \u203a an ANNOTATED result of an unrelated type registers fine",
+    "a `set` handler\u2019s result is DISCARDED \u203a a handler that returns the receiver reads the same way",
+    "a `set` handler\u2019s result is DISCARDED \u203a an UNANNOTATED handler stays trusted at registration (P28)",
+    "a WRITE checks the value against the property\u2019s type \u203a the store refuses it, and the handler is not invoked",
+    "a WRITE checks the value against the property\u2019s type \u203a an EPSIL setter refuses it as well"
+  ],
+  "test/epsil/type-variables-epsil.test.ts": [
+    "EPSIL `where` ANNOTATIONS (D13: full-literal positions) \u203a a function-literal body INSTALLS, and instantiates per call"
+  ]
+}

@@ -1,0 +1,178 @@
+[
+  {
+    "name": "ce-normal-baseline-gate1",
+    "arm": "baseline",
+    "mode": "normal",
+    "returncode": 0,
+    "command": [
+      "python3",
+      "monitor.py",
+      "ce-normal-baseline-gate1",
+      "timeout",
+      "-k",
+      "5",
+      "120",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-matched-perf-20261115/ce-normal-baseline-gate1.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    }
+  },
+  {
+    "name": "ce-normal-candidate-gate2",
+    "arm": "candidate",
+    "mode": "normal",
+    "returncode": 0,
+    "command": [
+      "python3",
+      "monitor.py",
+      "ce-normal-candidate-gate2",
+      "timeout",
+      "-k",
+      "5",
+      "120",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-matched-perf-20261115/ce-normal-candidate-gate2.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    }
+  },
+  {
+    "name": "ce-normal-candidate-gate3",
+    "arm": "candidate",
+    "mode": "normal",
+    "returncode": 0,
+    "command": [
+      "python3",
+      "monitor.py",
+      "ce-normal-candidate-gate3",
+      "timeout",
+      "-k",
+      "5",
+      "120",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-matched-perf-20261115/ce-normal-candidate-gate3.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    }
+  },
+  {
+    "name": "ce-normal-baseline-gate4",
+    "arm": "baseline",
+    "mode": "normal",
+    "returncode": 0,
+    "command": [
+      "python3",
+      "monitor.py",
+      "ce-normal-baseline-gate4",
+      "timeout",
+      "-k",
+      "5",
+      "120",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-matched-perf-20261115/ce-normal-baseline-gate4.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    }
+  },
+  {
+    "name": "ce-off-candidate-gate1",
+    "arm": "candidate",
+    "mode": "off",
+    "returncode": 3,
+    "command": [
+      "python3",
+      "monitor.py",
+      "ce-off-candidate-gate1",
+      "timeout",
+      "-k",
+      "5",
+      "120",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-matched-perf-20261115/ce-off-candidate-gate1.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    }
+  },
+  {
+    "name": "ce-off-baseline-gate2",
+    "arm": "baseline",
+    "mode": "off",
+    "returncode": 0,
+    "command": [
+      "python3",
+      "monitor.py",
+      "ce-off-baseline-gate2",
+      "timeout",
+      "-k",
+      "5",
+      "120",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-matched-perf-20261115/ce-off-baseline-gate2.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    }
+  },
+  {
+    "name": "ce-off-baseline-gate3",
+    "arm": "baseline",
+    "mode": "off",
+    "returncode": 3,
+    "command": [
+      "python3",
+      "monitor.py",
+      "ce-off-baseline-gate3",
+      "timeout",
+      "-k",
+      "5",
+      "120",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-matched-perf-20261115/ce-off-baseline-gate3.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    }
+  },
+  {
+    "name": "ce-off-candidate-gate4",
+    "arm": "candidate",
+    "mode": "off",
+    "returncode": 3,
+    "command": [
+      "python3",
+      "monitor.py",
+      "ce-off-candidate-gate4",
+      "timeout",
+      "-k",
+      "5",
+      "120",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-matched-perf-20261115/ce-off-candidate-gate4.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    }
+  }
+]

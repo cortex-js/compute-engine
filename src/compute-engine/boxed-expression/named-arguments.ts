@@ -525,7 +525,7 @@ export function valueCalleeSignature(
   def: BoxedValueDefinition
 ): Type | undefined | null {
   const type = def.type.type;
-  if (def.inferredType)
+  if (def.inferredType || (def._programVariable && isWildcardFunctionType(type)))
     return isWildcardFunctionType(type) ? def.value?.type.type : type;
   const resolved = resolveTypeReference(type);
   if (resolved === undefined || typeof resolved === 'string') return null;

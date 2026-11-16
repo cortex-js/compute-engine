@@ -1,0 +1,50 @@
+[
+  {
+    "name": "ce-normal-repeat1",
+    "returncode": 0
+  },
+  {
+    "name": "tycho-normal-repeat1",
+    "returncode": 3
+  },
+  {
+    "name": "ce-off-repeat1",
+    "returncode": 0
+  },
+  {
+    "name": "tycho-off-repeat1",
+    "returncode": 3
+  },
+  {
+    "name": "ce-normal-repeat2",
+    "returncode": 3
+  },
+  {
+    "name": "tycho-normal-repeat2",
+    "returncode": 3
+  },
+  {
+    "name": "ce-off-repeat2",
+    "returncode": 3
+  },
+  {
+    "name": "tycho-off-repeat2",
+    "returncode": 3
+  },
+  {
+    "name": "ce-normal-repeat3",
+    "returncode": 3
+  },
+  {
+    "name": "tycho-normal-repeat3",
+    "returncode": 3
+  },
+  {
+    "name": "ce-off-repeat3",
+    "returncode": 3
+  },
+  {
+    "name": "tycho-off-repeat3",
+    "returncode": 3
+  }
+]

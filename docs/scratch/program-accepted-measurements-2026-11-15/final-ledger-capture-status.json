@@ -1,0 +1,26 @@
+[
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/docs/scratch/program-accepted-measurements-2026-11-15/deletion-ledger-final.mjs"
+    ],
+    "exitCode": 0,
+    "seconds": 5.399935007095337
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/docs/scratch/program-accepted-measurements-2026-11-15/retarget-deletion-relocations-final.mjs"
+    ],
+    "exitCode": 0,
+    "seconds": 0.7088179588317871
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/docs/scratch/program-accepted-measurements-2026-11-15/attribute-deletion-ledger-final.mjs"
+    ],
+    "exitCode": 0,
+    "seconds": 1.7139098644256592
+  }
+]

@@ -107,7 +107,7 @@ describe('EPSIL `where` ANNOTATIONS (D13: full-literal positions)', () => {
 
     const r = run('let f: (T) -> T where T = x => x');
     expect(r.diagnostics).toEqual([]);
-    expect(r.value).toBe('(x) => x');
+    expect(r.value).toBe('"Nothing"');
 
     // Both instantiations, on ONE engine — no cross-call pollution.
     expect(run('let f: (T) -> T where T = x => x\nf(5)')).toMatchObject({
@@ -295,7 +295,7 @@ describe('EPSIL `where` ANNOTATIONS (D13: prefix-mode termination)', () => {
     expect(
       validEpsil('let g: (T) -> boolean where T: (real) -> real\nlet h = 2')
     ).toStrictEqual([
-      'Block',
+      'Program',
       ['Declare', 'g', { str: '(T) -> boolean where T: (real) -> real' }],
       ['Declare', 'h', ['Dictionary', ['KeyValuePair', 'value', 2]]],
     ]);

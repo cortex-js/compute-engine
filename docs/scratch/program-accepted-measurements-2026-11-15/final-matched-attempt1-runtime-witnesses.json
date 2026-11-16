@@ -1,0 +1,52 @@
+[
+  {
+    "arm": "baseline",
+    "id": "shared-Limit-sum",
+    "source": "function f(){let L=[1,2];limit(sum(L),1)};f()",
+    "value": "1",
+    "json": 1,
+    "type": "1",
+    "diagnostics": []
+  },
+  {
+    "arm": "baseline",
+    "id": "shared-Limit-length",
+    "source": "function f(){let L=[1,2];limit(length(L),1)};f()",
+    "value": "lim_(L -> 1) {Length(L)}",
+    "json": [
+      "Limit",
+      [
+        "Function",
+        [
+          "Block",
+          [
+            "Length",
+            "L"
+          ]
+        ],
+        "L"
+      ],
+      1
+    ],
+    "type": "number",
+    "diagnostics": []
+  },
+  {
+    "arm": "baseline",
+    "id": "division-zero-let",
+    "source": "let x=0;x/x",
+    "value": "NaN",
+    "json": "NaN",
+    "type": "NaN",
+    "diagnostics": []
+  },
+  {
+    "arm": "baseline",
+    "id": "division-zero-const",
+    "source": "const x=0;x/x",
+    "value": "1",
+    "json": 1,
+    "type": "1",
+    "diagnostics": []
+  }
+]

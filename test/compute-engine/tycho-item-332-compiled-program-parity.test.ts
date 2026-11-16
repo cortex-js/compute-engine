@@ -477,7 +477,7 @@ while n < 2 {
 s`,
         'b'
       )
-    ).toEqual({ type: 'real', value: '4.5' });
+    ).toEqual({ type: 'number', value: '4.5' });
   });
 
   test('a destructuring assignment whose value loses its tuple type widens its leaves to unknown', () => {

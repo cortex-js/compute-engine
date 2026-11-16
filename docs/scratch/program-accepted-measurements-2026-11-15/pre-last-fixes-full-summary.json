@@ -1,0 +1,29 @@
+{
+  "numTotalTestSuites": 2065,
+  "numPassedTestSuites": 2047,
+  "numFailedTestSuites": 7,
+  "numPendingTestSuites": 11,
+  "numTotalTests": 86467,
+  "numPassedTests": 85670,
+  "numFailedTests": 15,
+  "numPendingTests": 780,
+  "numTodoTests": 2,
+  "snapshot": {
+    "added": 0,
+    "didUpdate": false,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 4264,
+    "total": 4264,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0
+  },
+  "startTime": 1794811737445,
+  "success": false
+}

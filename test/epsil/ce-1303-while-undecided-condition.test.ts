@@ -148,10 +148,11 @@ describe('CE-1303: while with an undecided condition', () => {
   test('a condition undecided on the first turn ends the loop before the body runs', () => {
     // A condition must be decided at each turn: the body does not run to
     // give its name a value. In Epsil, `let x` with no value is a static
-    // error, so the program does not run (as before CE-1303); a host loop
-    // stops on the first turn, where it used to assign `x` and end.
+    // error. Program continues to the loop, which reports its undecided
+    // condition before running the body; the host loop has the same guard.
     expect(run('let x\nwhile x != 5 { x = 5 }\nx').diagnostics).toEqual([
       'static-type-error | `x` is declared without a value: write `let x = …` | let x | declaration-without-value',
+      'runtime-error | incompatible type: boolean at `x != 5` | in If argument 1 | incompatible-type',
     ]);
     const ce = engine();
     ce.declare('x', 'integer');

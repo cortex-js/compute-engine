@@ -183,8 +183,10 @@ describe('Epsil', () => {
       ce,
       DEFS + 'let alias: function = bob_S\nalias(3, factor: 5)'
     );
-    expect(codes(r)).toEqual(['argument-names-unavailable']);
-    expect(errorCodes(r.value)).toEqual(['argument-names-unavailable']);
+    expect(codes(r)).toEqual([]);
+    expect(errorCodes(r.value)).toEqual([]);
+    expect(r.value.re).toBe(15);
+    expect(ce.lookupDefinition('alias')?.value?.type.toString()).toBe('function');
   });
 
   test('`let alias: (number, number) -> number`: rejected', () => {

@@ -6312,7 +6312,8 @@ function canonicalImplicitLimitFunction(
   // The candidates: the unknowns of the body, and the user symbols that the
   // body reads and that have a value (`implicitVariableCandidates`).
   const candidates = implicitVariableCandidates(fn.op1);
-  if (candidates.length === 0) return fn;
+  if (candidates.length === 0)
+    return canonicalFunctionLiteralArguments(ce, [f], { liftedBody: true }) ?? fn;
   const v = candidates[0];
   // The literal has the variable as its one parameter. The other symbols are
   // free: a literal `Function(y·z, y, z)` would make `z` a parameter that the

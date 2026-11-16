@@ -50,10 +50,10 @@ describe('Phase 1: placeholder element refinement', () => {
     expect(ce.box('a').type.toString()).toBe('list<string>');
   });
 
-  test('declare-with-initializer refines identically to the split spelling', () => {
+  test('a Program declaration retains its declared placeholder', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let a: list = [1, 2, 3]');
-    expect(ce.box('a').type.toString()).toBe('list<integer>');
+    expect(ce.box('a').type.toString()).toBe('list');
   });
 
   test('only placeholder spellings refine: explicit contracts never move', () => {
@@ -65,7 +65,7 @@ describe('Phase 1: placeholder element refinement', () => {
     expect(ce.box('d').type.toString()).toBe('list<integer>');
   });
 
-  test('STATIC: the refined element type flows through the one-shot pre-pass', () => {
+  test('STATIC: unknown Program elements remain conservative', () => {
     // `k` is a declared function with no value. The pre-pass sees the
     // declaration of `a` and its assignment.
     const ce1 = new ComputeEngine();
@@ -74,7 +74,7 @@ describe('Phase 1: placeholder element refinement', () => {
       ce1,
       ['let a: list = []', 'a = ["x", "y"]', 'k(a[1])'].join('\n')
     );
-    expect(JSON.stringify(r.diagnostics)).toContain('static-type-error');
+    expect(r.diagnostics).toEqual([]);
     // The compatible case stays clean.
     const ce2 = new ComputeEngine();
     ce2.declare('k', '(integer) -> integer');

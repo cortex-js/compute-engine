@@ -3,8 +3,10 @@ import { MathJsonSymbol } from '../math-json.js';
 import {
   debugStatementHook,
   debugStatementResultHook,
+  invokeDebugHook,
+  isDebugHookFailure,
 } from '../common/debug-hook.js';
-import { isThenable } from '../common/interruptible.js';
+import { isThenable, CancellationError, checkDeadline, budgetCauseOf, isTimeoutCancellation } from '../common/interruptible.js';
 import { cmp } from './boxed-expression/compare.js';
 import {
   bindingInContext,
@@ -3575,9 +3577,8 @@ export function literalArgumentsWithDefaults(
  *   as the eval context, and lookup() would find those stale bindings
  *   before reaching the freshScope where actual param values live.)
  *
- * With `program`, the statements are the statements of a program: a `Block`
- * that the host evaluates directly (`evaluateBlock`), the counterpart of a
- * run of `executeEpsil`, where each statement is its own top-level
+ * With `program`, the statements belong to an explicit Program. Each
+ * statement is its own top-level
  * evaluation. Each statement after the first then starts a new top-level
  * evaluation (`beginTopLevelEvaluation`, `evaluation-epoch.ts`), so that a
  * result of a call whose head had no value, stored by an earlier statement,
@@ -3606,11 +3607,27 @@ export function evaluateStatements(
     // hook may BLOCK. One comparison per statement when no debugger is
     // attached.
     if (debugStatementHook !== undefined && op.sourceOffsets !== undefined)
-      debugStatementHook(op);
+      invokeDebugHook(() => debugStatementHook!(op));
     // Evaluate the statement. `Break`/`Continue` are inert registered
     // operators and `Return` is unregistered, so a literal control-flow
     // statement evaluates to itself with its operand evaluated.
-    result = op.evaluate(i === last ? lastStatementOptions : undefined);
+    let failure: unknown;
+    let reportingFrame = ce._deadlineFrame;
+    const savedRoute = ce._epsilDeclarationRoute;
+    if (program) ce._epsilDeclarationRoute = ['DeclareType', 'DeclareSumType', 'DeclareProtocol', 'DeclareConformance', 'DefineFunction'].includes(op.operator);
+    try {
+      if (program) checkDeadline(ce._deadlineFrame);
+      const evaluate = () => ce._boxingState.asProgramStatement(() => op.evaluate(i === last ? lastStatementOptions : undefined));
+      result = program && ce._epsilStatementTimeLimitMs !== undefined
+        ? ce.withTimeLimit({ ms: ce._epsilStatementTimeLimitMs, label: 'epsil:statement' }, evaluate)
+        : program ? evaluate() : op.evaluate(i === last ? lastStatementOptions : undefined);
+    } catch (error) {
+      if (!program || isDebugHookFailure(error)) throw error;
+      failure = error;
+      reportingFrame = ce._deadlineFrame;
+      result = programFailureValue(ce, error);
+    } finally { ce._epsilDeclarationRoute = savedRoute; }
+    try {
     // Before the hooks below, so that they receive the error of a function
     // that the statement made break a contract.
     if (result.operator !== 'Error')
@@ -3621,14 +3638,17 @@ export function evaluateStatements(
       debugStatementResultHook !== undefined &&
       op.sourceOffsets !== undefined
     )
-      debugStatementResultHook(op, result);
+      invokeDebugHook(() => debugStatementResultHook!(op, result));
     // The Epsil interpreter's hook, with the same guard: it reports a
     // nested statement whose value is discarded and holds an error.
     if (
       ce._epsilStatementResultHook !== undefined &&
-      op.sourceOffsets !== undefined
+      (program || op.sourceOffsets !== undefined)
     )
-      ce._epsilStatementResultHook(op, result);
+      ce._epsilStatementResultHook(op, result, program ? i : undefined, failure);
+    } finally {
+      if (program && isTimeoutCancellation(failure)) ce._deadlineFrame = reportingFrame;
+    }
     // Short-circuit on a control-flow result — whether the statement was a
     // literal `Break`/`Continue`/`Return` or *evaluated to* one (e.g.
     // `If(cond, Break)`). The control-flow expression itself is the block's
@@ -3647,10 +3667,26 @@ export function evaluateStatements(
     // statement carrying an embedded error operand is an ordinary inert
     // value, not a fault.
     const h = result.operator;
-    if (h === 'Return' || h === 'Break' || h === 'Continue' || h === 'Error')
+    if (h === 'Return' || h === 'Break' || h === 'Continue' || (!program && h === 'Error') || (program && isTimeoutCancellation(failure)))
       break;
   }
   return statementListValue(ce, ops, result);
+}
+
+/** Convert ordinary Program statement throws to values. Cancellation stops
+ * the sequence; a spent deadline is hidden while its diagnostics are built. */
+function programFailureValue(ce: ComputeEngine, error: unknown): Expression {
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof CancellationError) {
+    if (isTimeoutCancellation(error)) ce._deadlineFrame = undefined;
+    const cause = ['timeout', 'step-budget', 'iteration-limit-exceeded', 'recursion-depth-exceeded'].includes(String(error.cause)) ? String(error.cause) : budgetCauseOf(error);
+    return ce._fn('Error', [ce.string(message), ce.string(cause)]);
+  }
+  if (error instanceof Error && error.name === 'ConstantAssignmentError') {
+    const name = (error as Error & { constantName: string }).constantName;
+    return ce.error(['constant-assignment', name]);
+  }
+  return ce._fn('Error', [ce.string(message)]);
 }
 
 /** A run of a list of statements: the scope where its statements run, and
@@ -3841,10 +3877,8 @@ function statementListValue(
 const STATEMENT_LIST_SCOPES = new WeakSet<Scope>();
 
 /**
- * True when a list of statements (a `Block`, or the body of a function
- * application) has run in `scope`, through `evaluateStatements()` or
- * `evaluateStatementsAsync()`. The top level of the Epsil runner is not such
- * a scope: its statement loop does not call these functions.
+ * True when a statement list (a `Program`, a `Block`, or a function body)
+ * has run in `scope` through the shared synchronous or asynchronous sequencer.
  */
 function isStatementListScope(scope: Scope): boolean {
   return STATEMENT_LIST_SCOPES.has(scope);
@@ -3900,19 +3934,34 @@ export async function evaluateStatementsAsync(
         ? beginAsyncStatement(contextStack)
         : contextStack;
     if (debugStatementHook !== undefined && op.sourceOffsets !== undefined)
-      debugStatementHook(op);
+      invokeDebugHook(() => debugStatementHook!(op));
     // `effects` is the host capability registry the enclosing asynchronous
     // evaluation captured, and `contextStack` its evaluation-context stack
     // (which holds the block scope); each statement must run with the same
     // ones (for a statement of a program, a copy of the stack with the same
     // frames and a new number).
-    result = await op.evaluateAsync({
-      signal,
-      numericApproximation: i === last ? numericApproximation : undefined,
-      _effects: effects,
-      _contextStack: stack,
-      _precisionWindow: precisionWindow,
-    });
+    let failure: unknown;
+    let reportingFrame = ce._deadlineFrame;
+    const savedRoute = ce._epsilDeclarationRoute;
+    if (program) ce._epsilDeclarationRoute = ['DeclareType', 'DeclareSumType', 'DeclareProtocol', 'DeclareConformance', 'DefineFunction'].includes(op.operator);
+    try {
+      if (program) checkDeadline(ce._deadlineFrame);
+      if (signal?.aborted) throw new CancellationError({ cause: signal.reason });
+      const evaluate = () => op.evaluateAsync({
+        signal,
+        numericApproximation: i === last ? numericApproximation : undefined,
+        _effects: effects, _contextStack: stack, _precisionWindow: precisionWindow,
+      });
+      result = await (program && ce._epsilStatementTimeLimitMs !== undefined
+        ? (() => { let pending!: Promise<Expression>; ce.withTimeLimit({ ms: ce._epsilStatementTimeLimitMs!, label: 'epsil:statement' }, () => { pending = evaluate(); }); return pending; })()
+        : evaluate());
+    } catch (error) {
+      if (!program || signal?.aborted || isDebugHookFailure(error)) throw error;
+      failure = error;
+      reportingFrame = ce._deadlineFrame;
+      result = programFailureValue(ce, error);
+    } finally { ce._epsilDeclarationRoute = savedRoute; }
+    try {
     // Before the hooks, as on the synchronous route.
     if (result.operator !== 'Error')
       result = afterFunctionAssignment(ce, run, op) ?? result;
@@ -3920,14 +3969,17 @@ export async function evaluateStatementsAsync(
       debugStatementResultHook !== undefined &&
       op.sourceOffsets !== undefined
     )
-      debugStatementResultHook(op, result);
+      invokeDebugHook(() => debugStatementResultHook!(op, result));
     if (
       ce._epsilStatementResultHook !== undefined &&
-      op.sourceOffsets !== undefined
+      (program || op.sourceOffsets !== undefined)
     )
-      ce._epsilStatementResultHook(op, result);
+      ce._epsilStatementResultHook(op, result, program ? i : undefined, failure);
+    } finally {
+      if (program && isTimeoutCancellation(failure)) ce._deadlineFrame = reportingFrame;
+    }
     const h = result.operator;
-    if (h === 'Return' || h === 'Break' || h === 'Continue' || h === 'Error')
+    if (h === 'Return' || h === 'Break' || h === 'Continue' || (!program && h === 'Error') || (program && isTimeoutCancellation(failure)))
       break;
   }
   return statementListValue(ce, ops, result);
@@ -3962,7 +4014,7 @@ function holdBodyLocals(
   for (const [name, binding] of bodyScope.bindings) {
     if (!isValueDefinitionHalf(binding)) continue;
     const def = binding.value as BoxedValueDefinition;
-    if (def._blockLocal !== true) continue;
+    if (def._blockLocal !== true || def._programVariable) continue;
     frame.bindings.set(name, binding);
     values.set(def, undefined);
   }
@@ -5678,7 +5730,7 @@ function renameBoundVariables(
     if (parameters.has(name) && def !== undefined && 'value' in def)
       markFunctionLiteralParameter(ce, def.value);
     // The renamed local of a block is a local of the block too.
-    if (old?._blockLocal === true && def !== undefined && 'value' in def)
+    if (old?._blockLocal === true && !old._programVariable && def !== undefined && 'value' in def)
       def.value._blockLocal = true;
     // `ce.declare` of a value definition (a `type`) makes a value binding,
     // so the symbol exists. Without it the binder could not be renamed, and

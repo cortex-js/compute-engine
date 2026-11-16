@@ -1,3 +1,4 @@
+import { operand } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -194,7 +195,7 @@ describe('hold: contextual keyword and lowering', () => {
     const [expr, diags] = parseEpsil('hold f(e) = Head(e)');
     expect(diags).toHaveLength(0);
     const json = JSON.parse(
-      JSON.stringify(expr, (k, v) => (k === 'sourceOffsets' ? undefined : v))
+      JSON.stringify(operand(expr, 1), (k, v) => (k === 'sourceOffsets' ? undefined : v))
     );
     expect(json).toEqual({
       fn: [
@@ -372,7 +373,7 @@ describe('bind: bound-variable parameters of a hold function', () => {
     const [expr, diags] = parseEpsil(src);
     expect(diags).toHaveLength(0);
     const json = JSON.parse(
-      JSON.stringify(expr, (k, v) => (k === 'sourceOffsets' ? undefined : v))
+      JSON.stringify(operand(expr, 1), (k, v) => (k === 'sourceOffsets' ? undefined : v))
     );
     expect(json.fn[3].fn).toEqual([
       'Dictionary',

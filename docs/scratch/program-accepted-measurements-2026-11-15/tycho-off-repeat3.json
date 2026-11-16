@@ -1,0 +1,2502 @@
+{
+  "node": "v26.13.0",
+  "v8": "14.6.202.34-node.40",
+  "execArgv": [
+    "--import",
+    "tsx",
+    "--import",
+    "./tycho/scripts/repros/ce-alt-hook.mjs"
+  ],
+  "nodeOptions": "",
+  "jit": "off",
+  "rounds": 3,
+  "warmup": 1,
+  "load": [
+    7.4169921875,
+    9.00537109375,
+    11.03369140625
+  ],
+  "records": [
+    {
+      "id": "traffic-jam",
+      "sourceSha256": "b512bf54df604581946270d6406fba8be148edf9d81d598bb0d7cabb192d975c",
+      "sourceBytes": 1130,
+      "samples": [
+        {
+          "totalMs": 112.83112499999993,
+          "timings": {
+            "parseMs": 1.4526250000000118,
+            "checkMs": 23.27395899999999,
+            "compileMs": 4.248375000000124,
+            "runMs": 15.613628000000176,
+            "totalMs": 112.77712499999996
+          },
+          "functions": [
+            "roadseed",
+            "roadstart",
+            "roadstep",
+            "roadtrail"
+          ],
+          "valueSha256": "074e1f778c3964eb5c42191e4161546fc1c46aca0657cced0f0ba3bd80899426",
+          "statements": [
+            {
+              "names": [
+                "L"
+              ],
+              "route": "compiled",
+              "compileMs": 1.1283750000000055,
+              "runMs": 0.15941699999996217
+            },
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9404999999999291,
+              "runMs": 0.13350100000013754
+            },
+            {
+              "names": [
+                "W"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9165830000000597,
+              "runMs": 0.18845899999996618
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "interpreted",
+              "compileMs": 0.8128750000000764,
+              "runMs": 1.0172919999999976
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "interpreted",
+              "compileMs": 0.4500420000000531,
+              "runMs": 0.7886250000000246
+            }
+          ]
+        },
+        {
+          "totalMs": 94.2890000000001,
+          "timings": {
+            "parseMs": 1.4847499999999627,
+            "checkMs": 15.86054200000001,
+            "compileMs": 4.001209000000131,
+            "runMs": 10.619080000000054,
+            "totalMs": 94.26808300000005
+          },
+          "functions": [
+            "roadseed",
+            "roadstart",
+            "roadstep",
+            "roadtrail"
+          ],
+          "valueSha256": "074e1f778c3964eb5c42191e4161546fc1c46aca0657cced0f0ba3bd80899426",
+          "statements": [
+            {
+              "names": [
+                "L"
+              ],
+              "route": "compiled",
+              "compileMs": 1.0027499999999918,
+              "runMs": 0.12079100000005383
+            },
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9675000000000864,
+              "runMs": 0.15162499999996726
+            },
+            {
+              "names": [
+                "W"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9922500000000127,
+              "runMs": 0.15591600000004746
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "interpreted",
+              "compileMs": 0.6539999999999964,
+              "runMs": 0.8659159999999702
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "interpreted",
+              "compileMs": 0.3847090000000435,
+              "runMs": 0.5667909999999665
+            }
+          ]
+        },
+        {
+          "totalMs": 84.11199999999997,
+          "timings": {
+            "parseMs": 0.9998749999999745,
+            "checkMs": 13.914667000000009,
+            "compileMs": 4.488081999999963,
+            "runMs": 12.478289000000132,
+            "totalMs": 84.08979199999999
+          },
+          "functions": [
+            "roadseed",
+            "roadstart",
+            "roadstep",
+            "roadtrail"
+          ],
+          "valueSha256": "074e1f778c3964eb5c42191e4161546fc1c46aca0657cced0f0ba3bd80899426",
+          "statements": [
+            {
+              "names": [
+                "L"
+              ],
+              "route": "compiled",
+              "compileMs": 1.4132919999999558,
+              "runMs": 0.17345799999986866
+            },
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 1.0026660000000902,
+              "runMs": 0.1467080000001033
+            },
+            {
+              "names": [
+                "W"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7352909999999611,
+              "runMs": 0.1057500000000573
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "interpreted",
+              "compileMs": 0.4598750000000109,
+              "runMs": 0.6626660000000584
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "interpreted",
+              "compileMs": 0.8769579999999451,
+              "runMs": 1.1362910000000284
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "othello",
+      "sourceSha256": "1980cdaf33acf7be0a6b1ec84c2eed9a3bde81babf0ccd7473e7774f8d584612",
+      "sourceBytes": 2284,
+      "samples": [
+        {
+          "totalMs": 55.83162500000003,
+          "timings": {
+            "parseMs": 2.0063330000000406,
+            "checkMs": 26.125291999999945,
+            "compileMs": 2.2428330000000187,
+            "runMs": 25.199666999999977,
+            "totalMs": 55.807707999999934
+          },
+          "functions": [
+            "ray",
+            "flips",
+            "legal",
+            "hasmove",
+            "play",
+            "score",
+            "stones"
+          ],
+          "valueSha256": "cfd01d601efd203bec8f28cd81b7e143e766acd0b57b9c5194d5140420eb0db6",
+          "statements": [
+            {
+              "names": [
+                "O_0"
+              ],
+              "route": "compiled",
+              "compileMs": 2.2428330000000187,
+              "runMs": 0.3165830000000369
+            }
+          ]
+        },
+        {
+          "totalMs": 49.58183299999996,
+          "timings": {
+            "parseMs": 1.9537089999998898,
+            "checkMs": 24.201583000000028,
+            "compileMs": 1.7405840000001263,
+            "runMs": 21.414000000000215,
+            "totalMs": 49.558583
+          },
+          "functions": [
+            "ray",
+            "flips",
+            "legal",
+            "hasmove",
+            "play",
+            "score",
+            "stones"
+          ],
+          "valueSha256": "cfd01d601efd203bec8f28cd81b7e143e766acd0b57b9c5194d5140420eb0db6",
+          "statements": [
+            {
+              "names": [
+                "O_0"
+              ],
+              "route": "compiled",
+              "compileMs": 1.7405840000001263,
+              "runMs": 0.34120800000005147
+            }
+          ]
+        },
+        {
+          "totalMs": 50.36670800000002,
+          "timings": {
+            "parseMs": 1.8217500000000655,
+            "checkMs": 26.435958000000028,
+            "compileMs": 2.127292000000125,
+            "runMs": 19.748499000000038,
+            "totalMs": 50.343417000000045
+          },
+          "functions": [
+            "ray",
+            "flips",
+            "legal",
+            "hasmove",
+            "play",
+            "score",
+            "stones"
+          ],
+          "valueSha256": "cfd01d601efd203bec8f28cd81b7e143e766acd0b57b9c5194d5140420eb0db6",
+          "statements": [
+            {
+              "names": [
+                "O_0"
+              ],
+              "route": "compiled",
+              "compileMs": 2.127292000000125,
+              "runMs": 0.5414160000000265
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "heat-spread",
+      "sourceSha256": "9f569d50f4223ffeef04d1d20df5060dfa9d82c91b2d484df29acec2b473a84f",
+      "sourceBytes": 1784,
+      "samples": [
+        {
+          "totalMs": 42.57966699999997,
+          "timings": {
+            "parseMs": 2.3987919999999576,
+            "checkMs": 19.198624999999993,
+            "compileMs": 7.220209000000068,
+            "runMs": 13.00708399999985,
+            "totalMs": 42.559499999999844
+          },
+          "functions": [
+            "heatwall",
+            "heatseed",
+            "heatneighbor",
+            "heatstep",
+            "heatpaint"
+          ],
+          "valueSha256": "655d86b78c05a9f9d3dbf60620e630955978a86b90c8b4cdd7f9b429760be0e4",
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8998340000000553,
+              "runMs": 0.15300000000002
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "compiled",
+              "compileMs": 6.320375000000013,
+              "runMs": 1.2847919999999249
+            }
+          ]
+        },
+        {
+          "totalMs": 41.748792000000094,
+          "timings": {
+            "parseMs": 1.4173749999999927,
+            "checkMs": 18.806666999999834,
+            "compileMs": 5.785333999999693,
+            "runMs": 15.073207000000593,
+            "totalMs": 41.73266699999999
+          },
+          "functions": [
+            "heatwall",
+            "heatseed",
+            "heatneighbor",
+            "heatstep",
+            "heatpaint"
+          ],
+          "valueSha256": "655d86b78c05a9f9d3dbf60620e630955978a86b90c8b4cdd7f9b429760be0e4",
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8975839999998243,
+              "runMs": 0.15862400000014532
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "compiled",
+              "compileMs": 4.887749999999869,
+              "runMs": 2.9131250000002638
+            }
+          ]
+        },
+        {
+          "totalMs": 41.74445800000012,
+          "timings": {
+            "parseMs": 1.136916999999812,
+            "checkMs": 17.904624999999896,
+            "compileMs": 6.715542000000141,
+            "runMs": 15.429541999999628,
+            "totalMs": 41.72658299999989
+          },
+          "functions": [
+            "heatwall",
+            "heatseed",
+            "heatneighbor",
+            "heatstep",
+            "heatpaint"
+          ],
+          "valueSha256": "655d86b78c05a9f9d3dbf60620e630955978a86b90c8b4cdd7f9b429760be0e4",
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8751670000001468,
+              "runMs": 0.16916700000001583
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "compiled",
+              "compileMs": 5.8403749999999945,
+              "runMs": 1.2641669999998157
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "burning-ship",
+      "sourceSha256": "552873143a4793a41414d431dea40cfbcd83840d43aaf1e9b583916bec0d295e",
+      "sourceBytes": 484,
+      "samples": [
+        {
+          "totalMs": 8.795333999999912,
+          "timings": {
+            "parseMs": 1.7005420000000413,
+            "checkMs": 4.26825000000008,
+            "compileMs": 0,
+            "runMs": 2.790666999999985,
+            "totalMs": 8.779332999999951
+          },
+          "functions": [
+            "B"
+          ],
+          "valueSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "statements": []
+        },
+        {
+          "totalMs": 7.715290999999979,
+          "timings": {
+            "parseMs": 0.4272919999998521,
+            "checkMs": 3.682542000000012,
+            "compileMs": 0,
+            "runMs": 3.563374999999951,
+            "totalMs": 7.69766699999991
+          },
+          "functions": [
+            "B"
+          ],
+          "valueSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "statements": []
+        },
+        {
+          "totalMs": 9.273792000000185,
+          "timings": {
+            "parseMs": 0.4971250000000964,
+            "checkMs": 5.285250000000133,
+            "compileMs": 0,
+            "runMs": 3.427624999999807,
+            "totalMs": 9.254833999999846
+          },
+          "functions": [
+            "B"
+          ],
+          "valueSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "statements": []
+        }
+      ]
+    },
+    {
+      "id": "multibrot",
+      "sourceSha256": "a000ce5d49c2e9870527300acce6b8fb3bf6723445476be56782afa4aad8b9ca",
+      "sourceBytes": 583,
+      "samples": [
+        {
+          "totalMs": 9.151499999999942,
+          "timings": {
+            "parseMs": 0.5206250000001091,
+            "checkMs": 4.699583000000075,
+            "compileMs": 0,
+            "runMs": 3.8933330000002115,
+            "totalMs": 9.13370800000007
+          },
+          "functions": [
+            "M"
+          ],
+          "valueSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "statements": []
+        },
+        {
+          "totalMs": 8.183750000000146,
+          "timings": {
+            "parseMs": 0.4922079999998914,
+            "checkMs": 4.0237090000000535,
+            "compileMs": 0,
+            "runMs": 3.6307910000000447,
+            "totalMs": 8.166541000000052
+          },
+          "functions": [
+            "M"
+          ],
+          "valueSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "statements": []
+        },
+        {
+          "totalMs": 8.927833000000192,
+          "timings": {
+            "parseMs": 0.5709170000000086,
+            "checkMs": 5.297041000000036,
+            "compileMs": 0,
+            "runMs": 3.0213340000000244,
+            "totalMs": 8.90949999999998
+          },
+          "functions": [
+            "M"
+          ],
+          "valueSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "statements": []
+        }
+      ]
+    },
+    {
+      "id": "buddhabrot",
+      "sourceSha256": "b29d1f65a0f69ed94bfa34fef575940d273fd7f50a138a18fdd361e465b24842",
+      "sourceBytes": 3519,
+      "samples": [
+        {
+          "totalMs": 625.7803749999998,
+          "timings": {
+            "parseMs": 1.4570420000000013,
+            "checkMs": 24.77120799999966,
+            "compileMs": 32.925542999999834,
+            "runMs": 514.1260000000002,
+            "totalMs": 625.7584579999998
+          },
+          "functions": [
+            "step",
+            "tone",
+            "c"
+          ],
+          "valueSha256": "565d4e82fb73727818d0c3f10883f81b30e9f9f60bc7ef1a34b50e57a12f5648",
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8999589999998534,
+              "runMs": 0.17949999999973443
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "compiled",
+              "compileMs": 1.9137089999999262,
+              "runMs": 28.92212500000005
+            },
+            {
+              "names": [
+                "H_1"
+              ],
+              "route": "compiled",
+              "compileMs": 30.111875000000055,
+              "runMs": 468.48737500000016
+            }
+          ]
+        },
+        {
+          "totalMs": 648.2539999999999,
+          "timings": {
+            "parseMs": 1.3856660000001284,
+            "checkMs": 24.328166000000238,
+            "compileMs": 44.49933199999987,
+            "runMs": 520.7082109999997,
+            "totalMs": 648.2308750000002
+          },
+          "functions": [
+            "step",
+            "tone",
+            "c"
+          ],
+          "valueSha256": "565d4e82fb73727818d0c3f10883f81b30e9f9f60bc7ef1a34b50e57a12f5648",
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9718330000000606,
+              "runMs": 0.1661669999998594
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "compiled",
+              "compileMs": 1.554540999999972,
+              "runMs": 27.52616799999987
+            },
+            {
+              "names": [
+                "H_1"
+              ],
+              "route": "compiled",
+              "compileMs": 41.972957999999835,
+              "runMs": 476.4110429999996
+            }
+          ]
+        },
+        {
+          "totalMs": 579.4426250000001,
+          "timings": {
+            "parseMs": 1.4000839999998789,
+            "checkMs": 27.960665999999947,
+            "compileMs": 23.699292000000696,
+            "runMs": 483.029501,
+            "totalMs": 579.425209
+          },
+          "functions": [
+            "step",
+            "tone",
+            "c"
+          ],
+          "valueSha256": "565d4e82fb73727818d0c3f10883f81b30e9f9f60bc7ef1a34b50e57a12f5648",
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7123750000000655,
+              "runMs": 0.1169169999998303
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "compiled",
+              "compileMs": 1.265208000000257,
+              "runMs": 25.18349999999964
+            },
+            {
+              "names": [
+                "H_1"
+              ],
+              "route": "compiled",
+              "compileMs": 21.721709000000374,
+              "runMs": 446.1618750000007
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "julia-set",
+      "sourceSha256": "03627815d24a142e5c5129650c9a37d58bd2b01f8991ae87f2041e70dc772f00",
+      "sourceBytes": 2459,
+      "samples": [
+        {
+          "totalMs": 23.904208999999355,
+          "timings": {
+            "parseMs": 1.0246250000000146,
+            "checkMs": 12.44366699999955,
+            "compileMs": 0,
+            "runMs": 10.384500000000116,
+            "totalMs": 23.884875000000648
+          },
+          "functions": [
+            "J",
+            "pick",
+            "seg",
+            "channel",
+            "shade"
+          ],
+          "valueSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "statements": []
+        },
+        {
+          "totalMs": 22.339833,
+          "timings": {
+            "parseMs": 0.998540999999932,
+            "checkMs": 12.054833999999573,
+            "compileMs": 0,
+            "runMs": 9.236207999999351,
+            "totalMs": 22.321083000000726
+          },
+          "functions": [
+            "J",
+            "pick",
+            "seg",
+            "channel",
+            "shade"
+          ],
+          "valueSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "statements": []
+        },
+        {
+          "totalMs": 25.75116700000035,
+          "timings": {
+            "parseMs": 1.0082500000007713,
+            "checkMs": 14.617624999999862,
+            "compileMs": 0,
+            "runMs": 10.052582999999686,
+            "totalMs": 25.733749999999418
+          },
+          "functions": [
+            "J",
+            "pick",
+            "seg",
+            "channel",
+            "shade"
+          ],
+          "valueSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "statements": []
+        }
+      ]
+    },
+    {
+      "id": "game-of-life",
+      "sourceSha256": "4a040c5c409c56db3fe79aca59793d301cfc6942f024070ef88ccf228f896cff",
+      "sourceBytes": 1411,
+      "samples": [
+        {
+          "totalMs": 31.635083000000122,
+          "timings": {
+            "parseMs": 0.6172080000005735,
+            "checkMs": 5.725332999999409,
+            "compileMs": 5.8988760000002,
+            "runMs": 14.668125000001055,
+            "totalMs": 31.618916999999783
+          },
+          "functions": [
+            "life"
+          ],
+          "valueSha256": "200602d8b1be168f0f91dd0d0084505480f1bc0400f41fa3a115630743ff715f",
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9958749999996144,
+              "runMs": 0.13045800000054442
+            },
+            {
+              "names": [
+                "P"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9711670000006052,
+              "runMs": 0.16737400000056368
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 1.4802499999996144,
+              "runMs": 6.390166999999565
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 2.4515840000003664,
+              "runMs": 4.836876000000302
+            }
+          ]
+        },
+        {
+          "totalMs": 34.25720799999999,
+          "timings": {
+            "parseMs": 0.5733329999993657,
+            "checkMs": 7.833875000000262,
+            "compileMs": 6.1174999999993815,
+            "runMs": 15.07537500000035,
+            "totalMs": 34.24012499999935
+          },
+          "functions": [
+            "life"
+          ],
+          "valueSha256": "200602d8b1be168f0f91dd0d0084505480f1bc0400f41fa3a115630743ff715f",
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9449580000000424,
+              "runMs": 0.1519589999998061
+            },
+            {
+              "names": [
+                "P"
+              ],
+              "route": "compiled",
+              "compileMs": 1.107332999999926,
+              "runMs": 0.17599999999947613
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 1.460374999999658,
+              "runMs": 6.2022910000014235
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 2.604833999999755,
+              "runMs": 4.494166999999834
+            }
+          ]
+        },
+        {
+          "totalMs": 30.96900000000005,
+          "timings": {
+            "parseMs": 0.5554169999995793,
+            "checkMs": 5.981833999999253,
+            "compileMs": 5.51520999999957,
+            "runMs": 14.420124000002033,
+            "totalMs": 30.951375000000553
+          },
+          "functions": [
+            "life"
+          ],
+          "valueSha256": "200602d8b1be168f0f91dd0d0084505480f1bc0400f41fa3a115630743ff715f",
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7929590000003373,
+              "runMs": 0.13441600000078324
+            },
+            {
+              "names": [
+                "P"
+              ],
+              "route": "compiled",
+              "compileMs": 1.0220420000005106,
+              "runMs": 0.1551259999996546
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 1.3070840000000317,
+              "runMs": 6.064958000000843
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 2.3931249999986903,
+              "runMs": 4.462874000000738
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "apollonian-gasket",
+      "sourceSha256": "8f6b0fe036b0c5ad72a237d90fbe1f321290611611349a79df18b3c6724fb394",
+      "sourceBytes": 4637,
+      "samples": [
+        {
+          "totalMs": 223.16491599999972,
+          "timings": {
+            "parseMs": 2.7105830000000424,
+            "checkMs": 60.939290999999685,
+            "compileMs": 105.22729400000026,
+            "runMs": 50.497505000000274,
+            "totalMs": 223.144542
+          },
+          "functions": [
+            "csqrt",
+            "fourth",
+            "tangent",
+            "seen",
+            "admitted",
+            "fill",
+            "generations"
+          ],
+          "valueSha256": "e3a90cca3042777525acf92cfc1229cb92a9020e48e88243a7d2aa458f83e556",
+          "statements": [
+            {
+              "names": [
+                "minR"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7484590000003664,
+              "runMs": 0.11470899999949324
+            },
+            {
+              "names": [
+                "outer"
+              ],
+              "route": "compiled",
+              "compileMs": 1.6040000000002692,
+              "runMs": 0.1550840000008975
+            },
+            {
+              "names": [
+                "right"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5986249999996289,
+              "runMs": 0.10279199999968114
+            },
+            {
+              "names": [
+                "left"
+              ],
+              "route": "compiled",
+              "compileMs": 0.49570800000037707,
+              "runMs": 0.08758400000078836
+            },
+            {
+              "names": [
+                "top"
+              ],
+              "route": "compiled",
+              "compileMs": 0.45183300000007875,
+              "runMs": 0.08129200000075798
+            },
+            {
+              "names": [
+                "bottom"
+              ],
+              "route": "compiled",
+              "compileMs": 0.44395800000074814,
+              "runMs": 0.08012399999915942
+            },
+            {
+              "names": [
+                "circles"
+              ],
+              "route": "compiled",
+              "compileMs": 2.2034999999996217,
+              "runMs": 0.16595799999868177
+            },
+            {
+              "names": [
+                "circles"
+              ],
+              "route": "compiled",
+              "compileMs": 41.01033400000051,
+              "runMs": 4.567750999999589
+            },
+            {
+              "names": [
+                "G_1"
+              ],
+              "route": "compiled",
+              "compileMs": 4.521332999998776,
+              "runMs": 0.3566679999994449
+            },
+            {
+              "names": [
+                "G_2"
+              ],
+              "route": "compiled",
+              "compileMs": 7.444250000000466,
+              "runMs": 0.5286250000008295
+            },
+            {
+              "names": [
+                "G_3"
+              ],
+              "route": "compiled",
+              "compileMs": 6.852833000000828,
+              "runMs": 0.6801249999998618
+            },
+            {
+              "names": [
+                "G_4"
+              ],
+              "route": "compiled",
+              "compileMs": 6.826042000000598,
+              "runMs": 1.3292499999997744
+            },
+            {
+              "names": [
+                "G_5"
+              ],
+              "route": "compiled",
+              "compileMs": 5.338792000000467,
+              "runMs": 2.0775830000002316
+            },
+            {
+              "names": [
+                "G_6"
+              ],
+              "route": "compiled",
+              "compileMs": 5.661040999999386,
+              "runMs": 0.994207999999162
+            },
+            {
+              "names": [
+                "X_1"
+              ],
+              "route": "compiled",
+              "compileMs": 1.9478739999995014,
+              "runMs": 0.28458300000056624
+            },
+            {
+              "names": [
+                "Y_1"
+              ],
+              "route": "compiled",
+              "compileMs": 1.3615009999994072,
+              "runMs": 0.20445800000106829
+            },
+            {
+              "names": [
+                "K_1"
+              ],
+              "route": "compiled",
+              "compileMs": 1.1301669999993464,
+              "runMs": 0.14920800000072632
+            },
+            {
+              "names": [
+                "X_2"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9084579999998823,
+              "runMs": 0.1352919999999358
+            },
+            {
+              "names": [
+                "Y_2"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8342920000004597,
+              "runMs": 0.1266249999998763
+            },
+            {
+              "names": [
+                "K_2"
+              ],
+              "route": "compiled",
+              "compileMs": 1.3520420000004378,
+              "runMs": 0.19216599999981554
+            },
+            {
+              "names": [
+                "X_3"
+              ],
+              "route": "compiled",
+              "compileMs": 1.232582999999977,
+              "runMs": 0.21945799999957671
+            },
+            {
+              "names": [
+                "Y_3"
+              ],
+              "route": "compiled",
+              "compileMs": 1.1164579999986017,
+              "runMs": 0.2124180000000706
+            },
+            {
+              "names": [
+                "K_3"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9725420000004306,
+              "runMs": 0.1667090000000826
+            },
+            {
+              "names": [
+                "X_4"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9271669999998267,
+              "runMs": 0.17816700000003038
+            },
+            {
+              "names": [
+                "Y_4"
+              ],
+              "route": "compiled",
+              "compileMs": 1.3297089999996388,
+              "runMs": 0.3435829999998532
+            },
+            {
+              "names": [
+                "K_4"
+              ],
+              "route": "compiled",
+              "compileMs": 1.317124999999578,
+              "runMs": 0.21500000000014552
+            },
+            {
+              "names": [
+                "X_5"
+              ],
+              "route": "compiled",
+              "compileMs": 1.1286249999993743,
+              "runMs": 0.21262500000011642
+            },
+            {
+              "names": [
+                "Y_5"
+              ],
+              "route": "compiled",
+              "compileMs": 1.0197500000003856,
+              "runMs": 0.20670900000004622
+            },
+            {
+              "names": [
+                "K_5"
+              ],
+              "route": "compiled",
+              "compileMs": 0.967583000000559,
+              "runMs": 0.18591599999945174
+            },
+            {
+              "names": [
+                "X_6"
+              ],
+              "route": "compiled",
+              "compileMs": 1.5365840000004027,
+              "runMs": 0.2507930000001579
+            },
+            {
+              "names": [
+                "Y_6"
+              ],
+              "route": "compiled",
+              "compileMs": 1.0513750000000073,
+              "runMs": 0.17712500000016007
+            },
+            {
+              "names": [
+                "K_6"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8927510000003167,
+              "runMs": 0.1823340000000826
+            }
+          ]
+        },
+        {
+          "totalMs": 177.08341699999983,
+          "timings": {
+            "parseMs": 1.8872090000004391,
+            "checkMs": 37.50016599999981,
+            "compileMs": 88.8575009999995,
+            "runMs": 45.43891799999801,
+            "totalMs": 177.06766599999992
+          },
+          "functions": [
+            "csqrt",
+            "fourth",
+            "tangent",
+            "seen",
+            "admitted",
+            "fill",
+            "generations"
+          ],
+          "valueSha256": "e3a90cca3042777525acf92cfc1229cb92a9020e48e88243a7d2aa458f83e556",
+          "statements": [
+            {
+              "names": [
+                "minR"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7111670000003869,
+              "runMs": 0.11570799999935844
+            },
+            {
+              "names": [
+                "outer"
+              ],
+              "route": "compiled",
+              "compileMs": 1.011000000000422,
+              "runMs": 0.22762599999987287
+            },
+            {
+              "names": [
+                "right"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8122920000005251,
+              "runMs": 0.13237599999956728
+            },
+            {
+              "names": [
+                "left"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6398330000001806,
+              "runMs": 0.11558299999978772
+            },
+            {
+              "names": [
+                "top"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5757919999996375,
+              "runMs": 0.12908400000014808
+            },
+            {
+              "names": [
+                "bottom"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5609169999997903,
+              "runMs": 0.09587399999963964
+            },
+            {
+              "names": [
+                "circles"
+              ],
+              "route": "compiled",
+              "compileMs": 2.5031669999998485,
+              "runMs": 0.22341699999924458
+            },
+            {
+              "names": [
+                "circles"
+              ],
+              "route": "compiled",
+              "compileMs": 35.97491599999921,
+              "runMs": 3.5130829999989146
+            },
+            {
+              "names": [
+                "G_1"
+              ],
+              "route": "compiled",
+              "compileMs": 4.071208000000297,
+              "runMs": 0.31929200000104174
+            },
+            {
+              "names": [
+                "G_2"
+              ],
+              "route": "compiled",
+              "compileMs": 4.2369589999998425,
+              "runMs": 0.27187600000070233
+            },
+            {
+              "names": [
+                "G_3"
+              ],
+              "route": "compiled",
+              "compileMs": 4.635832999999366,
+              "runMs": 0.42299999999977445
+            },
+            {
+              "names": [
+                "G_4"
+              ],
+              "route": "compiled",
+              "compileMs": 5.492332999999235,
+              "runMs": 0.8941660000000411
+            },
+            {
+              "names": [
+                "G_5"
+              ],
+              "route": "compiled",
+              "compileMs": 4.499625000000378,
+              "runMs": 1.387959000000592
+            },
+            {
+              "names": [
+                "G_6"
+              ],
+              "route": "compiled",
+              "compileMs": 5.141416999999819,
+              "runMs": 1.1392910000004122
+            },
+            {
+              "names": [
+                "X_1"
+              ],
+              "route": "compiled",
+              "compileMs": 1.2807920000004742,
+              "runMs": 0.18620800000007875
+            },
+            {
+              "names": [
+                "Y_1"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9589999999998327,
+              "runMs": 0.15487500000017462
+            },
+            {
+              "names": [
+                "K_1"
+              ],
+              "route": "compiled",
+              "compileMs": 1.3605840000000171,
+              "runMs": 0.2107510000005277
+            },
+            {
+              "names": [
+                "X_2"
+              ],
+              "route": "compiled",
+              "compileMs": 1.8210430000008273,
+              "runMs": 0.20045899999968242
+            },
+            {
+              "names": [
+                "Y_2"
+              ],
+              "route": "compiled",
+              "compileMs": 1.1053329999995185,
+              "runMs": 0.21895799999947485
+            },
+            {
+              "names": [
+                "K_2"
+              ],
+              "route": "compiled",
+              "compileMs": 1.0285000000003492,
+              "runMs": 0.14554099999986647
+            },
+            {
+              "names": [
+                "X_3"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8476249999994252,
+              "runMs": 0.15087499999935972
+            },
+            {
+              "names": [
+                "Y_3"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7689579999996567,
+              "runMs": 0.1327499999997599
+            },
+            {
+              "names": [
+                "K_3"
+              ],
+              "route": "compiled",
+              "compileMs": 0.706875000000764,
+              "runMs": 0.1233749999992142
+            },
+            {
+              "names": [
+                "X_4"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7516660000001139,
+              "runMs": 0.136000000000422
+            },
+            {
+              "names": [
+                "Y_4"
+              ],
+              "route": "compiled",
+              "compileMs": 0.722208000000137,
+              "runMs": 0.13016699999934644
+            },
+            {
+              "names": [
+                "K_4"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7291240000004109,
+              "runMs": 0.13025000000016007
+            },
+            {
+              "names": [
+                "X_5"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8277920000000449,
+              "runMs": 0.15833300000031159
+            },
+            {
+              "names": [
+                "Y_5"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8211670000000595,
+              "runMs": 0.1553750000002765
+            },
+            {
+              "names": [
+                "K_5"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7892499999989013,
+              "runMs": 0.14741700000013225
+            },
+            {
+              "names": [
+                "X_6"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7402920000004087,
+              "runMs": 0.13633299999946757
+            },
+            {
+              "names": [
+                "Y_6"
+              ],
+              "route": "compiled",
+              "compileMs": 1.1793330000000424,
+              "runMs": 0.3630830000001879
+            },
+            {
+              "names": [
+                "K_6"
+              ],
+              "route": "compiled",
+              "compileMs": 1.551499999999578,
+              "runMs": 0.22475000000031287
+            }
+          ]
+        },
+        {
+          "totalMs": 169.85062500000004,
+          "timings": {
+            "parseMs": 1.8163329999997586,
+            "checkMs": 36.943083000000115,
+            "compileMs": 85.09583400000156,
+            "runMs": 42.88441199999306,
+            "totalMs": 169.83387499999935
+          },
+          "functions": [
+            "csqrt",
+            "fourth",
+            "tangent",
+            "seen",
+            "admitted",
+            "fill",
+            "generations"
+          ],
+          "valueSha256": "e3a90cca3042777525acf92cfc1229cb92a9020e48e88243a7d2aa458f83e556",
+          "statements": [
+            {
+              "names": [
+                "minR"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7586250000003929,
+              "runMs": 0.12054299999908835
+            },
+            {
+              "names": [
+                "outer"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8213329999998678,
+              "runMs": 0.1299989999997706
+            },
+            {
+              "names": [
+                "right"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5632079999995767,
+              "runMs": 0.10129199999937555
+            },
+            {
+              "names": [
+                "left"
+              ],
+              "route": "compiled",
+              "compileMs": 0.47795899999982794,
+              "runMs": 0.08529100000032486
+            },
+            {
+              "names": [
+                "top"
+              ],
+              "route": "compiled",
+              "compileMs": 0.44929100000081235,
+              "runMs": 0.0796249999993961
+            },
+            {
+              "names": [
+                "bottom"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8371250000000146,
+              "runMs": 0.19420799999988958
+            },
+            {
+              "names": [
+                "circles"
+              ],
+              "route": "compiled",
+              "compileMs": 1.8881669999991573,
+              "runMs": 0.17283400000087568
+            },
+            {
+              "names": [
+                "circles"
+              ],
+              "route": "compiled",
+              "compileMs": 30.086874999999964,
+              "runMs": 4.663873999999851
+            },
+            {
+              "names": [
+                "G_1"
+              ],
+              "route": "compiled",
+              "compileMs": 4.314125000000786,
+              "runMs": 0.2952919999997903
+            },
+            {
+              "names": [
+                "G_2"
+              ],
+              "route": "compiled",
+              "compileMs": 3.837082999998529,
+              "runMs": 0.24962499999946886
+            },
+            {
+              "names": [
+                "G_3"
+              ],
+              "route": "compiled",
+              "compileMs": 4.171124999999847,
+              "runMs": 0.5155409999997573
+            },
+            {
+              "names": [
+                "G_4"
+              ],
+              "route": "compiled",
+              "compileMs": 6.2028330000002825,
+              "runMs": 0.8864159999993717
+            },
+            {
+              "names": [
+                "G_5"
+              ],
+              "route": "compiled",
+              "compileMs": 6.025749999999789,
+              "runMs": 1.4113749999996799
+            },
+            {
+              "names": [
+                "G_6"
+              ],
+              "route": "compiled",
+              "compileMs": 6.1330840000000535,
+              "runMs": 1.075833999999304
+            },
+            {
+              "names": [
+                "X_1"
+              ],
+              "route": "compiled",
+              "compileMs": 1.2203750000007858,
+              "runMs": 0.15900000000056025
+            },
+            {
+              "names": [
+                "Y_1"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9225829999995767,
+              "runMs": 0.14454099999966274
+            },
+            {
+              "names": [
+                "K_1"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7760430000007545,
+              "runMs": 0.11025100000006205
+            },
+            {
+              "names": [
+                "X_2"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7487500000006548,
+              "runMs": 0.12150000000019645
+            },
+            {
+              "names": [
+                "Y_2"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7186260000007678,
+              "runMs": 0.1294579999994312
+            },
+            {
+              "names": [
+                "K_2"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7082920000002559,
+              "runMs": 0.11133300000074087
+            },
+            {
+              "names": [
+                "X_3"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7218750000001819,
+              "runMs": 0.13683299999956944
+            },
+            {
+              "names": [
+                "Y_3"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6540420000001177,
+              "runMs": 0.11533400000007532
+            },
+            {
+              "names": [
+                "K_3"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6575419999999212,
+              "runMs": 0.11387499999909778
+            },
+            {
+              "names": [
+                "X_4"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9515410000003612,
+              "runMs": 0.3049989999999525
+            },
+            {
+              "names": [
+                "Y_4"
+              ],
+              "route": "compiled",
+              "compileMs": 1.0842499999998836,
+              "runMs": 0.1575830000001588
+            },
+            {
+              "names": [
+                "K_4"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8725409999997282,
+              "runMs": 0.15474899999844638
+            },
+            {
+              "names": [
+                "X_5"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9446660000003249,
+              "runMs": 0.23645800000031159
+            },
+            {
+              "names": [
+                "Y_5"
+              ],
+              "route": "compiled",
+              "compileMs": 1.848374999999578,
+              "runMs": 0.40333299999929295
+            },
+            {
+              "names": [
+                "K_5"
+              ],
+              "route": "compiled",
+              "compileMs": 2.6368329999995694,
+              "runMs": 0.27162499999940337
+            },
+            {
+              "names": [
+                "X_6"
+              ],
+              "route": "compiled",
+              "compileMs": 1.1193750000002183,
+              "runMs": 0.23266599999897153
+            },
+            {
+              "names": [
+                "Y_6"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9905420000004597,
+              "runMs": 0.17120800000066083
+            },
+            {
+              "names": [
+                "K_6"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9529999999995198,
+              "runMs": 0.15304199999991397
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "barnsley-fern",
+      "sourceSha256": "9af6012e01cbe697d4ff7d977552d43a639ef13253af3abb4fa823479032eaff",
+      "sourceBytes": 713,
+      "samples": [
+        {
+          "totalMs": 49.09299999999985,
+          "timings": {
+            "parseMs": 0.5916250000000218,
+            "checkMs": 7.730291999999281,
+            "compileMs": 12.56683299999986,
+            "runMs": 22.6077920000007,
+            "totalMs": 49.071750000000065
+          },
+          "functions": [
+            "fern"
+          ],
+          "valueSha256": "e727a7b008e850119d8532b02e8230904e0a0c5f397a0ef8272e105b704b9d38",
+          "statements": [
+            {
+              "names": [
+                "P"
+              ],
+              "route": "compiled",
+              "compileMs": 12.56683299999986,
+              "runMs": 19.333792000000358
+            }
+          ]
+        },
+        {
+          "totalMs": 44.42674999999963,
+          "timings": {
+            "parseMs": 0.4290000000000873,
+            "checkMs": 5.750375000000531,
+            "compileMs": 10.537334000000556,
+            "runMs": 19.95379200000025,
+            "totalMs": 44.41125000000011
+          },
+          "functions": [
+            "fern"
+          ],
+          "valueSha256": "e727a7b008e850119d8532b02e8230904e0a0c5f397a0ef8272e105b704b9d38",
+          "statements": [
+            {
+              "names": [
+                "P"
+              ],
+              "route": "compiled",
+              "compileMs": 10.537334000000556,
+              "runMs": 17.246874999999818
+            }
+          ]
+        },
+        {
+          "totalMs": 42.323709000000235,
+          "timings": {
+            "parseMs": 0.46908300000086456,
+            "checkMs": 4.726249999999709,
+            "compileMs": 12.31524999999965,
+            "runMs": 19.279207000000497,
+            "totalMs": 42.30554100000063
+          },
+          "functions": [
+            "fern"
+          ],
+          "valueSha256": "e727a7b008e850119d8532b02e8230904e0a0c5f397a0ef8272e105b704b9d38",
+          "statements": [
+            {
+              "names": [
+                "P"
+              ],
+              "route": "compiled",
+              "compileMs": 12.31524999999965,
+              "runMs": 15.855249000000185
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "koch-snowflake",
+      "sourceSha256": "39e0ec9b642d236db9d9e29ea1f9fb57ba4af8cbcec524f9782661f07c85726d",
+      "sourceBytes": 948,
+      "samples": [
+        {
+          "totalMs": 56.074208,
+          "timings": {
+            "parseMs": 0.7295839999997042,
+            "checkMs": 14.148000000000138,
+            "compileMs": 21.15783399999964,
+            "runMs": 16.506666000001132,
+            "totalMs": 56.055583999999726
+          },
+          "functions": [
+            "koch"
+          ],
+          "valueSha256": "e460cbcc351a9ab67436e7c7bcdc3707b2d79216653af1aa92fe3ddcba91ba30",
+          "statements": [
+            {
+              "names": [
+                "Q"
+              ],
+              "route": "compiled",
+              "compileMs": 21.15783399999964,
+              "runMs": 8.021749000000455
+            }
+          ]
+        },
+        {
+          "totalMs": 45.18208299999969,
+          "timings": {
+            "parseMs": 0.6293749999995271,
+            "checkMs": 13.120957999999519,
+            "compileMs": 16.506875000000036,
+            "runMs": 12.844084000000294,
+            "totalMs": 45.16337500000009
+          },
+          "functions": [
+            "koch"
+          ],
+          "valueSha256": "e460cbcc351a9ab67436e7c7bcdc3707b2d79216653af1aa92fe3ddcba91ba30",
+          "statements": [
+            {
+              "names": [
+                "Q"
+              ],
+              "route": "compiled",
+              "compileMs": 16.506875000000036,
+              "runMs": 6.403667000000496
+            }
+          ]
+        },
+        {
+          "totalMs": 41.945958000000246,
+          "timings": {
+            "parseMs": 0.691000000000713,
+            "checkMs": 8.446750000000065,
+            "compileMs": 15.903374999999869,
+            "runMs": 14.608833000000232,
+            "totalMs": 41.92958399999952
+          },
+          "functions": [
+            "koch"
+          ],
+          "valueSha256": "e460cbcc351a9ab67436e7c7bcdc3707b2d79216653af1aa92fe3ddcba91ba30",
+          "statements": [
+            {
+              "names": [
+                "Q"
+              ],
+              "route": "compiled",
+              "compileMs": 15.903374999999869,
+              "runMs": 8.387749999999869
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "turing-patterns",
+      "sourceSha256": "8e64ee0b8f65c0a65f7ab29e5e04544a0054894c826030b3dd688a39e32d498c",
+      "sourceBytes": 1469,
+      "samples": [
+        {
+          "totalMs": 1632.1025829999999,
+          "timings": {
+            "parseMs": 0.8713750000006257,
+            "checkMs": 12.247624999999971,
+            "compileMs": 14.764624000000367,
+            "runMs": 1600.4267090000021,
+            "totalMs": 1632.0846250000004
+          },
+          "functions": [
+            "coatspot",
+            "coatseed",
+            "grayscott"
+          ],
+          "valueSha256": "69844751f5e55c6116b97912fe50b6b8a3548c5467f120f3c09cbf934d5fe1bb",
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7160830000002534,
+              "runMs": 0.10904200000004494
+            },
+            {
+              "names": [
+                "R_0"
+              ],
+              "route": "compiled",
+              "compileMs": 6.13866599999983,
+              "runMs": 5.177459000000454
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 7.909875000000284,
+              "runMs": 1585.1973750000016
+            }
+          ]
+        },
+        {
+          "totalMs": 1673.9127910000007,
+          "timings": {
+            "parseMs": 1.0385420000002341,
+            "checkMs": 15.358499999998457,
+            "compileMs": 13.07483400000092,
+            "runMs": 1640.8527510000022,
+            "totalMs": 1673.8945829999993
+          },
+          "functions": [
+            "coatspot",
+            "coatseed",
+            "grayscott"
+          ],
+          "valueSha256": "69844751f5e55c6116b97912fe50b6b8a3548c5467f120f3c09cbf934d5fe1bb",
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7750420000011218,
+              "runMs": 0.1400420000009035
+            },
+            {
+              "names": [
+                "R_0"
+              ],
+              "route": "compiled",
+              "compileMs": 5.864250000000538,
+              "runMs": 6.8058750000018335
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 6.435541999999259,
+              "runMs": 1624.1682509999991
+            }
+          ]
+        },
+        {
+          "totalMs": 1560.865749999999,
+          "timings": {
+            "parseMs": 0.890625,
+            "checkMs": 13.585167000001093,
+            "compileMs": 12.824416999997993,
+            "runMs": 1529.1684999999998,
+            "totalMs": 1560.8478749999995
+          },
+          "functions": [
+            "coatspot",
+            "coatseed",
+            "grayscott"
+          ],
+          "valueSha256": "69844751f5e55c6116b97912fe50b6b8a3548c5467f120f3c09cbf934d5fe1bb",
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7242499999993015,
+              "runMs": 0.10541700000067067
+            },
+            {
+              "names": [
+                "R_0"
+              ],
+              "route": "compiled",
+              "compileMs": 5.73370900000009,
+              "runMs": 4.479999999999563
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 6.366457999998602,
+              "runMs": 1516.4259579999998
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "galton-board",
+      "sourceSha256": "57faff5809230fb8ab2e89bb3ea3ba421dc22051b73204a1c6c759150a61c114",
+      "sourceBytes": 994,
+      "samples": [
+        {
+          "totalMs": 103.54262500000004,
+          "timings": {
+            "parseMs": 0.7349169999997684,
+            "checkMs": 7.338916000000609,
+            "compileMs": 73.34491700000035,
+            "runMs": 16.229498000000603,
+            "totalMs": 103.52779100000043
+          },
+          "functions": [
+            "galtonpaths",
+            "galtoncounts"
+          ],
+          "valueSha256": "c7e10da427363f43368e1859397ac305304f482edde44b0b6f1c36ec333e3ff7",
+          "statements": [
+            {
+              "names": [
+                "NB"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6085000000002765,
+              "runMs": 0.10195800000110466
+            },
+            {
+              "names": [
+                "NR"
+              ],
+              "route": "compiled",
+              "compileMs": 0.41062500000043656,
+              "runMs": 0.10308299999815063
+            },
+            {
+              "names": [
+                "X"
+              ],
+              "route": "compiled",
+              "compileMs": 66.05704200000037,
+              "runMs": 6.536707999999635
+            },
+            {
+              "names": [
+                "C"
+              ],
+              "route": "compiled",
+              "compileMs": 6.268749999999272,
+              "runMs": 5.528291000000536
+            }
+          ]
+        },
+        {
+          "totalMs": 105.72429200000079,
+          "timings": {
+            "parseMs": 0.7844589999986056,
+            "checkMs": 8.835791999999856,
+            "compileMs": 76.02903999999762,
+            "runMs": 15.700667999999496,
+            "totalMs": 105.70358299999862
+          },
+          "functions": [
+            "galtonpaths",
+            "galtoncounts"
+          ],
+          "valueSha256": "c7e10da427363f43368e1859397ac305304f482edde44b0b6f1c36ec333e3ff7",
+          "statements": [
+            {
+              "names": [
+                "NB"
+              ],
+              "route": "compiled",
+              "compileMs": 0.862290999999459,
+              "runMs": 0.13900100000137172
+            },
+            {
+              "names": [
+                "NR"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7750419999993028,
+              "runMs": 0.15295899999910034
+            },
+            {
+              "names": [
+                "X"
+              ],
+              "route": "compiled",
+              "compileMs": 69.4190409999992,
+              "runMs": 5.902665999999954
+            },
+            {
+              "names": [
+                "C"
+              ],
+              "route": "compiled",
+              "compileMs": 4.972665999999663,
+              "runMs": 4.010209000000032
+            }
+          ]
+        },
+        {
+          "totalMs": 98.83929200000057,
+          "timings": {
+            "parseMs": 0.8325830000012502,
+            "checkMs": 9.153000000000247,
+            "compileMs": 70.41191599999911,
+            "runMs": 14.179457000003822,
+            "totalMs": 98.82158400000117
+          },
+          "functions": [
+            "galtonpaths",
+            "galtoncounts"
+          ],
+          "valueSha256": "c7e10da427363f43368e1859397ac305304f482edde44b0b6f1c36ec333e3ff7",
+          "statements": [
+            {
+              "names": [
+                "NB"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7259159999994154,
+              "runMs": 0.11574999999902502
+            },
+            {
+              "names": [
+                "NR"
+              ],
+              "route": "compiled",
+              "compileMs": 0.4413330000006681,
+              "runMs": 0.06891600000199105
+            },
+            {
+              "names": [
+                "X"
+              ],
+              "route": "compiled",
+              "compileMs": 64.37799999999879,
+              "runMs": 4.880666000000929
+            },
+            {
+              "names": [
+                "C"
+              ],
+              "route": "compiled",
+              "compileMs": 4.866667000000234,
+              "runMs": 4.248500000001513
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fish-swarm",
+      "sourceSha256": "bb2a1c88dbb294a0e691422f6def0ec49b83cb4b85cc7e50a2e1d968e9a38413",
+      "sourceBytes": 1607,
+      "samples": [
+        {
+          "totalMs": 58.93987500000003,
+          "timings": {
+            "parseMs": 0.9741250000006403,
+            "checkMs": 17.433709000000817,
+            "compileMs": 15.980917000000773,
+            "runMs": 24.220666000002893,
+            "totalMs": 58.92358299999978
+          },
+          "functions": [
+            "fishhash",
+            "fishseed",
+            "fishstep"
+          ],
+          "valueSha256": "10e387d09a4eebcb1aac1ee2b64a077659f15d41c3a34ac9d2217378cd2544f6",
+          "statements": [
+            {
+              "names": [
+                "NF"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7507080000013957,
+              "runMs": 0.11091599999963364
+            },
+            {
+              "names": [
+                "R_0"
+              ],
+              "route": "compiled",
+              "compileMs": 3.43170900000041,
+              "runMs": 0.2922920000019076
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 11.798499999998967,
+              "runMs": 12.83508300000176
+            }
+          ]
+        },
+        {
+          "totalMs": 81.99333299999853,
+          "timings": {
+            "parseMs": 1.2909579999995913,
+            "checkMs": 26.168625000000247,
+            "compileMs": 20.10320899999897,
+            "runMs": 33.95800000000054,
+            "totalMs": 81.9737499999992
+          },
+          "functions": [
+            "fishhash",
+            "fishseed",
+            "fishstep"
+          ],
+          "valueSha256": "10e387d09a4eebcb1aac1ee2b64a077659f15d41c3a34ac9d2217378cd2544f6",
+          "statements": [
+            {
+              "names": [
+                "NF"
+              ],
+              "route": "compiled",
+              "compileMs": 1.187207999999373,
+              "runMs": 0.17124999999941792
+            },
+            {
+              "names": [
+                "R_0"
+              ],
+              "route": "compiled",
+              "compileMs": 5.774959000000308,
+              "runMs": 0.46854200000234414
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 13.141041999999288,
+              "runMs": 12.983541999999943
+            }
+          ]
+        },
+        {
+          "totalMs": 66.08354099999997,
+          "timings": {
+            "parseMs": 1.053291000000172,
+            "checkMs": 17.1127919999999,
+            "compileMs": 19.89025000000038,
+            "runMs": 27.700501999999688,
+            "totalMs": 66.06637500000033
+          },
+          "functions": [
+            "fishhash",
+            "fishseed",
+            "fishstep"
+          ],
+          "valueSha256": "10e387d09a4eebcb1aac1ee2b64a077659f15d41c3a34ac9d2217378cd2544f6",
+          "statements": [
+            {
+              "names": [
+                "NF"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7693330000001879,
+              "runMs": 0.19829200000094716
+            },
+            {
+              "names": [
+                "R_0"
+              ],
+              "route": "compiled",
+              "compileMs": 4.138249999999971,
+              "runMs": 0.3222089999999298
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 14.98266700000022,
+              "runMs": 12.172042000000147
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "black-hole",
+      "sourceSha256": "43c380539eaf414fae1e676aeac62d78ef396954058ae212714a7c3205e66d68",
+      "sourceBytes": 744,
+      "samples": [
+        {
+          "totalMs": 17.069166999999652,
+          "timings": {
+            "parseMs": 0.7980000000006839,
+            "checkMs": 9.8700000000008,
+            "compileMs": 0,
+            "runMs": 6.356707999999344,
+            "totalMs": 17.050708999999188
+          },
+          "functions": [
+            "blackhole"
+          ],
+          "valueSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "statements": []
+        },
+        {
+          "totalMs": 17.249292000000423,
+          "timings": {
+            "parseMs": 0.7046250000003056,
+            "checkMs": 9.802417000000787,
+            "compileMs": 0,
+            "runMs": 6.695208000001003,
+            "totalMs": 17.227624999999534
+          },
+          "functions": [
+            "blackhole"
+          ],
+          "valueSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "statements": []
+        },
+        {
+          "totalMs": 11.701208000000406,
+          "timings": {
+            "parseMs": 0.5830409999998665,
+            "checkMs": 7.0812910000004194,
+            "compileMs": 0,
+            "runMs": 3.9822499999991123,
+            "totalMs": 11.682082999999693
+          },
+          "functions": [
+            "blackhole"
+          ],
+          "valueSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "statements": []
+        }
+      ]
+    },
+    {
+      "id": "notebook-direct-execution-and-publication",
+      "source": "let a = 3\nlet b = a+1\nb",
+      "samples": [
+        {
+          "round": 0,
+          "phase": "rerun",
+          "ms": 0.5803166999999121
+        },
+        {
+          "round": 0,
+          "phase": "whole-source-edit",
+          "ms": 0.31298960000003717
+        },
+        {
+          "round": 1,
+          "phase": "rerun",
+          "ms": 0.4239541500000087
+        },
+        {
+          "round": 1,
+          "phase": "whole-source-edit",
+          "ms": 0.35307914999993956
+        },
+        {
+          "round": 2,
+          "phase": "rerun",
+          "ms": 0.4481479000000036
+        },
+        {
+          "round": 2,
+          "phase": "whole-source-edit",
+          "ms": 0.3432832999999846
+        },
+        {
+          "round": 3,
+          "phase": "rerun",
+          "ms": 0.230652100000043
+        },
+        {
+          "round": 3,
+          "phase": "whole-source-edit",
+          "ms": 0.3299812500000371
+        },
+        {
+          "round": 4,
+          "phase": "rerun",
+          "ms": 0.4011520500000188
+        },
+        {
+          "round": 4,
+          "phase": "whole-source-edit",
+          "ms": 0.27054585000005316
+        },
+        {
+          "round": 5,
+          "phase": "rerun",
+          "ms": 0.20940419999997176
+        },
+        {
+          "round": 5,
+          "phase": "whole-source-edit",
+          "ms": 0.23435205000005227
+        },
+        {
+          "round": 6,
+          "phase": "rerun",
+          "ms": 0.3097979000000123
+        },
+        {
+          "round": 6,
+          "phase": "whole-source-edit",
+          "ms": 0.3339853999999832
+        }
+      ],
+      "controls": {
+        "rerunLatex": "4",
+        "editLatex": "5"
+      },
+      "excludes": [
+        "compute-graph scheduling",
+        "UI rendering"
+      ]
+    },
+    {
+      "id": "prelude-edit-a",
+      "source": "function f(x) { x+1 }\nlet a = f(3)",
+      "samples": [
+        {
+          "totalMs": 2.607624999998734,
+          "timings": {
+            "parseMs": 0.10512500000004366,
+            "checkMs": 0.5727499999993597,
+            "compileMs": 1.5452919999988808,
+            "runMs": 0.3062079999999696,
+            "totalMs": 2.581458999999086
+          },
+          "valueSha256": "fca1b59f0ebb357f4d58c2c2fef743577d4981098615e1561059daa8c9be4e4b"
+        },
+        {
+          "totalMs": 2.221332999999504,
+          "timings": {
+            "parseMs": 0.08195800000066811,
+            "checkMs": 0.504958000001352,
+            "compileMs": 1.2516249999989668,
+            "runMs": 0.3208749999976135,
+            "totalMs": 2.2038329999995767
+          },
+          "valueSha256": "fca1b59f0ebb357f4d58c2c2fef743577d4981098615e1561059daa8c9be4e4b"
+        },
+        {
+          "totalMs": 2.514666999999463,
+          "timings": {
+            "parseMs": 0.09950000000026193,
+            "checkMs": 0.5437920000003942,
+            "compileMs": 1.4569160000010015,
+            "runMs": 0.33533299999908195,
+            "totalMs": 2.4888339999997697
+          },
+          "valueSha256": "fca1b59f0ebb357f4d58c2c2fef743577d4981098615e1561059daa8c9be4e4b"
+        }
+      ]
+    },
+    {
+      "id": "prelude-edit-b",
+      "source": "function f(x) { x+2 }\nlet a = f(3)",
+      "samples": [
+        {
+          "totalMs": 2.8828750000011496,
+          "timings": {
+            "parseMs": 0.10879100000056496,
+            "checkMs": 0.6272919999992155,
+            "compileMs": 1.5010419999998703,
+            "runMs": 0.5691660000011325,
+            "totalMs": 2.862208999998984
+          },
+          "valueSha256": "8b2deddbb25287ffef76977191d35c4affa29143bd3f92320978b54d5bfd826e"
+        },
+        {
+          "totalMs": 2.5827920000010636,
+          "timings": {
+            "parseMs": 0.08958399999937683,
+            "checkMs": 0.5029999999987922,
+            "compileMs": 1.4359590000003664,
+            "runMs": 0.48920900000121037,
+            "totalMs": 2.568083000000115
+          },
+          "valueSha256": "8b2deddbb25287ffef76977191d35c4affa29143bd3f92320978b54d5bfd826e"
+        },
+        {
+          "totalMs": 2.938333000000057,
+          "timings": {
+            "parseMs": 0.17433399999936228,
+            "checkMs": 0.6634999999987485,
+            "compileMs": 1.6860840000008466,
+            "runMs": 0.346042999997735,
+            "totalMs": 2.9217919999991864
+          },
+          "valueSha256": "8b2deddbb25287ffef76977191d35c4affa29143bd3f92320978b54d5bfd826e"
+        }
+      ]
+    }
+  ]
+}

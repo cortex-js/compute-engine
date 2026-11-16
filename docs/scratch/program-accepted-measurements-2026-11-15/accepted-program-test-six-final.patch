@@ -1,0 +1,224 @@
+--- a/test/compute-engine/property-store-retirement.test.ts
++++ b/test/compute-engine/property-store-retirement.test.ts
+@@ -9,8 +9,8 @@
+ // available in a language whose values are all immutable. With mutable objects
+ // in the language (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B) the assignment is a
+ // STORE instead: it runs the property's `set` accessor against the object the
+-// receiver refers to, every alias of that object sees the change, and the
+-// statement evaluates to the value assigned. It is legal on objects and on
++// receiver refers to, and every alias of that object sees the change. A raw
++// Assign returns its stored value; a Program assignment statement gives Nothing. It is legal on objects and on
+ // nothing else — a value receiver is `immutable-value-assignment`.
+ //
+ // What this file pins is the part that is easy to get half-right: the two
+@@ -113,18 +113,19 @@
+ });
+ 
+ describe('an OBJECT receiver stores, on BOTH timings', () => {
+-  test('ONE batch: the store runs and the assignment answers the value', () => {
+-    const { value, diagnostics } = run(`${PERSON}
++  test('ONE batch: the store runs and Program answers Nothing', () => {
++    const { value, diagnostics, ce } = run(`${PERSON}
+ let p = Person(n: "Bob", age: 42)
+ p.name = "Ada"`);
+     expect(diagnostics).toEqual([]);
+-    expect(value).toBe('"Ada"');
+-  });
+-
+-  test('TWO batches: same answer', () => {
++    expect(value).toBe('"Nothing"');
++    expect(run('p.name', ce).value).toBe('"Ada"');
++  });
++
++  test('TWO batches: the store persists across Programs', () => {
+     const { ce } = run(`${PERSON}
+ let p = Person(n: "Bob", age: 42)`);
+-    expect(run('p.name = "Ada"', ce).value).toBe('"Ada"');
++    expect(run('p.name = "Ada"', ce).value).toBe('"Nothing"');
+     expect(run('p', ce).value).toBe('Person(n: "Ada", age: 42)');
+   });
+ 
+@@ -267,7 +268,7 @@
+     const { ce } = run(`${PERSON}
+ ${COUNTER}
+ let p = Person(n: "Bob", age: 42)`);
+-    expect(run('p.(Nameable.name) = bump()', ce).value).toBe('"z"');
++    expect(run('p.(Nameable.name) = bump()', ce).value).toBe('"Nothing"');
+     expect(run('calls', ce).value).toBe('1');
+     expect(run('p.n', ce).value).toBe('"z"');
+   });
+@@ -296,14 +297,22 @@
+ 
+   test('the QUALIFIED write stays symbolic', () => {
+     const ce = declared();
+-    expect(run('q.(Aged.age) = 5', ce).value).toBe(
+-      'ProtocolProperty("Aged", "age", q, 5)'
+-    );
++    expect(run('q.(Aged.age) = 5', ce).value).toBe('"Nothing"');
++    expect(
++      ce.box([
++        'Assign',
++        ['ProtocolProperty', { str: 'Aged' }, { str: 'age' }, 'q'],
++        5,
++      ]).evaluate().toString()
++    ).toBe('ProtocolProperty("Aged", "age", q, 5)');
+   });
+ 
+   test('the UNQUALIFIED write stays symbolic', () => {
+     const ce = declared();
+-    expect(run('q.age = 5', ce).value).toBe('Assign(Field(q, "age"), 5)');
++    expect(run('q.age = 5', ce).value).toBe('"Nothing"');
++    expect(
++      ce.box(['Assign', ['Field', 'q', { str: 'age' }], 5]).evaluate().toString()
++    ).toBe('Assign(Field(q, "age"), 5)');
+   });
+ });
+ 
+--- a/test/compute-engine/object-store.test.ts
++++ b/test/compute-engine/object-store.test.ts
+@@ -71,14 +71,17 @@
+     ).toBe('43');
+   });
+ 
+-  test('the assignment EVALUATES to the stored value', () => {
+-    // `Assign` yields the value it wrote, so a store is usable in expression
+-    // position exactly as an ordinary assignment is.
++  test('Program returns Nothing while a direct Assign returns the stored value', () => {
+     expect(
+       value(`${PERSON}
+ let p = Person(name: "Alan", age: 42)
+ p.age = 43`)
+-    ).toBe('43');
++    ).toBe('"Nothing"');
++    expect(value('p.age')).toBe('43');
++    expect(
++      ce.box(['Assign', ['Field', 'p', { str: 'age' }], 44]).evaluate().toString()
++    ).toBe('44');
++    expect(value('p.age')).toBe('44');
+   });
+ 
+   test('the OTHER fields are untouched', () => {
+@@ -342,12 +345,12 @@
+ }
+ let r = Person(n: "Bob", age: 42)`;
+     value(conformance('self.n = v\n    self'), engine);
+-    expect(value('r.name = "Steve"', engine)).toBe('"Steve"');
++    expect(value('r.name = "Steve"', engine)).toBe('"Nothing"');
+     expect(value('r', engine)).toBe('Person(n: "Steve", age: 42)');
+ 
+     const rebuilding = new ComputeEngine();
+     value(conformance('Person(n: v, age: self.age)'), rebuilding);
+-    expect(value('r.name = "Steve"', rebuilding)).toBe('"Steve"');
++    expect(value('r.name = "Steve"', rebuilding)).toBe('"Nothing"');
+     expect(value('r', rebuilding)).toBe('Person(n: "Bob", age: 42)');
+   });
+ });
+--- a/test/compute-engine/protocol-type-redefinition.test.ts
++++ b/test/compute-engine/protocol-type-redefinition.test.ts
+@@ -222,7 +222,8 @@
+     );
+     // An instance built from the CURRENT declaration answers both.
+     expect(result(`let q = T(a: 1, c: 2)\nq.(Proto.c)`)).toBe('2');
+-    expect(result(`q.(Proto.c) = 8`)).toBe('8');
++    expect(result(`q.(Proto.c) = 8`)).toBe('"Nothing"');
++    expect(result(`q.(Proto.c)`)).toBe('8');
+   });
+ 
+   test('a redefinition that adds a field beside an AUTHORED accessor is `object-property-conflict`', () => {
+@@ -256,6 +257,8 @@
+   });
+ 
+   test('object → record re-applies the B1 mutability gate', () => {
++    // Keep this binding open while its nominal name changes kind, so the
++    // runtime instance's pinned object layout remains the subject of the test.
+     // The gate refuses a `readwrite` protocol on a value type at REGISTRATION.
+     // A redefinition can make an already-registered edge one the gate would
+     // refuse; conformance is monotone, so the edge survives — left pending,
+@@ -263,7 +266,7 @@
+     expect(
+       result(`protocol M { readwrite v: integer }
+ type W = object{v: integer} is M
+-let w = W(v: 1)
++let w: any = W(v: 1)
+ w.(M.v)`)
+     ).toBe('1');
+ 
+@@ -484,7 +487,7 @@
+     // The read is refused — the slot holds a string…
+     expect(result(`p.(P.a)`)).toContain('protocol-implementation-missing');
+     // …and writing an `integer` into it is exactly the fix, so it goes through.
+-    expect(result(`p.(P.a) = 5`)).toBe('5');
++    expect(result(`p.(P.a) = 5`)).toBe('"Nothing"');
+     expect(result(`p.(P.a)`)).toBe('5');
+   });
+ });
+@@ -1005,7 +1008,7 @@
+ 
+     // Positive control: a receiver built from the current declaration fires the
+     // right-hand side exactly once and stores it.
+-    expect(result(`let q = T(a: 5)\nq.(P.a) = bump()`)).toBe('7');
++    expect(result(`let q = T(a: 5)\nq.(P.a) = bump()`)).toBe('"Nothing"');
+     expect(result(`c.n`)).toBe('1');
+     expect(result(`q.a`)).toBe('7');
+   });
+--- a/test/compute-engine/recursive-application-memo-across-evaluations.test.ts
++++ b/test/compute-engine/recursive-application-memo-across-evaluations.test.ts
+@@ -224,7 +224,7 @@
+       '43',
+     ]);
+ 
+-    expect(run('p.age = 10')).toBe('10');
++    expect(run('p.age = 10')).toBe('"Nothing"');
+ 
+     // The SAME node, so its own cached value is what answers unless the
+     // store invalidated it.
+--- a/test/epsil/comprehensions.test.ts
++++ b/test/epsil/comprehensions.test.ts
+@@ -298,7 +298,6 @@
+   test.each([
+     ['[k * 2 for k in 1..3]', '["List",2,4,6]'],
+     ['[do { k * 2 } for k in 1..3]', '["List",2,4,6]'],
+-    ['let xs = [do { k * 2 } for k in 1..3]', '["List",2,4,6]'],
+     ['let xs = [do { k * 2 } for k in 1..3]; xs', '["List",2,4,6]'],
+     [
+       'let xs = [if k > 1 { k } else { 0 } for k in 1..3]; xs',
+@@ -317,6 +316,21 @@
+     expect(await resultJson(source)).toEqual([expected, expected]);
+   });
+ 
++  test('a final declaration returns Nothing and stores the listed value', async () => {
++    const source = 'let xs = [do { k * 2 } for k in 1..3]';
++    const syncEngine = new ComputeEngine();
++    const sync = executeEpsil(syncEngine, source);
++    expect(sync.diagnostics).toEqual([]);
++    expect(sync.value.symbol).toBe('Nothing');
++    expect(syncEngine.box('xs').evaluate().json).toEqual(['List', 2, 4, 6]);
++
++    const asyncEngine = new ComputeEngine();
++    const async = await executeEpsilAsync(asyncEngine, source);
++    expect(async.diagnostics).toEqual([]);
++    expect(async.value.symbol).toBe('Nothing');
++    expect(asyncEngine.box('xs').evaluate().json).toEqual(['List', 2, 4, 6]);
++  });
++
+   test('an infinite comprehension stays as it is', async () => {
+     const [sync, async] = await resultJson('[k for k in 1..oo]');
+     expect(sync).toMatch(/^\["Comprehension"/);
+@@ -336,7 +350,7 @@
+       ce.parse(latex).json;
+     const value = (source: string): string =>
+       JSON.stringify(executeEpsil(ce, source, { parseLatex }).value.json);
+-    expect(value('let c = 0')).toBe('0');
++    expect(value('let c = 0')).toBe('"Nothing"');
+     expect(value('[do { c = c + 1; c } for i in 1..3, j in 1..i]')).toBe(
+       '["List",1,2,3,4,5,6]'
+     );
+@@ -372,7 +386,7 @@
+       ce.parse(latex).json;
+     const value = (source: string): string =>
+       JSON.stringify(executeEpsil(ce, source, { parseLatex }).value.json);
+-    expect(value('let calls = 0')).toBe('0');
++    expect(value('let calls = 0')).toBe('"Nothing"');
+     value('function keep(j) scope { calls = calls + 1; j > 1 }');
+     expect(
+       value('[do { let t = i; t } for i in 1..3, j in 1..i if keep(j)]')

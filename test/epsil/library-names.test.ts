@@ -1,3 +1,4 @@
+import { operand, operands, operator } from '../../src/math-json/utils';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -35,7 +36,9 @@ import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 /** The resolved tree of `source`, without source offsets. */
 function resolved(source: string, ce = new ComputeEngine()): unknown {
   const [ast] = parseEpsil(source);
-  return strip(resolveLibraryNames(ast, source, ce));
+  const program = resolveLibraryNames(ast, source, ce);
+  expect(operator(program)).toBe('Program');
+  return strip(operands(program).length === 1 ? operand(program, 1)! : program);
 }
 
 function strip(node: MathJsonExpression): unknown {
@@ -292,7 +295,7 @@ describe('the resolution pass', () => {
 
   test('the raw tree keeps what was written', () => {
     const [ast] = parseEpsil('sin(x)');
-    expect(strip(ast)).toEqual({ fn: ['sin', { sym: 'x' }] });
+    expect(strip(operand(ast, 1)!)).toEqual({ fn: ['sin', { sym: 'x' }] });
   });
 
   test('a program-bound name is not a library name, in every binding form', () => {
@@ -315,7 +318,7 @@ describe('the resolution pass', () => {
     // any outer binding.
     expect(resolved('mean; let mean = 1')).toEqual({
       fn: [
-        'Block',
+        'Program',
         { sym: 'Mean' },
         {
           fn: [
@@ -592,7 +595,7 @@ describe('the resolution pass', () => {
     const ce = new ComputeEngine();
     const source = 'sin(x) + pi';
     const expr = ce.box(resolveLibraryNames(parseEpsil(source)[0], source, ce));
-    expect(expr.json).toEqual(['Add', ['Sin', 'x'], 'Pi']);
+    expect(expr.op1.json).toEqual(['Add', ['Sin', 'x'], 'Pi']);
     expect(compile(expr)?.run?.({ x: 0 })).toBeCloseTo(Math.PI, 12);
   });
 });
@@ -628,7 +631,7 @@ describe('the serializer', () => {
     // and a binding in a sibling scope count too — the MathJSON name reads
     // back the same either way.
     const declared: MathJsonExpression = [
-      'Block',
+      'Program',
       ['Declare', 'sin', ['Dictionary', ['KeyValuePair', 'value', 3]]],
       ['Sin', 'x'],
     ];
@@ -646,7 +649,7 @@ describe('the serializer', () => {
     ];
     expect(serializeEpsil(loop)).toBe('Loop(Pi + 1, pi in xs)');
     const nested: MathJsonExpression = [
-      'Block',
+      'Program',
       ['Sin', 'x'],
       [
         'Block',
@@ -717,7 +720,7 @@ describe('the serializer', () => {
     ] as [MathJsonExpression, unknown][]) {
       const source = serializeEpsil(expr);
       const [ast] = parseEpsil(source);
-      expect([source, strip(resolveLibraryNames(ast, source, ce))]).toEqual([
+      expect([source, strip(operand(resolveLibraryNames(ast, source, ce), 1)!)]).toEqual([
         source,
         expected,
       ]);
@@ -804,7 +807,7 @@ describe('the serializer', () => {
           failures.push(`${name}: ${source} does not parse`);
           continue;
         }
-        const back = strip(resolveLibraryNames(ast, source, ce));
+        const back = strip(operand(resolveLibraryNames(ast, source, ce), 1)!);
         const expected = Array.isArray(expr)
           ? { fn: [name, { sym: 'x' }] }
           : { sym: name };

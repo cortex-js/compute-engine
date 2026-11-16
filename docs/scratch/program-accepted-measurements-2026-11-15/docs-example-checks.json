@@ -1,0 +1,977 @@
+{
+  "before": {
+    "src/epsil/parse-epsil.ts": "b2777da14837d959b80dc2907b5586fdefdaab925b30726c2fa4daf7cd444757",
+    "src/epsil/execute-epsil.ts": "51dda1e825195cbeda8538738382c0e56b787e44ff270617ad8917529b2b82fd",
+    "src/epsil/static-diagnostics.ts": "dc9af8d31ceb16fa435c76ecdeedf96a024b7abda7009aba2954f9f79b0693bc",
+    "src/compute-engine/library/control-structures.ts": "d32e5dfd633174e3c6b524278722195d9e3cde850499b207ffd361c21e445981",
+    "src/compute-engine/function-utils.ts": "480377121f6d0e10dc691c19364b456709132bd83460b10f25df766165e7fc4c"
+  },
+  "after": {
+    "src/epsil/parse-epsil.ts": "b2777da14837d959b80dc2907b5586fdefdaab925b30726c2fa4daf7cd444757",
+    "src/epsil/execute-epsil.ts": "51dda1e825195cbeda8538738382c0e56b787e44ff270617ad8917529b2b82fd",
+    "src/epsil/static-diagnostics.ts": "dc9af8d31ceb16fa435c76ecdeedf96a024b7abda7009aba2954f9f79b0693bc",
+    "src/compute-engine/library/control-structures.ts": "d32e5dfd633174e3c6b524278722195d9e3cde850499b207ffd361c21e445981",
+    "src/compute-engine/function-utils.ts": "480377121f6d0e10dc691c19364b456709132bd83460b10f25df766165e7fc4c"
+  },
+  "sourceStable": true,
+  "records": [
+    {
+      "route": "parse",
+      "source": "2x + 1",
+      "ast": [
+        "Program",
+        [
+          "Add",
+          [
+            "Multiply",
+            2,
+            "x"
+          ],
+          1
+        ]
+      ],
+      "diagnostics": []
+    },
+    {
+      "route": "parse",
+      "source": "",
+      "ast": [
+        "Program"
+      ],
+      "diagnostics": []
+    },
+    {
+      "route": "parse",
+      "source": "a\n2",
+      "ast": [
+        "Program",
+        "a",
+        2
+      ],
+      "diagnostics": []
+    },
+    {
+      "route": "parse",
+      "source": "{1,2}",
+      "ast": [
+        "Program",
+        [
+          "Set",
+          1,
+          2
+        ]
+      ],
+      "diagnostics": []
+    },
+    {
+      "route": "parse",
+      "source": "if a { }",
+      "ast": [
+        "Program",
+        [
+          "If",
+          "a",
+          [
+            "Block"
+          ]
+        ]
+      ],
+      "diagnostics": []
+    },
+    {
+      "route": "parse",
+      "source": "if a { if b { 1 } }",
+      "ast": [
+        "Program",
+        [
+          "If",
+          "a",
+          [
+            "Block",
+            [
+              "If",
+              "b",
+              [
+                "Block",
+                1
+              ]
+            ]
+          ]
+        ]
+      ],
+      "diagnostics": []
+    },
+    {
+      "route": "parse",
+      "source": "let y = do { let t = 3; t + 1 }",
+      "ast": [
+        "Program",
+        [
+          "Declare",
+          "y",
+          [
+            "Dictionary",
+            [
+              "KeyValuePair",
+              "value",
+              [
+                "Block",
+                [
+                  "Declare",
+                  "t",
+                  [
+                    "Dictionary",
+                    [
+                      "KeyValuePair",
+                      "value",
+                      3
+                    ]
+                  ]
+                ],
+                [
+                  "Add",
+                  "t",
+                  1
+                ]
+              ]
+            ]
+          ]
+        ]
+      ],
+      "diagnostics": []
+    },
+    {
+      "route": "execute/check",
+      "source": "let a = 1; a = \"x\"; a",
+      "value": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "`a` has the type `number`, and the value has the type `string`",
+            "a := \"x\"",
+            "assignment-type-mismatch"
+          ],
+          "code": "assignment-type-mismatch",
+          "range": [
+            11,
+            18,
+            11
+          ]
+        }
+      ],
+      "checkDiagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "`a` has the type `number`, and the value has the type `string`",
+            "a := \"x\"",
+            "assignment-type-mismatch"
+          ],
+          "code": "assignment-type-mismatch",
+          "range": [
+            11,
+            18,
+            11
+          ]
+        }
+      ],
+      "types": {
+        "a": "number",
+        "x": "unknown",
+        "f": "unknown",
+        "bump": "unknown",
+        "c": "unknown"
+      }
+    },
+    {
+      "route": "execute/check",
+      "source": "function g(k) scope { t = k + 1; t }; let t = 0; [g(1), t]",
+      "value": [
+        "List",
+        2,
+        2
+      ],
+      "diagnostics": [],
+      "checkDiagnostics": [],
+      "types": {
+        "a": "unknown",
+        "x": "unknown",
+        "f": "unknown",
+        "bump": "unknown",
+        "c": "unknown"
+      }
+    },
+    {
+      "route": "execute/check",
+      "source": "let a = g(3); function g(k) { k^2 }; a",
+      "value": 9,
+      "diagnostics": [],
+      "checkDiagnostics": [],
+      "types": {
+        "a": "number",
+        "x": "unknown",
+        "f": "unknown",
+        "bump": "unknown",
+        "c": "unknown"
+      }
+    },
+    {
+      "route": "execute/check",
+      "source": "let a = h(1); let h = (x) => x + 1; a",
+      "value": "a",
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "`h` is used before the statement that declares it in this block",
+            "let a = h(1)",
+            "read-before-declaration"
+          ],
+          "code": "read-before-declaration",
+          "range": [
+            8,
+            9,
+            8
+          ]
+        }
+      ],
+      "checkDiagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "`h` is used before the statement that declares it in this block",
+            "let a = h(1)",
+            "read-before-declaration"
+          ],
+          "code": "read-before-declaration",
+          "range": [
+            8,
+            9,
+            8
+          ]
+        }
+      ],
+      "types": {
+        "a": "unknown",
+        "x": "unknown",
+        "f": "unknown",
+        "bump": "unknown",
+        "c": "unknown"
+      }
+    },
+    {
+      "route": "execute/check",
+      "source": "let f = (n: integer) => n+1; f = (s: string) => s; f(\"a\")",
+      "value": "'a'",
+      "diagnostics": [],
+      "checkDiagnostics": [],
+      "types": {
+        "a": "unknown",
+        "x": "unknown",
+        "f": "function",
+        "bump": "unknown",
+        "c": "unknown"
+      }
+    },
+    {
+      "route": "execute/check",
+      "source": "let f = (n: integer) => n; f = (s: string) => s; f = (n: integer) => n; f(\"a\")",
+      "value": [
+        "Error",
+        [
+          "ErrorCode",
+          "'incompatible-type'",
+          "'integer'",
+          "'string'"
+        ],
+        "'a'",
+        [
+          "ErrorTrace",
+          [
+            "ErrorFrame",
+            "'f'",
+            1
+          ]
+        ]
+      ],
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "expected `integer`, got `string` at `a`",
+            "f(\"a\")",
+            "incompatible-type"
+          ],
+          "code": "incompatible-type",
+          "range": [
+            74,
+            77,
+            74
+          ],
+          "notes": [
+            {
+              "message": "`f` has signature `(n: integer) -> integer`; argument 1 is `n: integer`"
+            },
+            {
+              "message": "`f` is defined here",
+              "range": [
+                4,
+                5
+              ]
+            }
+          ]
+        }
+      ],
+      "checkDiagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "expected `integer`, got `string` at `a`",
+            "f(\"a\")",
+            "incompatible-type"
+          ],
+          "code": "incompatible-type",
+          "range": [
+            74,
+            77,
+            74
+          ],
+          "notes": [
+            {
+              "message": "`f` has signature `(n: integer) -> integer`; argument 1 is `n: integer`"
+            },
+            {
+              "message": "`f` is defined here",
+              "range": [
+                4,
+                5
+              ]
+            }
+          ]
+        }
+      ],
+      "types": {
+        "a": "unknown",
+        "x": "unknown",
+        "f": "function",
+        "bump": "unknown",
+        "c": "unknown"
+      }
+    },
+    {
+      "route": "execute/check",
+      "source": "let n = 0; let bump = () => do { n = n + 1; n }; [bump(), bump(), n]",
+      "value": [
+        "List",
+        1,
+        2,
+        2
+      ],
+      "diagnostics": [],
+      "checkDiagnostics": [],
+      "types": {
+        "a": "unknown",
+        "x": "unknown",
+        "f": "unknown",
+        "bump": "function",
+        "c": "unknown"
+      }
+    },
+    {
+      "route": "execute/check",
+      "source": "let z = \"a\"+1; 5",
+      "value": 5,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "expected `number`, got `string` at `a`",
+            "\"a\" + 1",
+            "incompatible-type"
+          ],
+          "code": "incompatible-type",
+          "range": [
+            8,
+            11,
+            8
+          ]
+        },
+        {
+          "severity": "error",
+          "message": [
+            "runtime-error",
+            "expected `number`, got `string` at `a`",
+            "in Add argument 1",
+            "incompatible-type"
+          ],
+          "range": [
+            8,
+            11
+          ]
+        }
+      ],
+      "checkDiagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "expected `number`, got `string` at `a`",
+            "\"a\" + 1",
+            "incompatible-type"
+          ],
+          "code": "incompatible-type",
+          "range": [
+            8,
+            11,
+            8
+          ]
+        }
+      ],
+      "types": {
+        "a": "unknown",
+        "x": "unknown",
+        "f": "unknown",
+        "bump": "unknown",
+        "c": "unknown"
+      }
+    },
+    {
+      "route": "execute/check",
+      "source": "const c=1; c=2; c",
+      "value": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "cannot assign a value to the constant `c`",
+            "c := 2",
+            "constant-assignment"
+          ],
+          "code": "constant-assignment",
+          "range": [
+            11,
+            14,
+            11
+          ],
+          "notes": [
+            {
+              "message": "`c` is declared constant here",
+              "range": [
+                0,
+                9
+              ]
+            }
+          ]
+        }
+      ],
+      "checkDiagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "cannot assign a value to the constant `c`",
+            "c := 2",
+            "constant-assignment"
+          ],
+          "code": "constant-assignment",
+          "range": [
+            11,
+            14,
+            11
+          ],
+          "notes": [
+            {
+              "message": "`c` is declared constant here",
+              "range": [
+                0,
+                9
+              ]
+            }
+          ]
+        }
+      ],
+      "types": {
+        "a": "unknown",
+        "x": "unknown",
+        "f": "unknown",
+        "bump": "unknown",
+        "c": "integer"
+      }
+    },
+    {
+      "route": "execute/check",
+      "source": "let x=1; let x=2; x",
+      "value": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "variable redeclaration: x",
+            "let x = 2",
+            "variable-redeclaration"
+          ],
+          "code": "variable-redeclaration",
+          "range": [
+            9,
+            16,
+            9
+          ]
+        }
+      ],
+      "checkDiagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "variable redeclaration: x",
+            "let x = 2",
+            "variable-redeclaration"
+          ],
+          "code": "variable-redeclaration",
+          "range": [
+            9,
+            16,
+            9
+          ]
+        }
+      ],
+      "types": {
+        "a": "unknown",
+        "x": "number",
+        "f": "unknown",
+        "bump": "unknown",
+        "c": "unknown"
+      }
+    },
+    {
+      "route": "execute/check",
+      "source": "function f(x) {x+1}; f",
+      "value": "f",
+      "diagnostics": [],
+      "checkDiagnostics": [],
+      "types": {
+        "a": "unknown",
+        "x": "unknown",
+        "f": "(x: unknown) -> number",
+        "bump": "unknown",
+        "c": "unknown"
+      }
+    },
+    {
+      "route": "execute/check",
+      "source": "let x = 5; x",
+      "value": 5,
+      "diagnostics": [],
+      "checkDiagnostics": [],
+      "types": {
+        "a": "unknown",
+        "x": "number",
+        "f": "unknown",
+        "bump": "unknown",
+        "c": "unknown"
+      }
+    },
+    {
+      "route": "execute/check",
+      "source": "let f: (integer) -> integer = (x) => x+1; f(2)",
+      "value": 3,
+      "diagnostics": [],
+      "checkDiagnostics": [],
+      "types": {
+        "a": "unknown",
+        "x": "unknown",
+        "f": "(integer) -> integer",
+        "bump": "unknown",
+        "c": "unknown"
+      }
+    },
+    {
+      "route": "same-engine-rerun",
+      "source": "let value=1; value",
+      "value": 1,
+      "diagnostics": [],
+      "type": "number"
+    },
+    {
+      "route": "same-engine-rerun",
+      "source": "let value=\"text\"; value",
+      "value": "'text'",
+      "diagnostics": [],
+      "type": "string"
+    },
+    {
+      "route": "same-engine-rerun",
+      "source": "value=2; value",
+      "value": "'text'",
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "`value` has the type `string`, and the value has the type `2`",
+            "value := 2",
+            "assignment-type-mismatch"
+          ],
+          "code": "assignment-type-mismatch",
+          "range": [
+            0,
+            7,
+            0
+          ]
+        }
+      ],
+      "type": "string"
+    },
+    {
+      "route": "canonical-order",
+      "source": "let x=1; function f(x) { x+1 }; type alias Pair = tuple<number, number>; f(2)",
+      "raw": [
+        "Program",
+        [
+          "Declare",
+          "x",
+          [
+            "Dictionary",
+            [
+              "KeyValuePair",
+              "value",
+              1
+            ]
+          ]
+        ],
+        [
+          "DefineFunction",
+          "f",
+          [
+            "Function",
+            [
+              "Block",
+              [
+                "Add",
+                "x",
+                1
+              ]
+            ],
+            "x"
+          ]
+        ],
+        [
+          "DeclareType",
+          "Pair",
+          {
+            "str": "tuple<number, number>"
+          },
+          [
+            "Dictionary",
+            [
+              "KeyValuePair",
+              "alias",
+              "True"
+            ]
+          ]
+        ],
+        [
+          "f",
+          2
+        ]
+      ],
+      "canonical": [
+        "Program",
+        [
+          "DeclareType",
+          "Pair",
+          "'tuple<number, number>'",
+          {
+            "dict": {
+              "alias": true
+            }
+          }
+        ],
+        [
+          "DefineFunction",
+          "f",
+          [
+            "Function",
+            [
+              "Block",
+              [
+                "Add",
+                "x",
+                1
+              ]
+            ],
+            "x"
+          ]
+        ],
+        [
+          "Declare",
+          "x",
+          {
+            "dict": {
+              "value": 1
+            }
+          }
+        ],
+        [
+          "f",
+          2
+        ]
+      ]
+    },
+    {
+      "route": "execute-extra",
+      "source": "const W=5; function f(k=W) {k+1}; f()",
+      "value": [
+        "f"
+      ],
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "expected a literal default: a default value is a constant: write a number, a string, a boolean, `[]`, `{}`, a constant (a library constant or a symbol declared constant) or a symbol that the parameter type lists, or pass the argument at `Optional(k, W)`",
+            "(k = W) => do {k + 1}",
+            "expected-a-literal-default"
+          ],
+          "code": "expected-a-literal-default",
+          "range": [
+            22,
+            25,
+            22
+          ]
+        },
+        {
+          "severity": "error",
+          "message": [
+            "runtime-error",
+            "expected a literal default: a default value is a constant: write a number, a string, a boolean, `[]`, `{}`, a constant (a library constant or a symbol declared constant) or a symbol that the parameter type lists, or pass the argument at `Optional(k, W)`",
+            "in DefineFunction argument 2",
+            "expected-a-literal-default"
+          ],
+          "range": [
+            22,
+            25
+          ]
+        }
+      ]
+    },
+    {
+      "route": "execute-extra",
+      "source": "function f(k=W) {k+1}; const W=5; f()",
+      "value": [
+        "f"
+      ],
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "expected a literal default: a default value is a constant: write a number, a string, a boolean, `[]`, `{}`, a constant (a library constant or a symbol declared constant) or a symbol that the parameter type lists, or pass the argument at `Optional(k, W)`",
+            "(k = W) => do {k + 1}",
+            "expected-a-literal-default"
+          ],
+          "code": "expected-a-literal-default",
+          "range": [
+            11,
+            14,
+            11
+          ]
+        },
+        {
+          "severity": "error",
+          "message": [
+            "runtime-error",
+            "expected a literal default: a default value is a constant: write a number, a string, a boolean, `[]`, `{}`, a constant (a library constant or a symbol declared constant) or a symbol that the parameter type lists, or pass the argument at `Optional(k, W)`",
+            "in DefineFunction argument 2",
+            "expected-a-literal-default"
+          ],
+          "range": [
+            11,
+            14
+          ]
+        }
+      ]
+    },
+    {
+      "route": "execute-extra",
+      "source": "let n=0; let bump: () scope -> number = () => do {n=n+1;n}; [bump(),bump(),n]",
+      "value": [
+        "List",
+        1,
+        2,
+        2
+      ],
+      "diagnostics": []
+    },
+    {
+      "route": "execute-extra",
+      "source": "let x = k; let k=2; x",
+      "value": "x",
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "`k` is used before the statement that declares it in this block",
+            "let x = k",
+            "read-before-declaration"
+          ],
+          "code": "read-before-declaration",
+          "range": [
+            8,
+            9,
+            8
+          ]
+        }
+      ]
+    },
+    {
+      "route": "execute-extra",
+      "source": "do { let a = 1; a = \"x\"; a }",
+      "value": [
+        "Error",
+        [
+          "ErrorCode",
+          "'assignment-type-mismatch'",
+          "'a'",
+          "'number'",
+          "'string'"
+        ],
+        [
+          "ErrorTrace",
+          [
+            "ErrorFrame",
+            "'Block'",
+            2
+          ]
+        ]
+      ],
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "`a` has the type `number`, and the value has the type `string`",
+            "do {let a = 1; a := \"x\"; a}",
+            "assignment-type-mismatch"
+          ],
+          "code": "assignment-type-mismatch",
+          "range": [
+            16,
+            23,
+            16
+          ]
+        }
+      ]
+    },
+    {
+      "route": "execute-extra",
+      "source": "let s=0; s=s+0.5; s",
+      "value": 0.5,
+      "diagnostics": []
+    },
+    {
+      "route": "serialize-roundtrip",
+      "source": "a; 2",
+      "serialized": "a\n2"
+    },
+    {
+      "route": "serialize-roundtrip",
+      "source": "",
+      "serialized": ""
+    },
+    {
+      "route": "serialize-roundtrip",
+      "source": "2x+1",
+      "serialized": "2x + 1"
+    },
+    {
+      "route": "binder-sites-api",
+      "source": "sum(k^2, k, 1, n)",
+      "value": [
+        {
+          "name": "k",
+          "operands": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      ]
+    },
+    {
+      "route": "execute-extra",
+      "source": "5; function f(x) { x+1 }",
+      "value": 5,
+      "diagnostics": []
+    },
+    {
+      "route": "execute-extra",
+      "source": "let x = 5; x = x + 3; x",
+      "value": 8,
+      "diagnostics": []
+    },
+    {
+      "route": "check-only-extra",
+      "source": "parallel for k in [1] { log(k) }; function log(x) console { print(x) }",
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "parallel-effect",
+            "console"
+          ],
+          "range": [
+            22,
+            32
+          ]
+        }
+      ]
+    },
+    {
+      "route": "frozen-before-change-control",
+      "source": "let a = 1; a = \"x\"; a",
+      "value": "'x'",
+      "diagnostics": []
+    },
+    {
+      "route": "frozen-before-change-control",
+      "source": "let a = h(1); let h = (x) => x + 1; a",
+      "value": "a",
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "`h` is used before the statement that declares it in this block",
+            "let a = h(1)",
+            "read-before-declaration"
+          ],
+          "code": "read-before-declaration",
+          "range": [
+            8,
+            9,
+            8
+          ]
+        }
+      ]
+    },
+    {
+      "route": "frozen-before-change-control",
+      "source": "const W=5; function f(k=W) {k+1}; f()",
+      "value": 6,
+      "diagnostics": []
+    }
+  ]
+}

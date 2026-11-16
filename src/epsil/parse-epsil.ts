@@ -107,19 +107,19 @@ export function parseEpsil(
     isLibraryFunction: options?.isLibraryFunction,
   });
 
-  const value: MathJsonExpression | null = parser.parseProgram({
+  const value: MathJsonExpression = parser.parseProgram({
     program: true,
-  });
+  }) ?? { fn: ['Program'], sourceOffsets: [0, source.length] };
 
   lintFloorDivisionComments(source, parser.diagnostics);
 
   const diagnostics = analyzeErrors(parser.diagnostics);
-  if (diagnostics.length === 0) return [value ?? 'Nothing', []];
+  if (diagnostics.length === 0) return [value, []];
 
   // Convert the offset-based ranges to line/column origins (as before).
   const origin = new Origin(source, url);
   return [
-    value ?? 'Nothing',
+    value,
     diagnostics.map((x) => ({
       ...x,
       origin: origin.signalOrigin(x.range[2] ?? x.range[1]),

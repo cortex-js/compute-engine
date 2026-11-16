@@ -1,0 +1,34 @@
+{
+  "node": "v26.13.0",
+  "v8": "14.6.202.34-node.40",
+  "mode": "drop",
+  "jit": "off",
+  "count": 400,
+  "source": "do { let captured = 3; (x) => x + captured }",
+  "programSource": "let shared = 3\nshared+1",
+  "beforeHeapBytes": 24741832,
+  "heldHeapBytes": 26962216,
+  "afterDropEngineHeapBytes": 26962472,
+  "afterDropAllHeapBytes": 26962840,
+  "afterInspectorCleanupHeapBytes": 27843080,
+  "checkpoints": [
+    {
+      "programs": 100,
+      "liveHeapBytes": 25937104
+    },
+    {
+      "programs": 200,
+      "liveHeapBytes": 26595744
+    },
+    {
+      "programs": 300,
+      "liveHeapBytes": 26898376
+    },
+    {
+      "programs": 400,
+      "liveHeapBytes": 27020720
+    }
+  ],
+  "allocatedSampleBytes": 287620576,
+  "samplingInterval": 32768
+}

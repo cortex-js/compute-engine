@@ -1926,7 +1926,7 @@ describe('a wide index-slot union is not string evidence', () => {
       ce,
       // `Characters` yields `list<character>` since strings became collections
       // of characters, so the example's annotations move with it.
-      'let digits = Characters("0123456789")\n' +
+      'let digits: list<character> = Characters("0123456789")\n' +
         'isDigit(c: character) = c in digits\n' +
         'function countDigits(cs: list<character>, i: integer) -> tuple<integer, integer> {\n' +
         '  let j = i\n  let n = 0\n' +

@@ -1,3 +1,4 @@
+import { operands, operator } from '../../src/math-json/utils';
 /**
  * Compiled code does not test at run time an argument at a parameter
  * declared with a list or tuple type: a value outside the type gives an
@@ -16,8 +17,11 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * run-time test of the argument is still reachable for a parameter of the
  * root function declared `any`. */
 function runWithAnyV(ce: ComputeEngine, body: unknown, value: unknown) {
+  const block = operator(body as never) === 'Program'
+    ? ['Block', ...operands(body as never)]
+    : body;
   const result = compile(
-    ce.box(['Function', body, ['Typed', 'v', { str: 'any' }]] as never),
+    ce.box(['Function', block, ['Typed', 'v', { str: 'any' }]] as never),
     { to: 'javascript', fallback: false }
   );
   return (result.run as unknown as (v: unknown) => unknown)(value);

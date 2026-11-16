@@ -49,16 +49,16 @@ describe('a declared type admits a value of unknown type', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let xs: list = f(0)');
     expect(ce.box('xs').type.toString()).toBe('list');
-    // A later assignment still refines the element slot from real evidence.
+    // A later Program write retains the declared placeholder contract.
     executeEpsil(ce, 'xs = [1, 2, 3]');
-    expect(ce.box('xs').type.toString()).toBe('list<integer>');
+    expect(ce.box('xs').type.toString()).toBe('list');
   });
 
-  test('a call with a known return type refines as usual', () => {
+  test('a known initializer retains the Program declared placeholder', () => {
     const ce = new ComputeEngine();
     ce.declare('f', '(number) -> list<number>');
     executeEpsil(ce, 'let xs: list = f(0)');
-    expect(ce.box('xs').type.toString()).toBe('list<number>');
+    expect(ce.box('xs').type.toString()).toBe('list');
   });
 
   test('host route: ce.assign matches the Epsil route', () => {

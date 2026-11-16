@@ -64,7 +64,8 @@ describe('CE-43: block local types do not depend on statement order', () => {
 describe('CE-43: an assignment in a match case is an assignment of the block local', () => {
   function run(src: string): { type: string; value: string; sound: boolean } {
     const ce = new ComputeEngine();
-    const [ast, diags] = parseEpsil(src);
+    // These cases exercise Block locals rather than caller-namespace bindings.
+    const [ast, diags] = parseEpsil(`do { ${src} }`);
     expect(diags).toEqual([]);
     const e = ce.box(ast!);
     const type = e.type.toString();
@@ -97,7 +98,7 @@ describe('CE-43: an assignment in a match case is an assignment of the block loc
   test('the compiled while-let loop reads the block local', () => {
     const ce = new ComputeEngine();
     const [ast] = parseEpsil(
-      'let xs = [1, 2, 3]\nlet s = 0\nwhile let [h, ...] = xs { s = s + h; xs = Rest(xs) }\ns'
+      'do { let xs = [1, 2, 3]\nlet s = 0\nwhile let [h, ...] = xs { s = s + h; xs = Rest(xs) }\ns }'
     );
     const result = compile(ce.box(ast!));
     expect(result.success).toBe(true);

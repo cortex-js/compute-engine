@@ -415,7 +415,7 @@ function nodesAt(
   if (scope !== undefined) {
     let node = scope;
     nodes.push(node);
-    while (operator(node) === 'Block') {
+    while (operator(node) === 'Program' || operator(node) === 'Block') {
       const ops = [...operands(node)];
       if (ops.length !== 1) break;
       node = ops[0];
@@ -625,7 +625,7 @@ function isDirectlyAt(
   call: MathJsonExpression
 ): boolean {
   let node = arg;
-  while (node !== call && operator(node) === 'Block') {
+  while (node !== call && (operator(node) === 'Program' || operator(node) === 'Block')) {
     const ops = [...operands(node)];
     if (ops.length !== 1) return false;
     node = ops[0];

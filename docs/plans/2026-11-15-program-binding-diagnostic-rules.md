@@ -1,7 +1,8 @@
 # Program bindings and diagnostic flow: semantic decisions
 
-Status: proposal for acceptance, not implementation authorization. No line budget
-is assigned. This refines the [Program stop report](../scratch/2026-11-15-program-only-coordinator-report.md)
+Status: accepted by the user, with implementation authorized on 2026-11-15.
+No line budget is assigned; the [replacement ledger](2026-11-15-program-accepted-replacement-ledger.md)
+records the revised obligations before production edits. This refines the [Program stop report](../scratch/2026-11-15-program-only-coordinator-report.md)
 under the [approved Program specification](2026-11-12-program-operator-spec.md).
 The objective remains removal of duplicate binding semantics, not a general
 analysis framework or a compiler expansion.
@@ -44,10 +45,10 @@ changed. Earlier retained expressions keep existing CE home-scope/re-resolution
 behavior; no immutable document revisions or snapshot of all captured state is
 promised.
 
-This requires acceptance of removing the current top-level exception: D11 says
+The user accepted removal of the current top-level exception: D11 says
 globals are unchanged, and the Epsil declarations guide currently permits a
 top-level inferred variable to change kind. Making Program variables follow the
-Block rule must be recorded explicitly rather than called diagnostic cleanup.
+Block rule is an explicit semantic change rather than diagnostic cleanup.
 The public type of an unannotated callable variable also changes from an adopted
 literal signature to `function`. That is an observable typing change; preserving
 all current compilation coverage is not promised by this analysis.
@@ -198,17 +199,17 @@ provenance and source mapping remain real analysis. The recommended change
 removes their authority to create or change bindings; it does not claim checking
 needs no analysis.
 
-## Acceptance requested and work performed
+## Accepted scope and prior investigation
 
-Accept the stable Program-variable rule, including repeated function replacement
-and rejection of incompatible nonfunction writes; accept literal annotations as
-properties of values unless the variable explicitly declares a contract; retain
-P7 redeclaration across Programs; and accept conservative diagnostic precision
-when a read-only flow fact cannot be established. Only after these decisions
-should implementation design and cost be revisited. No budget or blanket promise
-of preserving every diagnostic/compiled emission is made here.
+The user accepted the stable Program-variable rule, including repeated function
+replacement and rejection of incompatible nonfunction writes; literal annotations
+as properties of values unless the variable explicitly declares a contract; P7
+redeclaration across Programs; and conservative diagnostic precision when a
+read-only flow fact cannot be established. The implementation is authorized under
+the revised replacement ledger. No budget or blanket promise of preserving every
+diagnostic/compiled emission is made here.
 
-Work performed: current source/reference reads, one bounded executable witness
+Prior investigation: current source/reference reads, one bounded executable witness
 instrument and an independent Sol source review of the semantic/IR assessment.
 No production, test or Tycho edits, compiler experiment, universal analysis service
 or performance claim. Source fingerprints matched around the probe. Suites,

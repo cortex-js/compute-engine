@@ -1,4 +1,5 @@
 import { performance } from 'node:perf_hooks';
+import { isFunction } from '../compute-engine/boxed-expression/type-guards.js';
 
 import type { Expression, ComputeEngine } from '../compute-engine.js';
 import type { Type } from '../common/type/types.js';
@@ -73,10 +74,9 @@ export function evaluateCompiled(
       resolveLibraryNames(parsed.ast, source, engine);
       staticDiagnostics(engine, parsed.ast, source, diagnostics);
       expr = engine.box(parsed.ast);
-      // An empty program (or one of comments only) is `Nothing`, which the
-      // interpreter answers as is and the CLI prints as nothing; there is no
-      // code to generate for it.
-      if (expr.isSame(engine.Nothing)) return expr;
+      // Empty source has no code to generate and prints no value.
+      if (expr.isSame(engine.Nothing) || (isFunction(expr, 'Program') && expr.nops === 0))
+        return engine.Nothing;
     }
 
     // `fallback: false`: a decline throws with the target's reason, instead

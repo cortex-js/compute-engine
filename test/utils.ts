@@ -3,6 +3,7 @@ import { ParsingDiagnostic } from '../src/epsil/diagnostics';
 import { ComputeEngine } from '../src/compute-engine';
 
 import { parseEpsil } from '../src/epsil';
+import { operand, operands, operator } from '../src/math-json/utils';
 import { _BoxedExpression } from '../src/compute-engine/boxed-expression/abstract-boxed-expression';
 import { BoxedType } from '../src/common/type/boxed-type';
 import { BoxedFunction } from '../src/compute-engine/boxed-expression/boxed-function';
@@ -329,13 +330,16 @@ function formatError(errors: ParsingDiagnostic[]): Expression {
 export function validEpsil(s: string): Expression | null {
   const [value, errors] = parseEpsil(s);
   if (errors && errors.length > 0) return formatError(errors);
-  return strip(value);
+  expect(operator(value)).toBe('Program');
+  // Grammar tests compare a single statement's payload. Multiple statements
+  // retain their Program container; Program cardinalities are tested separately.
+  return strip(operands(value).length === 1 ? operand(value, 1)! : value);
 }
 
 export function invalidEpsil(s: string): Expression | null {
   const [value, errors] = parseEpsil(s);
   if (errors && errors.length > 0) return formatError(errors);
-  return ['UnexpectedSuccess', strip(value as Expression) ?? 'Missing'];
+  return ['UnexpectedSuccess', strip(operands(value).length === 1 ? operand(value, 1)! : value) ?? 'Missing'];
 }
 
 function memToString(n: number): string {

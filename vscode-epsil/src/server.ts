@@ -36,7 +36,7 @@ import {
   type JsonDiagnostic,
 } from '../../src/cli/format.js';
 import { compile } from '../../src/compute-engine/compilation/compile-expression.js';
-import { ComputeEngine } from '../../src/epsil.js';
+import { ComputeEngine, resolveLibraryNames } from '../../src/epsil.js';
 import type { MathJsonExpression } from '../../src/math-json/types.js';
 import { operator, operands, symbol } from '../../src/math-json/utils.js';
 import { parseType } from '../../src/common/type/parse.js';
@@ -1665,54 +1665,20 @@ function renderView(text: string, uri: string, view: ViewKind): string {
       ...diagnosticComments(errors, text),
     ].join('\n');
 
+  resolveLibraryNames(ast, text, engine);
   if (view === 'canonical') return renderCanonical(engine, ast);
   return renderCompiled(engine, ast, view);
 }
 
-/**
- * Each top-level statement boxed canonically, in order, on the request's
- * engine — a statement's declarations are visible to the statements after it.
- *
- * Statement by statement, not the whole program at once: the parser wraps a
- * multi-statement program in `Block`, but its statements execute at the TOP
- * level (`executeEpsil` unwraps it), and canonicalizing the `Block` itself
- * would put them in a block scope — where a legal top-level `type` statement
- * is an error.
- */
+/** Canonicalize the same Program that the execution and compilation routes use. */
 function renderCanonical(
   engine: ComputeEngine,
   ast: MathJsonExpression
 ): string {
-  const statements = operator(ast) === 'Block' ? [...operands(ast)] : undefined;
-
-  if (statements === undefined) {
-    // A single statement is not `Block`-wrapped; show its value bare.
-    return [
-      '// Canonical MathJSON (nothing evaluated).',
-      '',
-      prettyJson(engine.box(ast).json),
-    ].join('\n');
-  }
-
-  const entries = statements.map((statement, i) => {
-    try {
-      return '  ' + prettyJson(engine.box(statement).json, '  ');
-    } catch (error) {
-      // Canonicalization is best-effort, as in `epsil check`: a statement the
-      // engine cannot box gets a placeholder instead of crashing the view.
-      const message = (
-        error instanceof Error ? error.message : String(error)
-      ).replaceAll(/\s+/g, ' ');
-      return `  // Statement ${i + 1} could not be canonicalized: ${message}\n  null`;
-    }
-  });
-
   return [
-    '// Canonical MathJSON — one entry per top-level statement (nothing evaluated).',
+    '// Canonical MathJSON (nothing evaluated).',
     '',
-    '[',
-    entries.join(',\n'),
-    ']',
+    prettyJson(engine.box(ast).json),
   ].join('\n');
 }
 

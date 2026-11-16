@@ -16,6 +16,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
+import { operands } from '../../src/math-json/utils';
 
 const RANGE = ['Range', 1, ['Length', 'p'], 1];
 const BODY = ['Join', 'acc', ['List', ['Multiply', 2, ['At', 'p', 'i']]]];
@@ -188,9 +189,18 @@ describe('issue #369: the consumers of a list-building fold compile', () => {
     const ce = engine();
     ce.declare('r', { type: 'collection<any>', inferred: true });
     const program = parseEpsil('let q = Join(r, [1])\nq[1]')[0];
-    const r = compile(ce.box(program), { fallback: false });
+    const r = compile(ce.box(['Block', ...operands(program)]), { fallback: false });
     expect(r.code).toContain('_SYS.arr(q');
     expect(r.run!({ r: [5, 6] })).toBe(5);
+  });
+
+  it('At of an unsettled persistent Program collection declines', () => {
+    const ce = engine();
+    ce.declare('r', { type: 'collection<any>', inferred: true });
+    const program = parseEpsil('let q = Join(r, [1])\nq[1]')[0];
+    expect(() => compile(ce.box(program), { fallback: false })).toThrow(
+      /Could not compile `At`: first operand is not an indexed collection/
+    );
   });
 
   it('At of such a block local declines when the index is not provably numeric', () => {

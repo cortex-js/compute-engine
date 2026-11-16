@@ -420,7 +420,7 @@ describe('Element-wise uses still broadcast', () => {
       )
     ).toBe('[11,31]');
     // The absence marker of an accessor is implicit in its type.
-    expect(ce2.symbol('g').type.toString()).toBe('(t: unknown) -> integer');
+    expect(ce2.symbol('g').type.toString()).toBe('(t: unknown) -> number');
   });
 
   test('a container operand is not a whole use: a point maps over a list', () => {

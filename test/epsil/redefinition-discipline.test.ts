@@ -65,9 +65,14 @@ describe('SAME-SCOPE RE-DECLARATION — `let`/`const` (ruled 2026-09-05)', () =>
   test('a second top-level `let` of one program is reported, with the first site', () => {
     const source = 'let a = 1\nlet a = 2\na';
     const { diagnostics } = checkSource(source);
-    expect(codes(diagnostics)).toEqual(['variable-redeclaration']);
+    expect(codes(diagnostics)).toEqual(['static-type-error']);
     const [d] = diagnostics;
-    expect(d.message).toEqual(['variable-redeclaration', 'a']);
+    expect(d.message).toEqual([
+      'static-type-error',
+      'variable redeclaration: a',
+      'let a = 2',
+      'variable-redeclaration',
+    ]);
     expect(source.slice(d.range[0], d.range[1])).toBe('let a = 2');
     expect(d.notes).toHaveLength(1);
     expect(source.slice(d.notes![0].range[0], d.notes![0].range[1])).toBe(
@@ -77,15 +82,19 @@ describe('SAME-SCOPE RE-DECLARATION — `let`/`const` (ruled 2026-09-05)', () =>
     // program keeps reading the FIRST binding.
     const r = run(source);
     expect(r.value).toBe(1);
-    expect(r.codes).toEqual([['variable-redeclaration', 'a']]);
+    expect(r.codes).toEqual([d.message]);
   });
 
   test('a destructuring `let` counts each pattern leaf', () => {
     expect(
-      codes(checkSource('let (p, q) = (1, 2)\nlet p = 3').diagnostics)
+      checkSource('let (p, q) = (1, 2)\nlet p = 3').diagnostics.map((d) =>
+        staticCodeOf(d.message)
+      )
     ).toEqual(['variable-redeclaration']);
     expect(
-      codes(checkSource('let p = 3\nlet (p, q) = (1, 2)').diagnostics)
+      checkSource('let p = 3\nlet (p, q) = (1, 2)').diagnostics.map((d) =>
+        staticCodeOf(d.message)
+      )
     ).toEqual(['variable-redeclaration']);
     // `_` declares nothing.
     expect(
@@ -190,7 +199,12 @@ describe('SAME-SCOPE RE-DECLARATION — `let`/`const` (ruled 2026-09-05)', () =>
     const source = 'let a = 1\nlet (a, b) = (2, 3)\nlet b = 4\nb';
     const { diagnostics } = checkSource(source);
     expect(diagnostics.map((d) => d.message)).toEqual([
-      ['variable-redeclaration', 'a'],
+      [
+        'static-type-error',
+        'variable redeclaration: a',
+        'let (a, b) = (2, 3)',
+        'variable-redeclaration',
+      ],
     ]);
     expect(run(source).value).toBe(4);
     // The same, inside a block.
@@ -612,14 +626,10 @@ describe('REDEFINITION — the route/origin matrix', () => {
     expect(typeToString(ce._typeRegistry['B'].def!)).toBe('tuple<a: integer>');
   });
 
-  test('a RE-ENTRANT box-route declaration mid-batch is unstamped, and the program may still declare that name', () => {
-    // The hazard: `ce._epsilBatchId` is ambient for the whole `executeEpsil`
-    // extent, so a `ce.box(["DeclareType", …]).evaluate()` a host operator
-    // performs re-entrantly goes through the very same `Declare*` handlers
-    // with a batch live. Stamping on "a batch is set" would make that
-    // registration a statement of the running program, and the program's own
-    // declaration of the name would then falsely report `type-redefinition`.
-    // Stamping keys on the statement ROUTE instead.
+  test('a RE-ENTRANT box-route declaration replaces the canonically earlier type without a stamp', () => {
+    // The host's raw `Declare*` calls are not declarations authored by this
+    // Program, even while its batch is live. They remain unstamped and can
+    // replace a type registered earlier by canonical type-first execution.
     const ce = new ComputeEngine();
     let stampSeenInsideHandler: unknown = 'the handler never ran';
     ce.declare('BoxDeclare', {
@@ -637,10 +647,11 @@ describe('REDEFINITION — the route/origin matrix', () => {
     );
     expect(stampSeenInsideHandler).toBeUndefined();
     expect(ce._protocolRegistry['BTP']).toBeDefined();
-    // The outer program's declarations REPLACE the box-route records.
+    // Program type/protocol declarations run before ordinary statements.
+    // The host's later box-route declaration replaces that registered type.
     expect(codes(diagnostics)).toEqual([]);
     expect(value.toString()).toBe('1');
-    expect(typeToString(ce._typeRegistry['BT'].def!)).toBe('tuple<a: integer>');
+    expect(typeToString(ce._typeRegistry['BT'].def!)).toBe('integer');
   });
 
   test('Epsil statement vs BOX-ROUTE incoming: replaces, and the stamp is cleared', () => {
@@ -930,7 +941,10 @@ describe('the discipline over function clauses', () => {
       expect(codes(diagnostics)).toEqual(['function-redefinition']);
 
       const [d] = diagnostics;
-      expect(d.message).toEqual(['function-redefinition', 'g']);
+      expect(d.message).toEqual([
+        'function-redefinition', 'g',
+        expect.stringContaining('A clause of "g" with this parameter list is already defined'),
+      ]);
       // The PRIMARY range is the second definition…
       expect(source.slice(d.range[0], d.range[1])).toBe('g(n) = 2');
       // …and the note points at the first.
@@ -1021,39 +1035,32 @@ describe('the discipline over function clauses', () => {
     });
   });
 
-  describe('provenance does not outlive the clause it describes', () => {
-    // All three regressions below were found by the dual code review of this
-    // change. Their common cause: the side-channels that describe a LONE clause
-    // are keyed on the definition RECORD, which is mutated in place and so
-    // survives events that discard the clause itself.
-    test('an ASSIGNMENT between two clauses is not a redefinition', () => {
-      // Assignment full-replaces (D6), so the clause defined afterwards is the
-      // first clause of a fresh binding. Reporting it as a redefinition of the
-      // pre-assignment clause both cited a statement whose clause was gone AND
-      // refused to install the new one — the program answered 42.
-      const ce = new ComputeEngine();
-      const { value, diagnostics } = executeEpsil(
-        ce,
-        'f(n) = 1\nf = (x => 42)\nf(m) = 2\nf(0)'
+  describe('clause provenance follows canonical Program order', () => {
+    test('an assignment runs after a refused duplicate clause', () => {
+      // Both function declarations precede the ordinary assignment. The second
+      // clause is refused; the assignment then installs the final function value.
+      const source = 'f(n) = 1\nf = (x => 42)\nf(m) = 2\nf(0)';
+      const { value, diagnostics } = executeEpsil(new ComputeEngine(), source);
+      expect(codes(diagnostics)).toEqual(['function-redefinition']);
+      expect(value.toString()).toBe('42');
+      expect(source.slice(diagnostics[0].range[0], diagnostics[0].range[1])).toBe(
+        'f(m) = 2'
       );
-      expect(diagnostics).toEqual([]);
-      expect(value.toString()).toBe('2');
-      // Both tiers agree: `epsil check` must not report it either.
-      expect(
-        codes(
-          checkSource('f(n) = 1\nf = (x => 42)\nf(m) = 2\nf(0)').diagnostics
-        )
-      ).toEqual([]);
+      const firstSite = diagnostics[0].notes![0].range!;
+      expect(source.slice(firstSite[0], firstSite[1])).toBe('f(n) = 1');
+      expect(codes(checkSource(source).diagnostics)).toEqual([
+        'function-redefinition',
+      ]);
     });
 
-    test('a clause defined after an assignment still installs', () => {
-      const ce = new ComputeEngine();
-      const { value, diagnostics } = executeEpsil(
-        ce,
-        'g(n) = 1\ng = x => 2\ng(n) = 3\ng(9)'
+    test('a textually later duplicate does not overwrite the ordinary assignment', () => {
+      const source = 'g(n) = 1\ng = x => 2\ng(n) = 3\ng(9)';
+      const { value, diagnostics } = executeEpsil(new ComputeEngine(), source);
+      expect(codes(diagnostics)).toEqual(['function-redefinition']);
+      expect(source.slice(diagnostics[0].range[0], diagnostics[0].range[1])).toBe(
+        'g(n) = 3'
       );
-      expect(diagnostics).toEqual([]);
-      expect(value.toString()).toBe('3');
+      expect(value.toString()).toBe('2');
     });
 
     test('a refused duplicate does not disable the static tier for later units', () => {
@@ -1092,8 +1099,8 @@ describe('the discipline over function clauses', () => {
       const source = 'function g(a) {\n  f(y) := y + 1\n  f(x) := x + 3\n  f(a)\n}\n[g(5), g(6)]';
       expect(staticCodes(source)).toEqual(['variable-redeclaration']);
       const r = run(source);
-      expect(r.codes).toContain('static-type-error');
-      expect(r.codes).toContain('runtime-error');
+      // The canonical refusal is reported once, before execution.
+      expect(r.codes).toEqual(['static-type-error']);
       // `g` is not defined, so each call stays unevaluated.
       expect(r.value).toEqual(['List', ['g', 5], ['g', 6]]);
     });

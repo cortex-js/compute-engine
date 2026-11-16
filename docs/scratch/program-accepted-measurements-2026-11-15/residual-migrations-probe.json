@@ -1,0 +1,55 @@
+[
+  {
+    "source": "let xs: list<integer> = [1, 2, 3, 4, 5, 6]\nfor k in [1, 2, 3] { xs = filter(xs, c => c > k) }\nxs",
+    "value": "[4,5,6]",
+    "diagnostics": [],
+    "x": "x",
+    "y": "y",
+    "compiled": {
+      "success": true,
+      "value": [
+        4,
+        5,
+        6
+      ]
+    }
+  },
+  {
+    "source": "let xs = [1, 2, 3, 4, 5, 6]\nfor k in [1, 2, 3] { xs = filter(xs, c => c > k) }\nxs",
+    "value": "[4,5,6]",
+    "diagnostics": [],
+    "x": "x",
+    "y": "y",
+    "compiled": {
+      "success": false,
+      "error": "Could not compile `Filter`: the callback parameter 'c' is annotated 'integer', which the argument type 'number' does not provably satisfy. The compiled callback cannot enforce the annotation, and the interpreter reports a per-element error when it does not hold. The interpreter evaluates it instead."
+    }
+  },
+  {
+    "source": "let x: integer = 1\nlet y: integer = 2\n(x, y) := (7, 4.5)",
+    "value": "Error(ErrorCode(\"assignment-type-mismatch\", \"y\", \"integer\", \"4.5\"))",
+    "diagnostics": [
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "`y` has the type `integer`, and the value has the type `4.5`",
+          "(x, y) := (7, 4.5)",
+          "assignment-type-mismatch"
+        ],
+        "code": "assignment-type-mismatch",
+        "range": [
+          38,
+          56,
+          38
+        ]
+      }
+    ],
+    "x": "1",
+    "y": "2",
+    "compiled": {
+      "success": false,
+      "error": "Could not compile invalid expression: \"{    Declare(x, \"integer\", {\"value\" -> 1});\n     Declare(y, \"integer\", {\"value\" -> 2});\n     Error(ErrorCode(\"assignment-type-mismatch\", \"y\", \"integer\", \"4.5\"))\n    }\""
+    }
+  }
+]

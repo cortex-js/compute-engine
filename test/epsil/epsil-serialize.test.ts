@@ -459,7 +459,7 @@ describe('EPSIL SERIALIZING OPERATORS', () => {
       [['Multiply', ['Multiply', ['Mod', 'x', 2], 'b'], 'a'], 'x % 2 * b * a'],
     ] as const) {
       expect(serializeEpsil(expr)).toBe(text);
-      expect(reparsed(expr)).toEqual(expr);
+      expect(reparsed(expr)).toEqual(['Program', expr]);
     }
     // A flat right operand reads back as another tree of the same value.
     expect(
@@ -586,7 +586,7 @@ describe('EPSIL SERIALIZING OPERATORS', () => {
       // Compare as canonical boxed expressions, since a parsed number is a
       // `{num}` object and the input a plain number.
       expect(
-        ce.box(expr, { form: 'raw' }).isSame(ce.box(c, { form: 'raw' }))
+        ce.box(expr, { form: 'raw' }).isSame(ce.box(['Program', c], { form: 'raw' }))
       ).toBe(true);
     }
   });

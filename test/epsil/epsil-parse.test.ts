@@ -1,4 +1,4 @@
-import { stringValue } from '../../src/math-json/utils';
+import { operand, stringValue } from '../../src/math-json/utils';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import { validEpsil, invalidEpsil } from '../utils';
@@ -8,7 +8,7 @@ describe('EPSIL PARSING RESOURCE LIMITS', () => {
     const source = `${'('.repeat(1_000)}1${')'.repeat(1_000)}`;
     expect(() => parseEpsil(source)).not.toThrow();
     const [value, diagnostics] = parseEpsil(source);
-    expect(value).toBe('Nothing');
+    expect(value).toMatchObject({ fn: ['Program'] });
     expect(diagnostics.map((d) => d.message[0])).toContain(
       'expression-nesting-limit'
     );
@@ -63,11 +63,11 @@ describe('EPSIL PARSING DIRECTIVES', () => {
     });
     expect(diags).toHaveLength(0);
     const symbol =
-      typeof ua === 'string' ? ua : ((ua as { sym?: string }).sym ?? '');
+      typeof operand(ua, 1) === 'string' ? operand(ua, 1) : ((operand(ua, 1) as { sym?: string }).sym ?? '');
     const validUa =
       symbol === 'Nothing' ||
       symbol === 'Undefined' ||
-      stringValue(ua)?.startsWith('Node') === true;
+      stringValue(operand(ua, 1))?.startsWith('Node') === true;
     expect(validUa).toBe(true);
   });
   test('Environment variable directive (host pragmas enabled)', () => {
@@ -75,7 +75,7 @@ describe('EPSIL PARSING DIRECTIVES', () => {
       allowHostPragmas: true,
     });
     expect(diags).toHaveLength(0);
-    expect(stringValue(value)).toBe(process.env['HOME']);
+    expect(stringValue(operand(value, 1))).toBe(process.env['HOME']);
   });
   test('Warning directive', () => {
     // `#warning` no longer writes to the console; it evaluates to its
@@ -90,11 +90,11 @@ describe('EPSIL PARSING DIRECTIVES', () => {
 
 describe('EPSIL PARSING SPACES', () => {
   test('Whitespace', () => {
-    expect(validEpsil(' ')).toBe('Nothing');
-    expect(validEpsil(' \t ')).toBe('Nothing');
-    expect(validEpsil(' \t\n ')).toBe('Nothing');
-    expect(validEpsil(' \u2000 ')).toBe('Nothing');
-    expect(validEpsil(' \u2009 ')).toBe('Nothing');
+    expect(validEpsil(' ')).toEqual(['Program']);
+    expect(validEpsil(' \t ')).toEqual(['Program']);
+    expect(validEpsil(' \t\n ')).toEqual(['Program']);
+    expect(validEpsil(' \u2000 ')).toEqual(['Program']);
+    expect(validEpsil(' \u2009 ')).toEqual(['Program']);
     // Two expressions on one line with no separator (a tab is not a linebreak)
     // is a diagnostic — no silent `Block`-juxtaposition (language-review §2.5).
     expect(validEpsil('1\t2')).toStrictEqual([
@@ -112,15 +112,15 @@ describe('EPSIL PARSING SPACES', () => {
 
 describe('EPSIL PARSING COMMENTS', () => {
   test('Single-line comments', () => {
-    expect(validEpsil('// Comment')).toBe('Nothing');
-    expect(validEpsil('/// Documentation **comment**')).toBe('Nothing');
+    expect(validEpsil('// Comment')).toEqual(['Program']);
+    expect(validEpsil('/// Documentation **comment**')).toEqual(['Program']);
     expect(validEpsil('3.14 // Trailing comment')).toBe(3.14);
-    expect(validEpsil('   // inline // comment')).toBe('Nothing');
+    expect(validEpsil('   // inline // comment')).toEqual(['Program']);
     expect(validEpsil('  12 // inline // comment')).toBe(12);
     expect(validEpsil('  12 // inline 👩🏻‍🎤 // comment')).toBe(12);
     expect(validEpsil('  12 /// inline 👩🏻‍🎤 // documentation')).toBe(12);
     expect(validEpsil('  12 /// inline\n 👩🏻‍🎤 // documentation')).toStrictEqual([
-      'Block',
+      'Program',
       12,
       '👩🏻‍🎤',
     ]);
@@ -209,7 +209,7 @@ describe('EPSIL PARSING NUMBERS', () => {
     // exact decimal string); a hexadecimal or binary integer beyond 2^53 is
     // converted with BigInt. Ordinary literals keep the normalized float
     // spelling asserted above.
-    const num = (s: string) => parseEpsil(s)[0];
+    const num = (s: string) => operand(parseEpsil(s)[0], 1);
     expect(num('2.0000000000000001')).toMatchObject({
       num: '2.0000000000000001',
     });
@@ -2178,15 +2178,12 @@ describe('EPSIL PARSING `do { … }` BLOCK EXPRESSIONS', () => {
     // The `do` keyword turns the brace-delimited statement block (otherwise the
     // `{…}` collection grammar) into a `Block` usable anywhere an expression
     // can. Its value is its final statement. A program whose only statement
-    // is the block is wrapped in a second `Block` (the program), so the block
+    // is the block is wrapped in a `Program`, so the block
     // is a nested scope, as it is after another statement.
     expect(validEpsil('do { let t = 3; t + 1 }')).toStrictEqual([
       'Block',
-      [
-        'Block',
-        ['Declare', 't', ['Dictionary', ['KeyValuePair', 'value', 3]]],
-        ['Add', 't', 1],
-      ],
+      ['Declare', 't', ['Dictionary', ['KeyValuePair', 'value', 3]]],
+      ['Add', 't', 1],
     ]);
   });
 
@@ -2227,19 +2224,19 @@ describe('EPSIL PARSING `do { … }` BLOCK EXPRESSIONS', () => {
 
   test('an empty do-block is `["Block"]`', () => {
     // The outer `Block` is the program (see above).
-    expect(validEpsil('do {}')).toStrictEqual(['Block', ['Block']]);
+    expect(validEpsil('do {}')).toStrictEqual(['Block']);
     expect(validEpsil('y = do {}')).toStrictEqual(['Assign', 'y', ['Block']]);
   });
 
   test('a single-statement do-block', () => {
-    expect(validEpsil('do { 42 }')).toStrictEqual(['Block', ['Block', 42]]);
+    expect(validEpsil('do { 42 }')).toStrictEqual(['Block', 42]);
   });
 
   test('a program whose only statement is a do-block is wrapped once', () => {
-    // Several statements: the program `Block` holds them, and a do-block
+    // Several statements: the `Program` holds them, and a do-block
     // among them is not wrapped again.
     expect(validEpsil('1; do { 2 }')).toStrictEqual([
-      'Block',
+      'Program',
       1,
       ['Block', 2],
     ]);
@@ -2614,7 +2611,7 @@ describe('EPSIL TYPE TEST `is`', () => {
     );
     expect(bare).toEqual({
       fn: [
-        'Block',
+        'Program',
         { sym: 'x' },
         { fn: ['Add', { sym: 'integer' }, { num: '1' }] },
       ],
@@ -2627,7 +2624,7 @@ describe('EPSIL TYPE TEST `is`', () => {
     // variable, not a type test on the previous one.
     expect(parseEpsil('x\nis + 1')[1]).toEqual([]);
     expect(validEpsil('x\nis + 1')).toStrictEqual([
-      'Block',
+      'Program',
       'x',
       ['Add', 'is', 1],
     ]);

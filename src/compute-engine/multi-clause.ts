@@ -4,7 +4,7 @@ import type {
   FunctionSignature,
   Type,
 } from '../common/type/types.js';
-import { checkSameUnitClauseRedefinition } from './declaration-origin.js';
+import { checkSameUnitClauseRedefinition, isSameStatementReRegistration } from './declaration-origin.js';
 import {
   clauseSignatureOf as clauseSignatureOfType,
   noteSingleClauseDeclared,
@@ -39,6 +39,7 @@ import type {
 } from './global-types.js';
 
 import { isFunction, isSymbol } from './boxed-expression/type-guards.js';
+import { _BoxedOperatorDefinition } from './boxed-expression/boxed-operator-definition.js';
 import { BOUND_ROLE, RAW_ROLE } from './library/operand-roles.js';
 import {
   armAdmission,
@@ -866,6 +867,8 @@ export function defineFunctionClause(
   // leaves the installed definition byte-identical — the same discipline the
   // effect-row checks below observe.
   const at = clauses.findIndex((c) =>
+    (c.origin !== undefined && origin !== undefined &&
+      isSameStatementReRegistration(c.origin, origin)) ||
     sameParameterDomain(c.signature, incoming.signature)
   );
   if (at >= 0) {
@@ -1300,7 +1303,11 @@ export function loosenForClauseDefinition(
   // self-call back at `unknown` (§4.3a).
   if (declaredSignatureOf(binding) !== undefined) return undefined;
   const saved = binding.operator;
-  updateDef(ce, id, binding, { signature: 'function' });
+  // This shell is temporary, not an installation. A committed update
+  // would rebuild dependents against the shell and consume the dependency
+  // before the final clause signature exists.
+  (binding as { operator: unknown }).operator =
+    new _BoxedOperatorDefinition(ce, id, { signature: 'function' });
   return () => {
     (binding as { operator: unknown }).operator = saved;
   };

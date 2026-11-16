@@ -1155,7 +1155,8 @@ these rules. `epsil check` reports each one with its own code:
   function it holds. So `function run(fs) { parallel for f in fs { f() } }`
   is accepted. Annotate the parameter with the effects that it admits
   (`function run(fs: list<() any -> any>) { … }`) to have the loop refused.
-  A function that the program defines after the loop is not seen either.
+  A top-level `function` statement is prepared before the loop, even when
+  its definition is written after it, so its effects are checked too.
 - No `break`, `continue` or `return` leaves the loop (`parallel-exit`). An
   inner loop of the body can use `break` and `continue`.
 
@@ -1387,7 +1388,10 @@ introducing keyword is always the collection grammar, so `{ 1, 2 }` on its own
 is a set.
 
 Each block pushes its own lexical scope. A block's value is its last
-expression; an empty block's value is `nothing`:
+expression; an empty block's value is `nothing`. An error stops the block.
+A whole program uses `Program` instead: it stays in its caller's scope,
+prepares types/protocols and functions first, and continues with the next
+top-level statement after an ordinary error:
 
 ```epsil
 if a { }

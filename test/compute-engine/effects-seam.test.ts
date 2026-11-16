@@ -142,6 +142,9 @@ describe('The Function-literal construction seam is the only builder', () => {
       // parallel loop can have only the `random` effect. It RUNS the walk
       // over a literal `Function(body)` built from the raw body and reads the
       // inferred set and `unresolvedHead`; it builds no arrow.
+      // Diagnostic flow reads existing admission/effect rules without building
+      // an arrow or installing it on a binding.
+      'epsil/diagnostic-flow.ts',
       'epsil/parallel-checks.ts',
     ].sort();
 

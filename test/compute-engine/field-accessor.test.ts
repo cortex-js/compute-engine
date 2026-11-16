@@ -1,3 +1,4 @@
+import { operand } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -18,7 +19,7 @@ describe('Epsil `.` grammar', () => {
   test('p.x lowers to Field', () => {
     const [ast, diags] = parseEpsil('p.x');
     expect(diags).toEqual([]);
-    expect(JSON.parse(JSON.stringify(ast)).fn).toEqual([
+    expect(JSON.parse(JSON.stringify(operand(ast, 1))).fn).toEqual([
       'Field',
       { sym: 'p', sourceOffsets: [0, 1] },
       { str: 'x' },
@@ -28,7 +29,7 @@ describe('Epsil `.` grammar', () => {
   test('chains left-associate: a.b.c', () => {
     const [ast, diags] = parseEpsil('a.b.c');
     expect(diags).toEqual([]);
-    const fn = JSON.parse(JSON.stringify(ast)).fn;
+    const fn = JSON.parse(JSON.stringify(operand(ast, 1))).fn;
     expect(fn[0]).toBe('Field');
     expect(fn[2]).toEqual({ str: 'c' });
     expect(fn[1].fn[0]).toBe('Field');
@@ -38,13 +39,13 @@ describe('Epsil `.` grammar', () => {
   test('2.x stays invisible multiplication (the lexer owns the dot)', () => {
     const [ast, diags] = parseEpsil('2.x');
     expect(diags).toEqual([]);
-    expect(JSON.parse(JSON.stringify(ast)).fn[0]).toBe('Multiply');
+    expect(JSON.parse(JSON.stringify(operand(ast, 1))).fn[0]).toBe('Multiply');
   });
 
   test('the range operator is untouched: 1..5', () => {
     const [ast, diags] = parseEpsil('1..5');
     expect(diags).toEqual([]);
-    expect(JSON.parse(JSON.stringify(ast)).fn[0]).toBe('Range');
+    expect(JSON.parse(JSON.stringify(operand(ast, 1))).fn[0]).toBe('Range');
   });
 
   test('the dot must abut the base: `p .x` ends the expression', () => {
@@ -63,17 +64,17 @@ describe('Epsil `.` grammar', () => {
     // (`docs/plans/2026-09-04-protocol-member-dot-call.md`, rule 2).
     const [ast, diags] = parseEpsil('p.x(2)');
     expect(diags).toEqual([]);
-    const fn = JSON.parse(JSON.stringify(ast)).fn;
+    const fn = JSON.parse(JSON.stringify(operand(ast, 1))).fn;
     expect(fn[0]).toBe('MemberCall');
     expect(fn[1]).toMatchObject({ sym: 'p' });
     expect(fn[2]).toEqual({ str: 'x' });
     const ce = new ComputeEngine();
     ce.declare('p', 'record{x: (number) -> number}');
-    expect(ce.box(ast!).toString()).toBe('Apply(Field(p, "x"), 2)');
+    expect(ce.box(ast!).op1.toString()).toBe('Apply(Field(p, "x"), 2)');
     // A parenthesized field read applied to arguments keeps the `Apply`
     // shape at the parse: `(p.x)(2)`.
     const [parenthesized] = parseEpsil('(p.x)(2)');
-    const pfn = JSON.parse(JSON.stringify(parenthesized)).fn;
+    const pfn = JSON.parse(JSON.stringify(operand(parenthesized, 1))).fn;
     expect(pfn[0]).toBe('Apply');
     expect(pfn[1].fn[0]).toBe('Field');
   });

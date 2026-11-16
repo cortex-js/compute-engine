@@ -1,0 +1,4 @@
+{"name": "ce-normal-repeat4", "exitCode": 0, "durationSeconds": 2.649022340774536, "accepted": true}
+{"name": "ce-off-repeat4", "exitCode": 0, "durationSeconds": 2.655426025390625, "accepted": false}
+{"name": "ce-normal-repeat5", "exitCode": 0, "durationSeconds": 2.6551849842071533, "accepted": true}
+{"name": "ce-off-repeat5", "exitCode": 0, "durationSeconds": 2.656769037246704, "accepted": true}

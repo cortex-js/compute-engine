@@ -1,0 +1,685 @@
+
+  ● phase 1: `FlatMap` — R-D2′ result inference › a PROVABLY DISJOINT named callback is rejected at canonicalization
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: false
+    Received: true
+
+      720 |     executeEpsil(ce, 'let wrap = (s: string) => [s]');
+      721 |     const e = ce.box(['FlatMap', 'cs', 'wrap']);
+    > 722 |     expect(e.isValid).toBe(false);
+          |                       ^
+      723 |     expect(e.toString()).toBe(
+      724 |       'FlatMap("cs", Error(ErrorCode("incompatible-type", "(integer) any -> unknown", "(s: string) -> list<string^1>"), "wrap"))'
+      725 |     );
+
+      at Object.<anonymous> (../test/compute-engine/design-d-callback-contract.test.ts:722:23)
+
+
+  ● the static rules: calls, local writes, and checks that cannot decide › rule 2, a call of a variable bound to a function literal has no diagnostic
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 6
+
+    - Array []
+    + Array [
+    +   Array [
+    +     "parallel-effect",
+    +     "any",
+    +   ],
+    + ]
+
+      1068 |     ],
+      1069 |   ])('rule 2, a call of %s has no diagnostic', (_name, source) => {
+    > 1070 |     expect(messages(source)).toEqual([]);
+           |                              ^
+      1071 |   });
+      1072 |
+      1073 |   test('rule 2, library functions and functions written in the pass are valid', () => {
+
+      at ../test/epsil/parallel-for.test.ts:1070:30
+
+  ● the static rules: calls, local writes, and checks that cannot decide › the rules, also the effect rule, apply when the statement cannot be boxed
+
+    expect(received).toBeGreaterThan(expected)
+
+    Expected: > 0
+    Received:   0
+
+      1214 |       'parallel-effect',
+      1215 |     ]);
+    > 1216 |     expect(failures).toBeGreaterThan(0);
+           |                      ^
+      1217 |   });
+      1218 | });
+      1219 |
+
+      at Object.<anonymous> (../test/epsil/parallel-for.test.ts:1216:22)
+
+  ● rule 2: programs that the checker accepts › a pipeline of library functions and a literal
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 6
+
+    - Array []
+    + Array [
+    +   Array [
+    +     "parallel-effect",
+    +     "any",
+    +   ],
+    + ]
+
+      1506 |     ],
+      1507 |   ])('%s', (_name, source, expected) => {
+    > 1508 |     expect(messages(source)).toEqual([]);
+           |                              ^
+      1509 |     const result = run(`${source}\ns`);
+      1510 |     expect(result.diagnostics).toEqual([]);
+      1511 |     expect(result.value.json).toEqual(expected);
+
+      at ../test/epsil/parallel-for.test.ts:1508:30
+
+  ● rule 2: programs that the checker accepts › a library function with a parameter that can be a function (`partition`) is valid in a loop with no accumulator
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 6
+
+    - Array []
+    + Array [
+    +   Array [
+    +     "parallel-effect",
+    +     "any",
+    +   ],
+    + ]
+
+      1542 |     ],
+      1543 |   ])('%s is valid in a loop with no accumulator', (_name, source) => {
+    > 1544 |     expect(messages(source)).toEqual([]);
+           |                              ^
+      1545 |   });
+      1546 | });
+      1547 |
+
+      at ../test/epsil/parallel-for.test.ts:1544:30
+
+  ● rule 2: programs that the checker accepts › a constant that holds a function literal is valid in a loop with no accumulator
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 6
+
+    - Array []
+    + Array [
+    +   Array [
+    +     "parallel-effect",
+    +     "any",
+    +   ],
+    + ]
+
+      1542 |     ],
+      1543 |   ])('%s is valid in a loop with no accumulator', (_name, source) => {
+    > 1544 |     expect(messages(source)).toEqual([]);
+           |                              ^
+      1545 |   });
+      1546 | });
+      1547 |
+
+      at ../test/epsil/parallel-for.test.ts:1544:30
+
+
+  ● Compilation of a consumer of a join over an inferred collection › the result of a call, in a function body
+
+    Failing test passed even though it was supposed to fail. Remove `.failing` to remove error.
+
+      650 |   for (const [name, source] of PROGRAMS) {
+      651 |     const check = name === 'the result of a call' ? test.failing : test;
+    > 652 |     check(`${name}, in a function body`, () => {
+          |     ^
+      653 |       const ce = new ComputeEngine();
+      654 |       const [parsed] = parseEpsil(source);
+      655 |       const program = ce.box(resolveLibraryNames(parsed, source, ce) as never);
+
+      at ../test/compute-engine/spread-literal-result-kind.test.ts:652:5
+      at Object.<anonymous> (../test/compute-engine/spread-literal-result-kind.test.ts:590:1)
+
+
+  ● a write that does not give a list is an error, and the variable keeps its value › a string gives the list that replaceAt gives
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  -  1
+    + Received  + 17
+
+    - Array []
+    + Array [
+    +   Object {
+    +     "code": "assignment-type-mismatch",
+    +     "message": Array [
+    +       "static-type-error",
+    +       "`s` has the type `string`, and the value has the type `list<character | string>`",
+    +       "s[1] := \"z\"",
+    +       "assignment-type-mismatch",
+    +     ],
+    +     "range": Array [
+    +       14,
+    +       24,
+    +       14,
+    +     ],
+    +     "severity": "error",
+    +   },
+    + ]
+
+      189 |   ])('%s gives the list that replaceAt gives', (_name, source, list) => {
+      190 |     const { value, diagnostics } = run(source);
+    > 191 |     expect(diagnostics).toEqual([]);
+          |                         ^
+      192 |     expect(value.json).toEqual(list);
+      193 |   });
+      194 |
+
+      at ../test/epsil/assign-to-list-element.test.ts:191:25
+
+  ● a write that does not give a list is an error, and the variable keeps its value › a tuple gives the list that replaceAt gives
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  -  1
+    + Received  + 17
+
+    - Array []
+    + Array [
+    +   Object {
+    +     "code": "assignment-type-mismatch",
+    +     "message": Array [
+    +       "static-type-error",
+    +       "`t` has the type `tuple<number, number>`, and the value has the type `list<integer>`",
+    +       "t[1] := 5",
+    +       "assignment-type-mismatch",
+    +     ],
+    +     "range": Array [
+    +       15,
+    +       23,
+    +       15,
+    +     ],
+    +     "severity": "error",
+    +   },
+    + ]
+
+      189 |   ])('%s gives the list that replaceAt gives', (_name, source, list) => {
+      190 |     const { value, diagnostics } = run(source);
+    > 191 |     expect(diagnostics).toEqual([]);
+          |                         ^
+      192 |     expect(value.json).toEqual(list);
+      193 |   });
+      194 |
+
+      at ../test/epsil/assign-to-list-element.test.ts:191:25
+
+  ● a write that does not give a list is an error, and the variable keeps its value › a tuple inside the list gives the list that replaceAt gives
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  -  1
+    + Received  + 17
+
+    - Array []
+    + Array [
+    +   Object {
+    +     "code": "assignment-type-mismatch",
+    +     "message": Array [
+    +       "static-type-error",
+    +       "`m` has the type `list<tuple<number, number>>`, and the value has the type `list<list<integer> | tuple<integer, integer>>`",
+    +       "m[1, 1] := 9",
+    +       "assignment-type-mismatch",
+    +     ],
+    +     "range": Array [
+    +       17,
+    +       28,
+    +       17,
+    +     ],
+    +     "severity": "error",
+    +   },
+    + ]
+
+      189 |   ])('%s gives the list that replaceAt gives', (_name, source, list) => {
+      190 |     const { value, diagnostics } = run(source);
+    > 191 |     expect(diagnostics).toEqual([]);
+          |                         ^
+      192 |     expect(value.json).toEqual(list);
+      193 |   });
+      194 |
+
+      at ../test/epsil/assign-to-list-element.test.ts:191:25
+
+  ● a write that does not give a list is an error, and the variable keeps its value › a string position past its last character is out-of-range
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 1
+
+      Array [
+    -   "out-of-range",
+    +   "assignment-type-mismatch",
+      ]
+
+      195 |   test('a string position past its last character is out-of-range', () => {
+      196 |     const { value, diagnostics } = run('let s = "abc"\ns[4] = "z"\ns');
+    > 197 |     expect(diagnostics.map((d) => d.message[3])).toEqual(['out-of-range']);
+          |                                                  ^
+      198 |     expect(value.json).toBe("'abc'");
+      199 |   });
+      200 |
+
+      at Object.<anonymous> (../test/epsil/assign-to-list-element.test.ts:197:50)
+
+
+  ● EPSIL RECURSIVE TYPES › a self-recursive JSON alias › rejects a function with a type error, not a stack overflow
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 1
+    Received length: 0
+    Received array:  []
+
+      1416 |             'not compatible with the declared type "json"'
+      1417 |           );
+    > 1418 |           expect(runtime).toHaveLength(1);
+           |                           ^
+      1419 |           expect(String(runtime[0].message[1])).toContain('expected `');
+      1420 |           for (const d of r.diagnostics)
+      1421 |             expect(String(d.message[1])).not.toContain('call stack');
+
+      at Object.<anonymous> (../test/epsil/declare-type.test.ts:1418:27)
+
+  ● EPSIL RECURSIVE TYPES › a mutually recursive JSON alias › rejects a function with a type error, not a stack overflow
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 1
+    Received length: 0
+    Received array:  []
+
+      1416 |             'not compatible with the declared type "json"'
+      1417 |           );
+    > 1418 |           expect(runtime).toHaveLength(1);
+           |                           ^
+      1419 |           expect(String(runtime[0].message[1])).toContain('expected `');
+      1420 |           for (const d of r.diagnostics)
+      1421 |             expect(String(d.message[1])).not.toContain('call stack');
+
+      at Object.<anonymous> (../test/epsil/declare-type.test.ts:1418:27)
+
+
+  ● binderSitesOf from the Epsil entry › in "let L: any = [1, 2]\nlimit(total(L)*t, 1)" the limit binds t
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "total([1,2])"
+    Received: "t * total(1)"
+
+      195 |   ])('in %j the limit binds %s', (source, name, value) => {
+      196 |     expect(limitSitesOf(source)).toEqual([{ name, operands: [0] }]);
+    > 197 |     expect(valueOf(source)).toBe(value);
+          |                             ^
+      198 |   });
+      199 |
+      200 |   test.each([
+
+      at ../test/epsil/binder-sites-of.test.ts:197:29
+
+  ● binderSitesOf from the Epsil entry › in "const a = 5\nlet r = g()\nfunction g() { f() }\nfunction f() { limit(a + h, 1) }" the declaration does not tell
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 8
+
+    - Array []
+    + Array [
+    +   Object {
+    +     "name": "h",
+    +     "operands": Array [
+    +       0,
+    +     ],
+    +   },
+    + ]
+
+      259 |     ],
+      260 |   ])('in %j the declaration does not tell', (source, names) => {
+    > 261 |     expect(limitSitesOf(source)).toEqual(
+          |                                  ^
+      262 |       names.map((name) => ({ name, operands: [0] }))
+      263 |     );
+      264 |   });
+
+      at ../test/epsil/binder-sites-of.test.ts:261:34
+
+  ● binderSitesOf from the Epsil entry › in "const a = 5\nlet r = g()\ntype T = integer\nfunction g() { limit(a + h, 1) }" the declaration does not tell
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 8
+
+    - Array []
+    + Array [
+    +   Object {
+    +     "name": "h",
+    +     "operands": Array [
+    +       0,
+    +     ],
+    +   },
+    + ]
+
+      259 |     ],
+      260 |   ])('in %j the declaration does not tell', (source, names) => {
+    > 261 |     expect(limitSitesOf(source)).toEqual(
+          |                                  ^
+      262 |       names.map((name) => ({ name, operands: [0] }))
+      263 |     );
+      264 |   });
+
+      at ../test/epsil/binder-sites-of.test.ts:261:34
+
+  ● binderSitesOf from the Epsil entry › the engine values of the programs whose declaration does not tell
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "1 + total([1,2])"
+    Received: "h + total(1)"
+
+      268 |     // declaration: `a` is a list at the call, and `L` is a variable when
+      269 |     // the body is boxed.
+    > 270 |     expect(valueOf('let a = 5\na = [1, 2]\nlimit(total(a) + h, 1)')).toBe(
+          |                                                                      ^
+      271 |       '1 + total([1,2])'
+      272 |     );
+      273 |     expect(
+
+      at Object.<anonymous> (../test/epsil/binder-sites-of.test.ts:270:70)
+
+  ● binderSitesOf from the Epsil entry › a `const` in a function body boxed early is a variable
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 8
+    + Received  + 1
+
+    - Array [
+    -   Object {
+    -     "name": "h",
+    -     "operands": Array [
+    -       0,
+    -     ],
+    -   },
+    - ]
+    + Array []
+
+      287 |     const source =
+      288 |       'const h = 5\nlet r = g()\nfunction g() { limit(sin(h)/h, 0) }\nr';
+    > 289 |     expect(limitSitesOf(source)).toEqual([{ name: 'h', operands: [0] }]);
+          |                                  ^
+      290 |     expect(valueOf(source)).toBe('1');
+      291 |     // A nested `function f` in the body of `g` names the top-level `f`, as
+      292 |     // the runner reads it: the runner prepares `f`, and the engine binds `a`.
+
+      at Object.<anonymous> (../test/epsil/binder-sites-of.test.ts:289:34)
+
+
+  ● EPSIL MULTI-CLAUSE — accumulation and dispatch › a declared function type is a contract with and without an initial value
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 3
+    + Received  + 1
+
+      Array [
+        "let h: (x: integer) -> integer = (x: integer) => x
+      function h(u: string) { 1 }
+      h(u: \"a\")",
+    -   Array [
+    -     "invalid-clause-definition",
+    -   ],
+    +   Array [],
+      ]
+
+      375 |       const { value, diagnostics } = executeEpsil(new ComputeEngine(), source);
+      376 |       const runtime = diagnostics.filter((d) => d.message[0] === 'runtime-error');
+    > 377 |       expect([source, runtime.map((d) => d.message.at(-1))]).toEqual([
+          |                                                              ^
+      378 |         source,
+      379 |         ['invalid-clause-definition'],
+      380 |       ]);
+
+      at Object.<anonymous> (../test/epsil/multi-clause.test.ts:377:62)
+
+
+  ● assignment to a property is a STORE › the assignment evaluates to the ASSIGNED VALUE, not the setter result
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "\"Steve\""
+    Received: "\"Nothing\""
+
+      246 |     // discarded; the store is what it is called for.
+      247 |     const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
+    > 248 |     expect(value(ce, 'p.name = "Steve"')).toBe('"Steve"');
+          |                                           ^
+      249 |   });
+      250 |
+      251 |   test('the write is a MODIFICATION: every alias of `p` sees it', () => {
+
+      at Object.<anonymous> (../test/compute-engine/protocol-properties.test.ts:248:43)
+
+  ● assignment to a property is a STORE › a NON-variable root STORES: `xs[1].tag = v` reaches the element
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "\"z\""
+    Received: "\"Nothing\""
+
+      313 | let a = Box(t: "a")
+      314 | let xs = [a, Box(t: "b")]`);
+    > 315 |     expect(value(ce, 'xs[1].tag = "z"')).toBe('"z"');
+          |                                          ^
+      316 |     expect(value(ce, 'xs[1].tag')).toBe('"z"');
+      317 |     expect(value(ce, 'a')).toBe('Box(t: "z")');
+      318 |   });
+
+      at Object.<anonymous> (../test/compute-engine/protocol-properties.test.ts:315:42)
+
+  ● P6: the qualified property form `p.(P.name)` › qualified ASSIGNMENT stores through the named protocol
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "\"x\""
+    Received: "\"Nothing\""
+
+      416 |     // unqualified `p.name = v` means — restricted to the protocol named.
+      417 |     const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
+    > 418 |     expect(value(ce, 'p.(Nameable.name) = "x"')).toBe('"x"');
+          |                                                  ^
+      419 |     expect(value(ce, 'p')).toBe('Person(n: "x", age: 42)');
+      420 |     expect(value(ce, 'p.(Nameable.name) := "y"')).toBe('"y"');
+      421 |     expect(value(ce, 'p.name')).toBe('"y"');
+
+      at Object.<anonymous> (../test/compute-engine/protocol-properties.test.ts:418:50)
+
+  ● an unqualified write resolves against the RECEIVER, every time › the write follows the receiver, not any earlier resolution
+
+    TypeCompatibilityError: Symbol "x"
+    |   The value "Fancily(v: "b")" of type "Fancily" is not compatible with the type "Plainly"
+
+      533 |       ? `The value holds the failed element "${failed.toString()}". The type "${declaredType}" does not admit an error at the position of this element`
+      534 |       : undefined);
+    > 535 |   return new TypeCompatibilityError(
+          |          ^
+      536 |     symbol,
+      537 |     declaredType,
+      538 |     onlyFailed ? undefined : value.type,
+
+      at declaredTypeError (../src/compute-engine/boxed-expression/type-compatibility-error.ts:535:10)
+      at assertAssignableValueDef (../src/compute-engine/engine-declarations.ts:4788:52)
+      at assignNamedValue (../src/compute-engine/engine-declarations.ts:4069:21)
+      at ../src/compute-engine/engine-declarations.ts:3266:5
+      at whileDefining (../src/compute-engine/boxed-expression/declared-parameter-result.ts:492:12)
+      at assignFn (../src/compute-engine/engine-declarations.ts:3265:23)
+      at ComputeEngine.assign (../src/compute-engine/index.ts:4111:24)
+      at Object.<anonymous> (../test/compute-engine/protocol-properties.test.ts:557:8)
+
+  ● an unqualified write resolves against the RECEIVER, every time › a receiver no protocol answers for is refused
+
+    TypeCompatibilityError: Symbol "x"
+    |   The value "[1,2]" of type "vector<integer^2>" is not compatible with the type "Plainly"
+
+      533 |       ? `The value holds the failed element "${failed.toString()}". The type "${declaredType}" does not admit an error at the position of this element`
+      534 |       : undefined);
+    > 535 |   return new TypeCompatibilityError(
+          |          ^
+      536 |     symbol,
+      537 |     declaredType,
+      538 |     onlyFailed ? undefined : value.type,
+
+      at declaredTypeError (../src/compute-engine/boxed-expression/type-compatibility-error.ts:535:10)
+      at assertAssignableValueDef (../src/compute-engine/engine-declarations.ts:4788:52)
+      at assignNamedValue (../src/compute-engine/engine-declarations.ts:4069:21)
+      at ../src/compute-engine/engine-declarations.ts:3266:5
+      at whileDefining (../src/compute-engine/boxed-expression/declared-parameter-result.ts:492:12)
+      at assignFn (../src/compute-engine/engine-declarations.ts:3265:23)
+      at ComputeEngine.assign (../src/compute-engine/index.ts:4111:24)
+      at Object.<anonymous> (../test/compute-engine/protocol-properties.test.ts:571:8)
+
+  ● an unqualified write resolves against the RECEIVER, every time › …and the Epsil spelling of that qualified write agrees
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "\"Ada\""
+    Received: "\"Nothing\""
+
+      645 |     // The protocol it does conform to writes, and the unqualified spelling —
+      646 |     // which names no protocol — finds it too.
+    > 647 |     expect(value(ce, 'p.(Renameable.name) = "Ada"')).toBe('"Ada"');
+          |                                                      ^
+      648 |     expect(value(ce, 'p.name = "Grace"')).toBe('"Grace"');
+      649 |     expect(value(ce, 'p')).toBe('Person(n: "Grace")');
+      650 |   });
+
+      at Object.<anonymous> (../test/compute-engine/protocol-properties.test.ts:647:54)
+
+  ● a `set` handler’s result is DISCARDED › an ANNOTATED result of an unrelated type registers fine
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "\"Ada\""
+    Received: "\"Nothing\""
+
+      688 |     expect(ce._protocolRegistry.Nameable.conformances).toHaveLength(1);
+      689 |     expect(run(ce, 'let p = Person(n: "Bob", age: 42)')).toEqual([]);
+    > 690 |     expect(value(ce, 'p.name = "Ada"')).toBe('"Ada"');
+          |                                         ^
+      691 |     expect(value(ce, 'p')).toBe('Person(n: "Ada", age: 42)');
+      692 |   });
+      693 |
+
+      at Object.<anonymous> (../test/compute-engine/protocol-properties.test.ts:690:41)
+
+  ● a `set` handler’s result is DISCARDED › a handler that returns the receiver reads the same way
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "\"Ada\""
+    Received: "\"Nothing\""
+
+      698 |       )
+      699 |     );
+    > 700 |     expect(value(ce, 'p.name = "Ada"')).toBe('"Ada"');
+          |                                         ^
+      701 |     expect(value(ce, 'p')).toBe('Person(n: "Ada", age: 42)');
+      702 |   });
+      703 |
+
+      at Object.<anonymous> (../test/compute-engine/protocol-properties.test.ts:700:41)
+
+  ● a `set` handler’s result is DISCARDED › an UNANNOTATED handler stays trusted at registration (P28)
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "\"Ada\""
+    Received: "\"Nothing\""
+
+      707 |     // unchanged — and the assignment still answers the value assigned.
+      708 |     const ce = engineFor(person('set name(self: Self, v: string) { v }'));
+    > 709 |     expect(value(ce, 'p.name = "Ada"')).toBe('"Ada"');
+          |                                         ^
+      710 |     expect(value(ce, 'p')).toBe('Person(n: "Bob", age: 42)');
+      711 |   });
+      712 | });
+
+      at Object.<anonymous> (../test/compute-engine/protocol-properties.test.ts:709:41)
+
+  ● a WRITE checks the value against the property’s type › the store refuses it, and the handler is not invoked
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "\"Ada\""
+    Received: "\"Nothing\""
+
+      746 |     expect(value(ce, 'p')).toBe('Person(n: "Bob", age: 42)');
+      747 |     // …and a well-typed one still reaches the handler.
+    > 748 |     expect(value(ce, 'p.name = "Ada"')).toBe('"Ada"');
+          |                                         ^
+      749 |     expect(value(ce, 'p')).toBe('Person(n: "Ada", age: 42)');
+      750 |     expect(invoked).toHaveLength(1);
+      751 |   });
+
+      at Object.<anonymous> (../test/compute-engine/protocol-properties.test.ts:748:41)
+
+  ● a WRITE checks the value against the property’s type › an EPSIL setter refuses it as well
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "\"Steve\""
+    Received: "\"Nothing\""
+
+      778 |     expect(errorCode(value(ce, 'p.name = 42'))).toBe('incompatible-type');
+      779 |     expect(value(ce, 'p')).toBe('Person(n: "Bob", age: 42)');
+    > 780 |     expect(value(ce, 'p.name = "Steve"')).toBe('"Steve"');
+          |                                           ^
+      781 |     expect(value(ce, 'p')).toBe('Person(n: "Steve", age: 42)');
+      782 |   });
+      783 | });
+
+      at Object.<anonymous> (../test/compute-engine/protocol-properties.test.ts:780:43)
+
+
+  ● EPSIL `where` ANNOTATIONS (D13: full-literal positions) › a function-literal body INSTALLS, and instantiates per call
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "(x) => x"
+    Received: "\"Nothing\""
+
+      108 |     const r = run('let f: (T) -> T where T = x => x');
+      109 |     expect(r.diagnostics).toEqual([]);
+    > 110 |     expect(r.value).toBe('(x) => x');
+          |                     ^
+      111 |
+      112 |     // Both instantiations, on ONE engine — no cross-call pollution.
+      113 |     expect(run('let f: (T) -> T where T = x => x\nf(5)')).toMatchObject({
+
+      at Object.<anonymous> (../test/epsil/type-variables-epsil.test.ts:110:21)
+
+Test Suites: 9 failed, 8 passed, 17 total
+Tests:       31 failed, 1179 passed, 1210 total
+Snapshots:   0 total
+Time:        5.902 s, estimated 6 s
+Ran all test suites matching test/epsil/member-call.test.ts|test/epsil/protocols.test.ts|test/compute-engine/protocol-dispatch.test.ts|test/compute-engine/spread-literal-result-kind.test.ts|test/epsil/declare-type.test.ts|test/compute-engine/protocol-properties.test.ts|test/compute-engine/design-d-callback-contract.test.ts|test/epsil/multi-clause.test.ts|test/compute-engine/field-accessor.test.ts|test/epsil/type-conformance-multiline.test.ts|test/epsil/type-variables-epsil.test.ts|test/epsil/binder-sites-of.test.ts|test/epsil/parallel-for.test.ts|test/epsil/parameter-default-values.test.ts|test/epsil/hold-functions.test.ts|test/epsil/std-qualified-name.test.ts|test/epsil/assign-to-list-element.test.ts.

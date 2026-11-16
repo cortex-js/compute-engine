@@ -1,0 +1,38 @@
+{
+  "cwd": "/tmp/wt-program-accepted-sol",
+  "command": [
+    "timeout",
+    "-k",
+    "30",
+    "600",
+    "npx",
+    "jest",
+    "-w",
+    "4",
+    "--watchman=false",
+    "--",
+    "test/epsil/binder-sites-of.test.ts",
+    "test/epsil/library-names.test.ts",
+    "test/epsil/named-arguments-parse.test.ts",
+    "test/epsil/generic-function-sugar.test.ts",
+    "test/epsil/parameter-default-values.test.ts",
+    "test/epsil/lambda-arrow.test.ts",
+    "test/epsil/paren-operand-source-range.test.ts",
+    "test/epsil/single-block-program.test.ts"
+  ],
+  "exitCode": 1,
+  "durationSeconds": 2.4778056144714355,
+  "lock": "box-lock: held by YOU \u2014 codex-program-accepted:test-consumers \u2014 Program parser test-consumer migrations \u2014 ~15 min left\n",
+  "files": [
+    "test/epsil/binder-sites-of.test.ts",
+    "test/epsil/library-names.test.ts",
+    "test/epsil/named-arguments-parse.test.ts",
+    "test/epsil/generic-function-sugar.test.ts",
+    "test/epsil/parameter-default-values.test.ts",
+    "test/epsil/lambda-arrow.test.ts",
+    "test/epsil/paren-operand-source-range.test.ts",
+    "test/epsil/single-block-program.test.ts"
+  ],
+  "inputsChangedDuringRun": [],
+  "sourceStable": true
+}

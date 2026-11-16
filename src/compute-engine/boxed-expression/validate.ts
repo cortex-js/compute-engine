@@ -3013,17 +3013,13 @@ function evidenceGuardedNarrow(
   // and with none it is valueless.
   const def = resolvedValueDefinition(op);
   const held = def?.value;
-  const staticEvidence =
-    held === undefined && def !== undefined
-      ? ce._staticAssignmentEvidence?.get(def)
-      : undefined;
-  if (held === undefined && staticEvidence === undefined) {
+  if (held === undefined) {
     // A valueless symbol is admitted; in check-only mode it is admitted
     // without the narrowing write.
     if (!noInference) op._infer(() => param, 'narrow');
     return 'narrowed';
   }
-  const evidenceType = held !== undefined ? held.type.type : staticEvidence!;
+  const evidenceType = held.type.type;
   return isSubtype(evidenceType, param) ? 'admitted' : 'fall-through';
 }
 
@@ -3176,48 +3172,6 @@ function overlapAdmission(op: Expression, param: Type): boolean {
   // parameter exempt from this admission, which the overlap deferral
   // decides). The call then failed only when it was evaluated.
   if (pointComponentRefuted(op, param)) return false;
-  // Epsil pre-pass assignment evidence (the ROADMAP entry "Epsil static
-  // evidence diagnostics lost to overlap admission", paths 1 and 2, both
-  // ruled 2026-08-23): during the static pre-pass a symbol carries the type
-  // of its last top-level assignment as evidence — a concrete literal's
-  // exact type (`1.5`, not the widened `real`) or the right-hand
-  // side's static type (`number`, for `x = g()`). The pre-pass is a LINTER
-  // and is deliberately stricter than engine admission: evidence that does
-  // not FIT the parameter is refused here, at boxing, which is what the
-  // pre-pass mints its diagnostic from — the way TypeScript flags code that
-  // would run. So `let x; x = g(); k(x)` with `g: () -> number` and
-  // `k: (integer) -> integer` flags, because the program as written assigns
-  // a `number` where an `integer` is required, even though `g()` could well
-  // return 5. The fit test is `isSubtype`, matching the held-value verdict
-  // in `evidenceGuardedNarrow` so a narrow-eligible slot and this one
-  // cannot disagree.
-  //
-  // This is lint-only: `_staticAssignmentEvidence` is non-undefined only
-  // while a pre-pass runs, so the clause is inert everywhere else, and the
-  // EXECUTED program is unaffected — by the time the call boxes during
-  // execution the symbol HOLDS its value and a concrete value decides
-  // admission exactly.
-  if (isSymbol(op)) {
-    const def = op.valueDefinition;
-    const evidence =
-      def === undefined
-        ? undefined
-        : op.engine._staticAssignmentEvidence?.get(def);
-    if (evidence !== undefined && !isSubtype(evidence, param)) return false;
-  }
-  // A collection operand overlaps a collection parameter through the empty
-  // collection alone when their element types are disjoint: the empty list
-  // is a `list<list<number>>` and a `collection<number>`. Such an operand
-  // is not admitted: `Mean(R)` with `R: list<list<number>>` is refused when
-  // it is boxed, as `Histogram(R, 2)` is by `overlapsForDeferredValidation`
-  // and as the matrix literal is (ROADMAP CE-402, after CE-13).
-  // `couldMatchNonEmpty` (`common/type/subtype.ts`) reads the arms of both
-  // types and requires two collection arms to match on their elements.
-  // The test applies when an arm of the operand is a collection: the arms of
-  // a union and the definition of a transparent alias are read the same way
-  // (`nonEmptyQuestionArms`), so `list<list<number>> | list<string>` and an
-  // alias of `list<list<number>>` are refused too. An operand with a scalar
-  // arm that can match (`list<number> | number`) is still admitted.
   const opType = op.type.type;
   if (
     nonEmptyQuestionArms(opType).some(isCollectionTypeNode) &&
@@ -4034,6 +3988,8 @@ export interface ValidateArgumentsInternals {
    * already typed what it types, and the seam is a gate on the declaration,
    * not a second source of types. */
   noInference?: boolean;
+  /** Additional absence diagnostics at a read-only source-check use. */
+  diagnostic?: boolean;
   /** Ask threadable numeric slots to reject a collection whose static element
    * carrier is provably non-numeric (`validateThreadableOperand`). Set for a
    * `broadcastable: true` library operator on both operator routes — the
@@ -4144,32 +4100,7 @@ function acceptsNaNArgument(
   );
 }
 
-/**
- * Whether the argument `op` is refused at the annotated parameter `param` of
- * a function literal because it is absent (user decision 2026-09-30).
- *
- * At evaluation, a function literal answers an `incompatible-type` error for
- * an absent argument (`Missing`) at a parameter annotated with a type that
- * is not numeric, is not a point and has no `missing` member (`apply()`,
- * `function-utils.ts`; at a numeric or a point parameter the call is
- * `Missing`). Two cases are refused here, at boxing:
- *
- * - The argument is typed `missing`: it is absent on every route, so the
- *   call is an error whenever it runs.
- * - The argument is typed `missing | T` and an Epsil static pre-pass is
- *   running. The engine admits such an argument: its value is usually
- *   present, and in a LaTeX document there is no way to write the absent
- *   case out (`P[i]`, `First(xs)` and a restricted point are all typed
- *   `missing | T`). An Epsil author can write it out
- *   (`first(xs) ?? fallback`, `isMissing`, or a parameter annotated
- *   `T | missing`), so the pre-pass, which is a linter and is stricter than
- *   the engine, reports the argument. `_staticAssignmentEvidence` is defined
- *   only while a pre-pass runs.
- *
- * A `missing` member inside a collection or a tuple (an absent cell) does
- * not count: only the argument as a whole. A parameter typed `unknown` is a
- * placeholder, not an annotation, and refuses nothing.
- */
+
 export function refusesAbsentArgument(
   ce: ComputeEngine,
   op: Expression,
@@ -4177,21 +4108,9 @@ export function refusesAbsentArgument(
   internals: ValidateArgumentsInternals | undefined,
   index?: number
 ): boolean {
-  // A library operator whose evaluation refuses an absent operand at this
-  // position (user decision P2, 2026-10-21) is reported by the Epsil static
-  // check on the same terms as a function literal's annotated parameter
-  // (user decision P3): the rule is one rule, read from the definition. The
-  // library case is a static report only, never a boxing refusal, so it
-  // applies only while a pre-pass runs (`_staticAssignmentEvidence` is
-  // defined then). An operand typed `missing` is usually a symbol that holds
-  // the absent value, and a canonical form must not depend on the value
-  // assigned to a symbol: refused at boxing, `ToUpperCase(w)` would keep its
-  // error after `w` was assigned a string. Outside the pre-pass the engine
-  // defers to evaluation, whose gate refuses the absent operand when the
-  // call runs (`boxed-function.ts`).
   const libraryRefuses =
     index !== undefined &&
-    ce._staticAssignmentEvidence !== undefined &&
+    internals?.diagnostic === true &&
     internals?.refusesAbsentAt?.(index) === true;
   if (internals?.enforcesParameterAnnotations !== true && !libraryRefuses)
     return false;
@@ -4204,7 +4123,7 @@ export function refusesAbsentArgument(
     return false;
   const t = resolveTypeAlias(op.type.type);
   if (t === 'missing') return true;
-  if (ce._staticAssignmentEvidence === undefined) return false;
+  if (internals?.diagnostic !== true) return false;
   if (typeof t === 'string' || t.kind !== 'union') return false;
   return t.types.some((arm) => resolveTypeAlias(arm) === 'missing');
 }

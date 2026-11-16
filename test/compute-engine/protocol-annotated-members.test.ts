@@ -193,8 +193,8 @@ type Box = object{n: integer} is Sized {
     // canonical handler, so the static pre-pass sees this refusal and reports
     // it with a source snippet before the evaluation pass reports it again.
     // That is the house convention for the code — `let x: integer = "abc"`
-    // produces the same static+runtime pair (asserted just below) — not
-    // something specific to implementation blocks. The top-level case is the
+    // has separate static+runtime reporting paths. Ordinary Declare refusals
+    // below suppress their duplicate runtime report. The top-level case is the
     // quiet one: its contract is checked when the definition is INSTALLED, at
     // evaluation, so canonicalization has nothing to report.
     expect(inBlock.diagnostics).toEqual([
@@ -203,17 +203,15 @@ type Box = object{n: integer} is Sized {
     ]);
   });
 
-  test('the static+runtime pair matches every other `incompatible-type`', () => {
-    // The control for the comment above: an ordinary declared-type violation
-    // reports on both channels too, so the implementation-block refusal is not
-    // louder than its peers.
+  test('an ordinary declared-type refusal is reported once', () => {
+    // Ordinary Declare refusals use the common declaration source metadata
+    // to suppress duplicate runtime reporting. The implementation-block
+    // diagnostics above retain their separate existing paths.
     const { diagnostics } = run(`let x: integer = "abc"
 1`);
-    expect(diagnostics).toHaveLength(2);
+    expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]).toContain('static-type-error');
     expect(diagnostics[0]).toContain('incompatible-type');
-    expect(diagnostics[1]).toContain('runtime-error');
-    expect(diagnostics[1]).toContain('incompatible-type');
   });
 
   test('a refused member registers NOTHING — the conformance as a whole is rejected', () => {

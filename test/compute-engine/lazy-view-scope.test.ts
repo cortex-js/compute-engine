@@ -1020,7 +1020,7 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
     ],
     [
       'a view in a dictionary',
-      'let r = 0; for d in [3, 6] { if d == 3 { r = {"a" -> Map(x => x + d, Range(1, Infinity))} } }; ListFrom(Take(r["a"], 2))',
+      'let r: any = 0; for d in [3, 6] { if d == 3 { r = {"a" -> Map(x => x + d, Range(1, Infinity))} } }; ListFrom(Take(r["a"], 2))',
       ['List', 4, 5],
     ],
     // The callback reads the local `d` through the activation of the block,
@@ -1056,7 +1056,7 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
     // activation of the block when an element is computed: `total = 20`.
     [
       'a field reads a local of the scope of its object when an element is computed',
-      'type Box = object{v: any}; let r = 0; if true { let total = 0; let o = Box(v: []); for i in [1, 2] { o.v = Map(x => x + total, Range(1, Infinity)); total = total + 10 }; r = ListFrom(Take(o.v, 2)) }; r',
+      'type Box = object{v: any}; let r: any = 0; if true { let total = 0; let o = Box(v: []); for i in [1, 2] { o.v = Map(x => x + total, Range(1, Infinity)); total = total + 10 }; r = ListFrom(Take(o.v, 2)) }; r',
       ['List', 21, 22],
     ],
     // An alias in an inner scope names the object of `o`: the view reads
@@ -1075,7 +1075,7 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
     // not rewritten.
     [
       'a view under a node that stays unevaluated',
-      'let r = 0; for d in [3, 6] { if d == 3 { r = ListFrom(TakeWhile(Range(1, Infinity), x => x < d)) } }; r',
+      'let r: any = 0; for d in [3, 6] { if d == 3 { r = ListFrom(TakeWhile(Range(1, Infinity), x => x < d)) } }; r',
       [
         'ListFrom',
         [
@@ -1120,7 +1120,7 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
     // The inner `f` holds `5`, not a function. The view read after the
     // blocks gives the same elements as the view read in the inner block.
     const blocks = (read: string) =>
-      `let h = []; let r = 0; if true { let f = x => x + 1; if true { let f = 5; h = Map(x => f(x), Range(1, Infinity))${read} } }`;
+      `let h = []; let r: any = 0; if true { let f = x => x + 1; if true { let f = 5; h = Map(x => f(x), Range(1, Infinity))${read} } }`;
     for (const debug of [false, true])
       expect(
         run(`${blocks('')}; ListFrom(Take(h, 2))`, debug)
@@ -1143,7 +1143,7 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
     for (const debug of [false, true])
       expect(
         run(
-          `let h = 0; for d in [3, 6] { if d == 3 { ${lets.join('; ')}; h = a${DEPTH} } }; ListFrom(Take(h${path}, 2))`,
+          `let h: any = 0; for d in [3, 6] { if d == 3 { ${lets.join('; ')}; h = a${DEPTH} } }; ListFrom(Take(h${path}, 2))`,
           debug
         )
       ).toEqual(['List', 4, 5]);

@@ -461,9 +461,9 @@ describe('Phase 0a: a VALUE-bound intermediate propagates the derived union', ()
     expect(opDef(ce, 'h').effects).toEqual(['random']);
   });
 
-  test('an INFERRED arrow of a value-bound literal follows a later conformance (CE-62.2)', () => {
-    // `g` is a `let` binding: its type is inferred from the literal it
-    // holds, so the effects of its arrow are not a contract. The literal
+  test('a stored literal follows a later conformance without refining its variable contract (CE-62.2)', () => {
+    // `g` has a coarse function contract. The effects of the literal it
+    // holds remain derived from its body. The literal
     // already draws, so its arrow is not bare, and a caller read that arrow
     // as stated and froze it. A later conformance whose `speak` writes an
     // outer variable makes `g`, and its callers, `scope` functions too.
@@ -471,7 +471,8 @@ describe('Phase 0a: a VALUE-bound intermediate propagates the derived union', ()
     executeEpsil(ce, EPSIL_PROTOCOL);
     executeEpsil(ce, EPSIL_PURE_CONFORMANCE);
     executeEpsil(ce, 'let g = (x) => [Random(), speak(x)]');
-    expect(ce.symbol('g').type.toString()).toBe(
+    expect(ce.symbol('g').type.toString()).toBe('function');
+    expect(ce.symbol('g').value!.type.toString()).toBe(
       '(x: unknown) random -> list<real | string>'
     );
     executeEpsil(ce, 'function h(x: string) { g(x) }');
@@ -486,13 +487,12 @@ describe('Phase 0a: a VALUE-bound intermediate propagates the derived union', ()
     expect(opDef(ce, 'speak').effects).toEqual(['scope']);
     // Before: `h` stayed `random`, and `g` kept its first arrow.
     expect(opDef(ce, 'h').effects).toEqual(['random', 'scope']);
-    expect(ce.symbol('g').type.toString()).toBe(
+    expect(ce.symbol('g').type.toString()).toBe('function');
+    expect(ce.symbol('g').value!.type.toString()).toBe(
       '(x: unknown) random scope -> list<real | string>'
     );
-    // The arrow of the binding agrees with the arrow of the literal.
-    expect(ce.symbol('g').value!.type.toString()).toBe(
-      ce.symbol('g').type.toString()
-    );
+    // Effects belong to the stored value; the variable's contract stays coarse.
+    expect(ce.symbol('g').type.toString()).toBe('function');
   });
 
   test('a STATED declared arrow stays a trusted contract — the stored literal is not consulted', () => {

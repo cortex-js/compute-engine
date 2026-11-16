@@ -1,3 +1,4 @@
+import { isFunction } from '../boxed-expression/type-guards.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import { entrySource } from './function-purity.js';
 import type { Expression, JSSource } from '../global-types.js';
@@ -183,6 +184,9 @@ export function compile<
   options?: CompileExpressionOptions<T>
 ): CompilationResult<T, R> {
   const ce = expr.engine;
+  // A compiled Program owns its emitted locals, exactly as a Block does.
+  // Reuse the existing source analyses and emitter on that representation.
+  if (isFunction(expr, 'Program')) expr = ce._fn('Block', expr.ops);
   if (
     jsProfilePublicDefault() &&
     publicDepth === 0 &&

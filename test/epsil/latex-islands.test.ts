@@ -1,3 +1,4 @@
+import { operand } from '../../src/math-json/utils';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { ComputeEngine } from '../../src/compute-engine';
 import { MathJsonExpression } from '../../src/math-json/types';
@@ -29,19 +30,19 @@ describe('EPSIL LATEX ISLANDS (stub parser)', () => {
 
   test('an island is spliced in as a primary', () => {
     const [value] = parseEpsil('$\\frac{1}{2}$', undefined, stub);
-    expect(bare(value)).toStrictEqual(['LatexStub', '\\frac{1}{2}']);
+    expect(bare(operand(value, 1)!)).toStrictEqual(['LatexStub', '\\frac{1}{2}']);
   });
 
   test('the spliced node carries the island Epsil-source range', () => {
     const source = '$x+1$';
     const [value] = parseEpsil(source, undefined, stub);
     // The whole `$…$` span, including the delimiters.
-    expect((value as any).sourceOffsets).toStrictEqual([0, source.length]);
+    expect((operand(value, 1) as any).sourceOffsets).toStrictEqual([0, source.length]);
   });
 
   test('an island composes inside a larger expression', () => {
     const [value] = parseEpsil('2 * $\\pi$', undefined, stub);
-    expect(bare(value)).toStrictEqual([
+    expect(bare(operand(value, 1)!)).toStrictEqual([
       'Multiply',
       2,
       ['LatexStub', '\\pi'],
@@ -80,6 +81,6 @@ describe('EPSIL LATEX ISLANDS (real engine)', () => {
       parseLatex,
     });
     expect(diags).toHaveLength(0);
-    expect(bare(value)).toStrictEqual(['Multiply', 2, ['Divide', 1, 2]]);
+    expect(bare(operand(value, 1)!)).toStrictEqual(['Multiply', 2, ['Divide', 1, 2]]);
   });
 });

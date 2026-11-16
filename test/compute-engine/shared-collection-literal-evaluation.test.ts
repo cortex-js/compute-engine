@@ -27,7 +27,7 @@ function run(ce: ComputeEngine, src: string): string {
 // depth, is not kept, and such a chain is still evaluated once per path.
 function chainInLoop(n: number, wrap: (x: string) => string): string {
   const lines = [
-    'let h = 0',
+    'let h: any = 0',
     'for d in [3, 6] {',
     '  let a0 = map(x => x + d, Range(1, 1000))',
   ];

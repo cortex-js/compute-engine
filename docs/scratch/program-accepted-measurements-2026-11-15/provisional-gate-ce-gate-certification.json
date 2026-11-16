@@ -1,0 +1,11 @@
+{
+  "frozenArmChanges": [],
+  "frozenArmsUnchanged": true,
+  "worktreeChanges": [
+    "epsil/docs/types.md",
+    "epsil/docs/examples.md"
+  ],
+  "worktreeProductionChanges": [],
+  "endRecorderExit": 1,
+  "endRecorderExplanation": "The first end recorder asserted on harmless worktree markdown drift before writing; a follow-up read-only capture retained full frozen-arm identities. Both frozen arms are byte-identical through the timing window. Candidate is provisional because coordinator identified a subsequent required serialization fix."
+}

@@ -1,0 +1,56 @@
+{
+  "changedFiles": 5,
+  "insertions": 57,
+  "deletions": 28,
+  "files": [
+    {
+      "file": "test/compute-engine/property-store-retirement.test.ts",
+      "insertions": 23,
+      "deletions": 14,
+      "beforeSha256": "7713d1ca5b980942f116dcea8e6c94e4a57ded7aa0377af1ad6229c513f75e9f",
+      "afterSha256": "7e6324794c3f5a9cf6656ec657c95ebc91b67a6052a6108fdc11f6b89d99db53",
+      "mainWorktreeIdentical": true
+    },
+    {
+      "file": "test/compute-engine/object-store.test.ts",
+      "insertions": 9,
+      "deletions": 6,
+      "beforeSha256": "3e39ef8d2d0a0d69e89b734701a687994bf79f3a5cae13d337e56178b4d1f1b1",
+      "afterSha256": "02eb4c4547c648337f3bc657a392301dab52a8e7f4cada9680454b0836574415",
+      "mainWorktreeIdentical": true
+    },
+    {
+      "file": "test/compute-engine/protocol-type-redefinition.test.ts",
+      "insertions": 7,
+      "deletions": 4,
+      "beforeSha256": "7092395be0747f12dccefda7ca42bdefc31b243d40e7381393ce7b5ed898b130",
+      "afterSha256": "e2824f6cba71c6cef574d79d17a869d4700a64f2fbf1d0046f921ee6b2b8d5cf",
+      "mainWorktreeIdentical": true
+    },
+    {
+      "file": "test/compute-engine/protocol-dispatch-compile.test.ts",
+      "insertions": 0,
+      "deletions": 0,
+      "beforeSha256": "23ca50277d6c9ed35f40205387c925efece5842d9472e5d96724d58fb31e2b63",
+      "afterSha256": "23ca50277d6c9ed35f40205387c925efece5842d9472e5d96724d58fb31e2b63",
+      "mainWorktreeIdentical": true
+    },
+    {
+      "file": "test/compute-engine/recursive-application-memo-across-evaluations.test.ts",
+      "insertions": 1,
+      "deletions": 1,
+      "beforeSha256": "0a42336044cafc7ef393f23cb6e0494ff82de52296b7425635a6ba771898c167",
+      "afterSha256": "2a6f5e2c7a093701cea93f30577bd115a998e23bc35d3871949c7298657b477b",
+      "mainWorktreeIdentical": true
+    },
+    {
+      "file": "test/epsil/comprehensions.test.ts",
+      "insertions": 17,
+      "deletions": 3,
+      "beforeSha256": "30f9005ccf35b6e3e94496c11cc3e9f1b27447fe2847c1abb56b29be062d927b",
+      "afterSha256": "5d5942bc56e5532eca55a3f8e8942ebca72bd1f18e7361e13f82b9bbba5c45da",
+      "mainWorktreeIdentical": true
+    }
+  ],
+  "validation": "Coordinator root driver includes all six; no duplicate subagent run. Source/runtime results pending."
+}

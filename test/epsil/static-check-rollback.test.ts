@@ -88,7 +88,7 @@ describe('STATIC CHECK — engine state rolls back', () => {
     expect(def.value.type.toString()).toBe(typeBefore);
   });
 
-  test('a pinned `:=` signature registration is undone', () => {
+  test('legacy callable checking preserves the caller binding', () => {
     // The pass registers the signature a `f := ⟨annotated literal⟩` statement
     // pins so LATER statements check named calls against it
     // (`registerPinnedSignature`, static-diagnostics.ts). When the name
@@ -106,7 +106,9 @@ describe('STATIC CHECK — engine state rolls back', () => {
       ce,
       'g := (x: number, y: string) => x + 3\ng(y: "ok", x: 1)'
     );
-    expect(diagnostics).toHaveLength(0);
+    expect(diagnostics.map((d) => d.code)).toEqual([
+      'argument-names-unavailable', 'argument-names-unavailable',
+    ]);
     expect(ce.lookupDefinition('g')).toBe(def);
     expect(def.value.type.toString()).toBe(typeBefore);
 

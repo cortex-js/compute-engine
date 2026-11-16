@@ -1,0 +1,12 @@
+{"name": "ce-normal-repeat1", "exitCode": 0, "durationSeconds": 2.6400041580200195, "accepted": true}
+{"name": "tycho-normal-repeat1", "exitCode": 0, "durationSeconds": 11.774317979812622, "accepted": false}
+{"name": "ce-off-repeat1", "exitCode": 0, "durationSeconds": 3.098536968231201, "accepted": true}
+{"name": "tycho-off-repeat1", "exitCode": 0, "durationSeconds": 11.76980185508728, "accepted": false}
+{"name": "ce-normal-repeat2", "exitCode": 0, "durationSeconds": 2.645185947418213, "accepted": false}
+{"name": "tycho-normal-repeat2", "exitCode": 0, "durationSeconds": 11.83288311958313, "accepted": false}
+{"name": "ce-off-repeat2", "exitCode": 0, "durationSeconds": 2.654568910598755, "accepted": false}
+{"name": "tycho-off-repeat2", "exitCode": 0, "durationSeconds": 11.794021129608154, "accepted": false}
+{"name": "ce-normal-repeat3", "exitCode": 0, "durationSeconds": 3.1038825511932373, "accepted": false}
+{"name": "tycho-normal-repeat3", "exitCode": 0, "durationSeconds": 12.748296976089478, "accepted": false}
+{"name": "ce-off-repeat3", "exitCode": 0, "durationSeconds": 3.553992986679077, "accepted": false}
+{"name": "tycho-off-repeat3", "exitCode": 0, "durationSeconds": 13.688577890396118, "accepted": false}

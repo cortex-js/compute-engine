@@ -192,7 +192,7 @@ let counts = listFrom(map(d => count(circles, c => c[4] == d), 1..12))
   // Expected failure: the compilation declines at a destructuring
   // declaration, whose value is a call typed `unknown`. Tracked in
   // docs/plans/2026-11-11-bound-once-evidence/step1-state.md.
-  test.failing('numeric accumulator and predicate source contracts compile the 224 circles', () => {
+  test('numeric accumulator and predicate source contracts compile the 224 circles', () => {
     const annotated = PROGRAM.replace(
       'function fill(p, q, r, depth, acc) {',
       'function fill(p, q, r, depth, acc: list<tuple<number, number, number, number>>) {'

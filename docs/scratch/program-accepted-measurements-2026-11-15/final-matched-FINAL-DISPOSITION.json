@@ -1,0 +1,22 @@
+{
+  "boundedAuthorizedMatrixComplete": true,
+  "allTimingEnvelopesComplete": false,
+  "missingTimingRatios": [
+    {
+      "mode": "off",
+      "missing": {
+        "baseline": {
+          "heat-spread": 1,
+          "burning-ship": 1
+        },
+        "candidate": {}
+      }
+    }
+  ],
+  "allOriginalCorrectnessControlsPassed": true,
+  "all36CalibratedHeapByteControlsValid": true,
+  "performanceNoRegressionPassed": false,
+  "sourceBuildDepsUnchanged": true,
+  "candidateProductionBuildsExecuted": 1,
+  "disposition": "Report measured costs and missing off timing ratios for coordinator review; no optimization or additional quiet-window loop authorized."
+}

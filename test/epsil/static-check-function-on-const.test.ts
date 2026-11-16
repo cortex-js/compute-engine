@@ -4,15 +4,13 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
 // A `function` statement (or a `name(params) = body` definition) for a name
-// that an earlier top-level `const` declaration bound. The run time refuses
-// to add a clause to a constant (`invalid-clause-definition`), and the
-// binding keeps its value. The static check (`epsil check`) reports the
-// refusal at the `function` statement, as a `static-type-error` that carries
-// the engine's error code, with a note on the `const` declaration.
+// that an earlier top-level `const` declaration bound. The later declaration
+// is refused as `variable-redeclaration`, and the binding keeps its value.
+// The static check (`epsil check`) reports the refusal at the later statement,
+// as a `static-type-error` with a note on the first declaration.
 //
 
-const DESCRIPTION = (name: string) =>
-  `invalid clause definition — "${name}" is a constant; it cannot be redefined`;
+const DESCRIPTION = (name: string) => `variable redeclaration: ${name}`;
 
 function check(source: string) {
   return checkSource(source).diagnostics.map((d) => ({
@@ -34,11 +32,11 @@ describe('EPSIL CHECK: A FUNCTION STATEMENT ON A CONST BINDING', () => {
           'static-type-error',
           DESCRIPTION('c'),
           'function c(x) {x}',
-          'invalid-clause-definition',
+          'variable-redeclaration',
         ],
         at: 'function c(x) { x }',
         notes: [
-          { message: '`c` is declared constant here', at: 'const c = 1' },
+          { message: 'first declared here', at: 'const c = 1' },
         ],
       },
     ]);
@@ -50,7 +48,7 @@ describe('EPSIL CHECK: A FUNCTION STATEMENT ON A CONST BINDING', () => {
     expect(d.length).toBe(1);
     expect(d[0].message[0]).toBe('static-type-error');
     expect(d[0].message[1]).toBe(DESCRIPTION('k'));
-    expect(d[0].message[3]).toBe('invalid-clause-definition');
+    expect(d[0].message[3]).toBe('variable-redeclaration');
     expect(d[0].at).toBe('k(x) = x * 2');
     expect(d[0].notes[0].at).toBe('const k = (n) => n');
   });
@@ -74,7 +72,7 @@ describe('EPSIL CHECK: A FUNCTION STATEMENT ON A CONST BINDING', () => {
     ]);
     const stat = r.diagnostics[0];
     expect(stat.message[1]).toBe(DESCRIPTION('c'));
-    expect(stat.message[3]).toBe('invalid-clause-definition');
+    expect(stat.message[3]).toBe('variable-redeclaration');
     expect(source.slice(stat.range[0], stat.range[1])).toBe(
       'function c(x) { x }'
     );
@@ -94,11 +92,16 @@ describe('EPSIL CHECK: NO REPORT', () => {
       '2'
     );
   });
+});
 
-  test('a const whose initializer does not match its type binds nothing', () => {
-    // The run time refuses the `const`, so the `function` statement is then
-    // the first definition of `c`.
-    const d = check('const c: string = 1\nfunction c(x) { x }\nc(2)');
-    expect(d.map((x) => x.message[3])).toEqual(['incompatible-type']);
+describe('EPSIL CHECK: A REFUSED FIRST DECLARATION', () => {
+  test('a bad initializer does not free the name for a second declaration', () => {
+    const source = 'const c: string = 1\nfunction c(x) { x }\nc(2)';
+    const expectedCodes = ['variable-redeclaration', 'incompatible-type'];
+    expect(check(source).map((d) => d.message[3])).toEqual(expectedCodes);
+    const result = executeEpsil(new ComputeEngine(), source);
+    expect(result.diagnostics.map((d) => d.message[3])).toEqual(expectedCodes);
+    // Neither the invalid initializer nor the refused function installs a value.
+    expect(result.value.json).toEqual(['c', 2]);
   });
 });

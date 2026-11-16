@@ -1,0 +1,26 @@
+{
+  "files": [
+    "test/compute-engine/property-store-retirement.test.ts",
+    "test/compute-engine/object-store.test.ts",
+    "test/compute-engine/protocol-type-redefinition.test.ts",
+    "test/compute-engine/recursive-application-memo-across-evaluations.test.ts",
+    "test/epsil/comprehensions.test.ts"
+  ],
+  "sha256": "33828b51fddb5ecf2e7eaf4a27e6676857e798f90ffdcaa9b01e757c2cf45dc6",
+  "before": {
+    "test/compute-engine/property-store-retirement.test.ts": "7713d1ca5b980942f116dcea8e6c94e4a57ded7aa0377af1ad6229c513f75e9f",
+    "test/compute-engine/object-store.test.ts": "3e39ef8d2d0a0d69e89b734701a687994bf79f3a5cae13d337e56178b4d1f1b1",
+    "test/compute-engine/protocol-type-redefinition.test.ts": "7092395be0747f12dccefda7ca42bdefc31b243d40e7381393ce7b5ed898b130",
+    "test/compute-engine/protocol-dispatch-compile.test.ts": "23ca50277d6c9ed35f40205387c925efece5842d9472e5d96724d58fb31e2b63",
+    "test/compute-engine/recursive-application-memo-across-evaluations.test.ts": "0a42336044cafc7ef393f23cb6e0494ff82de52296b7425635a6ba771898c167",
+    "test/epsil/comprehensions.test.ts": "30f9005ccf35b6e3e94496c11cc3e9f1b27447fe2847c1abb56b29be062d927b"
+  },
+  "after": {
+    "test/compute-engine/property-store-retirement.test.ts": "7e6324794c3f5a9cf6656ec657c95ebc91b67a6052a6108fdc11f6b89d99db53",
+    "test/compute-engine/object-store.test.ts": "02eb4c4547c648337f3bc657a392301dab52a8e7f4cada9680454b0836574415",
+    "test/compute-engine/protocol-type-redefinition.test.ts": "17643011a85b1722794f484d3df6a26183878b6a3ba9496d400511f46be2f837",
+    "test/compute-engine/protocol-dispatch-compile.test.ts": "23ca50277d6c9ed35f40205387c925efece5842d9472e5d96724d58fb31e2b63",
+    "test/compute-engine/recursive-application-memo-across-evaluations.test.ts": "2a6f5e2c7a093701cea93f30577bd115a998e23bc35d3871949c7298657b477b",
+    "test/epsil/comprehensions.test.ts": "106e47a3fc785a5e234ab62929a8a58f8b325f5976c78093c72e804b4b75d16c"
+  }
+}

@@ -287,9 +287,7 @@ describe('an author who expects absence says so', () => {
 });
 
 describe('the engine admits an argument that may be absent', () => {
-  // Expected failure: the type of the call is `unknown`, not `number`.
-  // Tracked in docs/plans/2026-11-11-bound-once-evidence/step1-state.md.
-  test.failing('the call is valid, and its type has no `missing` member', () => {
+  test('the call is valid, and its type has no `missing` member', () => {
     const { call } = box(
       `function f(p: tuple<number, number>) { p[1] + 1 }\nf(${PRESENT})`
     );
@@ -375,7 +373,7 @@ describe('a value typed `never` is no assignment evidence', () => {
     );
     const last = expr.ops[expr.ops.length - 1];
     expect(last.op1.type.toString()).toBe(
-      'list<tuple<integer, real, integer, integer>>'
+      'list<tuple<number, number, number, number>>'
     );
     expect(compiled(expr)).toBe(3);
   });

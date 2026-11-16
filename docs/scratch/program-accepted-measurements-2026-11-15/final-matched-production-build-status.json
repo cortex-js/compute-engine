@@ -1,0 +1,16 @@
+{
+  "command": [
+    "timeout",
+    "-k",
+    "30",
+    "600",
+    "node",
+    "scripts/build.mjs"
+  ],
+  "environment": {
+    "BUILD": "production"
+  },
+  "cwd": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+  "exitCode": 0,
+  "seconds": 0.47693705558776855
+}

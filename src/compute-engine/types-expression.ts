@@ -227,6 +227,7 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
   _typeWithFacts(declared: BoxedType, memoize: boolean): BoxedType;
   /** A hoisted block local (see `types-definitions.ts`). @internal */
   _blockLocal: boolean;
+  _programVariable: boolean;
   /** History of writes to this definition's type. Structural mirror of
    * `TypeProvenanceEntry[]` — the full type lives in `types-definitions.ts`,
    * which imports this file, so it cannot be named from here (same

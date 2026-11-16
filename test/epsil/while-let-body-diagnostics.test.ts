@@ -26,7 +26,7 @@ describe('EPSIL WHILE LET BODY DIAGNOSTICS', () => {
   test('the last statement of a `while let` body is reported', () => {
     // The loop runs once: the second test of `i` fails, as `i` is a string.
     const r = run(
-      G + 'let i = 0\nwhile let n: number = i { i = "s"\n [g("a")] }\n1'
+      G + 'let i: any = 0\nwhile let n: number = i { i = "s"\n [g("a")] }\n1'
     );
     expect(r.codes).toEqual(['runtime-error']);
     expect(r.at).toEqual(['[g("a")]']);
@@ -35,7 +35,7 @@ describe('EPSIL WHILE LET BODY DIAGNOSTICS', () => {
   test('a value passed up from an `if` in a `while let` body is reported where it was made', () => {
     const r = run(
       G +
-        'let i = 0\nwhile let n: number = i { i = "s"; if true { [g("a")] } }\n1'
+        'let i: any = 0\nwhile let n: number = i { i = "s"; if true { [g("a")] } }\n1'
     );
     expect(r.codes).toEqual(['runtime-error']);
     expect(r.at).toEqual(['[g("a")]']);

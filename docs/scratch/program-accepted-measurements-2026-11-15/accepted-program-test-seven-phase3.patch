@@ -1,0 +1,110 @@
+--- a/test/epsil/static-check-function-on-const.test.ts
++++ b/test/epsil/static-check-function-on-const.test.ts
+@@ -94,10 +94,16 @@
+     );
+   });
+ 
+-  test('a const whose initializer does not match its type binds nothing', () => {
+-    // The run time refuses the `const`, so the `function` statement is then
+-    // the first definition of `c`.
+-    const d = check('const c: string = 1\nfunction c(x) { x }\nc(2)');
+-    expect(d.map((x) => x.message[3])).toEqual(['incompatible-type']);
++});
++
++describe('EPSIL CHECK: A REFUSED FIRST DECLARATION', () => {
++  test('a bad initializer does not free the name for a second declaration', () => {
++    const source = 'const c: string = 1\nfunction c(x) { x }\nc(2)';
++    const expectedCodes = ['variable-redeclaration', 'incompatible-type'];
++    expect(check(source).map((d) => d.message[3])).toEqual(expectedCodes);
++    const result = executeEpsil(new ComputeEngine(), source);
++    expect(result.diagnostics.map((d) => d.message[3])).toEqual(expectedCodes);
++    // Neither the invalid initializer nor the refused function installs a value.
++    expect(result.value.json).toEqual(['c', 2]);
+   });
+ });
+--- a/test/epsil/redefinition-discipline.test.ts
++++ b/test/epsil/redefinition-discipline.test.ts
+@@ -1032,39 +1032,32 @@
+     });
+   });
+ 
+-  describe('provenance does not outlive the clause it describes', () => {
+-    // All three regressions below were found by the dual code review of this
+-    // change. Their common cause: the side-channels that describe a LONE clause
+-    // are keyed on the definition RECORD, which is mutated in place and so
+-    // survives events that discard the clause itself.
+-    test('an ASSIGNMENT between two clauses is not a redefinition', () => {
+-      // Assignment full-replaces (D6), so the clause defined afterwards is the
+-      // first clause of a fresh binding. Reporting it as a redefinition of the
+-      // pre-assignment clause both cited a statement whose clause was gone AND
+-      // refused to install the new one — the program answered 42.
+-      const ce = new ComputeEngine();
+-      const { value, diagnostics } = executeEpsil(
+-        ce,
+-        'f(n) = 1\nf = (x => 42)\nf(m) = 2\nf(0)'
++  describe('clause provenance follows canonical Program order', () => {
++    test('an assignment runs after a refused duplicate clause', () => {
++      // Both function declarations precede the ordinary assignment. The second
++      // clause is refused; the assignment then installs the final function value.
++      const source = 'f(n) = 1\nf = (x => 42)\nf(m) = 2\nf(0)';
++      const { value, diagnostics } = executeEpsil(new ComputeEngine(), source);
++      expect(codes(diagnostics)).toEqual(['function-redefinition']);
++      expect(value.toString()).toBe('42');
++      expect(source.slice(diagnostics[0].range[0], diagnostics[0].range[1])).toBe(
++        'f(m) = 2'
+       );
+-      expect(diagnostics).toEqual([]);
++      const firstSite = diagnostics[0].notes![0].range;
++      expect(source.slice(firstSite[0], firstSite[1])).toBe('f(n) = 1');
++      expect(codes(checkSource(source).diagnostics)).toEqual([
++        'function-redefinition',
++      ]);
++    });
++
++    test('a textually later duplicate does not overwrite the ordinary assignment', () => {
++      const source = 'g(n) = 1\ng = x => 2\ng(n) = 3\ng(9)';
++      const { value, diagnostics } = executeEpsil(new ComputeEngine(), source);
++      expect(codes(diagnostics)).toEqual(['function-redefinition']);
++      expect(source.slice(diagnostics[0].range[0], diagnostics[0].range[1])).toBe(
++        'g(n) = 3'
++      );
+       expect(value.toString()).toBe('2');
+-      // Both tiers agree: `epsil check` must not report it either.
+-      expect(
+-        codes(
+-          checkSource('f(n) = 1\nf = (x => 42)\nf(m) = 2\nf(0)').diagnostics
+-        )
+-      ).toEqual([]);
+-    });
+-
+-    test('a clause defined after an assignment still installs', () => {
+-      const ce = new ComputeEngine();
+-      const { value, diagnostics } = executeEpsil(
+-        ce,
+-        'g(n) = 1\ng = x => 2\ng(n) = 3\ng(9)'
+-      );
+-      expect(diagnostics).toEqual([]);
+-      expect(value.toString()).toBe('3');
+     });
+ 
+     test('a refused duplicate does not disable the static tier for later units', () => {
+--- a/test/compute-engine/constant-function-reassignment.test.ts
++++ b/test/compute-engine/constant-function-reassignment.test.ts
+@@ -76,8 +76,15 @@
+     expect(value.re).toBe(3);
+   });
+ 
+-  test('Epsil: a `let` function is still replaceable by both routes', () => {
++  test('Epsil: a `let` function remains replaceable by assignment', () => {
+     expect(run('let k = (n) => n + 1\nk = (s) => s\nk(1)').value.re).toBe(1);
+-    expect(run('let k = (n) => n\nk(x) = x * 2\nk(3)').value.re).toBe(6);
++  });
++
++  test('Epsil: a math-style function declaration cannot replace an earlier `let`', () => {
++    const { value, diagnostics } = run('let k = (n) => n\nk(x) = x * 2\nk(3)');
++    expect(diagnostics.map((d) => d.message[3])).toEqual([
++      'variable-redeclaration',
++    ]);
++    expect(value.re).toBe(3);
+   });
+ });

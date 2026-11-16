@@ -9,9 +9,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
 import {
-  freeTypeVariables,
   solveTypeArguments,
-  substituteTypeVariables,
 } from '../../src/common/type/instantiate';
 import {
   contextualCallbackPlan,
@@ -314,7 +312,7 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
     ]);
     expect(
       canonicalJson((ce) =>
-        ce.box(parseEpsil('Filter(points, p => p == (0, 0))')[0])
+        ce.box(parseEpsil('Filter(points, p => p == (0, 0))')[0]).op1
       )
     ).toBe(viaBox);
     expect(
@@ -706,23 +704,16 @@ describe('phase 1: `FlatMap` — R-D2′ result inference', () => {
     expect(e.evaluate().toString()).toBe('[2,4,6]');
   });
 
-  it('a PROVABLY DISJOINT named callback is rejected at canonicalization', () => {
-    // Compatibility admission (`docs/TYPE-SYSTEM.md`): a `string` parameter
-    // can never receive an element of a
-    // `list<integer>`, so this operand is provably unusable and the call is
-    // statically invalid — where Design D admitted it and let the mismatch
-    // surface as a per-element error VALUE. The diagnostic names both arrows:
-    // the per-call SUPPLY arrow built from the source, and the operand's own
-    // declared type. Partial overlap (a narrower callback over a union source)
-    // is still admitted — see `Filter`'s per-element-dynamics pin above.
+  it('a coarse Program callback retains its own runtime argument checks', () => {
+    // The variable contract is function. Its current literal still refuses
+    // integer cells when FlatMap invokes its string parameter.
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     executeEpsil(ce, 'let wrap = (s: string) => [s]');
     const e = ce.box(['FlatMap', 'cs', 'wrap']);
-    expect(e.isValid).toBe(false);
-    expect(e.toString()).toBe(
-      'FlatMap("cs", Error(ErrorCode("incompatible-type", "(integer) any -> unknown", "(s: string) -> list<string^1>"), "wrap"))'
-    );
+    expect(ce.symbol('wrap').type.toString()).toBe('function');
+    expect(e.isValid).toBe(true);
+    expect(e.evaluate().toString()).toContain('incompatible-type');
   });
 });
 
@@ -755,7 +746,7 @@ describe('phase 1: route parity (box / Epsil / LaTeX)', () => {
     ]);
     expect(
       parityJson((ce) =>
-        ce.box(parseEpsil('TakeWhile(points, p => p == (0, 0))')[0])
+        ce.box(parseEpsil('TakeWhile(points, p => p == (0, 0))')[0]).op1
       )
     ).toBe(viaBox);
     expect(
@@ -786,7 +777,7 @@ describe('phase 1: route parity (box / Epsil / LaTeX)', () => {
     ]);
     expect(
       parityJson((ce) =>
-        ce.box(parseEpsil('IndexWhere(points, p => p == (0, 0))')[0])
+        ce.box(parseEpsil('IndexWhere(points, p => p == (0, 0))')[0]).op1
       )
     ).toBe(viaBox);
     expect(
@@ -1537,7 +1528,7 @@ describe('phase 2: route parity (box / Epsil / LaTeX)', () => {
       ['Function', ['Less', 'n', 3], ['Typed', 'n', "'integer'"]],
     ]);
     expect(
-      parityJson((ce) => ce.box(parseEpsil('Partition(cs, n => n < 3)')[0]))
+      parityJson((ce) => ce.box(parseEpsil('Partition(cs, n => n < 3)')[0]).op1)
     ).toBe(viaBox);
     expect(
       parityJson((ce) =>
@@ -1556,7 +1547,7 @@ describe('phase 2: route parity (box / Epsil / LaTeX)', () => {
       ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
     ]);
     expect(
-      parityJson((ce) => ce.box(parseEpsil('Reduce(cs, (a, x) => a + x)')[0]))
+      parityJson((ce) => ce.box(parseEpsil('Reduce(cs, (a, x) => a + x)')[0]).op1)
     ).toBe(viaBox);
     expect(
       parityJson((ce) =>
@@ -1835,7 +1826,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     ]);
     expect(
       canonicalJson((ce) =>
-        ce.box(parseEpsil('CountIf(points, p => p == (0, 0))')[0])
+        ce.box(parseEpsil('CountIf(points, p => p == (0, 0))')[0]).op1
       )
     ).toBe(viaBox);
     expect(
@@ -1959,7 +1950,7 @@ describe('phase 2/3: route parity for the remaining shapes', () => {
       10,
     ]);
     expect(
-      parityJson((ce) => ce.box(parseEpsil('Fold((a, x) => a + x, 10, cs)')[0]))
+      parityJson((ce) => ce.box(parseEpsil('Fold((a, x) => a + x, 10, cs)')[0]).op1)
     ).toBe(viaBox);
     expect(
       parityJson((ce) =>
@@ -1980,7 +1971,7 @@ describe('phase 2/3: route parity for the remaining shapes', () => {
       ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
     ]);
     expect(
-      parityJson((ce) => ce.box(parseEpsil('Scan(cs, (a, x) => a + x)')[0]))
+      parityJson((ce) => ce.box(parseEpsil('Scan(cs, (a, x) => a + x)')[0]).op1)
     ).toBe(viaBox);
     expect(
       parityJson((ce) =>
@@ -1999,7 +1990,7 @@ describe('phase 2/3: route parity for the remaining shapes', () => {
       ['Function', ['Less', 1, 'n'], ['Typed', 'n', "'integer'"]],
     ]);
     expect(
-      parityJson((ce) => ce.box(parseEpsil('Any(cs, n => n > 1)')[0]))
+      parityJson((ce) => ce.box(parseEpsil('Any(cs, n => n > 1)')[0]).op1)
     ).toBe(viaBox);
     expect(
       parityJson((ce) =>

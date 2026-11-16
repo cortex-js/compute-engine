@@ -4,6 +4,7 @@ import {
   executeEpsilAsync,
 } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
+import { operands } from '../../src/math-json/utils';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { isString } from '../../src/compute-engine/boxed-expression/type-guards';
 import type { Expression } from '../../src/compute-engine/global-types';
@@ -12,10 +13,8 @@ import type { Type } from '../../src/common/type/types';
 //
 // A `function` statement (`DefineFunction` with a `Function` literal) at the
 // top level of an Epsil program defines a function of the engine, available
-// in the whole program, before the first statement runs. The Epsil runner
-// boxes one statement at a time, so it installs the `function` statements of
-// the program before the statement loop (`prepareFunctionDeclarations()`,
-// `src/epsil/execute-epsil.ts`).
+// in the whole program, before the first statement runs. Program canonicalization orders function statements before executable
+// statements. Nested Blocks retain their local declaration timing.
 //
 // The same program boxed as one block (`block()`) is not the top level of a
 // program: there a function statement declares a local, a variable that has
@@ -51,7 +50,7 @@ function epsil(source: string): { value: unknown; diagnostics: string[] } {
  * engine. */
 function block(source: string): unknown {
   const ce = new ComputeEngine();
-  return plain(ce.box(parseEpsil(source)[0] as never).evaluate());
+  return plain(ce.box(['Block', ...operands(parseEpsil(source)[0])] as never).evaluate());
 }
 
 /** The codes of the static errors of `source` boxed as one block. In a
@@ -60,7 +59,7 @@ function block(source: string): unknown {
  * the same name is a second declaration. */
 function blockErrors(source: string): string[] {
   const json = JSON.stringify(
-    new ComputeEngine().box(parseEpsil(source)[0] as never).json
+    new ComputeEngine().box(['Block', ...operands(parseEpsil(source)[0])] as never).json
   );
   return [...json.matchAll(/"ErrorCode","'([a-z-]+)'"/g)].map((m) => m[1]);
 }
@@ -137,12 +136,12 @@ describe('THE DECLARED SIGNATURE IS KEPT', () => {
     expect(blockErrors(src)).toContain('read-before-declaration');
   });
 
-  test('the declared signature does not apply before its `let` runs', () => {
-    // The same answer as the block route. Before: the Epsil runner answered
-    // "g(1.5)".
-    const src =
-      'let a = String(g(1.5))\nlet g: (integer) -> integer\nfunction g(k) { 2 * k }\na';
-    expect(epsil(src)).toEqual({ value: '3', diagnostics: [] });
+  test('the paired signature applies before executable statements', () => {
+    const src = 'let a = String(g(1.5))\nlet g: (integer) -> integer\nfunction g(k) { 2 * k }\na';
+    const result = epsil(src);
+    expect(result.diagnostics).toHaveLength(2);
+    expect(result.diagnostics.every((d) => d.includes('incompatible-type'))).toBe(true);
+    expect(JSON.stringify(result.value)).toContain('incompatible-type');
     expect(blockErrors(src)).toContain('variable-redeclaration');
   });
 });
@@ -208,17 +207,12 @@ describe('THE BINDINGS OF EARLIER STATEMENTS ARE KEPT', () => {
     expect(blockErrors(src)).toContain('read-before-declaration');
   });
 
-  // In a program, a function can assign a variable only if the `let` of the
-  // variable comes before the function: the statements are read one at a
-  // time, and an assignment never declares a name. A `Block` evaluated as a
-  // whole declares its locals for the whole block, so there `f` writes the
-  // `t` of the block.
+  // Program declarations are hoisted before function bodies are boxed.
+  // A write to one is an outer write and requires the existing scope effect.
   test('a write in a function before the `let` of the name is an error', () => {
     const src =
       'function f() { t = 1; t }\nlet a = String(g())\nlet t = 0\nfunction g() { 5 }\n[f(), t]';
-    expect(epsil(src).diagnostics[0]).toContain(
-      'assignment-to-undeclared-variable'
-    );
+    expect(epsil(src).diagnostics[0]).toContain(SCOPE_ERROR);
     // In the block, the write to the `t` of the block is the `scope` effect,
     // which `f` does not declare.
     expect(blockErrors(src)).toContain('read-before-declaration');
@@ -226,24 +220,17 @@ describe('THE BINDINGS OF EARLIER STATEMENTS ARE KEPT', () => {
     const read =
       'function f() { t = 1; t }\nlet b = String(t)\nlet a = String(g())\nlet t = 0\nfunction g() { 5 }\n[f(), t, b]';
     const { diagnostics } = epsil(read);
-    expect(diagnostics[0]).toContain('assignment-to-undeclared-variable');
-    expect(diagnostics[1]).toContain('read-before-declaration');
+    expect(diagnostics.some((d) => d.includes(SCOPE_ERROR))).toBe(true);
+    expect(diagnostics.some((d) => d.includes('read-before-declaration'))).toBe(true);
     expect(JSON.stringify(block(read))).toContain('read-before-declaration');
   });
 
-  test('a `scope` write in a function before the `let` of the name is an error', () => {
-    const src =
-      'function f() scope { t = 1; t }\nlet a = String(g())\nlet t = 0\nfunction g() { 5 }\n[f(), t]';
-    expect(epsil(src).diagnostics).toHaveLength(1);
-    expect(epsil(src).diagnostics[0]).toContain(
-      'assignment-to-undeclared-variable'
-    );
+  test('a scope function can write a declaration textually below it', () => {
+    const src = 'function f() scope { t = 1; t }\nlet a = String(g())\nlet t = 0\nfunction g() { 5 }\n[f(), t]';
+    expect(epsil(src)).toEqual({ value: [1, 1], diagnostics: [] });
     expect(blockErrors(src)).toContain('read-before-declaration');
     const late = 'function g(k) scope { t = k + 1; t }\nlet t = 0\n[g(1), t]';
-    expect(epsil(late).diagnostics).toHaveLength(1);
-    expect(epsil(late).diagnostics[0]).toContain(
-      'assignment-to-undeclared-variable'
-    );
+    expect(epsil(late)).toEqual({ value: [2, 2], diagnostics: [] });
     expect(block(late)).toEqual([2, 2]);
   });
 
@@ -280,30 +267,35 @@ describe('A LIBRARY CONSTANT AND A VARIABLE OF THE SAME NAME', () => {
     expect(block(src)).toEqual([4, 4]);
   });
 
-  test('a statement before the `let` reads the constant', () => {
+  test('a direct read before the let is a use before the declaration', () => {
     const src = 'let a = i^2\nlet i = 2\nfunction g() { i^2 }\n[a, i^2, g()]';
-    expect(epsil(src)).toEqual({ value: [-1, 4, 4], diagnostics: [] });
-    expect(block(src)).toEqual([-1, 4, 4]);
+    const result = epsil(src);
+    expect(result.value).toEqual(['a', 4, 4]);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]).toContain('read-before-declaration');
+    expect(JSON.stringify(block(src))).toContain('read-before-declaration');
   });
 
   test('a body before the `let` reads the constant', () => {
     const src = 'function g() { i^2 }\nlet i = 2\n[g(), i^2]';
-    expect(epsil(src)).toEqual({ value: [-1, 4], diagnostics: [] });
-    expect(block(src)).toEqual([-1, 4]);
+    expect(epsil(src)).toEqual({ value: [4, 4], diagnostics: [] });
+    expect(block(src)).toEqual([4, 4]);
   });
 
   // In the two programs below, a call before the `function` statement makes
   // the preparation declare `i` for the body and then remove that binding
   // again, so that a statement before the `let` reads the constant.
-  test('a call after the `let` of a constant prepares the function', () => {
-    const src =
-      'let a = i^2\nlet i = 2\nlet b = g()\nfunction g() { i^2 }\n[a, b, g()]';
-    expect(epsil(src)).toEqual({ value: [-1, 4, 4], diagnostics: [] });
+  test('a function does not restore a library constant hidden by a Program let', () => {
+    const src = 'let a = i^2\nlet i = 2\nlet b = g()\nfunction g() { i^2 }\n[a, b, g()]';
+    const result = epsil(src);
+    expect(result.value).toEqual(['a', 4, 4]);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]).toContain('read-before-declaration');
   });
 
   test('a call before the `let` of a constant reads the constant', () => {
     const src = 'let a = g()\nlet i = 2\nfunction g() { i^2 }\n[a, g()]';
-    expect(epsil(src)).toEqual({ value: [-1, 4], diagnostics: [] });
+    expect(epsil(src)).toEqual({ value: [4, 4], diagnostics: [] });
   });
 });
 
@@ -345,20 +337,13 @@ describe('A HOST BINDING AND A VARIABLE OF THE SAME NAME', () => {
       withHostBinding(
         'let a = String(g())\nlet c = 2\nfunction g() { c^2 }\n[a, g()]'
       )
-    ).toEqual(['100', 4]);
+    ).toEqual(['c^2', 4]);
   });
 });
 
-describe('THE SIGNATURE OF A PREPARED FUNCTION HOLDS A CALL BEFORE THE `let`', () => {
-  // A call of a prepared function before the `let` of a name that an
-  // enclosing scope defines reads the outer definition in the body (the
-  // tests above). The signature that the body infers must hold the value of
-  // that call, so the binding that the preparation gives the body has the
-  // union of the two types. The host operator `Snap` reads the signature of
-  // `g` when its statement runs, before the `function` statement runs and
-  // installs `g` again with the binding of the `let`.
-  //
-  // Provenance: ROADMAP entry CE-480.
+describe('A FUNCTION USES THE HOISTED PROGRAM DECLARATION CONTRACT', () => {
+  // The Program binding and its static type belong to this declaration.
+  // An earlier caller binding does not contribute an alternative contract.
   function run(
     source: string,
     host?: (ce: ComputeEngine) => void
@@ -393,7 +378,7 @@ describe('THE SIGNATURE OF A PREPARED FUNCTION HOLDS A CALL BEFORE THE `let`', (
   test('a body that squares the constant `i`', () => {
     // Before: the signature was `() -> integer<0..>`, and the value `-1`.
     const r = run('let a = g()\nSnap()\nlet i = 2\nfunction g() { i^2 }\na');
-    expect(r.value.json).toEqual(-1);
+    expect(r.value.json).toEqual(4);
     expect(r.result).toEqual('() -> number');
     expect(r.matches).toBe(true);
   });
@@ -401,8 +386,8 @@ describe('THE SIGNATURE OF A PREPARED FUNCTION HOLDS A CALL BEFORE THE `let`', (
   test('a body that adds 1 to the constant `i`', () => {
     // Before: the signature was `() -> integer`, and the value `1 + i`.
     const r = run('let a = g()\nSnap()\nlet i = 2\nfunction g() { i + 1 }\na');
-    expect(r.value.toString()).toEqual('(1 + i)');
-    expect(r.result).toEqual('() -> complex');
+    expect(r.value.toString()).toEqual('3');
+    expect(r.result).toEqual('() -> number');
     expect(r.matches).toBe(true);
   });
 
@@ -416,7 +401,7 @@ describe('THE SIGNATURE OF A PREPARED FUNCTION HOLDS A CALL BEFORE THE `let`', (
         ce.pushScope();
       }
     );
-    expect(r.value.json).toEqual(2.25);
+    expect(r.value.json).toEqual(4);
     expect(r.matches).toBe(true);
   });
 
@@ -431,8 +416,8 @@ describe('THE SIGNATURE OF A PREPARED FUNCTION HOLDS A CALL BEFORE THE `let`', (
         ce.pushScope();
       }
     );
-    expect(r.value.symbol).toEqual('Nothing');
-    expect(r.result).toEqual('() -> integer | nothing');
+    expect(r.value.json).toEqual(2);
+    expect(r.result).toEqual('() -> number');
     expect(r.matches).toBe(true);
   });
 
@@ -446,21 +431,21 @@ describe('THE SIGNATURE OF A PREPARED FUNCTION HOLDS A CALL BEFORE THE `let`', (
         ce.pushScope();
       }
     );
-    expect(r.result).toEqual('() -> unknown');
+    expect(r.result).toEqual('() -> number');
     expect(r.matches).toBe(true);
   });
 
   test('no call before the `let`: the signature keeps the variable type', () => {
     const r = run(
-      'let a = i^2\nlet i = 2\nlet b = g()\nSnap()\nfunction g() { i^2 }\nb'
+      'let i = 2\nlet b = g()\nSnap()\nfunction g() { i^2 }\nb'
     );
     expect(r.value.json).toEqual(4);
-    expect(r.result).toEqual('() -> integer<0..>');
+    expect(r.result).toEqual('() -> number');
     expect(r.matches).toBe(true);
   });
 });
 
-describe('STATEMENTS THAT ARE NOT HOISTED', () => {
+describe('PROGRAM CANONICAL ORDER AND VALUE DECLARATIONS', () => {
   test('the constructor of a nominal type runs after its type statement', () => {
     // The same answer as before: the call before the `type` statement stays
     // unresolved.
@@ -468,7 +453,7 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
       'let p = String(point(7))\ntype point = tuple<integer, integer>\nfunction point(a: integer) { (a, a) }\nlet q = point(7)\n[p, String(q), String(Type(q))]'
     );
     expect(diagnostics).toEqual([]);
-    expect(value).toEqual(['point(7)', 'point(7, 7)', 'point']);
+    expect(value).toEqual(['point(7, 7)', 'point(7, 7)', 'point']);
   });
 
   test('the constructor of a variant of a sum type', () => {
@@ -477,7 +462,7 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
       'let p = String(jnum(3, 4))\ntype json = jbool(boolean) | jnum(number)\nfunction jnum(a: integer, b: integer) { a + b }\n[p, String(jnum(3, 4))]'
     );
     expect(diagnostics).toEqual([]);
-    expect(value).toEqual(['jnum(3, 4)', 'jnum(7)']);
+    expect(value).toEqual(['jnum(7)', 'jnum(7)']);
   });
 
   test('a function statement for a name that holds a value keeps its error', () => {
@@ -485,18 +470,15 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
     const { value, diagnostics } = epsil('let g = 5\nfunction g(k) { k }\ng');
     expect(value).toBe(5);
     expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0]).toContain('runtime-error');
-    expect(diagnostics[0]).toContain('invalid-clause-definition');
+    expect(diagnostics[0]).toContain('variable-redeclaration');
   });
 
-  test('a function statement for a name that an earlier `let` binds', () => {
-    // The definition adds a clause to the function that the `let`
-    // installs, so it runs in order. The same answer as before.
-    const { value, diagnostics } = epsil(
-      'let a = String(g(2))\nlet g = (k: integer) => 10 * k\nfunction g(k: string) { k }\n[a, String(g(2)), g("s")]'
-    );
-    expect(diagnostics).toEqual([]);
-    expect(value).toEqual(['g(2)', '20', 's']);
+  test('a function statement conflicts with an unpaired value declaration', () => {
+    const { value, diagnostics } = epsil('let a = String(g(2))\nlet g = (k: integer) => 10 * k\nfunction g(k: string) { k }\n[a, String(g(2)), g("s")]');
+    expect(diagnostics.filter((d) => d.includes('variable-redeclaration'))).toHaveLength(1);
+    expect(diagnostics.filter((d) => d.includes('read-before-declaration'))).toHaveLength(1);
+    expect((value as unknown[])[1]).toBe('20');
+    expect(JSON.stringify((value as unknown[])[2])).toContain('incompatible-type');
   });
 
   test('a function statement after a type statement', () => {
@@ -506,7 +488,7 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
       'type alias num = number\nlet a = String(g(3))\nfunction g(k: num) { k^2 }\n[a, String(g(3))]'
     );
     expect(diagnostics).toEqual([]);
-    expect(value).toEqual(['g(3)', '9']);
+    expect(value).toEqual(['9', '9']);
     // Without the `String(…)` probe, `a` holds the unresolved `g(3)`, and
     // the read of `a` in the last statement, a later top-level evaluation,
     // resolves it.
@@ -526,7 +508,7 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
     const src =
       'let value = {I -> 1, V -> 5, X -> 10}\nlet r = String(decode("XIV"))\ndecode(s) = do {\n  let vs = map(c => value[String(c)], characters(s))\n  let n = length(vs)\n  sum(map(i => -vs[i] if i < n && vs[i] < vs[i + 1] else vs[i], 1..n))\n}\n[r, String(decode("XIV"))]';
     expect(epsil(src)).toEqual({
-      value: ['decode("XIV")', '14'],
+      value: ['14', '14'],
       diagnostics: [],
     });
     // Without the probe, the read of `r` in the last statement resolves the
@@ -542,7 +524,7 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
     // The same exclusion as above, for a body that reads a dictionary.
     const probed =
       'let v = {I -> 1}\nlet a = String(g(3))\nfunction g(k) { v["I"] + k }\na';
-    expect(epsil(probed)).toEqual({ value: 'g(3)', diagnostics: [] });
+    expect(epsil(probed)).toEqual({ value: '4', diagnostics: [] });
     expect(blockErrors(probed)).toContain('read-before-declaration');
     const src =
       'let v = {I -> 1}\nlet a = g(3)\nfunction g(k) { v["I"] + k }\na';
@@ -550,14 +532,12 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
     expect(blockErrors(src)).toContain('read-before-declaration');
   });
 
-  test('a body that uses a variable that two earlier statements write', () => {
-    // The preparation can give `c` one type only. With the `string` type of
-    // the `let`, the body `c^2` was boxed with an `incompatible-type` error
-    // that the prepared statement kept, where in order `c^2` is boxed after
-    // `c = 2`. So the statement runs in order.
-    const src =
-      'let c = "old"\nc = 2\nlet a = String(g())\nfunction g() { c^2 }\n[a, g()]';
-    expect(epsil(src)).toEqual({ value: ['g()', 4], diagnostics: [] });
+  test('a function body uses the stable data contract despite an incompatible write', () => {
+    const src = 'let c = "old"\nc = 2\nlet a = String(g())\nfunction g() { c^2 }\n[a, g()]';
+    const result = epsil(src);
+    expect(result.diagnostics.some((d) => d.includes('assignment-type-mismatch'))).toBe(true);
+    expect(result.diagnostics.some((d) => d.includes('incompatible-type'))).toBe(true);
+    expect(result.value).toEqual(['g()', ['g']]);
   });
 
   test('an earlier `let` of a literal gives its type to the body', () => {
@@ -587,7 +567,7 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
       ce,
       'let c = 2\nlet a = String(g())\nfunction g() { c^2 }\n[a, g()]'
     );
-    expect(plain(value)).toEqual(['g()', 4]);
+    expect(plain(value)).toEqual(['4', 4]);
     expect(diagnostics).toEqual([]);
   });
 
@@ -596,7 +576,7 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
     // the sense of the selection, so `g` runs in order.
     const probed =
       'let h = (x) => 3 * x\nlet a = String(g(2))\nfunction g(k) { h(k) }\na';
-    expect(epsil(probed)).toEqual({ value: 'g(2)', diagnostics: [] });
+    expect(epsil(probed)).toEqual({ value: '6', diagnostics: [] });
     expect(blockErrors(probed)).toContain('read-before-declaration');
     const src = 'let h = (x) => 3 * x\nlet a = g(2)\nfunction g(k) { h(k) }\na';
     expect(epsil(src)).toEqual({ value: 6, diagnostics: [] });
@@ -608,7 +588,7 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
     // canonicalization, so a generic function takes effect when its
     // statement runs, on both routes.
     const probed = 'let a = String(f(3))\nfunction f<T>(x: T) -> T { x }\na';
-    expect(epsil(probed)).toEqual({ value: 'f(3)', diagnostics: [] });
+    expect(epsil(probed)).toEqual({ value: '3', diagnostics: [] });
     expect(blockErrors(probed)).toContain('read-before-declaration');
     const src = 'let a = f(3)\nfunction f<T>(x: T) -> T { x }\na';
     expect(epsil(src)).toEqual({ value: 3, diagnostics: [] });
@@ -740,33 +720,12 @@ describe('A PROGRAM RUN AGAIN ON THE SAME ENGINE WITH ANOTHER SIGNATURE', () => 
     ).toBe('7.5');
   });
 
-  test('a preparation that cannot box the statement keeps the earlier binding', () => {
-    // The preparation boxes each statement with `{ form: 'raw' }` first, and
-    // then boxes the `function` statement to install its clause. That second
-    // boxing throws here once, so the statement runs in order: the call
-    // before the `let` reads the function of the first program (`2*n`), and
-    // the call after the definition reads the new one (`3*n`).
+  test('a later paired declaration replaces the previous Program contract', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let f: (integer) -> integer\nfunction f(n) { 2*n }');
-    const box = ce.box.bind(ce);
-    let rawSeen = false;
-    let thrown = false;
-    ce.box = ((expr: unknown, options?: { form?: string }) => {
-      if (JSON.stringify(expr).startsWith('{"fn":["DefineFunction"')) {
-        if (options?.form === 'raw') rawSeen = true;
-        else if (rawSeen && !thrown) {
-          thrown = true;
-          throw new Error('the boxing fails');
-        }
-      }
-      return box(expr as never, options as never);
-    }) as typeof ce.box;
-    const { value } = executeEpsil(
-      ce,
-      'let a = String(f(2))\nlet f: (integer) -> integer\nfunction f(n) { 3*n }\n[a, f(2)]'
-    );
-    expect(thrown).toBe(true);
-    expect(plain(value)).toEqual(['4', 6]);
+    const { value, diagnostics } = executeEpsil(ce, 'let a = String(f(2))\nlet f: (integer) -> integer\nfunction f(n) { 3*n }\n[a, f(2)]');
+    expect(diagnostics).toEqual([]);
+    expect(plain(value)).toEqual(['6', 6]);
   });
 
   test('the asynchronous runner', async () => {
@@ -784,15 +743,11 @@ describe('A PROGRAM RUN AGAIN ON THE SAME ENGINE WITH ANOTHER SIGNATURE', () => 
 });
 
 describe('THE COMPILER', () => {
-  test('a call before a function statement', () => {
-    // In a block the call reads the local before its declaration: the block
-    // is invalid, and the compilation refuses it.
+  test('a Program call before a function statement compiles', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(
-      parseEpsil('let a = g(3)\nfunction g(k) { k^2 }\na')[0] as never
-    );
-    expect(() =>
-      compile(expr, { to: 'javascript', fallback: false } as never)
-    ).toThrow();
+    const expr = ce.box(parseEpsil('let a = g(3)\nfunction g(k) { k^2 }\na')[0]!);
+    const result = compile(expr, { to: 'javascript', fallback: false });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.run()).toBe(9);
   });
 });

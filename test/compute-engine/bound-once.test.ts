@@ -2,6 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
+import { operand, operator } from '../../src/math-json/utils';
 
 // An expression resolves each name from the scope it was boxed in, for its
 // type and for its value (`docs/plans/2026-11-11-bound-once-spec.md`,
@@ -618,8 +619,12 @@ describe('a local of a block is declared', () => {
   });
 
   test('a typed constant local is initialized once and then refuses a write', () => {
-    const run = (source: string) =>
-      new ComputeEngine().box(parseEpsil(source)[0]).evaluate().toString();
+    const run = (source: string) => {
+      const ast = parseEpsil(source)[0]!;
+      expect(operator(ast)).toBe('Program');
+      expect(operator(operand(ast, 1))).toBe('Block');
+      return new ComputeEngine().box(operand(ast, 1)!).evaluate().toString();
+    };
     expect(
       run('do { const f: (integer) -> integer = (x) => x + 1; f(2) }')
     ).toBe('3');
@@ -686,12 +691,15 @@ describe('a local of a block is declared', () => {
     ).toContain('variable-redeclaration');
   });
 
-  test('a program that ends with the name of a function gives its literal on both routes', () => {
-    for (const source of ['let f = () => 5\nf', 'function f() { 5 }\nf']) {
+  test('Program returns a variable function value and preserves an operator name', () => {
+    for (const [source, expected] of [
+      ['let f = () => 5\nf', ['Function', ['Block', 5]]],
+      ['function f() { 5 }\nf', 'f'],
+    ] as const) {
       const run = executeEpsil(new ComputeEngine(), source);
       const boxed = new ComputeEngine().box(parseEpsil(source)[0]).evaluate();
-      expect(run.value.json).toEqual(['Function', ['Block', 5]]);
-      expect(boxed.json).toEqual(['Function', ['Block', 5]]);
+      expect(run.value.json).toEqual(expected);
+      expect(boxed.json).toEqual(expected);
     }
   });
 });

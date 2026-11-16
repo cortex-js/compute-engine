@@ -1,3 +1,4 @@
+import { operand } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { resolveLibraryNames } from '../../src/epsil/resolve-library-names';
@@ -430,7 +431,7 @@ describe('EPSIL ROUND-TRIP', () => {
     // (`apply(…)` for `Apply`); the resolution pass reads it back.
     expect(
       normalize(resolveLibraryNames(value, src, new ComputeEngine()))
-    ).toEqual(normalize(expr));
+    ).toEqual(normalize(['Program', expr]));
   });
 });
 
@@ -550,7 +551,7 @@ describe('EPSIL UNSPELLABLE PARAMETER PATTERN', () => {
     // Re-parses as a `Function` literal with the pattern intact. (The stray
     // `Typed` is transparent in the generic form, as everywhere else — the
     // annotation, not the structure, is what is dropped.)
-    expect(normalize(value)).toEqual([
+    expect(normalize(operand(value, 1))).toEqual([
       'Function',
       'body',
       'x',
@@ -583,7 +584,7 @@ describe('EPSIL RULE ARGUMENTS AND PAIR KEYS', () => {
     const [value, diagnostics] = parseEpsil(src);
     return {
       src,
-      back: normalize(resolveLibraryNames(value, src, new ComputeEngine())),
+      back: normalize(operand(resolveLibraryNames(value, src, new ComputeEngine()), 1)),
       messages: diagnostics.map((d) => d.message),
     };
   };
@@ -659,7 +660,7 @@ describe('EPSIL RULE ARGUMENTS AND PAIR KEYS', () => {
   test('source keys are not resolved to library names', () => {
     const resolved = (src: string): unknown =>
       normalize(
-        resolveLibraryNames(parseEpsil(src)[0], src, new ComputeEngine())
+        operand(resolveLibraryNames(parseEpsil(src)[0], src, new ComputeEngine()), 1)
       );
     expect(resolved('[max -> 10]')).toEqual([
       'List',
@@ -685,7 +686,7 @@ describe('EPSIL RULE ARGUMENTS AND PAIR KEYS', () => {
 //
 describe('EPSIL vs loose math parser', () => {
   const ce = new ComputeEngine();
-  const epsil = (s: string) => normalize(parseEpsil(s)[0]);
+  const epsil = (s: string) => normalize(operand(parseEpsil(s)[0], 1));
   const loose = (s: string) =>
     normalize(ce.parse(s, { canonical: false }).json);
 
@@ -733,7 +734,7 @@ describe('EPSIL vs loose math parser', () => {
 describe('EPSIL FLOAT LITERAL ROUND-TRIP', () => {
   const ce = new ComputeEngine();
   const read = (src: string) =>
-    ce.box(parseEpsil(src)[0] as MathJsonExpression);
+    ce.box(operand(parseEpsil(src)[0], 1)!);
 
   test.each([
     ['2.0', '2.0', false],

@@ -1,0 +1,5 @@
+let x = 1
+let x = 2
+const c = 1
+c = 2
+5

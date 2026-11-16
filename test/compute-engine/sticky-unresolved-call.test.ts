@@ -5,8 +5,7 @@ import type { EvaluateOptions, Expression } from '../../src/compute-engine';
 // the rest of the top-level evaluation that produced it, even when the name
 // is assigned later in that evaluation (a later statement of a nested block,
 // a later term of a `Sum`). A later top-level evaluation (a host call of
-// `evaluate()`, the next statement of an Epsil program or of a block that
-// the host evaluates) resolves it again. The original, unevaluated call is
+// `evaluate()` or the next statement of a Program) resolves it again. The original, unevaluated call is
 // never sticky. Decided in
 // `docs/plans/2026-10-21-function-declaration-hoisting.md`, rule 1.
 
@@ -149,14 +148,11 @@ describe('a rebuilt expression', () => {
   });
 });
 
-describe('a program block that is not canonical', () => {
-  // A `Block` that the host evaluates directly is a program: each of its
-  // statements is its own top-level evaluation, so the stored `fn(3)`
-  // resolves when the last statement reads it. A block that is not
-  // canonical is evaluated by its canonical form, one evaluation deeper;
-  // it is still a program (`runsAsProgram()`, `library/control-structures.ts`).
+describe('a Program that is not canonical', () => {
+  // Each Program statement starts its own top-level evaluation. A raw or
+  // structural Program retains this behavior when canonicalized.
   const PROGRAM = [
-    'Block',
+    'Program',
     ['Declare', 'r', "'unknown'", ['fn', 3]],
     ['Assign', 'fn', ['Function', ['Multiply', 2, 'z'], 'z']],
     ['Tuple', 'r', ['fn', 3]],
@@ -172,7 +168,7 @@ describe('a program block that is not canonical', () => {
       'structural ce.function',
       (ce) =>
         ce.function(
-          'Block',
+          'Program',
           PROGRAM.slice(1).map((s) => ce.box(s as never, { form: 'raw' })),
           { form: 'structural' }
         ),
@@ -227,12 +223,13 @@ describe('the result of an unresolved call over the same operands', () => {
 /** A block that stores `h(k)`, then assigns `h`, then reads the stored
  * value. As a program, the last statement resolves the stored call
  * (`2k`); as a nested block, it stays `h(k)`. */
-function storeThenAssign(h: string): unknown[] {
+function storeThenAssign(h: string, program = false): unknown[] {
+  const result = program ? `r_${h}` : 'r';
   return [
-    'Block',
-    ['Declare', 'r', "'unknown'", [h, 'k']],
+    program ? 'Program' : 'Block',
+    ['Declare', result, "'unknown'", [h, 'k']],
     ['Assign', h, ['Function', ['Multiply', 2, 'z'], 'z']],
-    'r',
+    result,
   ];
 }
 
@@ -287,18 +284,18 @@ function engineWithTick(): ComputeEngine {
   return ce;
 }
 
-describe('two host asynchronous evaluations of blocks at the same time', () => {
+describe('two host asynchronous evaluations of Programs at the same time', () => {
   // Each asynchronous evaluation has its own top-level evaluation number,
-  // carried by its context stack (`evaluation-epoch.ts`), and each block
-  // that the host evaluates is a program, whatever other evaluations are
+  // carried by its context stack (`evaluation-epoch.ts`), and each Program
+  // keeps its statement boundaries, whatever other evaluations are
   // pending. Before, asynchronous evaluations that ran at the same time
   // shared one number, the two blocks ran as nested blocks, and the stored
   // calls stayed unresolved: `h(k)` and `q(k)`.
-  test('at the same time, each block is a program', async () => {
+  test('at the same time, each Program has statement boundaries', async () => {
     const ce = newEngine();
     const [a, b] = await Promise.all([
-      ce.box(storeThenAssign('h') as never).evaluateAsync(),
-      ce.box(storeThenAssign('q') as never).evaluateAsync(),
+      ce.box(storeThenAssign('h', true) as never).evaluateAsync(),
+      ce.box(storeThenAssign('q', true) as never).evaluateAsync(),
     ]);
     expect([a.toString(), b.toString()]).toEqual(['2k', '2k']);
   });
@@ -308,11 +305,11 @@ describe('two host asynchronous evaluations of blocks at the same time', () => {
     // so the statements of the two blocks alternate.
     const ce = engineWithTick();
     const waiting = (h: string): unknown[] => [
-      'Block',
-      ['Declare', 'r', "'unknown'", [h, 'k']],
+      'Program',
+      ['Declare', `r_${h}`, "'unknown'", [h, 'k']],
       ['Tick'],
       ['Assign', h, ['Function', ['Multiply', 2, 'z'], 'z']],
-      'r',
+      `r_${h}`,
     ];
     const [a, b] = await Promise.all([
       ce.box(waiting('h') as never).evaluateAsync(),
@@ -327,7 +324,7 @@ describe('two host asynchronous evaluations of blocks at the same time', () => {
     const ce = engineWithTick();
     const pending = ce
       .box([
-        'Block',
+        'Program',
         ['Declare', 'r', "'unknown'", ['h', 'k']],
         ['Tick'],
         ['Assign', 'h', ['Function', ['Multiply', 2, 'z'], 'z']],
@@ -336,7 +333,7 @@ describe('two host asynchronous evaluations of blocks at the same time', () => {
       .evaluateAsync();
     expect(
       ce
-        .box(storeThenAssign('q') as never)
+        .box(storeThenAssign('q', true) as never)
         .evaluate()
         .toString()
     ).toBe('2k');
@@ -350,7 +347,7 @@ describe('two host asynchronous evaluations of blocks at the same time', () => {
     const nested = ['Tuple', storeThenAssign('h'), 1];
     const [a, b] = await Promise.all([
       ce.box(nested as never).evaluateAsync(),
-      ce.box(storeThenAssign('q') as never).evaluateAsync(),
+      ce.box(storeThenAssign('q', true) as never).evaluateAsync(),
     ]);
     expect([a.toString(), b.toString()]).toEqual(['(h(k), 1)', '2k']);
     // Another name: the block above assigned the `h` of the engine.
@@ -364,10 +361,10 @@ describe('two host asynchronous evaluations of blocks at the same time', () => {
     await pending;
   });
 
-  test('one after the other, each block is a program', async () => {
+  test('one after the other, each Program has statement boundaries', async () => {
     const ce = newEngine();
-    const a = await ce.box(storeThenAssign('h') as never).evaluateAsync();
-    const b = await ce.box(storeThenAssign('q') as never).evaluateAsync();
+    const a = await ce.box(storeThenAssign('h', true) as never).evaluateAsync();
+    const b = await ce.box(storeThenAssign('q', true) as never).evaluateAsync();
     expect([a.toString(), b.toString()]).toEqual(['2k', '2k']);
   });
 });
@@ -468,19 +465,19 @@ describe('the evaluation number on the routes that copy the context stack', () =
     ).toBe('h(k)');
   });
 
-  test('a symbol that holds a program block', async () => {
+  test('a symbol that holds a Program', async () => {
     // The read of the symbol starts the asynchronous evaluation, and the
     // block it holds is the outermost evaluation of it: a program, as on
     // the synchronous route. Before, the read gave the value a copy of the
     // engine's stack that carried no evaluation, and the block ran as a
     // nested block: `q(k)`.
     const sync = newEngine();
-    sync.assign('p', sync.box(storeThenAssign('h') as never, { form: 'raw' }));
+    sync.assign('p', sync.box(storeThenAssign('h', true) as never, { form: 'raw' }));
     expect(sync.symbol('p').evaluate().toString()).toBe('2k');
     const async = newEngine();
     async.assign(
       'p',
-      async.box(storeThenAssign('q') as never, { form: 'raw' })
+      async.box(storeThenAssign('q', true) as never, { form: 'raw' })
     );
     expect((await async.symbol('p').evaluateAsync()).toString()).toBe('2k');
   });

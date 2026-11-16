@@ -295,14 +295,15 @@ describe('Integrate of any other block stays unevaluated under evaluate()', () =
         'x'
       ).evaluate().operator
     ).toBe('Integrate');
-    expect(
-      integral(
-        ce,
-        ['Declare', 'c', { str: 'unknown' }, failing],
-        ['Assign', 'c', 2],
-        CX
-      ).evaluate().operator
-    ).toBe('Integrate');
+    const refused = integral(
+      ce,
+      ['Declare', 'c', { str: 'unknown' }, failing],
+      ['Assign', 'c', 2],
+      CX
+    ).evaluate();
+    expect(refused.operator).toBe('Error');
+    expect(refused.op1.json).toEqual(['ErrorCode', "'assignment-type-mismatch'", "'c'", "'function'", "'2'"]);
+    expect(refused.op2.operator).toBe('ErrorTrace');
     const unread = ce.box([
       'D',
       block(['Declare', 'c', { str: 'unknown' }, failing], 'x'),

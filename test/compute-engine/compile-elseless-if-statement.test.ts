@@ -97,7 +97,7 @@ describe('an else-less If as a block statement', () => {
       ce,
       // `Characters` yields `list<character>` since strings became indexed
       // collections of characters, so the example's annotations move with it.
-      'let digits = Characters("0123456789")\n' +
+      'let digits: list<character> = Characters("0123456789")\n' +
         'isDigit(c: character | missing) = c in digits\n' +
         'function parseDigits(cs: list<character>, i: integer) -> tuple<integer, integer> {\n' +
         '  let j = i\n  let n = 0\n' +

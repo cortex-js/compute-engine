@@ -3,14 +3,8 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 
-//
-// A program whose only statement is a `do { … }` block. The program is a
-// `Block` and a block is a `Block` too, so without a wrapper the two were the
-// same MathJSON node: the block ran in the program scope, and its `let` was a
-// top-level declaration. The parser wraps such a program in a second `Block`,
-// so the block is a nested scope, as it is when it comes after another
-// statement.
-//
+// A Program retains a nested Block for a sole `do { … }` statement, so its
+// declarations belong to the block rather than the caller's program scope.
 
 function strip(x: unknown): unknown {
   return JSON.parse(
@@ -45,12 +39,12 @@ describe('a program whose only statement is a block', () => {
     expect(executeEpsil(ce, 'a').value.toString()).toBe('a');
   });
 
-  test('the parsed shape is the block inside the program block', () => {
+  test('the parsed shape is a Block inside Program', () => {
     const [ast, diagnostics] = parseEpsil('do { let a = 3; a }');
     expect(diagnostics).toEqual([]);
     expect(strip(ast)).toEqual({
       fn: [
-        'Block',
+        'Program',
         {
           fn: [
             'Block',

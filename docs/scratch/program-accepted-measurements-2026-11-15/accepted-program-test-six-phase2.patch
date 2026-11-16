@@ -1,0 +1,43 @@
+--- a/test/epsil/comprehensions.test.ts
++++ b/test/epsil/comprehensions.test.ts
+@@ -298,7 +298,6 @@
+   test.each([
+     ['[k * 2 for k in 1..3]', '["List",2,4,6]'],
+     ['[do { k * 2 } for k in 1..3]', '["List",2,4,6]'],
+-    ['let xs = [do { k * 2 } for k in 1..3]', '"Nothing"'],
+     ['let xs = [do { k * 2 } for k in 1..3]; xs', '["List",2,4,6]'],
+     [
+       'let xs = [if k > 1 { k } else { 0 } for k in 1..3]; xs',
+@@ -315,6 +314,21 @@
+     ],
+   ])('%s', async (source, expected) => {
+     expect(await resultJson(source)).toEqual([expected, expected]);
++  });
++
++  test('a final declaration returns Nothing and stores the listed value', async () => {
++    const source = 'let xs = [do { k * 2 } for k in 1..3]';
++    const syncEngine = new ComputeEngine();
++    const sync = executeEpsil(syncEngine, source);
++    expect(sync.diagnostics).toEqual([]);
++    expect(sync.value.symbol).toBe('Nothing');
++    expect(syncEngine.box('xs').evaluate().json).toEqual(['List', 2, 4, 6]);
++
++    const asyncEngine = new ComputeEngine();
++    const async = await executeEpsilAsync(asyncEngine, source);
++    expect(async.diagnostics).toEqual([]);
++    expect(async.value.symbol).toBe('Nothing');
++    expect(asyncEngine.box('xs').evaluate().json).toEqual(['List', 2, 4, 6]);
+   });
+ 
+   test('an infinite comprehension stays as it is', async () => {
+--- a/test/compute-engine/protocol-type-redefinition.test.ts
++++ b/test/compute-engine/protocol-type-redefinition.test.ts
+@@ -257,6 +257,8 @@
+   });
+ 
+   test('object → record re-applies the B1 mutability gate', () => {
++    // Keep this binding open while its nominal name changes kind, so the
++    // runtime instance's pinned object layout remains the subject of the test.
+     // The gate refuses a `readwrite` protocol on a value type at REGISTRATION.
+     // A redefinition can make an already-registered edge one the gate would
+     // refuse; conformance is monotone, so the edge survives — left pending,

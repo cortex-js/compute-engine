@@ -57,3 +57,17 @@ export function setDebugStatementResultHook(
 ): void {
   debugStatementResultHook = hook;
 }
+
+// A debugger command can unwind evaluation. Program continuation must not turn
+// an exception from a host hook into an ordinary statement error.
+const HOOK_FAILURES = new WeakSet<object>();
+export function invokeDebugHook(fn: () => void): void {
+  try { fn(); } catch (error) {
+    const failure = error !== null && (typeof error === 'object' || typeof error === 'function') ? error : new Error('Debugger hook threw', { cause: error });
+    HOOK_FAILURES.add(failure);
+    throw failure;
+  }
+}
+export function isDebugHookFailure(error: unknown): boolean {
+  return error !== null && (typeof error === 'object' || typeof error === 'function') && HOOK_FAILURES.has(error);
+}

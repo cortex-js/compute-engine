@@ -1,3 +1,4 @@
+import { operand, operator } from '../../src/math-json/utils';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
@@ -22,7 +23,8 @@ function strip(expr: MathJsonExpression): any {
 function ast(src: string): any {
   const [expr, diagnostics] = parseEpsil(src);
   expect(diagnostics.map((d) => d.message)).toEqual([]);
-  return strip(expr);
+  expect(operator(expr)).toBe('Program');
+  return strip(operand(expr, 1)!);
 }
 
 /** The diagnostic codes `src` reports (`[]` when it parses cleanly). */

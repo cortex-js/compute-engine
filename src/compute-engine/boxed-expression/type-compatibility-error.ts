@@ -648,6 +648,13 @@ export function constructorAssignmentError(
   );
 }
 
+const DECLARATION_TYPE_ERRORS = new WeakMap<Expression, Expression>();
+
+/** Whether this value is a refusal by the Declare initialization owner. */
+export function isDeclarationTypeErrorValue(value: Expression, target: Expression): boolean {
+  return isFunction(value, 'Error') && DECLARATION_TYPE_ERRORS.get(value.op1) === target;
+}
+
 /**
  * The `incompatible-type` error VALUE a rejected declared type yields on the
  * `Assign` / `Declare` operator routes — the same shape and channel as the
@@ -657,26 +664,18 @@ export function constructorAssignmentError(
  */
 export function typeCompatibilityErrorValue(
   ce: ComputeEngine,
-  e: TypeCompatibilityError
+  e: TypeCompatibilityError,
+  declarationTarget?: Expression
 ): Expression {
   // G11 keeps the `incompatible-type` code and its three-part payload
   // (Epsil's diagnostic machinery keys on both), but carries the DEDICATED
   // sentence in the `where` slot so the message is the same on every route —
   // a host throw and an `Assign`/`Declare` error value read alike.
-  if (e.kind === 'generic-overload-literal')
-    return ce.typeError(
-      e.declaredType.type,
-      e.valueType,
-      `${e.symbol}: ${GENERIC_OVERLOAD_LITERAL_MESSAGE}`
-    );
-  // The signature-vs-non-function near-miss carries its explanation in the
-  // `where` slot, exactly as G11 does, so the error value is as actionable
-  // as the host throw.
-  if (e.hint !== undefined)
-    return ce.typeError(
-      e.declaredType.type,
-      e.valueType,
-      `${e.symbol}: ${e.hint}`
-    );
-  return ce.typeError(e.declaredType.type, e.valueType, e.symbol);
+  const where = e.kind === 'generic-overload-literal'
+    ? `${e.symbol}: ${GENERIC_OVERLOAD_LITERAL_MESSAGE}`
+    : e.hint !== undefined ? `${e.symbol}: ${e.hint}` : e.symbol;
+  const result = ce.typeError(e.declaredType.type, e.valueType, where);
+  if (declarationTarget !== undefined && isFunction(result, 'Error'))
+    DECLARATION_TYPE_ERRORS.set(result.op1, declarationTarget);
+  return result;
 }

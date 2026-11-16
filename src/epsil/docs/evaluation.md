@@ -8,8 +8,11 @@ date: Last Modified
 ---
 # Evaluation
 
-A program's top-level statements are evaluated **sequentially**, and the
-program's value is the **last statement's** value:
+A whole program is prepared before any statement executes. Types and
+protocols come first, then function definitions with their paired signature
+declarations, then all remaining statements in source order. Statements are
+evaluated **sequentially** in that canonical order, and the program's value
+is the **last statement's** value:
 
 ```epsil
 let x = 5
@@ -21,7 +24,9 @@ x
 No scope is pushed around the whole program: declarations persist across
 statements, and across cells in a notebook or inputs in a REPL that share one
 session. Blocks and function bodies still push their own lexical scopes (see
-[Control Flow](/epsil/control-flow/)).
+[Control Flow](/epsil/control-flow/)). A later program may redeclare a
+session name and establish a new type; assignment keeps the existing
+binding's contract. See [Declarations](/epsil/declarations/).
 
 ## Symbolic by default
 
@@ -341,7 +346,19 @@ Per [Principles](/epsil/principles/), "errors are values": a *runtime*
 problem — a type error, an out-of-domain argument, reassigning a `const` —
 becomes an `Error` value that propagates outward through the enclosing
 expressions and becomes their result, not a thrown exception. A program never
-throws to its host for a runtime problem.
+throws to its host for an ordinary runtime problem. Each top-level statement
+fails on its own, so an invalid statement or a thrown runtime error does not
+prevent later siblings from running:
+
+```epsil
+let z = "a" + 1
+5
+// ➔ 5, with diagnostics for the invalid statement
+```
+
+A nested block or function body stops at its error instead of continuing its
+remaining statements. Cancellation stops the program; it is not an ordinary
+statement failure.
 
 *Parse*-time problems are different: a malformed program surfaces as a
 **diagnostic**, not as a value. So do the few execution-time problems that are
@@ -354,9 +371,8 @@ value produced by an earlier statement would otherwise vanish silently. Each
 a `runtime-error` diagnostic — for example an assignment to an element past
 the end of a list (`xs[5] = 9` when `xs` has three elements), or reassigning
 a library constant such as
-`Pi`. A problem that the static check
-already reported before the program ran, such as reassigning a `const` of the
-same program, is not reported a second time.
+`Pi`. A same-program `const` write rejected during preparation is already
+reported by the static check and is not reported a second time at runtime.
 
 The same applies inside a block: a statement of a loop body, a function body
 or an `if` branch whose value is discarded and holds an error is reported, once

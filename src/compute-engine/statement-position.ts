@@ -1,8 +1,9 @@
 import type {
   Expression,
+  BoxedDefinition,
   IComputeEngine as ComputeEngine,
 } from './global-types.js';
-import { isSymbol } from './boxed-expression/type-guards.js';
+import { isFunction, isSymbol } from './boxed-expression/type-guards.js';
 
 // The canonical forms of a statement operand, and the position of the
 // statement that is canonicalized now. A statement operand is an operand
@@ -107,6 +108,18 @@ export function isInBodyOrBranch(): boolean {
   return bodyDepth > 0 || branchDepth > 0 || savedBranchDepths.length > 0;
 }
 
+/** The syntactic position of a direct Program statement during boxing. */
+let programPosition: readonly number[] | undefined;
+export function withProgramStatement<T>(fn: () => T): T {
+  const saved = programPosition;
+  programPosition = [bodyDepth, branchDepth, savedBranchDepths.length];
+  try { return fn(); } finally { programPosition = saved; }
+}
+export function isProgramStatement(): boolean {
+  return programPosition !== undefined && programPosition[0] === bodyDepth &&
+    programPosition[1] === branchDepth && programPosition[2] === savedBranchDepths.length;
+}
+
 /**
  * The names that a function definition statement (`DefineFunction`, the
  * Epsil `function f(…) { … }` or `f(x) = …`) defines in the statement list
@@ -192,4 +205,36 @@ export function canonicalStatement(
       op.symbol
     );
   return op.canonical;
+}
+
+let programBatchCounter = 0;
+/** Shared statement-declaration origin for direct Programs and Epsil routes. */
+export function nextProgramBatchId(): number { return ++programBatchCounter; }
+
+let programInitializerOuters: ReadonlyMap<string, BoxedDefinition> | undefined;
+export function withProgramInitializerOuters<T>(bindings: ReadonlyMap<string, BoxedDefinition>, fn: () => T): T {
+  const saved = programInitializerOuters;
+  programInitializerOuters = bindings;
+  try { return fn(); } finally { programInitializerOuters = saved; }
+}
+export function programInitializerOuter(name: string): BoxedDefinition | undefined {
+  return programInitializerOuters?.get(name);
+}
+
+/** Prior caller bindings of a declaration whose Program hoisted a replacement. */
+const programDeclarationPrevious = new WeakMap<Expression, ReadonlyMap<string, BoxedDefinition | undefined>>();
+export function noteProgramDeclarationPrevious(target: Expression, previous: ReadonlyMap<string, BoxedDefinition | undefined>): void {
+  programDeclarationPrevious.set(target, previous);
+}
+export function priorProgramDeclaration(target: Expression | undefined): ReadonlyMap<string, BoxedDefinition | undefined> | undefined {
+  return target === undefined ? undefined : programDeclarationPrevious.get(target);
+}
+
+/** The authored positions of a Program's canonical statements. */
+const programSourceOrders = new WeakMap<Expression, readonly number[]>();
+export function noteProgramSourceOrder(program: Expression, order: readonly number[]): void {
+  programSourceOrders.set(program, order);
+}
+export function programSourceOrder(program: Expression): readonly number[] {
+  return programSourceOrders.get(program) ?? (isFunction(program) ? program.ops.map((_, i) => i) : []);
 }

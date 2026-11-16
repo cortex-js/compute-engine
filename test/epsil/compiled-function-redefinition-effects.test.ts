@@ -75,9 +75,8 @@ describe('A FUNCTION DEFINED UNDER A DECLARATION THAT STATES ITS EFFECTS', () =>
   });
 
   test('the compilation is refused', () => {
-    // The compiled program is one block, where the declaration and the
-    // function statement are two declarations of `g`.
-    expect(() => compileProgram(source)).toThrow(/variable-redeclaration/);
+    // The paired Program signature remains a pure contract at compilation.
+    expect(() => compileProgram(source)).toThrow(/body infers the effects `random`/);
   });
 
   test('a definition that meets the declared effects still compiles', () => {

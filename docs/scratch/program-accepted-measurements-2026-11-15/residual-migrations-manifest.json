@@ -1,0 +1,37 @@
+[
+  {
+    "file": "test/compute-engine/assignment-stores-lazy-collection.test.ts",
+    "insertions": 10,
+    "deletions": 1,
+    "beforeSha256": "0c88c297627b4582a849e797ce90fa03da1bdf13dec0d0981e73f9030d817898",
+    "afterSha256": "40b12f38cc798d264866d9e7746c06b9ad741a1c257cb41f4dc38e57333f8287"
+  },
+  {
+    "file": "test/compute-engine/declare-destructure.test.ts",
+    "insertions": 8,
+    "deletions": 3,
+    "beforeSha256": "224d6947bfb8f63f475f89c43d5769a477fc4b06e97020e64da942be3d90a6ce",
+    "afterSha256": "64be1e86ad9f32401de4adf929c68c8c32e5a26e04e91f64294f396a57f69e48"
+  },
+  {
+    "file": "test/compute-engine/tycho-item-332-compiled-program-parity.test.ts",
+    "insertions": 0,
+    "deletions": 0,
+    "beforeSha256": "6cdcfe45fd5a418a70feb4955ce77a531eddaa5b92894e7f460a77ae05653245",
+    "afterSha256": "6cdcfe45fd5a418a70feb4955ce77a531eddaa5b92894e7f460a77ae05653245"
+  },
+  {
+    "file": "test/epsil/static-check-const-assignment.test.ts",
+    "insertions": 0,
+    "deletions": 0,
+    "beforeSha256": "da1cb6366eaa77f68da459174477d45de2de4b43e298b84a67fc379b7456aa9c",
+    "afterSha256": "da1cb6366eaa77f68da459174477d45de2de4b43e298b84a67fc379b7456aa9c"
+  },
+  {
+    "file": "test/compute-engine/named-arguments-declared-callee.test.ts",
+    "insertions": 0,
+    "deletions": 0,
+    "beforeSha256": "3900a3a51a15188c10e2cb1142f72e463f14d8b7238d98c1317c6d5e8a201527",
+    "afterSha256": "3900a3a51a15188c10e2cb1142f72e463f14d8b7238d98c1317c6d5e8a201527"
+  }
+]

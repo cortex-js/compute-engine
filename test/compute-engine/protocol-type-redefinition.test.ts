@@ -222,7 +222,8 @@ let p = T(a: 1)`
     );
     // An instance built from the CURRENT declaration answers both.
     expect(result(`let q = T(a: 1, c: 2)\nq.(Proto.c)`)).toBe('2');
-    expect(result(`q.(Proto.c) = 8`)).toBe('8');
+    expect(result(`q.(Proto.c) = 8`)).toBe('"Nothing"');
+    expect(result(`q.(Proto.c)`)).toBe('8');
   });
 
   test('a redefinition that adds a field beside an AUTHORED accessor is `object-property-conflict`', () => {
@@ -256,6 +257,8 @@ q.(P.label)`)
   });
 
   test('object → record re-applies the B1 mutability gate', () => {
+    // Keep this binding open while its nominal name changes kind, so the
+    // runtime instance's pinned object layout remains the subject of the test.
     // The gate refuses a `readwrite` protocol on a value type at REGISTRATION.
     // A redefinition can make an already-registered edge one the gate would
     // refuse; conformance is monotone, so the edge survives — left pending,
@@ -263,7 +266,7 @@ q.(P.label)`)
     expect(
       result(`protocol M { readwrite v: integer }
 type W = object{v: integer} is M
-let w = W(v: 1)
+let w: any = W(v: 1)
 w.(M.v)`)
     ).toBe('1');
 
@@ -484,7 +487,7 @@ let p = T(a: "s")`
     // The read is refused — the slot holds a string…
     expect(result(`p.(P.a)`)).toContain('protocol-implementation-missing');
     // …and writing an `integer` into it is exactly the fix, so it goes through.
-    expect(result(`p.(P.a) = 5`)).toBe('5');
+    expect(result(`p.(P.a) = 5`)).toBe('"Nothing"');
     expect(result(`p.(P.a)`)).toBe('5');
   });
 });
@@ -1005,7 +1008,7 @@ let p = T(a: 1)`
 
     // Positive control: a receiver built from the current declaration fires the
     // right-hand side exactly once and stores it.
-    expect(result(`let q = T(a: 5)\nq.(P.a) = bump()`)).toBe('7');
+    expect(result(`let q = T(a: 5)\nq.(P.a) = bump()`)).toBe('"Nothing"');
     expect(result(`c.n`)).toBe('1');
     expect(result(`q.a`)).toBe('7');
   });

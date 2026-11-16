@@ -1,3 +1,4 @@
+import { operand, operands, operator } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -36,11 +37,12 @@ function head(node: MathJsonExpression): unknown {
   return fn?.[0];
 }
 
-/** Parse `src` and return the root node; fail on any diagnostic. */
+/** Observe a sole parsed statement, retaining Program for several statements. */
 function parse(src: string): MathJsonExpression {
   const [expr, diagnostics] = parseEpsil(src);
   expect(diagnostics).toEqual([]);
-  return expr;
+  expect(operator(expr)).toBe('Program');
+  return operands(expr).length === 1 ? operand(expr, 1)! : expr;
 }
 
 /** The first node, depth first, whose head is `name`. */

@@ -1,0 +1,554 @@
+[
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+    "command": "BUILD=production node scripts/build.mjs",
+    "lockCheck": "node ~/.claude/scripts/box-lock.mjs check codex-program-accepted:baseline",
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "ce-time.mjs",
+      "ce-normal-1.json",
+      "auto"
+    ],
+    "environment": {},
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "ce-time.mjs",
+      "ce-normal-repeat1.json",
+      "auto"
+    ],
+    "environment": {},
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": true
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "ce-time.mjs",
+      "ce-normal-repeat2.json",
+      "auto"
+    ],
+    "environment": {},
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "ce-time.mjs",
+      "ce-normal-repeat3.json",
+      "auto"
+    ],
+    "environment": {},
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "ce-time.mjs",
+      "ce-normal-repeat4.json",
+      "auto"
+    ],
+    "environment": {},
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": true
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "ce-time.mjs",
+      "ce-normal-repeat5.json",
+      "auto"
+    ],
+    "environment": {},
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": true
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "ce-time.mjs",
+      "ce-off-repeat1.json",
+      "off"
+    ],
+    "environment": {},
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": true
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "ce-time.mjs",
+      "ce-off-repeat2.json",
+      "off"
+    ],
+    "environment": {},
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "ce-time.mjs",
+      "ce-off-repeat3.json",
+      "off"
+    ],
+    "environment": {},
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "ce-time.mjs",
+      "ce-off-repeat4.json",
+      "off"
+    ],
+    "environment": {},
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "ce-time.mjs",
+      "ce-off-repeat5.json",
+      "off"
+    ],
+    "environment": {},
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": true
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "./tycho/scripts/repros/ce-alt-hook.mjs",
+      "tycho-time.mts",
+      "tycho-normal-1.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "./tycho/scripts/repros/ce-alt-hook.mjs",
+      "tycho-time.mts",
+      "tycho-normal-repeat1.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "./tycho/scripts/repros/ce-alt-hook.mjs",
+      "tycho-time.mts",
+      "tycho-normal-repeat2.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "./tycho/scripts/repros/ce-alt-hook.mjs",
+      "tycho-time.mts",
+      "tycho-normal-repeat3.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "./tycho/scripts/repros/ce-alt-hook.mjs",
+      "tycho-time.mts",
+      "tycho-normal-repeat4.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "./tycho/scripts/repros/ce-alt-hook.mjs",
+      "tycho-time.mts",
+      "tycho-normal-repeat5.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "./tycho/scripts/repros/ce-alt-hook.mjs",
+      "tycho-time.mts",
+      "tycho-off-repeat1.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "./tycho/scripts/repros/ce-alt-hook.mjs",
+      "tycho-time.mts",
+      "tycho-off-repeat2.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "./tycho/scripts/repros/ce-alt-hook.mjs",
+      "tycho-time.mts",
+      "tycho-off-repeat3.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "./tycho/scripts/repros/ce-alt-hook.mjs",
+      "tycho-time.mts",
+      "tycho-off-repeat4.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "./tycho/scripts/repros/ce-alt-hook.mjs",
+      "tycho-time.mts",
+      "tycho-off-repeat5.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "monitorAcceptedWholeProcess": false
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-allocating-control-normal-1.json",
+      "allocating-control",
+      "auto"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-allocating-control-normal-2.json",
+      "allocating-control",
+      "auto"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-allocating-control-normal-3.json",
+      "allocating-control",
+      "auto"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-allocating-control-off-1.json",
+      "allocating-control",
+      "off"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-allocating-control-off-2.json",
+      "allocating-control",
+      "off"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-allocating-control-off-3.json",
+      "allocating-control",
+      "off"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-drop-normal-1.json",
+      "drop",
+      "auto"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-drop-normal-2.json",
+      "drop",
+      "auto"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-drop-normal-3.json",
+      "drop",
+      "auto"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-drop-off-1.json",
+      "drop",
+      "off"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-drop-off-2.json",
+      "drop",
+      "off"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-drop-off-3.json",
+      "drop",
+      "off"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-retain-closures-normal-1.json",
+      "retain-closures",
+      "auto"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-retain-closures-normal-2.json",
+      "retain-closures",
+      "auto"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-retain-closures-normal-3.json",
+      "retain-closures",
+      "auto"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-retain-closures-off-1.json",
+      "retain-closures",
+      "off"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-retain-closures-off-2.json",
+      "retain-closures",
+      "off"
+    ],
+    "exitCode": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115",
+    "command": [
+      "node",
+      "--expose-gc",
+      "heap.mjs",
+      "heap-retain-closures-off-3.json",
+      "retain-closures",
+      "off"
+    ],
+    "exitCode": 0
+  }
+]

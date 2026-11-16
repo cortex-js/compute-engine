@@ -450,6 +450,7 @@ export function bindingInContext(
  * reads the definition that its home chain gives (`homeChainBinding()`).
  */
 export function readsActivation(def: BoxedDefinition): boolean {
+  if ('value' in def && def.value._programVariable) return false;
   if (isBlockLocalBinding(def)) return true;
   return 'value' in def && readsActivationHalf(def.value);
 }
@@ -460,7 +461,7 @@ export function readsActivation(def: BoxedDefinition): boolean {
 export function readsActivationHalf(def: BoxedBaseDefinition): boolean {
   if (isActivation(def)) return true;
   const own = def as BoxedValueDefinition;
-  return isBinderVariable(own) || own._blockLocal === true;
+  return isBinderVariable(own) || (own._blockLocal === true && !own._programVariable);
 }
 
 /**
@@ -579,6 +580,7 @@ export function freeNameBindingAndScope(
  * `library/core.ts`).
  */
 export function isBlockLocalBinding(found: BoxedDefinition): boolean {
+  if ('value' in found && found.value._programVariable) return false;
   if ((found as { _declaredByStatement?: boolean })._declaredByStatement)
     return true;
   return 'value' in found && found.value._blockLocal === true;

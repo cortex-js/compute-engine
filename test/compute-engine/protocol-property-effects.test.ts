@@ -84,14 +84,14 @@ describe('the runtime channel: `expr.effects` of a store', () => {
   });
 
   test('a `Field` target on a RECORD stays `scope` — records have no slots', () => {
-    const { ce } = run(`type Badge = record{name: string}
-let b = Badge(name: "a")`);
-    const store = ce.box([
-      'Assign',
-      ['Field', 'b', { str: 'name' }],
-      { str: 'z' },
-    ] as never);
+    const { ce } = run(`type Badge = record{name: string}`);
+    ce.declare('b', 'Badge');
+    const json = ['Assign', ['Field', 'b', { str: 'name' }], { str: 'z' }];
+    // Inspect the effect channel before canonicalization refuses the immutable
+    // record target. The execution channel must still refuse the store.
+    const store = ce.box(json as never, { canonical: false });
     expect(store.effects).toEqual(['scope']);
+    expect(ce.box(json as never).operator).toBe('Error');
   });
 
   test('a four-operand `ProtocolProperty` — the setter invocation — is `state`', () => {
@@ -489,14 +489,15 @@ Type(f)`).value
   });
 
   test('…and annotating that function `pure` is REFUSED, as an error value', () => {
-    // The refusal is the statement's VALUE, not a diagnostic: an effect
-    // contract is checked when the definition is evaluated.
+    // The refused definition is reported even though canonical Program
+    // order leaves the ordinary variable declaration last, returning Nothing.
     const { value, diagnostics } = run(`${FIELD_BACKED}
 function f(x: P) pure { x.age = 43 }`);
-    expect(value).toContain('incompatible-type');
-    expect(value).toContain('pure effects');
-    expect(value).toContain('state effects');
-    expect(diagnostics).toEqual([]);
+    expect(value).toBe('"Nothing"');
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toContain('incompatible-type');
+    expect(diagnostics[0]).toContain('pure effects');
+    expect(diagnostics[0]).toContain('state effects');
   });
 
   test('a store through a COMPUTED property infers `state`', () => {
@@ -515,10 +516,12 @@ Type(f)`).value
   test('…and annotating THAT function `pure` is refused too', () => {
     // Regression: this was accepted, and calling it mutated the caller's
     // object behind a `pure` contract.
-    const { ce, value } = run(`${COMPUTED}
+    const { ce, value, diagnostics } = run(`${COMPUTED}
 function f(x: Q) pure { x.age = 3 }`);
-    expect(value).toContain('incompatible-type');
-    expect(value).toContain('state effects');
+    expect(value).toBe('"Nothing"');
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toContain('incompatible-type');
+    expect(diagnostics[0]).toContain('state effects');
     // The definition was refused, so the mutation never happens: `q` keeps the
     // `n` it was built with.
     expect(run('f(q)\nq.n', ce).value).toBe('1');
@@ -582,7 +585,7 @@ Type(rename)`);
       run(`type M = object{id: string}
 let g = M(id: "a")
 function touch() pure { let r = g
-  r.id = "b" }`).value
+  r.id = "b" }`).diagnostics.join('|')
     ).toContain('incompatible-type');
     expect(
       run(`type M = object{id: string}

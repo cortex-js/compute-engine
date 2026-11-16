@@ -1,0 +1,259 @@
+[
+  {
+    "source": "do { let xs = [1, 2, 3]\nwhile let [h, ...] = xs { xs = Rest(xs) }\nxs }",
+    "parseDiagnostics": [],
+    "type": "list<integer>",
+    "value": "[]",
+    "sound": true,
+    "result": {
+      "value": [
+        "Rest",
+        [
+          "Rest",
+          [
+            "Rest",
+            [
+              "List",
+              1,
+              2,
+              3
+            ]
+          ]
+        ]
+      ],
+      "diagnostics": []
+    },
+    "checkDiagnostics": []
+  },
+  {
+    "source": "do { let xs = [1, 2, 3]\nmatch 1 { 1 => do { xs = \"abc\" } }\nxs }",
+    "parseDiagnostics": [],
+    "type": "error",
+    "value": "Error(ErrorCode(\"assignment-type-mismatch\", \"xs\", \"list<number>\", \"string\"))",
+    "sound": true,
+    "result": {
+      "value": [
+        "Error",
+        [
+          "ErrorCode",
+          "'assignment-type-mismatch'",
+          "'xs'",
+          "'list<number>'",
+          "'string'"
+        ],
+        [
+          "ErrorTrace",
+          [
+            "ErrorFrame",
+            "'Block'",
+            2
+          ]
+        ]
+      ],
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "`xs` has the type `list<number>`, and the value has the type `string`",
+            "do {let xs = [1, 2, 3]; match 1 { 1 => do {xs := \"abc\"} }; …",
+            "assignment-type-mismatch"
+          ],
+          "code": "assignment-type-mismatch",
+          "range": [
+            24,
+            58,
+            24
+          ]
+        }
+      ]
+    },
+    "checkDiagnostics": [
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "`xs` has the type `list<number>`, and the value has the type `string`",
+          "do {let xs = [1, 2, 3]; match 1 { 1 => do {xs := \"abc\"} }; …",
+          "assignment-type-mismatch"
+        ],
+        "code": "assignment-type-mismatch",
+        "range": [
+          24,
+          58,
+          24
+        ]
+      }
+    ]
+  },
+  {
+    "source": "do { let xs = [1, 2, 3]\nlet s = 0\nwhile let [h, ...] = xs { s = s + h; xs = Rest(xs) }\ns }",
+    "parseDiagnostics": [],
+    "type": "number",
+    "value": "6",
+    "sound": true,
+    "result": {
+      "value": 6,
+      "diagnostics": []
+    },
+    "checkDiagnostics": [],
+    "compiled": {
+      "success": true,
+      "value": 6
+    }
+  },
+  {
+    "source": "let a: any = 1\na = \"x\"\na",
+    "parseDiagnostics": [],
+    "type": "any",
+    "value": "\"x\"",
+    "sound": true,
+    "result": {
+      "value": "'x'",
+      "diagnostics": []
+    },
+    "checkDiagnostics": []
+  },
+  {
+    "source": "let a = 1\nlet a = 2\na",
+    "parseDiagnostics": [],
+    "type": "error",
+    "value": "1",
+    "sound": false,
+    "result": {
+      "value": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "variable redeclaration: a",
+            "let a = 2",
+            "variable-redeclaration"
+          ],
+          "code": "variable-redeclaration",
+          "range": [
+            10,
+            19,
+            10
+          ]
+        }
+      ]
+    },
+    "checkDiagnostics": [
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "variable redeclaration: a",
+          "let a = 2",
+          "variable-redeclaration"
+        ],
+        "code": "variable-redeclaration",
+        "range": [
+          10,
+          19,
+          10
+        ]
+      }
+    ]
+  },
+  {
+    "source": "let a = 1\nlet (a, b) = (2, 3)\nlet b = 4\nb",
+    "parseDiagnostics": [],
+    "type": "error",
+    "value": "4",
+    "sound": false,
+    "result": {
+      "value": 4,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "variable redeclaration: a",
+            "let (a, b) = (2, 3)",
+            "variable-redeclaration"
+          ],
+          "code": "variable-redeclaration",
+          "range": [
+            10,
+            29,
+            10
+          ]
+        }
+      ]
+    },
+    "checkDiagnostics": [
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "variable redeclaration: a",
+          "let (a, b) = (2, 3)",
+          "variable-redeclaration"
+        ],
+        "code": "variable-redeclaration",
+        "range": [
+          10,
+          29,
+          10
+        ]
+      }
+    ]
+  },
+  {
+    "source": "function g(a) {\n  f(y) := y + 1\n  f(x) := x + 3\n  f(a)\n}\n[g(5), g(6)]",
+    "parseDiagnostics": [],
+    "type": "error",
+    "value": "[g(5),g(6)]",
+    "sound": false,
+    "result": {
+      "value": [
+        "List",
+        [
+          "g",
+          5
+        ],
+        [
+          "g",
+          6
+        ]
+      ],
+      "diagnostics": [
+        {
+          "severity": "error",
+          "message": [
+            "static-type-error",
+            "variable redeclaration: f",
+            "do {f(y) = y + 1; f(x) = x + 3; f(a)}",
+            "variable-redeclaration"
+          ],
+          "code": "variable-redeclaration",
+          "range": [
+            34,
+            47,
+            34
+          ]
+        }
+      ]
+    },
+    "checkDiagnostics": [
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "variable redeclaration: f",
+          "do {f(y) = y + 1; f(x) = x + 3; f(a)}",
+          "variable-redeclaration"
+        ],
+        "code": "variable-redeclaration",
+        "range": [
+          34,
+          47,
+          34
+        ]
+      }
+    ]
+  }
+]

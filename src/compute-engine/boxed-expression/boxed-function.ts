@@ -1,3 +1,4 @@
+import { programSourceOrder } from '../statement-position.js';
 import { provedAbsentDomainOf } from './proved-absent-domain.js';
 import { isIndexReadTuple } from './index-read-tuple.js';
 import { isCapturedValuelessSymbol } from './canonical-utils.js';
@@ -75,7 +76,6 @@ import {
   substituteTypeVariables,
 } from '../../common/type/instantiate.js';
 import { isWildcard } from './pattern-utils.js';
-import { isErrorTypedOperand } from './error-typed-operand.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import type {
   SimplifyOptions,
@@ -2575,7 +2575,11 @@ export class BoxedFunction
 
   get json(): MathJsonExpression {
     const s = this.structural;
-    const ops = isFunction(s) ? s.ops : this._ops;
+    const canonicalOps = isFunction(s) ? s.ops : this._ops;
+    const ops = this._operator === 'Program'
+      ? programSourceOrder(this).map((source, i) => ({source, op: canonicalOps[i]}))
+          .sort((a, b) => a.source - b.source).map((x) => x.op)
+      : canonicalOps;
     // The operands of a scoped node (a `Function` literal, a `Block`) are
     // written with its local scope as the reading scope: a local of the node
     // that shadows a library name makes a library-bound operand write the
@@ -2816,7 +2820,7 @@ export class BoxedFunction
     // type in one place and `error` in the other.
     if (
       this.isCanonical ||
-      (!this.isValid &&
+      (!this.isValid && this._operator !== 'Program' &&
         !isIterableWithFailedCells(this) &&
         !(this._operator === 'Tuple' && failedCellsAreIterable(this)))
     )
@@ -6435,42 +6439,6 @@ export class BoxedFunction
     // list of 20,000 points, against 4 ms on the synchronous route.
     if (this._isLiteralData(literalDataOptions(options)))
       return Promise.resolve(this);
-    // Host capabilities (`ce.effects`): an asynchronous evaluation captures
-    // the registry when it starts and carries it in its options, which every
-    // nested `evaluateAsync(options)` call receives. An engine field cannot
-    // hold it: while this evaluation is suspended at an `await`, another one
-    // may run on the same engine with a different registry. A synchronous
-    // evaluation that is already running (this call comes from one of its
-    // handlers) passes its own registry on.
-    //
-    // The evaluation-context stack (`EvaluateOptions._contextStack`), which
-    // holds the scopes of the scoped operators the evaluation is inside,
-    // travels the same way. A call without one captures a copy of the
-    // engine's stack as it is now: for a call from the host, of the engine's
-    // own array; for a call from the synchronous part of a handler
-    // (`ce.box(…).evaluateAsync()` with no options), of the stack of the
-    // enclosing evaluation, which then holds the scope of its index. Without
-    // this capture, the nested evaluation saw that scope only until its
-    // first `await`.
-    //
-    // A call that receives the stack of a pending asynchronous evaluation in
-    // its options is a part of that evaluation, and uses that array. Any
-    // other call starts a new asynchronous evaluation, on its own copy of
-    // the stack (`beginAsyncEvaluation`, `evaluation-epoch.ts`): the copy
-    // carries the number of the evaluation, which the sticky rule of an
-    // unresolved call and the runs of a `Block` read, and the counts that
-    // tell whether a `Block` is a program (`runsAsProgram()`,
-    // `library/control-structures.ts`). So the number of this evaluation
-    // does not depend on other evaluations that run at the same time. An
-    // evaluation that pushes a frame it holds across an `await` (a scoped
-    // operator, step 4 of the asynchronous driver) pushes it on a copy of
-    // its own stack, which carries the same number (`copyContextStack`).
-    //
-    // A call that joins a pending evaluation from inside a
-    // `ce.withTimeLimit()` span shorter than the evaluation's time limit
-    // gets a copy of the stack that carries the shorter limit
-    // (`joinAsyncEvaluation`), so the limit applies to this call after its
-    // first `await`, and not to the other parts of the evaluation.
     let evaluation = asyncEvaluationOf(options?._contextStack);
     let contextStack = options?._contextStack;
     if (evaluation === undefined)
@@ -9220,7 +9188,7 @@ export class BoxedFunction
               this.ops.map((x) => x.evaluate(operandOptions(options)))
             )
           : this;
-      if (!this.isValid) {
+      if (!this.isValid && this.operator !== 'Program') {
         const invalid = this._invalidValue();
         if (invalid === this) {
           const frozen = this._frozenLiteralValue(options);
@@ -10761,7 +10729,7 @@ export class BoxedFunction
         return this._freeHeadScope !== undefined
           ? evaluatedUnresolvedCallAsync(this, options)
           : this;
-      if (!this.isValid) {
+      if (!this.isValid && this.operator !== 'Program') {
         const invalid = this._invalidValue();
         if (invalid === this) {
           const frozen = await this._frozenLiteralValueAsync(options);
@@ -14137,7 +14105,9 @@ function heldErrorCallback(
     // declare it.
     if (!isValueDef(expr.engine.lookupDefinition(op.symbol))) continue;
     const symbol = op.isCanonical ? op : op.canonical;
-    if (!isErrorTypedOperand(symbol)) continue;
+    // Program variables keep their declared contract when their value is an
+    // error. At this runtime boundary, inspect the held value itself.
+    if (symbol.value?.operator !== 'Error') continue;
     return errorValue(symbol.evaluate(), {
       operator: expr.operator,
       index: i + 1,
@@ -18287,16 +18257,7 @@ async function evaluatedUnresolvedCallAsync(
   );
 }
 
-/**
- * Run `evaluate`, the evaluation of the canonical form of an expression that
- * is not canonical, in place of the evaluation of that expression, with
- * `_delegatedEvaluations` raised. The evaluation that delegates and the
- * evaluation of the canonical form are one evaluation for the host: a raw
- * or structural `Block` that the host evaluates directly is evaluated by its
- * canonical form one level deeper, and its evaluate handler must still see
- * that it is the outermost evaluation (`runsAsProgram()`,
- * `library/control-structures.ts`).
- */
+
 function delegateEvaluation<T>(ce: ComputeEngine, evaluate: () => T): T {
   ce._delegatedEvaluations += 1;
   try {

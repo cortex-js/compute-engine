@@ -1,3 +1,4 @@
+import { operands } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
@@ -15,7 +16,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 function bothRoutes(source: string): { block: unknown; epsil: unknown } {
   const block = new ComputeEngine()
-    .box(parseEpsil(source)[0] as never)
+    .box(['Block', ...operands(parseEpsil(source)[0])] as never)
     .evaluate().json;
   const epsil = executeEpsil(new ComputeEngine(), source).value.json;
   return { block, epsil };
@@ -38,7 +39,7 @@ describe('A PROGRAM READ AS ONE BLOCK: NAMES DECLARED LATER', () => {
       'function g(k) { t = k + 1; u = k; [t, u] }\n' +
       'let (t, u) = (0, 5)\n[g(1), g(2), t, u]';
     const block = new ComputeEngine()
-      .box(parseEpsil(source)[0] as never)
+      .box(['Block', ...operands(parseEpsil(source)[0])] as never)
       .evaluate().json as unknown[];
     expect(block).toEqual(['List', ['List', 2, 1], ['List', 3, 2], 3, 2]);
   });
@@ -61,17 +62,14 @@ describe('A PROGRAM READ AS ONE BLOCK: NAMES DECLARED LATER', () => {
 });
 
 //
-// A `let` of a library constant name (`i`, `e`, `Pi`, …) that a later
-// statement of the top-level block declares is not hoisted: the block
-// declares the name, and makes it shadow the constant, when it reaches that
-// statement. A function defined before it reads the constant, as on the
-// `executeEpsil()` route. The `let` of another name is hoisted as before.
+// A library constant name declared in the sequence shadows the library
+// throughout it, on both routes. There is no host-Block deferral rule.
 //
 
 describe('A PROGRAM READ AS ONE BLOCK: A LIBRARY CONSTANT DECLARED LATER', () => {
-  test('a function defined before the `let` reads the constant', () => {
+  test('a function defined before the `let` reads the declared variable', () => {
     const source = 'function g() { i^2 }\nlet i = 2\n[g(), i^2]';
-    const value = ['List', -1, 4];
+    const value = ['List', 4, 4];
     expect(bothRoutes(source)).toEqual({ block: value, epsil: value });
   });
 
@@ -81,10 +79,14 @@ describe('A PROGRAM READ AS ONE BLOCK: A LIBRARY CONSTANT DECLARED LATER', () =>
     expect(bothRoutes(source)).toEqual({ block: value, epsil: value });
   });
 
-  test('a statement before the `let` reads the constant', () => {
+  test('a statement before the `let` cannot read the shadowed name', () => {
     const source = 'let a = i^2\nlet i = 2\n[a, i^2]';
-    const value = ['List', -1, 4];
-    expect(bothRoutes(source)).toEqual({ block: value, epsil: value });
+    const result = bothRoutes(source);
+    expect(JSON.stringify(result.block)).toContain('read-before-declaration');
+    expect(result.epsil).toEqual(['List', 'a', 4]);
+    expect(executeEpsil(new ComputeEngine(), source).diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'read-before-declaration' })])
+    );
   });
 
   test('a name that is not a constant is read from the later `let`', () => {
@@ -102,6 +104,6 @@ describe('A PROGRAM READ AS ONE BLOCK: A LIBRARY CONSTANT DECLARED LATER', () =>
         ['List', ['h'], ['Power', 'i', 2]],
       ] as never)
       .evaluate().json;
-    expect(value).toEqual(['List', -1, 4]);
+    expect(value).toEqual(['List', 4, 4]);
   });
 });

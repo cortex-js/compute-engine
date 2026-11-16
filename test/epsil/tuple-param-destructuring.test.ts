@@ -1,3 +1,4 @@
+import { operand } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -224,7 +225,7 @@ describe('EPSIL TUPLE PARAMETER DESTRUCTURING — diagnostics', () => {
     // shape the author wrote minus the duplicate.
     const [ast] = parseEpsil('(x, y, x) => x + y');
     expect(
-      JSON.stringify(ast).replace(/,?"sourceOffsets":\[\d+,\d+\]/g, '')
+      JSON.stringify(operand(ast, 1)).replace(/,?"sourceOffsets":\[\d+,\d+\]/g, '')
     ).toBe(
       JSON.stringify({
         fn: [

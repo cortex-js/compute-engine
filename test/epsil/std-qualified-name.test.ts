@@ -1,3 +1,4 @@
+import { operand, operands } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { checkEpsil } from '../../src/epsil/check-epsil';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
@@ -25,7 +26,7 @@ function strip(node: MathJsonExpression): unknown {
 function parsed(source: string): [unknown, string[]] {
   const [ast, diagnostics] = parseEpsil(source);
   return [
-    strip(ast),
+    strip(operands(ast).length === 1 ? operand(ast, 1)! : ast),
     diagnostics.map((d) =>
       Array.isArray(d.message) ? d.message[0] : d.message
     ),
@@ -35,7 +36,8 @@ function parsed(source: string): [unknown, string[]] {
 /** The resolved tree of `source`, without source offsets. */
 function resolved(source: string): unknown {
   const [ast] = parseEpsil(source);
-  return strip(resolveLibraryNames(ast, source, new ComputeEngine()));
+  const program = resolveLibraryNames(ast, source, new ComputeEngine());
+  return strip(operands(program).length === 1 ? operand(program, 1)! : program);
 }
 
 /** The value of `source` as text, and the codes of its diagnostics. */
@@ -74,7 +76,7 @@ describe('parse', () => {
     expect(resolved('std::Pi')).toEqual({ fn: ['Module', { sym: 'Pi' }] });
     expect(resolved('let floor = 3; std::floor(2.5)')).toEqual({
       fn: [
-        'Block',
+        'Program',
         {
           fn: [
             'Declare',

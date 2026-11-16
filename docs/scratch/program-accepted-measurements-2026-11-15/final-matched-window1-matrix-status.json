@@ -1,0 +1,314 @@
+[
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-1",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-1",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-1.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-1",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-1",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-1.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-2",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-2",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-2.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-2",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-2",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-2.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-3",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-3",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-3.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-3",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-3",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-3.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-4",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-4",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-4.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-4",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-4",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-4.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-5",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-5",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-5.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-5",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-5",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-5.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-6",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-6",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-6.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-6",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-6",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-6.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  }
+]

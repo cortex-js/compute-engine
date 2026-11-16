@@ -1,0 +1,405 @@
+[
+  {
+    "source": "function circle(x, y, r) { {x -> x, y -> y, r -> r} }\ntype circle = record{x: number, y: number, r: number}\ncircle(1, 2, 3)",
+    "value": [
+      "circle",
+      {
+        "dict": {
+          "x": 1,
+          "y": 2,
+          "r": 3
+        }
+      }
+    ],
+    "type": "circle",
+    "diagnostics": [],
+    "checked": []
+  },
+  {
+    "source": "const c = 1\nfunction c(x) { x }\nc",
+    "value": 1,
+    "type": "1",
+    "diagnostics": [
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "variable redeclaration: c",
+          "function c(x) {x}",
+          "variable-redeclaration"
+        ],
+        "code": "variable-redeclaration",
+        "range": [
+          12,
+          31,
+          12
+        ]
+      }
+    ],
+    "checked": [
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "variable redeclaration: c",
+          "function c(x) {x}",
+          "variable-redeclaration"
+        ],
+        "code": "variable-redeclaration",
+        "range": [
+          12,
+          31,
+          12
+        ]
+      }
+    ]
+  },
+  {
+    "source": "const k = (n) => n\nk(x) = x * 2\nk(3)",
+    "value": 3,
+    "type": "3",
+    "diagnostics": [
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "variable redeclaration: k",
+          "k(x) = x * 2",
+          "variable-redeclaration"
+        ],
+        "code": "variable-redeclaration",
+        "range": [
+          19,
+          31,
+          19
+        ]
+      }
+    ],
+    "checked": [
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "variable redeclaration: k",
+          "k(x) = x * 2",
+          "variable-redeclaration"
+        ],
+        "code": "variable-redeclaration",
+        "range": [
+          19,
+          31,
+          19
+        ]
+      }
+    ]
+  },
+  {
+    "source": "const c = 1\nfunction c(x) { x }\nfunction c(x, y) { x }",
+    "value": "Nothing",
+    "type": "nothing",
+    "diagnostics": [
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "variable redeclaration: c",
+          "function c(x) {x}",
+          "variable-redeclaration"
+        ],
+        "code": "variable-redeclaration",
+        "range": [
+          12,
+          31,
+          12
+        ]
+      },
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "variable redeclaration: c",
+          "function c(x, y) {x}",
+          "variable-redeclaration"
+        ],
+        "code": "variable-redeclaration",
+        "range": [
+          32,
+          54,
+          32
+        ]
+      }
+    ],
+    "checked": [
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "variable redeclaration: c",
+          "function c(x) {x}",
+          "variable-redeclaration"
+        ],
+        "code": "variable-redeclaration",
+        "range": [
+          12,
+          31,
+          12
+        ]
+      },
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "variable redeclaration: c",
+          "function c(x, y) {x}",
+          "variable-redeclaration"
+        ],
+        "code": "variable-redeclaration",
+        "range": [
+          32,
+          54,
+          32
+        ]
+      }
+    ]
+  },
+  {
+    "source": "const c: string = 1\nfunction c(x) { x }\nc(2)",
+    "value": [
+      "c",
+      2
+    ],
+    "type": "unknown",
+    "diagnostics": [
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "variable redeclaration: c",
+          "function c(x) {x}",
+          "variable-redeclaration"
+        ],
+        "code": "variable-redeclaration",
+        "range": [
+          20,
+          39,
+          20
+        ]
+      },
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "The value \"1\" of type \"1\" is not compatible with the declared type \"string\"",
+          "const c: string = 1",
+          "incompatible-type"
+        ],
+        "code": "incompatible-type",
+        "range": [
+          0,
+          19,
+          0
+        ]
+      },
+      {
+        "severity": "error",
+        "message": [
+          "runtime-error",
+          "expected `string`, got `1` at `c`",
+          "",
+          "incompatible-type"
+        ],
+        "range": [
+          0,
+          19
+        ]
+      }
+    ],
+    "checked": [
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "variable redeclaration: c",
+          "function c(x) {x}",
+          "variable-redeclaration"
+        ],
+        "code": "variable-redeclaration",
+        "range": [
+          20,
+          39,
+          20
+        ]
+      },
+      {
+        "severity": "error",
+        "message": [
+          "static-type-error",
+          "The value \"1\" of type \"1\" is not compatible with the declared type \"string\"",
+          "const c: string = 1",
+          "incompatible-type"
+        ],
+        "code": "incompatible-type",
+        "range": [
+          0,
+          19,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "source": "f(n) = 1\nf = (x => 42)\nf(m) = 2\nf(0)",
+    "value": 42,
+    "type": "42",
+    "diagnostics": [
+      {
+        "severity": "error",
+        "message": [
+          "function-redefinition",
+          "f"
+        ],
+        "range": [
+          23,
+          31,
+          23
+        ],
+        "notes": [
+          {
+            "message": "this clause of `f` is first defined here",
+            "range": [
+              0,
+              8
+            ]
+          }
+        ]
+      },
+      {
+        "severity": "error",
+        "message": [
+          "runtime-error",
+          "function redefinition — A clause of \"f\" with this parameter list is already defined at characters 0-1 in this program, and this one would silently replace it. Give the clauses different parameter lists to dispatch between them, or edit the existing clause in place; to redefine it interactively, re-run it as a separate program.",
+          "",
+          "function-redefinition"
+        ],
+        "range": [
+          23,
+          31
+        ]
+      }
+    ],
+    "checked": [
+      {
+        "severity": "error",
+        "message": [
+          "function-redefinition",
+          "f"
+        ],
+        "range": [
+          23,
+          31,
+          23
+        ],
+        "notes": [
+          {
+            "message": "this clause of `f` is first defined here",
+            "range": [
+              0,
+              8
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "source": "g(n) = 1\ng = x => 2\ng(n) = 3\ng(9)",
+    "value": 2,
+    "type": "2",
+    "diagnostics": [
+      {
+        "severity": "error",
+        "message": [
+          "function-redefinition",
+          "g"
+        ],
+        "range": [
+          20,
+          28,
+          20
+        ],
+        "notes": [
+          {
+            "message": "this clause of `g` is first defined here",
+            "range": [
+              0,
+              8
+            ]
+          }
+        ]
+      },
+      {
+        "severity": "error",
+        "message": [
+          "runtime-error",
+          "function redefinition — A clause of \"g\" with this parameter list is already defined at characters 0-1 in this program, and this one would silently replace it. Give the clauses different parameter lists to dispatch between them, or edit the existing clause in place; to redefine it interactively, re-run it as a separate program.",
+          "",
+          "function-redefinition"
+        ],
+        "range": [
+          20,
+          28
+        ]
+      }
+    ],
+    "checked": [
+      {
+        "severity": "error",
+        "message": [
+          "function-redefinition",
+          "g"
+        ],
+        "range": [
+          20,
+          28,
+          20
+        ],
+        "notes": [
+          {
+            "message": "this clause of `g` is first defined here",
+            "range": [
+              0,
+              8
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "source": "BoxDeclare()\ntype BT = tuple<a: integer>\nprotocol BTP {}\n1",
+    "value": 1,
+    "diagnostics": [],
+    "stampIsUndefined": true,
+    "finalType": "integer",
+    "protocolKnown": true
+  },
+  {
+    "source": "rerun let (a,b)=3",
+    "value": [
+      "Error",
+      [
+        "ErrorCode",
+        "'incompatible-type'",
+        "'tuple'",
+        "'3'"
+      ],
+      "'3'"
+    ],
+    "diagnostics": [],
+    "read": [
+      "Tuple",
+      1,
+      2
+    ]
+  }
+]

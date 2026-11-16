@@ -1,3 +1,4 @@
+import { operand } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -238,13 +239,15 @@ describe('assignment to a property is a STORE', () => {
     expect(value(ce, 'p.age')).toBe('42');
   });
 
-  test('the assignment evaluates to the ASSIGNED VALUE, not the setter result', () => {
+  test('a Program assignment is valueless; its store returns the assigned value', () => {
     // The setter below returns the receiver, and the assignment still answers
     // the value written — the same answer a stored field gives (Appendix B,
     // "A store writes the evaluated value"). A `set` handler's result is
-    // discarded; the store is what it is called for.
+    // discarded. A Program assignment statement itself returns Nothing.
     const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
-    expect(value(ce, 'p.name = "Steve"')).toBe('"Steve"');
+    expect(value(ce, 'p.name = "Steve"')).toBe('"Nothing"');
+    expect(ce.box(parseEpsil('p.name = "Ada"')[0]).op1.evaluate().json).toBe("'Ada'");
+    expect(value(ce, 'p.name')).toBe('"Ada"');
   });
 
   test('the write is a MODIFICATION: every alias of `p` sees it', () => {
@@ -311,7 +314,7 @@ let x = "hi"`);
     const ce = engineFor(`${TAGGED_BOX}
 let a = Box(t: "a")
 let xs = [a, Box(t: "b")]`);
-    expect(value(ce, 'xs[1].tag = "z"')).toBe('"z"');
+    expect(value(ce, 'xs[1].tag = "z"')).toBe('"Nothing"');
     expect(value(ce, 'xs[1].tag')).toBe('"z"');
     expect(value(ce, 'a')).toBe('Box(t: "z")');
   });
@@ -414,9 +417,9 @@ let x = "z"`);
     // `ProtocolProperty` node the read builds, so it means exactly what the
     // unqualified `p.name = v` means — restricted to the protocol named.
     const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
-    expect(value(ce, 'p.(Nameable.name) = "x"')).toBe('"x"');
+    expect(value(ce, 'p.(Nameable.name) = "x"')).toBe('"Nothing"');
     expect(value(ce, 'p')).toBe('Person(n: "x", age: 42)');
-    expect(value(ce, 'p.(Nameable.name) := "y"')).toBe('"y"');
+    expect(value(ce, 'p.(Nameable.name) := "y"')).toBe('"Nothing"');
     expect(value(ce, 'p.name')).toBe('"y"');
   });
 
@@ -453,7 +456,7 @@ let x = "z"`);
     // Re-parses to the same operator, operands and arity (the parser's own
     // symbol/string encodings differ from the hand-written literal above).
     const [again] = parseEpsil(out);
-    expect(JSON.stringify(operandsOf(again))).toBe(
+    expect(JSON.stringify(operandsOf(operand(again, 1)))).toBe(
       JSON.stringify({
         fn: [
           'ProtocolProperty',
@@ -538,7 +541,8 @@ type Fancily is Fancy {
     self
   }
 }
-let x = Plainly(v: "a")`;
+// This routing fixture intentionally stores different receiver types.
+let x: any = Plainly(v: "a")`;
 
   test('the write follows the receiver, not any earlier resolution', () => {
     const ce = engineFor(TWO_PROTOCOLS);
@@ -643,8 +647,8 @@ let p = Person(n: "Bob")`);
     expect(value(ce, 'p')).toBe('Person(n: "Bob")');
     // The protocol it does conform to writes, and the unqualified spelling —
     // which names no protocol — finds it too.
-    expect(value(ce, 'p.(Renameable.name) = "Ada"')).toBe('"Ada"');
-    expect(value(ce, 'p.name = "Grace"')).toBe('"Grace"');
+    expect(value(ce, 'p.(Renameable.name) = "Ada"')).toBe('"Nothing"');
+    expect(value(ce, 'p.name = "Grace"')).toBe('"Nothing"');
     expect(value(ce, 'p')).toBe('Person(n: "Grace")');
   });
 });
@@ -686,7 +690,7 @@ type Person = object{n: string, age: integer}`
     expect(result.value.operator).not.toBe('Error');
     expect(ce._protocolRegistry.Nameable.conformances).toHaveLength(1);
     expect(run(ce, 'let p = Person(n: "Bob", age: 42)')).toEqual([]);
-    expect(value(ce, 'p.name = "Ada"')).toBe('"Ada"');
+    expect(value(ce, 'p.name = "Ada"')).toBe('"Nothing"');
     expect(value(ce, 'p')).toBe('Person(n: "Ada", age: 42)');
   });
 
@@ -696,16 +700,16 @@ type Person = object{n: string, age: integer}`
         'set name(self: Self, v: string) -> Person {\n    self.n = v\n    self\n  }'
       )
     );
-    expect(value(ce, 'p.name = "Ada"')).toBe('"Ada"');
+    expect(value(ce, 'p.name = "Ada"')).toBe('"Nothing"');
     expect(value(ce, 'p')).toBe('Person(n: "Ada", age: 42)');
   });
 
   test('an UNANNOTATED handler stays trusted at registration (P28)', () => {
     // …and its result is not checked at the write either, because nothing
     // consumes it. The handler below stores nothing, so the object is
-    // unchanged — and the assignment still answers the value assigned.
+    // unchanged. The Program assignment statement returns Nothing.
     const ce = engineFor(person('set name(self: Self, v: string) { v }'));
-    expect(value(ce, 'p.name = "Ada"')).toBe('"Ada"');
+    expect(value(ce, 'p.name = "Ada"')).toBe('"Nothing"');
     expect(value(ce, 'p')).toBe('Person(n: "Bob", age: 42)');
   });
 });
@@ -744,7 +748,7 @@ describe('a WRITE checks the value against the property’s type', () => {
     // The refused write left the object alone…
     expect(value(ce, 'p')).toBe('Person(n: "Bob", age: 42)');
     // …and a well-typed one still reaches the handler.
-    expect(value(ce, 'p.name = "Ada"')).toBe('"Ada"');
+    expect(value(ce, 'p.name = "Ada"')).toBe('"Nothing"');
     expect(value(ce, 'p')).toBe('Person(n: "Ada", age: 42)');
     expect(invoked).toHaveLength(1);
   });
@@ -776,7 +780,7 @@ describe('a WRITE checks the value against the property’s type', () => {
     const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
     expect(errorCode(value(ce, 'p.name = 42'))).toBe('incompatible-type');
     expect(value(ce, 'p')).toBe('Person(n: "Bob", age: 42)');
-    expect(value(ce, 'p.name = "Steve"')).toBe('"Steve"');
+    expect(value(ce, 'p.name = "Steve"')).toBe('"Nothing"');
     expect(value(ce, 'p')).toBe('Person(n: "Steve", age: 42)');
   });
 });

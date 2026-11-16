@@ -118,7 +118,7 @@ describe('COMPILE a call of a function returned by a call', () => {
         )
       // `mk` is a local of the program block, a variable of type
       // `function`: the call `a(1)` has no callee that the compiler knows.
-    ).toThrow(/Unknown operator `a`/);
+    ).toThrow(/function value known only at run time/);
   });
 
   it('declines on interval-js', () => {

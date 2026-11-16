@@ -1,3 +1,4 @@
+import { operand } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -31,7 +32,7 @@ function run(source: string): ReturnType<typeof executeEpsil> & {
 function lowered(source: string): unknown {
   const [expr, diags] = parseEpsil(source);
   expect(diags).toEqual([]);
-  return strip(expr);
+  return strip(operand(expr, 1)!);
 }
 
 function strip(e: unknown): unknown {
@@ -359,35 +360,22 @@ fact(5)`);
     expect(JSON.stringify(diagnostics)).toContain('invalid clause definition');
   });
 
-  test('a declared function type is a contract with and without an initial value', () => {
-    // User decision 2026-10-17: a `function` statement adds no clause outside
-    // the declared signature, also when the `let` gave the binding a value.
-    // Before, with the initial value, `function h(u: string)` added a second
-    // clause and `h(u: "a")` gave "a".
-    for (const head of [
-      'let h: (x: integer) -> integer = (x: integer) => x\n',
-      'let h: (x: integer) -> integer\n',
-    ]) {
-      // The body returns an integer, so only the parameter is outside the
-      // declared signature.
-      const source = head + 'function h(u: string) { 1 }\nh(u: "a")';
-      const { value, diagnostics } = executeEpsil(new ComputeEngine(), source);
-      const runtime = diagnostics.filter((d) => d.message[0] === 'runtime-error');
-      expect([source, runtime.map((d) => d.message.at(-1))]).toEqual([
-        source,
-        ['invalid-clause-definition'],
-      ]);
-      expect(JSON.stringify(value.json)).toContain('argument-name-unknown');
-      // The static check reports the call that the refused clause would
-      // have accepted.
-      expect(
-        checkSource(source).diagnostics.map((d) => d.message.at(-1))
-      ).toEqual(['argument-name-unknown']);
-    }
-    // The clause inside the declared signature is still accepted.
-    const accepted = run(
-      'let h: (x: integer) -> integer = (x: integer) => x\nfunction h(x: integer) { x + 1 }\nh(x: 3)'
-    );
+  test('a paired signature is a contract and a value declaration is a separate declaration', () => {
+    const paired = 'let h: (x: integer) -> integer\nfunction h(u: string) { 1 }\nh(u: "a")';
+    const refused = executeEpsil(new ComputeEngine(), paired);
+    expect(refused.diagnostics.filter((d) => d.message[0] === 'runtime-error').map((d) => d.message.at(-1))).toEqual(['invalid-clause-definition']);
+    expect(JSON.stringify(refused.value.json)).toContain('argument-name-unknown');
+    expect(checkSource(paired).diagnostics.map((d) => d.message.at(-1))).toEqual(['argument-name-unknown']);
+
+    const value = 'let h: (x: integer) -> integer = (x: integer) => x\nfunction h(u: string) { 1 }\nh(u: "a")';
+    const conflict = executeEpsil(new ComputeEngine(), value);
+    expect(conflict.diagnostics.map((d) => d.message.at(-1))).toEqual(['variable-redeclaration', 'argument-name-unknown']);
+    expect(JSON.stringify(conflict.value.json)).toContain('argument-name-unknown');
+    const first = executeEpsil(new ComputeEngine(), value.replace('h(u: "a")', 'h(x: 3)'));
+    expect(first.diagnostics.map((d) => d.message.at(-1))).toEqual(['variable-redeclaration']);
+    expect(first.value.json).toBe(3);
+
+    const accepted = run('let h: (x: integer) -> integer\nfunction h(x: integer) { x + 1 }\nh(x: 3)');
     expect(accepted.diagnostics).toEqual([]);
     expect(accepted.text).toBe('4');
   });

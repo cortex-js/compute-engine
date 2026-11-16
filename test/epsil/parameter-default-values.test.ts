@@ -1,3 +1,4 @@
+import { operand, operator } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -40,7 +41,8 @@ function strip(expr: any): any {
 function parse(source: string): MathJsonExpression {
   const [value, diagnostics] = parseEpsil(source);
   expect(diagnostics).toEqual([]);
-  return strip(value);
+  expect(operator(value)).toBe('Program');
+  return strip(operand(value, 1)!);
 }
 
 /** The parse diagnostics of a program, as `[code, ...arguments]`. */
@@ -178,13 +180,13 @@ describe('PARAMETER DEFAULT VALUES — parse', () => {
     expect(diagnostics.map((d) => d.message)).toEqual([
       ['mapsto-arrow-expected'],
     ]);
-    const ops = strip(expr) as any[];
+    const ops = strip(operand(expr, 1)!) as any[];
     expect(ops[0]).toBe('Function');
     expect(ops[ops.length - 1]).toEqual(param);
   });
 
   test('`(k == 2) -> k` is a pair, not a lambda', () => {
-    expect(strip(parseEpsil('(k == 2) -> k')[0])).toEqual([
+    expect(strip(operand(parseEpsil('(k == 2) -> k')[0], 1)!)).toEqual([
       'KeyValuePair',
       ['Equal', 'k', 2],
       'k',
@@ -296,7 +298,7 @@ describe('PARAMETER DEFAULT VALUES — invalid defaults', () => {
 
   test('a refused default leaves the parameter required', () => {
     const [expr] = parseEpsil('(x, k = x + 1) => x');
-    expect(strip(expr)).toEqual(['Function', 'x', 'x', 'k']);
+    expect(strip(operand(expr, 1)!)).toEqual(['Function', 'x', 'x', 'k']);
   });
 
   test('a `bind` parameter of a hold definition', () => {
@@ -568,8 +570,7 @@ describe('PARAMETER DEFAULT VALUES — print', () => {
     expect(describeName(ce, 'f')?.signature).toBe(
       '(x: number, k: number = 2) -> number'
     );
-    expect(describeName(ce, 'g')?.type).toBe(
-      '(xs: unknown = [], mode: unknown = "auto") -> unknown'
-    );
+    // An unannotated Program variable keeps its coarse callable contract.
+    expect(describeName(ce, 'g')?.type).toBe('function');
   });
 });

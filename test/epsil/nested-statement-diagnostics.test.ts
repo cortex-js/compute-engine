@@ -149,7 +149,7 @@ describe('EPSIL NESTED STATEMENT DIAGNOSTICS', () => {
     run(G + 'function q(x) { let y = [g(x)]\n y }', ce);
     // The range of a statement of `q` indexes the earlier source; only the
     // statement of this program is reported.
-    const r = run('let w = 0\nfor i in [1] { w = q("a") }\nw', ce);
+    const r = run('let w: list = []\nfor i in [1] { w = q("a") }\nw', ce);
     expect(r.at).toEqual(['w = q("a")']);
   });
 
@@ -157,7 +157,7 @@ describe('EPSIL NESTED STATEMENT DIAGNOSTICS', () => {
     const r = run(
       'function p(a, b) { a + b }\nlet xs = []\nfor i in [1] { xs = [p(1, 2, i)] }\nxs'
     );
-    expect(r.codes).toEqual(['runtime-error']);
+    expect(r.codes).toEqual(['static-type-error', 'runtime-error']);
     expect(r.diagnostics[0].message[3]).toBe('unexpected-argument');
     expect(r.diagnostics[0].notes?.length ?? 0).toBeGreaterThan(0);
   });

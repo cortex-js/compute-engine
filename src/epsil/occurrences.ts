@@ -57,15 +57,7 @@ export type ProgramDeclaration = {
   annotated: boolean;
   /** The initializer of the statement, when it has one. */
   value: MathJsonExpression | undefined;
-  /** The call is in the body of a `function` statement that the runner can
-   * box before the statements above it run: a top-level statement above
-   * the `function` statement, other than a `function` statement, names the
-   * function, directly or through the clauses of the functions it names.
-   * The runner leaves out some of these functions, so `true` means that the
-   * body CAN be boxed early. When it is, the name is a valueless variable of
-   * its declared type, or of the static type of its initializer when it has
-   * no annotation, and it is not yet a constant. When this is `false`, the
-   * statement has run when the call is boxed. */
+  /** The occurrence is canonicalized before Program declarations run. */
   boxedEarly: boolean;
 };
 
@@ -181,85 +173,6 @@ function countWrites(ast: MathJsonExpression | null): Map<string, number> {
   return counts;
 }
 
-/** Add to `into` every name that `node` writes as a symbol or as the head of
- * a call, the names that `function` statements define included. */
-function namesIn(node: MathJsonExpression | null, into: Set<string>): void {
-  if (node === null || typeof node !== 'object') {
-    const name = symbol(node);
-    if (name !== null) into.add(name);
-    return;
-  }
-  if (!Array.isArray(node) && 'dict' in node) {
-    for (const value of Object.values(node.dict as Record<string, unknown>))
-      namesIn(value as MathJsonExpression, into);
-    return;
-  }
-  const name = symbol(node);
-  if (name !== null) {
-    into.add(name);
-    return;
-  }
-  const head = operator(node);
-  if (typeof head === 'string') into.add(head);
-  else namesIn(head as MathJsonExpression, into);
-  for (const op of operands(node)) namesIn(op, into);
-}
-
-/**
- * The top-level `function` statements of `ast` whose body the runner can box
- * before the statements above them run. The runner prepares a function that
- * a top-level statement other than a `function` statement names above the
- * last `function` statement of that function, directly or through the
- * clauses of the functions it names (`prepareFunctionDeclarations()`,
- * `execute-epsil.ts`), and it leaves out some of these functions (a function
- * after a `type` statement, a function whose body reads a variable that is
- * written twice before it). This set holds every clause of each function
- * that the first rule gives, without the exclusions: it holds every
- * function that the runner prepares, and can hold more. A function that the
- * set leaves out is boxed at its turn.
- */
-function functionsBoxedEarly(
-  ast: MathJsonExpression | null
-): Set<MathJsonExpression> {
-  const statements =
-    ast === null ? [] : operator(ast) === 'Block' ? [...operands(ast)] : [ast];
-  // The clauses of each function, with the index of its last clause.
-  const clauses = new Map<string, MathJsonExpression[]>();
-  const last = new Map<string, number>();
-  statements.forEach((statement, i) => {
-    if (operator(statement) !== 'DefineFunction') return;
-    const name = symbol(operand(statement, 1));
-    if (name === null) return;
-    clauses.set(name, [...(clauses.get(name) ?? []), statement]);
-    last.set(name, i);
-  });
-  const early = new Set<string>();
-  statements.forEach((statement, k) => {
-    if (operator(statement) === 'DefineFunction') return;
-    // The names that the statement reaches, through the clauses of the
-    // functions it names.
-    const reached = new Set<string>();
-    const pending: string[] = [];
-    const add = (node: MathJsonExpression): void => {
-      const names = new Set<string>();
-      namesIn(node, names);
-      for (const name of names)
-        if (!reached.has(name)) {
-          reached.add(name);
-          pending.push(name);
-        }
-    };
-    add(statement);
-    while (pending.length > 0)
-      for (const clause of clauses.get(pending.pop()!) ?? []) add(clause);
-    for (const name of reached) if (k < (last.get(name) ?? -1)) early.add(name);
-  });
-  const result = new Set<MathJsonExpression>();
-  for (const name of early)
-    for (const clause of clauses.get(name) ?? []) result.add(clause);
-  return result;
-}
-
 /**
  * Resolve every symbol occurrence in a parsed (raw, uncanonicalized) Epsil
  * program to its binding. Groups come back in order of first occurrence.
@@ -336,17 +249,13 @@ export function documentBindings(
   // The bindings that a `let` or `const` statement at the top level of the
   // program makes for one name, with the statement. `writeCounts` tells how
   // many statements of the program write or declare each name, and
-  // `earlyFunctions` which `function` statements the runner can box early
-  // (`ProgramDeclaration`). Both are computed on the first read.
+  // top-level function bodies are canonicalized before executable statements.
+  // Write counts are computed on the first read.
   const programDeclarations = new Map<
     BindingGroup,
     Omit<ProgramDeclaration, 'boxedEarly'>
   >();
   let writeCounts: Map<string, number> | undefined;
-  let earlyFunctions: Set<MathJsonExpression> | undefined;
-  // The `function` statements whose body holds the node that the walk is
-  // in, the outermost first.
-  const enclosingDefinitions: MathJsonExpression[] = [];
   const labels: {
     callee: string;
     name: string;
@@ -888,10 +797,8 @@ export function documentBindings(
             scope,
             sum: false,
           });
-        enclosingDefinitions.push(node);
         if (fn !== null && operator(fn) === 'Function') walkFunction(fn, scope);
         else walk(fn, scope);
-        enclosingDefinitions.pop();
         bindsLiteral(
           operand(node, 1),
           fn,
@@ -1114,12 +1021,9 @@ export function documentBindings(
                   if (declared === undefined) return undefined;
                   writeCounts ??= countWrites(ast);
                   if (writeCounts.get(name) !== 1) return undefined;
-                  const early = (earlyFunctions ??= functionsBoxedEarly(ast));
                   return {
                     ...declared,
-                    boxedEarly: enclosingDefinitions.some((definition) =>
-                      early.has(definition)
-                    ),
+                    boxedEarly: operator(ast) === 'Program',
                   };
                 }
               )
@@ -1441,7 +1345,7 @@ export function documentBindings(
   }
 
   if (ast !== null) {
-    if (operator(ast) === 'Block') {
+    if (operator(ast) === 'Program') {
       const statements = [...operands(ast)];
       hoistFunctions(statements, root);
       for (const statement of statements) walk(statement, root);
@@ -1521,7 +1425,7 @@ export function protocolFunctionMembers(
   ast: MathJsonExpression
 ): Map<string, ProtocolFunctionMember> {
   const members = new Map<string, ProtocolFunctionMember>();
-  const statements = operator(ast) === 'Block' ? operands(ast) : [ast];
+  const statements = operator(ast) === 'Program' ? operands(ast) : [ast];
   for (const statement of statements) {
     if (operator(statement) !== 'DeclareProtocol') continue;
     const end = (statement as { sourceOffsets?: [number, number] })

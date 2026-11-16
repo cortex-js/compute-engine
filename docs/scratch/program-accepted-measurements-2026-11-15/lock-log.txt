@@ -1,0 +1,7 @@
+box-lock: waiting, number 2 in the queue — HELD by tycho-96 (session tycho-96, ttys001) — Tycho wide validation/build — ~44 min left
+box-lock: waiting, number 2 in the queue — HELD by tycho-96 (session tycho-96, ttys001) — Tycho wide validation/build — ~43 min left
+box-lock: waiting, number 2 in the queue — HELD by tycho-96 (session tycho-96, ttys001) — Tycho wide validation/build — ~42 min left
+box-lock: waiting, number 1 in the queue — HELD by codex-mg-evidence — MG five-witness compiler prerequisite arms — ~9 min left
+box-lock: box free for codex-program-accepted:baseline after 235 s
+box-lock: ACQUIRED by codex-program-accepted:baseline for 30 min — Program accepted matched baseline build and measurements
+box-lock: load 12.2 / 15.1 / 13.5 on 18 cores at acquire — record this with your results

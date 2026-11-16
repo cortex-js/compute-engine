@@ -599,7 +599,7 @@ into a string:
 ```epsil
 let x = 2^11 - 1
 "\(x) has type \(type(x))"
-// ➔ "2047 has type integer"
+// ➔ "2047 has type number"
 ```
 
 **A formatted table.** `\t` and `\n` escapes in a string literal are real

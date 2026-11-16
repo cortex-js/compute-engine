@@ -380,28 +380,20 @@ function implicitVariableOf(
  * - a string, a list (`[1, 2]`) or a function literal: the engine never
  *   chooses the name.
  *
- * When the statement has run, the engine reads the value, so the literal
- * tells also for a name with an annotation (`let L: any = [1, 2]`), and a
- * `const` name is a constant, which the engine does not choose. In the body
- * of a `function` statement that the runner can box before the statement
- * runs (`boxedEarly`), the name can be a valueless variable that is not a
- * constant: its type is then the static type of the initializer, which the
- * literal gives, or the declared type when the statement has an annotation,
- * which the analysis does not read. Since the body can also be boxed after
- * the statement, a `const` whose initializer is a number is not decided
- * there: `const h = 5`, then `let r = g()`, then
- * `function g() { limit(sin(h)/h, 0) }` binds `h` because the runner boxes
- * `g` early, and the analysis does not know it. After `let L: any = [1, 2]`
- * the choice is not known either.
+ * In a Program function body, canonicalization precedes executable
+ * statements (`boxedEarly`). A constant is already marked constant on its
+ * hoisted binding and is never a candidate. A mutable annotated binding may
+ * have a type the source analysis does not read, so that case is unknown.
+ * After a mutable declaration has run, its literal value is evidence too.
  */
 function canBeImplicitVariable(
   declaration: ProgramDeclaration | undefined
 ): boolean | undefined {
   if (declaration === undefined) return undefined;
+  if (declaration.constant) return false;
   if (declaration.boxedEarly && declaration.annotated) return undefined;
   const kind = literalKind(declaration.value);
   if (kind === 'not-number') return false;
-  if (declaration.constant) return declaration.boxedEarly ? undefined : false;
   return kind === 'number' ? true : undefined;
 }
 

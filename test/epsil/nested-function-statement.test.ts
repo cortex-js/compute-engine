@@ -165,17 +165,10 @@ describe('A NESTED FUNCTION THAT USES A PARAMETER OF THE OUTER FUNCTION', () => 
 });
 
 describe('A CONSTANT OF THE PROGRAM', () => {
-  test('a top-level `function` statement cannot replace a top-level `const`', () => {
+  test('a first-authored const refuses a conflicting function declaration', () => {
     const r = run('const k = 5\nfunction k(n) { n }\nk');
     expect(r.text).toBe('5');
-    expect(r.diagnostics).toEqual([
-      [
-        'static-type-error',
-        'invalid clause definition — "k" is a constant; it cannot be redefined',
-        'function k(n) {n}',
-        'invalid-clause-definition',
-      ],
-    ]);
+    expect(r.diagnostics.map((d) => d[3])).toEqual(['variable-redeclaration']);
   });
 
   test('a nested function with the name of a `const` shadows it in the body', () => {

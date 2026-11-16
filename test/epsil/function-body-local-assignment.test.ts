@@ -235,10 +235,8 @@ describe('THE SCOPE OF A NAME IS DECIDED WHERE THE FUNCTION IS DEFINED', () => {
     expect(ce.box('g').type.toString()).not.toContain('scope');
   });
 
-  test('a top-level `let` after the function does not declare its name in the body', () => {
-    expect(
-      staticCodes('function g(k) { t = k + 1; t }\nlet t = 0\n[g(1), g(2), t]')
-    ).toEqual(['assignment-to-undeclared-variable']);
+  test('a later Program let is visible and an operator write needs scope', () => {
+    expectScopeError('function g(k) { t = k + 1; t }\nlet t = 0\n[g(1), g(2), t]');
   });
 
   test('a top-level assignment after the function is not written', () => {
@@ -324,7 +322,7 @@ describe('THE SCOPE OF A NAME IS DECIDED WHERE THE FUNCTION IS DEFINED', () => {
     expect(ce.box('g').type.toString()).toContain('scope');
     expect(
       staticCodes('function g(k) scope { t = k + 1; t }\nlet t = 0\n[g(1), t]')
-    ).toEqual(['assignment-to-undeclared-variable']);
+    ).toEqual([]);
   });
 
   test('the host route: `Assign` and `ce.assign()`', () => {
@@ -794,7 +792,7 @@ describe('THE COMPILED ROUTES CHECK THE EFFECTS OF A DEFINITION', () => {
     // The compilation declines the stored function that assigns a name of
     // an enclosing scope.
     const source = 'let t = 0\nlet g = (k) => do { t = k + 1; t }\n[g(1), t]';
-    expectScopeError(source);
+    expect(run(source)).toMatchObject({value: ['List', 2, 2], diagnostics: []});
     const stored =
       /a function \(stored, returned, or a user function that the code calls\) assigns a name of an enclosing scope/;
     expect(() => compileProgram(source)).toThrow(stored);
@@ -810,11 +808,7 @@ describe('THE COMPILED ROUTES CHECK THE EFFECTS OF A DEFINITION', () => {
     expect(() => compileProgram(source)).toThrow(/writes outside the function/);
   });
 
-  // Expected failure: the compiled route declines for the write of the
-  // outer `t` before it checks the declared effects, so the message is not
-  // the one about `pure`. Tracked in
-  // docs/plans/2026-11-11-bound-once-evidence/step1-state.md.
-  test.failing('stated effects that do not cover the body', () => {
+  test('stated effects that do not cover the body', () => {
     const source = 'let t = 0\nfunction g(k) pure { t = k + 1; t }\n[g(1), t]';
     expect(run(source).diagnostics[0]).toContain('pure effects');
     expect(() => compileProgram(source)).toThrow(
@@ -852,9 +846,9 @@ describe('THE COMPILED ROUTES CHECK THE EFFECTS OF A DEFINITION', () => {
       value: ['List', 2, 2],
       diagnostics: [],
     });
-    // The compiled program is one block, where the declaration and the
-    // function statement are two declarations of `g`.
-    expect(() => compileProgram(source)).toThrow(/variable-redeclaration/);
+    // The paired signature is accepted; the existing escaping-write
+    // admission still declines compiled execution.
+    expect(() => compileProgram(source)).toThrow(/assigns a name of an enclosing scope/);
   });
 });
 
@@ -873,14 +867,7 @@ describe('A FUNCTION DECLARED WITH A TYPE, THEN DEFINED, COMPILES', () => {
     expect(result.success).toBe(true);
     return result.run!({} as never);
   };
-  const refused = (source: string): void => {
-    expect(() =>
-      compile(
-        new ComputeEngine().box(parseEpsil(source)[0] as never),
-        { to: 'javascript', fallback: false } as never
-      )
-    ).toThrow(/variable-redeclaration/);
-  };
+
 
   test.each([
     [
@@ -903,7 +890,7 @@ describe('A FUNCTION DECLARED WITH A TYPE, THEN DEFINED, COMPILES', () => {
       value: ['List', ...value],
       diagnostics: [],
     });
-    refused(source);
+    expect(compiled(source)).toEqual(value);
   });
 
   test('in a function body, two declarations', () => {
@@ -938,7 +925,7 @@ describe('A FUNCTION DECLARED WITH A TYPE, THEN DEFINED, COMPILES', () => {
     // The interpreter refuses the definition, and the compilation fails.
     const source = 'let g = 5\nfunction g(k) { k + 1 }\ng(1)';
     expect(JSON.stringify(run(source).diagnostics)).toContain(
-      'already holds a non-function value'
+      'variable-redeclaration'
     );
     expect(() =>
       compile(new ComputeEngine().box(parseEpsil(source)[0] as never), {
@@ -1009,28 +996,27 @@ describe('A TOP-LEVEL `let` OF A LIBRARY CONSTANT SHADOWS IT FROM ITS STATEMENT 
   test('`i` read by a function defined before the `let`', () => {
     const source = 'function g() { i + 1 }\nlet i = 2\n[g(), i + 1]';
     expect(threeRoutes(source)).toEqual({
-      run: ['List', ['Complex', 1, 1], 3],
-      evaluated: ['List', ['Complex', 1, 1], 3],
-      compiled: [{ re: 1, im: 1 }, 3],
+      run: ['List', 3, 3],
+      evaluated: ['List', 3, 3],
+      compiled: [3, 3],
     });
   });
 
   test('`e` read by a function defined before the `let`', () => {
     const source = 'function g() { 2 * e }\nlet e = 3\n[g(), 2 * e]';
     const routes = threeRoutes(source);
-    expect(routes.run).toEqual(['List', ['Multiply', 2, 'ExponentialE'], 6]);
+    expect(routes.run).toEqual(['List', 6, 6]);
     expect(routes.evaluated).toEqual(routes.run);
-    expect((routes.compiled as number[])[0]).toBeCloseTo(2 * Math.E, 12);
+    expect((routes.compiled as number[])[0]).toBe(6);
     expect((routes.compiled as number[])[1]).toBe(6);
   });
 
-  test('`Pi`: the block and the compiled program agree', () => {
-    // The run refuses a top-level `let` of `Pi` (see `naming.md`).
+  test('a protected global Pi declaration is refused on Program routes', () => {
     const source = 'function g() { Pi + 1 }\nlet Pi = 3\n[g(), Pi]';
-    const { evaluated, compiled } = blockRoutes(source);
-    expect(evaluated).toEqual(['List', ['Add', 1, 'Pi'], 3]);
-    expect((compiled as number[])[0]).toBeCloseTo(Math.PI + 1, 12);
-    expect((compiled as number[])[1]).toBe(3);
+    const expected = ['List', ['Add', 1, 'Pi'], 'Pi'];
+    expect(run(source).value).toEqual(expected);
+    expect(new ComputeEngine().box(parseEpsil(source)[0] as never).evaluate().json).toEqual(expected);
+    expect(() => compile(new ComputeEngine().box(parseEpsil(source)[0] as never), {fallback:false})).toThrow();
   });
 
   test('a `let` before the function', () => {

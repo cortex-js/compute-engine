@@ -93,7 +93,7 @@ describe('EPSIL TYPE DECLARATIONS', () => {
         'type alias point = tuple<number, number>\nlet p: point = (1, 2)'
       )
     ).toStrictEqual([
-      'Block',
+      'Program',
       [
         'DeclareType',
         'point',
@@ -158,7 +158,7 @@ describe('EPSIL `type` IS A CONTEXTUAL KEYWORD', () => {
 
   test('`type` used as a value in a later statement', () => {
     expect(validEpsil('let type = 5\ntype + 1')).toStrictEqual([
-      'Block',
+      'Program',
       ['Declare', 'type', ['Dictionary', ['KeyValuePair', 'value', 5]]],
       ['Add', 'type', 1],
     ]);
@@ -805,15 +805,11 @@ describe('EPSIL TYPE DECLARATIONS (end-to-end)', () => {
     );
     const messages = r.diagnostics.map((d) => d.message);
     // The static check reports it first: a tuple literal of closed literals
-    // is a closed literal, judged by the full `matches()` check (since
-    // 2026-10-21, with the strict declared contract). Then the run time.
-    expect(messages).toHaveLength(2);
+    // is a closed literal, judged by the full `matches()` check. The same
+    // declaration refusal is reported once rather than again at runtime.
+    expect(messages).toHaveLength(1);
     expect(messages[0][0]).toBe('static-type-error');
-    expect(messages[1][0]).toBe('runtime-error');
-    // The declared-type rejection is an `incompatible-type` error VALUE (the
-    // `Declare` operator route does not throw), so the diagnostic quotes the
-    // coded error rather than an opaque host message.
-    expect(String(messages[1][1])).toContain('expected `');
+    expect(messages[0][3]).toBe('incompatible-type');
     expect(String(messages[0][1])).toContain('point');
     // The type itself IS registered — only the annotation is refused.
     expect(ce.type('point').matches('point')).toBe(true);
@@ -1104,7 +1100,7 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
     // The rejection travels as an `incompatible-type` error VALUE, not a
     // host throw, so the diagnostic carries the code (see the channel note in
     // `test/compute-engine/nominal-assign.test.ts`).
-    expect(JSON.stringify(r.diagnostics)).toContain('expected `');
+    expect(r.diagnostics[0].code).toBe('incompatible-type');
     expect(JSON.stringify(r.diagnostics)).toContain('point');
   });
 
@@ -1310,14 +1306,12 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
     );
     // Record types are closed, and the type of a dictionary literal is the
     // record of exactly its keys, so the static pass refuses the literal, as
-    // it refuses a mismatched tuple literal; the run reports it too.
+    // it refuses a mismatched tuple literal. The declaration refusal is
+    // reported once, with its original contract and source location.
     const messages = r.diagnostics.map((d) => d.message);
-    expect(messages.map((m) => m[0])).toEqual([
-      'static-type-error',
-      'runtime-error',
-    ]);
+    expect(messages.map((m) => m[0])).toEqual(['static-type-error']);
+    expect(messages[0][3]).toBe('incompatible-type');
     expect(String(messages[0][1])).toContain('declared type "pt"');
-    expect(String(messages[1][1])).toContain('expected `pt`');
   });
 
   test('equality is structural over the tag (D9)', () => {
@@ -1401,10 +1395,9 @@ describe('EPSIL RECURSIVE TYPES', () => {
         test(`rejects ${label} with a type error, not a stack overflow`, () => {
           const ce = new ComputeEngine();
           const r = executeEpsil(ce, def + `let a: json = ${value}\na`);
-          // Two diagnostics for the one mistake — the static declared-type
-          // check (which proves the mismatch through the recursive alias
-          // without overflowing either) plus the runtime rejection. The
-          // static/runtime duplication is the pass's documented convention.
+          // The static declared-type check proves the mismatch through the
+          // recursive alias without overflowing. The same declaration refusal
+          // is not duplicated by the runtime reporting hook.
           const statics = r.diagnostics.filter(
             (d) => d.message[0] === 'static-type-error'
           );
@@ -1415,8 +1408,8 @@ describe('EPSIL RECURSIVE TYPES', () => {
           expect(String(statics[0].message[1])).toContain(
             'not compatible with the declared type "json"'
           );
-          expect(runtime).toHaveLength(1);
-          expect(String(runtime[0].message[1])).toContain('expected `');
+          expect(statics[0].code).toBe('incompatible-type');
+          expect(runtime).toHaveLength(0);
           for (const d of r.diagnostics)
             expect(String(d.message[1])).not.toContain('call stack');
         });

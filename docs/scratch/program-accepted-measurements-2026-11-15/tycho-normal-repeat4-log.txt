@@ -1,0 +1,18 @@
+traffic-jam 74.77,62.89,59.37
+othello 25.57,23.34,21.72
+heat-spread 26.85,24.45,26.82
+burning-ship 6.70,8.92,6.28
+multibrot 7.21,7.98,8.56
+buddhabrot 502.37,519.03,522.14
+julia-set 29.12,21.20,18.24
+game-of-life 31.96,31.57,29.08
+apollonian-gasket 223.66,215.72,197.78
+barnsley-fern 47.00,43.38,42.29
+koch-snowflake 35.83,39.86,32.93
+turing-patterns 1609.92,1537.33,1581.35
+galton-board 97.20,77.16,78.34
+fish-swarm 44.51,44.29,44.37
+black-hole 13.43,8.99,7.66
+(node:2835) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[ce-alt-hook] rerouting @cortex-js/compute-engine -> file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/compute-engine.js

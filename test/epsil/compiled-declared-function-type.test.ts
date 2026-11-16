@@ -58,14 +58,9 @@ const ASSIGNED = 'let g: (integer) -> integer = (k) => k + 1\n';
 const ANNOTATED = 'function g(k: integer) { k + 1 }\n';
 
 describe('A `let` DECLARATION THEN A DEFINITION', () => {
-  test('a program compiled as one block declares `g` twice', () => {
-    // At the top level of a program, the declaration gives the signature of
-    // the function. The compiled program is one block, where the function
-    // statement declares the local `g` a second time.
+  test('a Program pairs the declaration and definition when compiled', () => {
     expect(interpret(DECLARED + 'g(1)').value).toBe(2);
-    expect(() => compileProgram(DECLARED + 'g(1)')).toThrow(
-      /variable-redeclaration/
-    );
+    expect(compileProgram(DECLARED + 'g(1)').run()).toBe(2);
   });
 });
 

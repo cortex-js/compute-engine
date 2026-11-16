@@ -1,0 +1,4 @@
+{"name": "tycho-normal-repeat4", "exitCode": 0, "durationSeconds": 12.215327978134155, "accepted": false}
+{"name": "tycho-off-repeat4", "exitCode": 0, "durationSeconds": 11.32977294921875, "accepted": false}
+{"name": "tycho-normal-repeat5", "exitCode": 0, "durationSeconds": 11.795315027236938, "accepted": false}
+{"name": "tycho-off-repeat5", "exitCode": 0, "durationSeconds": 11.81359314918518, "accepted": false}

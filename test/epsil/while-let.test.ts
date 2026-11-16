@@ -1,3 +1,4 @@
+import { operand } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -365,7 +366,7 @@ describe('EPSIL WHILE LET — serialize (the lowering spells back as while let)'
     expect(out).toContain('_ => Break()');
     const [reparsed, diags] = parseEpsil(out);
     expect(diags).toEqual([]);
-    expect(strip(reparsed)).toEqual([
+    expect(strip(operand(reparsed, 1))).toEqual([
       'Loop',
       [
         'Match',

@@ -246,8 +246,8 @@ function noteOwnNames(e: Expression, bound: Set<object>): void {
   if (scope === undefined) return;
   for (const [name, binding] of scope.bindings) {
     if (!('value' in binding)) continue;
-    const def = binding.value as { _blockLocal?: boolean };
-    if (def._blockLocal === true || scope.binderNames?.has(name) === true)
+    const def = binding.value;
+    if ((def._blockLocal === true && !def._programVariable) || scope.binderNames?.has(name) === true)
       bound.add(binding.value);
   }
 }

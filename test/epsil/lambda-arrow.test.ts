@@ -1,3 +1,4 @@
+import { operand, operator } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -40,7 +41,8 @@ function strip(expr: any): any {
 function parse(source: string): MathJsonExpression {
   const [expr, diagnostics] = parseEpsil(source);
   expect(diagnostics.map((d) => d.message[0])).toEqual([]);
-  return strip(expr);
+  expect(operator(expr)).toBe('Program');
+  return strip(operand(expr, 1)!);
 }
 
 /** The diagnostic codes a program reports, in order. */
@@ -365,7 +367,7 @@ describe('EPSIL LAMBDA ARROW — the retired `|->` spelling', () => {
       'x => x + 1'
     );
     // Recovered AS the arrow: the program still yields the function it meant.
-    expect(strip(expr)).toEqual(['Function', ['Add', 'x', 1], 'x']);
+    expect(strip(operand(expr, 1)!)).toEqual(['Function', ['Add', 'x', 1], 'x']);
   });
 
   test('exactly one diagnostic per written arrow', () => {
@@ -383,7 +385,7 @@ describe('EPSIL LAMBDA ARROW — the retired `|->` spelling', () => {
     expect(diagnostics.map((d) => d.message[0])).toEqual([
       'mapsto-arrow-legacy',
     ]);
-    expect(strip(expr)).toEqual(['Pipe', 'xs', ['Function', ['Add', 'x', 1], 'x']]);
+    expect(strip(operand(expr, 1)!)).toEqual(['Pipe', 'xs', ['Function', ['Add', 'x', 1], 'x']]);
   });
 
   test('`|->` is not read as a `match` or-alternative separator', () => {

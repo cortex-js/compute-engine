@@ -808,7 +808,9 @@ describe('COMPILE: `unsupported` of a program that defines a function', () => {
     // definition has no value.
     const last = program('let a = x\nfunction f(t) { t + 1 }', 'javascript');
     expect(last.success).toBe(false);
-    expect(last.unsupported).toEqual(['DefineFunction']);
+    expect(last.unsupported).toEqual([
+      'DefineFunction', expect.stringContaining('Declare(a,'),
+    ]);
   });
 
   // The call is a call of the local, so the body of an engine function of

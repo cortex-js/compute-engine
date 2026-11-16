@@ -189,7 +189,7 @@ describe('builtin contextual trigger: Filter/Map over a typed collection', () =>
     );
     const viaEpsil = canonicalJson((ce) => {
       const [ast] = parseEpsil('Filter(points, p => p == (0, 0))');
-      return ce.box(ast);
+      return ce.box(ast).op1;
     });
     const viaParse = canonicalJson((ce) =>
       ce.parse('\\operatorname{Filter}(\\mathrm{points}, p \\mapsto p = (0,0))')

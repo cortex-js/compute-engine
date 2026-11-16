@@ -223,7 +223,7 @@ describe('EPSIL CHECK: NO REPORT', () => {
     // The run time refuses the re-declaration, so `c` stays the `let`
     // binding, and the later assignment and `function` statement are valid.
     const d = check('let c = 1\nconst c = 2\nc = 3\nc');
-    expect(d.map((x) => x.message[0])).toEqual(['variable-redeclaration']);
+    expect(d.map((x) => x.message[3])).toEqual(['variable-redeclaration']);
     expect(run('let c = 1\nconst c = 2\nc = 3\nc').value.toString()).toBe('3');
     const f = check('let c = 1\nconst c = 2\nfunction c(x) { x }\nc(5)');
     expect(f.some((x) => x.message[3] === 'invalid-clause-definition')).toBe(
@@ -340,7 +340,7 @@ describe('EPSIL CHECK: A CONST IN A FUNCTION BODY OR A BLOCK', () => {
     const notes = checkSource(source).diagnostics.map(
       (x) => x.notes![0].range[0]
     );
-    expect(notes).toEqual([0, 33]);
+    expect(notes).toEqual([33, 0]);
   });
 
   test('a local const in a nested block of a lambda body', () => {
@@ -450,25 +450,23 @@ const RUN = (source: string, ce = new ComputeEngine()) => {
 
 describe('ONE REPORT FOR EACH ASSIGNMENT', () => {
   test('a function defined before a top-level `const` does not write it', () => {
-    // No enclosing scope declares `c` when `f` is defined, so the assignment
-    // `c = 2` in its body is an assignment to an undeclared variable. The
-    // constant keeps its value.
+    // Program declares `c` before preparing `f`, so the body sees its
+    // constant contract. The refused write leaves its value unchanged.
     const source =
       'function f() scope -> integer { c = 2; 0 }\nconst c = 1\nf()\nc';
     const expected = [
-      ['static-type-error', 'assignment-to-undeclared-variable', 1, 'c = 2'],
+      ['static-type-error', 'constant-assignment', 1, 'c = 2'],
     ];
     expect(CHECK(source)).toEqual(expected);
     expect(RUN(source)).toEqual({ value: '1', diagnostics: expected });
   });
 
   test('two assignments to the same name', () => {
-    // Only the top-level assignment writes the constant. The assignment in
-    // the body of `f` has no `c` in scope.
+    // Both writes see the same Program constant contract.
     const source =
       'function f() scope -> integer { c = 2; 0 }\nconst c = 1\nc = 3\nf()\n4';
     const expected = [
-      ['static-type-error', 'assignment-to-undeclared-variable', 1, 'c = 2'],
+      ['static-type-error', 'constant-assignment', 1, 'c = 2'],
       ['static-type-error', 'constant-assignment', 3, 'c = 3'],
     ];
     expect(CHECK(source)).toEqual(expected);
@@ -482,7 +480,7 @@ describe('ONE REPORT FOR EACH ASSIGNMENT', () => {
       'const c = 1\nf()\n4';
     const expected = [
       ['static-type-error', 'constant-assignment', 1, 'c = 6'],
-      ['static-type-error', 'assignment-to-undeclared-variable', 2, 'c = 2'],
+      ['static-type-error', 'constant-assignment', 2, 'c = 2'],
     ];
     expect(CHECK(source)).toEqual(expected);
     expect(RUN(source)).toEqual({ value: '4', diagnostics: expected });
@@ -531,12 +529,9 @@ describe('ONE REPORT FOR EACH ASSIGNMENT', () => {
 });
 
 describe('EPSIL CHECK: A FUNCTION DEFINED BEFORE THE CONST', () => {
-  // A top-level `const` is not declared when an earlier statement defines a
-  // function or runs a block, so an assignment to the name there has no
-  // variable in scope: it is `assignment-to-undeclared-variable`, and the
-  // constant is not written. A `const` of a block is declared before the
-  // functions of the block are defined, so a function defined before it in
-  // the block writes it (the next test).
+  // Program prepares declarations before function bodies. A function sees
+  // the constant contract even when its declaration is later in the source.
+  // An ordinary earlier statement still cannot read an uninitialized binding.
   test.each([
     // Each assignment of the body, in a block too.
     [
@@ -558,9 +553,9 @@ describe('EPSIL CHECK: A FUNCTION DEFINED BEFORE THE CONST', () => {
   ])('the top-level const is not written: %j', (source, value, at) => {
     const expected = (Array.isArray(at) ? at : [at]).map((site) => [
       'static-type-error',
-      'assignment-to-undeclared-variable',
+      source.startsWith('do {') ? 'read-before-declaration' : 'constant-assignment',
       1,
-      site,
+      source.startsWith('do {') ? 'c' : site,
     ]);
     expect(CHECK(source)).toEqual(expected);
     expect(RUN(source)).toEqual({ value, diagnostics: expected });

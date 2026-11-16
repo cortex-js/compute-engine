@@ -937,8 +937,8 @@ export class Parser {
       if (this.pos === startPos) this.advance();
     }
 
-    if (exprs.length === 0) return null;
-    if (exprs.length === 1 && !(program && operator(exprs[0]) === 'Block'))
+    if (exprs.length === 0 && !program) return null;
+    if (exprs.length === 1 && !program)
       return exprs[0];
 
     const first = exprs[0] as { sourceOffsets?: [number, number] };
@@ -946,10 +946,10 @@ export class Parser {
       sourceOffsets?: [number, number];
     };
     return {
-      fn: ['Block', ...exprs] as [MathJsonSymbol, ...MathJsonExpression[]],
+      fn: [program ? 'Program' : 'Block', ...exprs] as [MathJsonSymbol, ...MathJsonExpression[]],
       sourceOffsets: [
-        first.sourceOffsets?.[0] ?? this.baseOffset,
-        last.sourceOffsets?.[1] ?? this.baseOffset,
+        first?.sourceOffsets?.[0] ?? this.baseOffset,
+        last?.sourceOffsets?.[1] ?? this.baseOffset,
       ],
     };
   }

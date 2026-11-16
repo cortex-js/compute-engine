@@ -1,3 +1,4 @@
+import { operands } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -208,9 +209,9 @@ describe('D17: a run keeps the cached types', () => {
       },
     });
     const block: any = ce.box(
-      parseEpsil(
+      ['Block', ...operands(parseEpsil(
         'const h = (k) => k + 1\nTypeOfD17(Map(h, [1, 2]))\nMap(h, [1, 2])'
-      )[0] as any
+      )[0])] as any
     );
     const probed = find(block, (x) => x.operator === 'TypeOfD17').op1;
     const map = block.ops[block.ops.length - 1];

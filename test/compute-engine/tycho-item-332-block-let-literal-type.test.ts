@@ -1,3 +1,4 @@
+import { operands } from '../../src/math-json/utils';
 /**
  * Tycho item 332 (filed 2026-09-28), the part that is a defect: a block-local
  * `let` with a literal initial value stayed `unknown` on the routes that never
@@ -23,7 +24,7 @@ import type { Expression } from '../../src/compute-engine/global-types';
 function box(ce: ComputeEngine, source: string): Expression {
   const [ast, diagnostics] = parseEpsil(source);
   expect(diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
-  return ce.box(ast!);
+  return ce.box(['Block', ...operands(ast!)]);
 }
 
 /** Evaluate and compile the program; both must agree with `expected`. */

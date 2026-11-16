@@ -404,7 +404,7 @@ describe('EPSIL CONDITIONAL EXPRESSION', () => {
   // line is a new `if`-statement, never a conditional tail.
   test('an `if` on the next line is a statement, not a conditional tail', () => {
     expect(validEpsil('let y = 3\nif c { 1 } else { 2 }')).toStrictEqual([
-      'Block',
+      'Program',
       ['Declare', 'y', ['Dictionary', ['KeyValuePair', 'value', 3]]],
       ['If', 'c', ['Block', 1], ['Block', 2]],
     ]);
@@ -493,9 +493,9 @@ describe('EPSIL STATEMENT KEYWORDS STAY RESERVED IN EXPRESSION POSITION', () => 
 });
 
 describe('EPSIL MULTI-STATEMENT PROGRAM', () => {
-  test('declarations and control flow sequence into a Block', () => {
+  test('declarations and control flow sequence into Program', () => {
     expect(validEpsil('let x = 5\nif x > 0 { 1 } else { 2 }')).toStrictEqual([
-      'Block',
+      'Program',
       ['Declare', 'x', ['Dictionary', ['KeyValuePair', 'value', 5]]],
       ['If', ['Greater', 'x', 0], ['Block', 1], ['Block', 2]],
     ]);

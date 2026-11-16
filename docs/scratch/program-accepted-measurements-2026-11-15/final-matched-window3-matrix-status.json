@@ -1,0 +1,2217 @@
+[
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-1",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-1",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-1.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-1",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-1",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-1.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-2",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-2",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-2.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-2",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-2",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-2.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-3",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-3",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-3.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-3",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-3",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-3.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-4",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-4",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-4.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-4",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-4",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-4.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-5",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-5",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-5.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-5",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-5",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-5.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-6",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-6",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-6.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-6",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-6",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-6.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-7",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-7",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-7.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-7",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-7",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-7.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-8",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-8",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-8.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-8",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-8",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-8.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-9",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-9",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-9.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-9",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-9",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-9.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-10",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-10",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-10.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-10",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-10",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-10.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-11",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-11",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-11.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-11",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-11",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-11.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-12",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-12",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-12.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-12",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-12",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-12.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-13",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-13",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-13.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-13",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-13",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-13.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-14",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-14",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-14.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-14",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-14",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-14.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-15",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-15",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-15.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-15",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-15",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-15.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "ce-normal-candidate-16",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-candidate-16",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-candidate-16.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "ce-normal-baseline-16",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-normal-baseline-16",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-normal-baseline-16.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "off",
+    "arm": "candidate",
+    "name": "ce-off-candidate-1",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-off-candidate-1",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-off-candidate-1.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "off",
+    "arm": "baseline",
+    "name": "ce-off-baseline-1",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-off-baseline-1",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-off-baseline-1.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "off",
+    "arm": "baseline",
+    "name": "ce-off-baseline-2",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-off-baseline-2",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-off-baseline-2.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "off",
+    "arm": "candidate",
+    "name": "ce-off-candidate-2",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-off-candidate-2",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-off-candidate-2.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "off",
+    "arm": "candidate",
+    "name": "ce-off-candidate-3",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-off-candidate-3",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-off-candidate-3.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "off",
+    "arm": "baseline",
+    "name": "ce-off-baseline-3",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-off-baseline-3",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-off-baseline-3.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "off",
+    "arm": "baseline",
+    "name": "ce-off-baseline-4",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-off-baseline-4",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-off-baseline-4.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false
+  },
+  {
+    "kind": "ce",
+    "mode": "off",
+    "arm": "candidate",
+    "name": "ce-off-candidate-4",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-off-candidate-4",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-off-candidate-4.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "off",
+    "arm": "candidate",
+    "name": "ce-off-candidate-5",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-off-candidate-5",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-off-candidate-5.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "off",
+    "arm": "baseline",
+    "name": "ce-off-baseline-5",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-off-baseline-5",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-off-baseline-5.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "off",
+    "arm": "baseline",
+    "name": "ce-off-baseline-6",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-off-baseline-6",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-baseline-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-off-baseline-6.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "ce",
+    "mode": "off",
+    "arm": "candidate",
+    "name": "ce-off-candidate-6",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "ce-off-candidate-6",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce-time.mjs",
+      "/private/tmp/program-final-matched-perf-20261115/ce-off-candidate-6.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true
+  },
+  {
+    "kind": "tycho",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "tycho-normal-baseline-1",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-normal-baseline-1",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-normal-baseline-1.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true,
+    "acceptedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 3,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "turing-patterns": 3,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    },
+    "rejectedCaseSamples": {}
+  },
+  {
+    "kind": "tycho",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "tycho-normal-candidate-1",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-normal-candidate-1",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-normal-candidate-1.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 3,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    },
+    "rejectedCaseSamples": {
+      "turing-patterns": 3
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "tycho-normal-candidate-2",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-normal-candidate-2",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-normal-candidate-2.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {
+      "multibrot": 1,
+      "buddhabrot": 1,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "turing-patterns": 2,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    },
+    "rejectedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 2,
+      "buddhabrot": 2,
+      "turing-patterns": 1
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "tycho-normal-baseline-2",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-normal-baseline-2",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-normal-baseline-2.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true,
+    "acceptedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 3,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "turing-patterns": 3,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    },
+    "rejectedCaseSamples": {}
+  },
+  {
+    "kind": "tycho",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "tycho-normal-baseline-3",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-normal-baseline-3",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-normal-baseline-3.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 1
+    },
+    "rejectedCaseSamples": {
+      "othello": 2,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 3,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "turing-patterns": 3,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "tycho-normal-candidate-3",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-normal-candidate-3",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-normal-candidate-3.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {
+      "turing-patterns": 1,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    },
+    "rejectedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 3,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "turing-patterns": 2
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "normal",
+    "arm": "candidate",
+    "name": "tycho-normal-candidate-4",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-normal-candidate-4",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-normal-candidate-4.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 0,
+    "exitCode": 0,
+    "accepted": true,
+    "acceptedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 3,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "turing-patterns": 3,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    },
+    "rejectedCaseSamples": {}
+  },
+  {
+    "kind": "tycho",
+    "mode": "normal",
+    "arm": "baseline",
+    "name": "tycho-normal-baseline-4",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-normal-baseline-4",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-normal-baseline-4.json",
+      "auto"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 1,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3
+    },
+    "rejectedCaseSamples": {
+      "buddhabrot": 2,
+      "turing-patterns": 3,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "off",
+    "arm": "candidate",
+    "name": "tycho-off-candidate-1",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-off-candidate-1",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-off-candidate-1.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    },
+    "rejectedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 3,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "turing-patterns": 3
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "off",
+    "arm": "baseline",
+    "name": "tycho-off-baseline-1",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-off-baseline-1",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-off-baseline-1.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {
+      "multibrot": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "turing-patterns": 3,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    },
+    "rejectedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "buddhabrot": 3,
+      "julia-set": 3,
+      "game-of-life": 3
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "off",
+    "arm": "baseline",
+    "name": "tycho-off-baseline-2",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-off-baseline-2",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-off-baseline-2.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 1,
+      "buddhabrot": 2,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "turing-patterns": 3,
+      "galton-board": 3,
+      "fish-swarm": 2
+    },
+    "rejectedCaseSamples": {
+      "othello": 2,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 1,
+      "fish-swarm": 1,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "off",
+    "arm": "candidate",
+    "name": "tycho-off-candidate-2",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-off-candidate-2",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-off-candidate-2.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {
+      "multibrot": 3,
+      "buddhabrot": 1,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    },
+    "rejectedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "buddhabrot": 2,
+      "turing-patterns": 3
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "off",
+    "arm": "candidate",
+    "name": "tycho-off-candidate-3",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-off-candidate-3",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-off-candidate-3.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    },
+    "rejectedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 3,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "turing-patterns": 3
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "off",
+    "arm": "baseline",
+    "name": "tycho-off-baseline-3",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-off-baseline-3",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-off-baseline-3.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {},
+    "rejectedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 3,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "turing-patterns": 3,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "off",
+    "arm": "baseline",
+    "name": "tycho-off-baseline-4",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-off-baseline-4",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-off-baseline-4.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {
+      "multibrot": 3,
+      "buddhabrot": 2
+    },
+    "rejectedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "buddhabrot": 1,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "turing-patterns": 3,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "off",
+    "arm": "candidate",
+    "name": "tycho-off-candidate-4",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-off-candidate-4",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-off-candidate-4.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {},
+    "rejectedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 3,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "turing-patterns": 3,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "off",
+    "arm": "candidate",
+    "name": "tycho-off-candidate-5",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-off-candidate-5",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-off-candidate-5.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    },
+    "rejectedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 3,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "turing-patterns": 3,
+      "galton-board": 3,
+      "fish-swarm": 3
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "off",
+    "arm": "baseline",
+    "name": "tycho-off-baseline-5",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-off-baseline-5",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-off-baseline-5.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {
+      "apollonian-gasket": 3,
+      "barnsley-fern": 2
+    },
+    "rejectedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 3,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "barnsley-fern": 1,
+      "koch-snowflake": 3,
+      "turing-patterns": 3,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "off",
+    "arm": "baseline",
+    "name": "tycho-off-baseline-6",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-off-baseline-6",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-off-baseline-6.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "turing-patterns": 2
+    },
+    "rejectedCaseSamples": {
+      "traffic-jam": 3,
+      "othello": 3,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 3,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "turing-patterns": 1,
+      "galton-board": 3,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    }
+  },
+  {
+    "kind": "tycho",
+    "mode": "off",
+    "arm": "candidate",
+    "name": "tycho-off-candidate-6",
+    "command": [
+      "python3",
+      "/private/tmp/program-final-matched-perf-20261115/monitor.py",
+      "tycho-off-candidate-6",
+      "timeout",
+      "-k",
+      "10",
+      "180",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho-time.mts",
+      "/private/tmp/program-final-matched-perf-20261115/tycho-off-candidate-6.json",
+      "off"
+    ],
+    "environment": {
+      "CE_ROOT": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "driverExit": 3,
+    "exitCode": 0,
+    "accepted": false,
+    "acceptedCaseSamples": {
+      "traffic-jam": 2,
+      "othello": 2,
+      "galton-board": 2
+    },
+    "rejectedCaseSamples": {
+      "traffic-jam": 1,
+      "othello": 1,
+      "heat-spread": 3,
+      "burning-ship": 3,
+      "multibrot": 3,
+      "buddhabrot": 3,
+      "julia-set": 3,
+      "game-of-life": 3,
+      "apollonian-gasket": 3,
+      "barnsley-fern": 3,
+      "koch-snowflake": 3,
+      "turing-patterns": 3,
+      "galton-board": 1,
+      "fish-swarm": 3,
+      "black-hole": 3,
+      "notebook-direct-execution-and-publication:rerun": 7,
+      "notebook-direct-execution-and-publication:whole-source-edit": 7,
+      "prelude-edit-a": 3,
+      "prelude-edit-b": 3
+    }
+  }
+]

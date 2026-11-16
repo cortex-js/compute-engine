@@ -1,0 +1,1 @@
+Owner codex-program-accepted:matched-performance; FIFO behind ce-interval:b15; acquired by existing acquire process. Exact acquired check in controller-acquired.json. Final release load8.4/7.4/7.5 in release.log. Earlier immediate reacquire loads6.1/13.1/14.3 and3.0/6.7/10.8 recorded in tool outputs and final report.

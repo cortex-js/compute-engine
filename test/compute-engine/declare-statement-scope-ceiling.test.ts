@@ -136,12 +136,16 @@ describe('a top-level `let` of an Epsil program', () => {
     ['let f: () -> number = () => do { c = c + 1; c }'],
     ['let f = () => do { c = c + 1; c }'],
     ['const f = () => do { c = c + 1; c }'],
-  ])('`%s` is refused and the variable does not change', (statement) => {
+  ])('`%s` follows the Program value-variable rule', (statement) => {
     const result = run(`let c = 0\n${statement}\nf()\nc`);
-    expect(result.value?.json).toBe(0);
-    expect(
-      result.diagnostics.map((d) => (d.message as unknown[])[3])
-    ).toContain('incompatible-type');
+    expect(result.value?.json).toBe(1);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it('preserves an explicit pure contract on a Program variable', () => {
+    const result = run('let c=0; let f: () pure -> number = () => do {c=c+1;c}; f(); c');
+    expect(result.value.json).toBe(0);
+    expect(result.diagnostics.map((d) => d.message[3])).toContain('incompatible-type');
   });
 
   it('a `let` of a program that states `scope` installs the writer', () => {
@@ -152,7 +156,7 @@ describe('a top-level `let` of an Epsil program', () => {
     expect(result.value?.json).toBe(1);
   });
 
-  it('is refused when a host runs the program in a scope that it pushed', () => {
+  it('uses the same value-variable rule in a host-pushed caller scope', () => {
     const ce = new ComputeEngine();
     ce.pushScope();
     const result = executeEpsil(
@@ -160,10 +164,8 @@ describe('a top-level `let` of an Epsil program', () => {
       'let c = 0\nlet f = () => do { c = c + 1; c }\nf()\nc'
     );
     ce.popScope();
-    expect(result.value?.json).toBe(0);
-    expect(
-      result.diagnostics.map((d) => (d.message as unknown[])[3])
-    ).toContain('incompatible-type');
+    expect(result.value?.json).toBe(1);
+    expect(result.diagnostics).toEqual([]);
   });
 
   it('a `let` in a function body stays installable', () => {

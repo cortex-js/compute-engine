@@ -71,20 +71,20 @@ infinities and `NaN` are not in any of them: they have types of their own,
 
 ## When to write an annotation
 
-**The default is not to.** Epsil infers the type of anything you declare, and
-for a value used near where it is defined the inferred type is the one you
-would have written:
+**The default is not to.** Epsil infers a stable assignment contract for an
+unannotated variable. Numeric variables use `number`, so later numeric values
+can replace the initializer:
 
 ```epsil-live
 let radius = 2.5
 let area = pi * radius^2
 type(area)
-// ➔ TypeFrom("real")
+// ➔ TypeFrom("number")
 ```
 
-Writing `let radius: real = 2.5` adds a word and no information — the
-initializer already said it. Reach for an annotation in the five situations
-where it does something.
+Writing `let radius: real = 2.5` restricts later assignments to finite real
+values. Reach for an annotation when this restriction is part of the contract,
+or in the five situations below.
 
 ### 1. On the parameters of a function others will call
 
@@ -428,7 +428,7 @@ A value built this way carries its type with it, wherever it goes:
 type point = tuple<x: number, y: number>
 let ps = [point(1, 2), point(3, 4)]
 type(ps)
-// ➔ TypeFrom("list<point^2>")
+// ➔ TypeFrom("list<point>")
 ```
 
 An **alias** constructor is a checked cast instead of a tag: it validates the

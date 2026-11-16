@@ -356,7 +356,7 @@ describe('EPSIL PROGRAMS — strings', () => {
 let x = 2^11 - 1
 "\\(x) has type \\(Type(x))"`);
     expect(diagnostics).toEqual([]);
-    expect(value.string).toBe('2047 has type integer');
+    expect(value.string).toBe('2047 has type number');
   });
 
   test('a formatted table with StringJoin, interpolation and escapes', () => {
@@ -1166,7 +1166,7 @@ let r = 0
 let a: integer = 1
 let b: integer = 2
 (a, b) := (1, "oops")`);
-    expect(text).toContain('incompatible-type');
+    expect(text).toContain('assignment-type-mismatch');
   });
 
   test('a shape mismatch is an Error value', () => {

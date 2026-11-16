@@ -1,0 +1,51 @@
+[
+  {
+    "file": "test/epsil/static-check-function-on-const.test.ts",
+    "insertions": 0,
+    "deletions": 0,
+    "beforeSha256": "da7fafd77faa59473e0198d9f6ef74d88a15b4068100a05d5af4587248d2995f",
+    "afterSha256": "da7fafd77faa59473e0198d9f6ef74d88a15b4068100a05d5af4587248d2995f"
+  },
+  {
+    "file": "test/epsil/redefinition-discipline.test.ts",
+    "insertions": 22,
+    "deletions": 8,
+    "beforeSha256": "4f7c07b5c97393f7b59ab0274f62754bb370ded13a91e4eb8278f23df0be8911",
+    "afterSha256": "f6ea25e2562a51ab792b2e055e087ec0a656150bfd0f94a5211bea251722e639"
+  },
+  {
+    "file": "test/compute-engine/constant-function-reassignment.test.ts",
+    "insertions": 0,
+    "deletions": 0,
+    "beforeSha256": "a8b7ed39fe8d9988517ded2c625b838b53d505fd627304be9b7e9e6536806c7e",
+    "afterSha256": "a8b7ed39fe8d9988517ded2c625b838b53d505fd627304be9b7e9e6536806c7e"
+  },
+  {
+    "file": "test/compute-engine/constructor-functions.test.ts",
+    "insertions": 0,
+    "deletions": 0,
+    "beforeSha256": "1ee6446d0aa8c13f0b027ea6f695b108c6337feeaa80a320a41b29896ab7df7d",
+    "afterSha256": "1ee6446d0aa8c13f0b027ea6f695b108c6337feeaa80a320a41b29896ab7df7d"
+  },
+  {
+    "file": "test/compute-engine/library-name-shadowing.test.ts",
+    "insertions": 0,
+    "deletions": 0,
+    "beforeSha256": "1f9723e60d0a3e27dbbbdcda5b346bff19e4cbd9f4b8e3463713b27be83d9c08",
+    "afterSha256": "1f9723e60d0a3e27dbbbdcda5b346bff19e4cbd9f4b8e3463713b27be83d9c08"
+  },
+  {
+    "file": "test/compute-engine/block-locals-declaration-rules.test.ts",
+    "insertions": 3,
+    "deletions": 3,
+    "beforeSha256": "98a372fd84b43136e81a8fee24d9582b8e67ff084ca64f7f94a48dbf64955c48",
+    "afterSha256": "f7f37b9629e33ff3b16337abedcdd3e9ceb0521ea03f783f4e71bbc3b75acf76"
+  },
+  {
+    "file": "test/compute-engine/ce-43-block-local-statement-order.test.ts",
+    "insertions": 3,
+    "deletions": 2,
+    "beforeSha256": "c4c287b0a32bd88d27a990a88a374c6e265d71c97c15d299a59e832a33670b45",
+    "afterSha256": "968357f4d91f0b212eaab447ea282e4cd75289b2dbb30ee88f8a7b0eecfe00b0"
+  }
+]

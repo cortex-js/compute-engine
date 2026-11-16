@@ -1641,8 +1641,7 @@ function triviallyAdmittedCall(
       const def = resolvedValueDefinition(op);
       if (
         def !== undefined &&
-        (def.value !== undefined ||
-          ce._staticAssignmentEvidence?.get(def) !== undefined)
+        def.value !== undefined
       )
         return false;
       // A symbol whose type fits the parameter is admitted outright (the
@@ -2580,7 +2579,7 @@ function candidateParamsAt(valueType: Type, idx: number): Type[] {
  * exactly as it would be without the declaration. A signature-wide `true`
  * there admitted a collection at every slot unchecked.
  */
-function threadableGate(sig: Type, whenUndeclared: boolean): Threadable {
+export function threadableGate(sig: Type, whenUndeclared: boolean): Threadable {
   const plan = broadcastableParamSlots(sig);
   if (plan === undefined) {
     // A signature with a point parameter maps a list at a scalar sibling
@@ -3270,39 +3269,10 @@ function stampableParamType(t: Type): Type | undefined {
  * typed as under the written-out declaration. */
 function calleeSignatureType(def: BoxedValueDefinition): Type | undefined {
   const declared = resolveTypeAlias(def.type.type);
-  if (isWildcardFunctionType(declared)) return def.value?.type.type;
+  if (isWildcardFunctionType(declared)) return def._programVariable ? undefined : def.value?.type.type;
   return declared;
 }
 
-/**
- * Whether a call to `def` — a function-typed value definition whose type is
- * INFERRED — must have its arguments validated at boxing as if the signature
- * were declared, because the Epsil static pre-pass is checking the program.
- *
- * Outside the pass (`_staticPinnedCallees` undefined) the answer is always no:
- * an inferred signature is not a user constraint, and an assigned function
- * literal refuses a wrong argument itself, when applied, with an error VALUE
- * (the `filter-predicate-errors` pins in `test/compute-engine/` depend on
- * that timing). Inside the pass two definitions qualify — the pass mutates
- * nothing, since the verdict lands in a boxed tree the pass reads and then
- * discards:
- *
- * - one the pass itself pinned from a function literal the program declares
- *   or assigns (`registerPinnedSignature`, `src/epsil/static-diagnostics.ts`)
- *   — `let k = (n: integer) => n + 1`, checked in the same program;
- * - one an earlier evaluation left HOLDING a function literal (a previous
- *   notebook cell's `let k = (n: integer) => n + 1`), whose inferred type is
- *   that literal's own signature: a call in a later cell that the literal
- *   would refuse is reported where it is written.
- */
-function staticallyPinnedCallee(
-  ce: ComputeEngine,
-  def: BoxedValueDefinition
-): boolean {
-  const pinned = ce._staticPinnedCallees;
-  if (pinned === undefined) return false;
-  return pinned.has(def) || def.value?.operator === 'Function';
-}
 
 /** `x` when it is a function literal that annotates at least one of its
  * parameters (`(u: real) ↦ 7`), and `undefined` otherwise. */
@@ -3333,7 +3303,8 @@ function annotatedLiteral(x: Expression | undefined): Expression | undefined {
 export function validatedLiteralApplicationOperands(
   ce: ComputeEngine,
   literal: Expression,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  diagnostic = false
 ): ReadonlyArray<Expression> | undefined {
   if (!ce.strict) return undefined;
   const annotated = annotatedLiteral(constantFieldLiteral(literal) ?? literal);
@@ -3359,6 +3330,8 @@ export function validatedLiteralApplicationOperands(
       mapsPointLists: true,
       userFunction: true,
       enforcesParameterAnnotations: true,
+      noInference: diagnostic,
+      diagnostic,
     }
   );
   if (!invalid) return undefined;
@@ -3401,12 +3374,7 @@ function keepProvisionalOperands(
       orig &&
       orig.isValid &&
       !r.isValid &&
-      orig.freeVariables.length > 0 &&
-      !(
-        isSymbol(orig) &&
-        orig.valueDefinition !== undefined &&
-        ce._staticAssignmentEvidence?.has(orig.valueDefinition)
-      )
+      orig.freeVariables.length > 0
     ) {
       const params = candidateParamsAt(checkedType, i);
       // `isDisjointFrom` is conservative: it does not read the dimensions of
@@ -4241,6 +4209,17 @@ function makeCanonicalFunctionCore(
     // its canonical handler intact, and the call it builds — the dispatcher
     // call `scale(c, k: 2)`, or the qualified `Apply(Field(P, m), …)` — comes
     // back through this seam under the head that does carry the names.
+    if (isValueDef(def) && def.value._programVariable &&
+        (isWildcardFunctionType(def.value.type.type) || def.value.type.isUnknown) && def.value.value === undefined) {
+      const written = ops.map((op) => ce.box(op, { form: 'raw' }));
+      const held = written.map((op) => isFunction(op, 'NamedArgument')
+        ? ce._fn('NamedArgument', semiCanonical(ce, op.ops), { metadata: { sourceOffsets: op.sourceOffsets } })
+        : semiCanonical(ce, [op])[0]);
+      const call = new BoxedFunction(ce, name, held, { metadata, canonical: true });
+      call._refusedOps = written;
+      call._stampCallee(undefined, written);
+      return call;
+    }
     const split = splitNamedArguments(ops);
     if (split) {
       // A variable callee: the names are matched against its DECLARED type
@@ -4279,13 +4258,25 @@ function makeCanonicalFunctionCore(
           metadata,
           scope,
         });
-      if (normalized.kind === 'error')
-        return new BoxedFunction(
+      if (normalized.kind === 'error') {
+        const result = new BoxedFunction(
           ce,
           name,
           flatten(semiCanonical(ce, normalized.ops)),
           { metadata, canonical: true }
         );
+        // A named refusal is checked again after the same callee is
+        // replaced, just as a successful named call is below.
+        if (isValueDef(def)
+          ? def.value.inferredType || (def.value._programVariable && isWildcardFunctionType(def.value.type.type))
+          : def.operator.isUserFunctionDefinition)
+        {
+          const written = ops.map((op) => ce.box(op, { form: 'raw' }));
+          result._refusedOps = written;
+          result._stampCallee(undefined, written);
+        }
+        return result;
+      }
       // `unavailable` leaves `ops` alone: the carriers survive to their own
       // canonicalization, which is where `argument-names-unavailable` is
       // minted.
@@ -4309,7 +4300,7 @@ function makeCanonicalFunctionCore(
         if (
           normalized.permutation !== undefined &&
           (isValueDef(def)
-            ? def.value.inferredType
+            ? def.value.inferredType || (def.value._programVariable && isWildcardFunctionType(def.value.type.type))
             : def.operator.isUserFunctionDefinition ||
               (def.operator.inferredSignature &&
                 parameterDefaultOperands(ce, def.operator) !== undefined))
@@ -4457,7 +4448,7 @@ function makeCanonicalFunctionCore(
     // the literal is pinned. The same literal assigned with no declaration
     // is an operator definition, whose call is checked against them, so
     // `f("abc")` is invalid on both routes, typed `error` on both.
-    const wildcardLiteral = wildcardCallee
+    const wildcardLiteral = wildcardCallee && !def.value._programVariable
       ? annotatedLiteral(def.value.value)
       : undefined;
     const pinned = def.value.inferredType || wildcardLiteral !== undefined;
@@ -4465,8 +4456,7 @@ function makeCanonicalFunctionCore(
     if (
       ce.strict &&
       (!def.value.inferredType ||
-        wildcardLiteral !== undefined ||
-        staticallyPinnedCallee(ce, def.value)) &&
+        wildcardLiteral !== undefined) &&
       typeof valueType !== 'string' &&
       // A plain signature, OR an overload set (an intersection of signatures).
       // Gating on `kind === 'signature'` alone let an overload-typed value
@@ -4493,23 +4483,10 @@ function makeCanonicalFunctionCore(
       // call so result typing reads the arm the call was VALIDATED against
       // (`_resolvedOverload`, phase 2c).
       const valueResolutionOut: { resolution?: OverloadResolution } = {};
-      // A statically pinned literal is checked as its own application would
-      // check it (`pinnedValidationSignature`); a declared signature is
-      // checked whole.
-      // A signature declared with placeholder slots validates those slots
-      // as `any`: their refined types were inferred from the body, not
-      // written by the author (`placeholderSlotsAs`).
-      // The literal a statically pinned name holds (`let f = (p: T) => …`).
-      // Its application checks the parameters it ANNOTATES and nothing
-      // else, so the slot of a bare parameter, whose type was inferred from
-      // the body, validates as `any` here too.
-      // During the Epsil static pre-pass the name has no value yet, and the
-      // literal is the one the pass registered (`_staticPinnedCallees`).
       const heldLiteral = def.value.value;
       const pinnedLiteral = !pinned
         ? undefined
         : (wildcardLiteral ??
-          ce._staticPinnedCallees?.get(def.value) ??
           (isFunction(heldLiteral, 'Function') ? heldLiteral : undefined));
       const checkedType = pinned
         ? pinnedValidationSignature(valueType, boxedOps.length, pinnedLiteral)

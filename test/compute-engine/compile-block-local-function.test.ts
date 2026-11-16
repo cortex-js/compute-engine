@@ -1,3 +1,4 @@
+import { operands } from '../../src/math-json/utils';
 /**
  * Compiling a program that DEFINES a function and then CALLS it — the ordinary
  * shape of an Epsil file, and of any `Block` whose local holds a lambda:
@@ -29,12 +30,12 @@ beforeEach(() => {
   ce.declare('x', 'real | list<real>');
 });
 
-/** Box an Epsil program in a fresh engine, without evaluating it. */
+/** Box the parsed statements as a local Block, without evaluating it. */
 function program(source: string) {
   const [ast] = parseEpsil(source, {
     parseLatex: (latex: string) => ce.parse(latex).json,
   });
-  return ce.box(ast as never);
+  return ce.box(['Block', ...operands(ast)] as never);
 }
 
 /** The compiled program's result, and the interpreter's, for comparison. */

@@ -365,6 +365,28 @@ export function noteConstantDeclaration(
   );
 }
 
+/** Preserve source-order constant-default admission while Program hoists
+ * functions. These are declaration facts, never evaluated constant values. */
+export function withEarlierConstantDeclarations<T>(
+  ce: ComputeEngine,
+  declarations: ReadonlySet<string>,
+  earlier: ReadonlySet<string>,
+  fn: () => T
+): T {
+  if (declarations.size === 0) return fn();
+  const scope = ce.context.lexicalScope;
+  const saved = CONSTANT_DECLARATIONS.get(scope);
+  const overlay = new Map(saved);
+  for (const name of declarations)
+    overlay.set(name, earlier.has(name) ? 'const' : 'variable');
+  CONSTANT_DECLARATIONS.set(scope, overlay);
+  try { return fn(); }
+  finally {
+    if (saved === undefined) CONSTANT_DECLARATIONS.delete(scope);
+    else CONSTANT_DECLARATIONS.set(scope, saved);
+  }
+}
+
 /**
  * Remove the mark of `name` in the scope `scope` from
  * `CONSTANT_DECLARATIONS`. `ce.declare()` and the run of a `Declare`

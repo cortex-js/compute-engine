@@ -1,3 +1,4 @@
+import { operand } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -10,7 +11,7 @@ import { validEpsil } from '../utils';
 function payload(source: string): unknown {
   const [ast] = parseEpsil(source);
   return JSON.parse(
-    JSON.stringify(ast).replace(/,"sourceOffsets":\[\d+,\d+\]/g, '')
+    JSON.stringify(operand(ast, 1)).replace(/,"sourceOffsets":\[\d+,\d+\]/g, '')
   );
 }
 

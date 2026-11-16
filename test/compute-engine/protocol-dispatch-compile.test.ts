@@ -557,8 +557,8 @@ function bumpQualified(p: P) -> integer {
   test('a SET on a value receiver never reaches the compiler at all', () => {
     // It is refused where it is written: assignment through a `Field` target is
     // a store, a store needs a mutable object, and a tuple is not one — so the
-    // whole `function` statement evaluates to that error and no definition is
-    // installed. (A `readonly` property is the only kind a value type can carry
+    // function declaration is refused and no definition is installed.
+    // Program evaluates its type/conformance statements before the function. (A `readonly` property is the only kind a value type can carry
     // at all, after the B1 mutability gate.)
     const ce = new ComputeEngine();
     const result = executeEpsil(
@@ -575,7 +575,10 @@ function retag(p: Person, v: string) -> Person {
   p
 }`
     );
-    expect(String(result.value)).toContain('immutable-value-assignment');
+    expect(result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ message: expect.arrayContaining(['immutable-value-assignment']) }),
+    ]));
+    expect(ce.lookupDefinition('retag')?.operator?.evaluate).toBeUndefined();
   });
 
   test('a typed local declared in a LOOP BODY resolves the static tier', () => {

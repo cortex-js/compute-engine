@@ -1,0 +1,231 @@
+[
+  {
+    "name": "scalar",
+    "source": "1 + 2",
+    "to": "javascript",
+    "head": "Integer",
+    "type": "3",
+    "success": true,
+    "result": 3,
+    "unsupported": []
+  },
+  {
+    "name": "scalar",
+    "source": "1 + 2",
+    "to": "interval-js",
+    "head": "Integer",
+    "type": "3",
+    "success": true,
+    "result": {
+      "kind": "interval",
+      "value": {
+        "lo": 3,
+        "hi": 3
+      }
+    },
+    "unsupported": []
+  },
+  {
+    "name": "scalar",
+    "source": "1 + 2",
+    "to": "glsl",
+    "head": "Integer",
+    "type": "3",
+    "success": true,
+    "unsupported": []
+  },
+  {
+    "name": "scalar",
+    "source": "1 + 2",
+    "to": "wgsl",
+    "success": false,
+    "error": "Error: Compilation target \"wgsl\" is not registered. Available targets: javascript, interval-js, glsl"
+  },
+  {
+    "name": "mutable",
+    "source": "let x=1; x=1.5; x",
+    "to": "javascript",
+    "head": "Block",
+    "type": "real",
+    "success": true,
+    "result": 1.5,
+    "unsupported": []
+  },
+  {
+    "name": "mutable",
+    "source": "let x=1; x=1.5; x",
+    "to": "interval-js",
+    "head": "Block",
+    "type": "real",
+    "success": true,
+    "result": {
+      "kind": "interval",
+      "value": {
+        "lo": 1.5,
+        "hi": 1.5
+      }
+    },
+    "unsupported": []
+  },
+  {
+    "name": "mutable",
+    "source": "let x=1; x=1.5; x",
+    "to": "glsl",
+    "head": "Block",
+    "type": "real",
+    "success": true,
+    "unsupported": []
+  },
+  {
+    "name": "mutable",
+    "source": "let x=1; x=1.5; x",
+    "to": "wgsl",
+    "success": false,
+    "error": "Error: Compilation target \"wgsl\" is not registered. Available targets: javascript, interval-js, glsl"
+  },
+  {
+    "name": "callable",
+    "source": "let k=(n:integer)=>n+1; k(2)",
+    "to": "javascript",
+    "head": "Block",
+    "type": "unknown",
+    "success": true,
+    "result": 3,
+    "unsupported": []
+  },
+  {
+    "name": "callable",
+    "source": "let k=(n:integer)=>n+1; k(2)",
+    "to": "interval-js",
+    "head": "Block",
+    "type": "unknown",
+    "success": true,
+    "result": {
+      "kind": "interval",
+      "value": {
+        "lo": 3,
+        "hi": 3
+      }
+    },
+    "unsupported": []
+  },
+  {
+    "name": "callable",
+    "source": "let k=(n:integer)=>n+1; k(2)",
+    "to": "glsl",
+    "success": false,
+    "error": "CompileDeclineError: The head `Function` is outside the GLSL fragment."
+  },
+  {
+    "name": "callable",
+    "source": "let k=(n:integer)=>n+1; k(2)",
+    "to": "wgsl",
+    "success": false,
+    "error": "Error: Compilation target \"wgsl\" is not registered. Available targets: javascript, interval-js, glsl"
+  },
+  {
+    "name": "typedCallable",
+    "source": "let k:(integer)->integer=(n)=>n+1; k(2)",
+    "to": "javascript",
+    "head": "Block",
+    "type": "integer",
+    "success": true,
+    "result": 3,
+    "unsupported": []
+  },
+  {
+    "name": "typedCallable",
+    "source": "let k:(integer)->integer=(n)=>n+1; k(2)",
+    "to": "interval-js",
+    "head": "Block",
+    "type": "integer",
+    "success": true,
+    "result": {
+      "kind": "interval",
+      "value": {
+        "lo": 3,
+        "hi": 3
+      }
+    },
+    "unsupported": []
+  },
+  {
+    "name": "typedCallable",
+    "source": "let k:(integer)->integer=(n)=>n+1; k(2)",
+    "to": "glsl",
+    "success": false,
+    "error": "CompileDeclineError: The head `Function` is outside the GLSL fragment."
+  },
+  {
+    "name": "typedCallable",
+    "source": "let k:(integer)->integer=(n)=>n+1; k(2)",
+    "to": "wgsl",
+    "success": false,
+    "error": "Error: Compilation target \"wgsl\" is not registered. Available targets: javascript, interval-js, glsl"
+  },
+  {
+    "name": "paired",
+    "source": "let g:(integer)->integer; function g(k) { k+1 }; g(1)",
+    "to": "javascript",
+    "success": false,
+    "error": "Error: Could not compile invalid expression: \"{    Error(ErrorCode(\"declaration-without-value\", \"g\", \"function\"));\n     Error(ErrorCode(\"variable-redeclaration\", \"g\"));\n     g(1)\n    }\""
+  },
+  {
+    "name": "paired",
+    "source": "let g:(integer)->integer; function g(k) { k+1 }; g(1)",
+    "to": "interval-js",
+    "head": "Block",
+    "type": "error",
+    "success": false,
+    "unsupported": [
+      "ErrorCode",
+      "g"
+    ]
+  },
+  {
+    "name": "paired",
+    "source": "let g:(integer)->integer; function g(k) { k+1 }; g(1)",
+    "to": "glsl",
+    "success": false,
+    "error": "CompileDeclineError: The head `Error` is outside the GLSL fragment."
+  },
+  {
+    "name": "paired",
+    "source": "let g:(integer)->integer; function g(k) { k+1 }; g(1)",
+    "to": "wgsl",
+    "success": false,
+    "error": "Error: Compilation target \"wgsl\" is not registered. Available targets: javascript, interval-js, glsl"
+  },
+  {
+    "name": "invalid",
+    "source": "let k:(integer)->integer=(n)=>n; k(1.5)",
+    "to": "javascript",
+    "success": false,
+    "error": "Error: Could not compile invalid expression: \"{    Declare(k, \"(integer)->integer\", {\"value\" -> (n) => n});\n     k(Error(ErrorCode(\"incompatible-type\", \"integer\", \"1.5\"), 1.5))\n    }\""
+  },
+  {
+    "name": "invalid",
+    "source": "let k:(integer)->integer=(n)=>n; k(1.5)",
+    "to": "interval-js",
+    "head": "Block",
+    "type": "error",
+    "success": false,
+    "unsupported": [
+      "ErrorCode"
+    ]
+  },
+  {
+    "name": "invalid",
+    "source": "let k:(integer)->integer=(n)=>n; k(1.5)",
+    "to": "glsl",
+    "success": false,
+    "error": "CompileDeclineError: The head `Function` is outside the GLSL fragment."
+  },
+  {
+    "name": "invalid",
+    "source": "let k:(integer)->integer=(n)=>n; k(1.5)",
+    "to": "wgsl",
+    "success": false,
+    "error": "Error: Compilation target \"wgsl\" is not registered. Available targets: javascript, interval-js, glsl"
+  }
+]

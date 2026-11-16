@@ -2626,6 +2626,7 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * literal (an unknown bare symbol is a number) does not apply to it.
    * @internal */
   _blockLocal: boolean;
+  _programVariable: boolean;
 
   /** When the declaration's type was a bare collection constructor (`list`,
    * `set`, `dictionary`, `collection`, `indexed_collection` — the forms

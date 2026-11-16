@@ -7,16 +7,8 @@ import {
   staticDiagnostics,
 } from '../../src/epsil/static-diagnostics';
 
-// The Epsil static pre-pass reports a call whose argument cannot satisfy the
-// parameter annotation of a FUNCTION LITERAL bound to the callee's name:
-// `let k = (n: integer) => n + 1` followed by `k(1.5)`. The run time leaves
-// that refusal to the literal itself, when applied (the definition stays
-// INFERRED, and an inferred signature never refuses a value at boxing), so
-// the pass registers the literal's signature (`registerPinnedSignature`,
-// src/epsil/static-diagnostics.ts) and asks boxing to validate the later calls
-// against it (`staticallyPinnedCallee`, boxed-expression/box.ts) — the same
-// validation, and the same diagnostic, both annotated spellings of the callee
-// always got.
+// Diagnostic value facts follow straight-line writes without changing a
+// binding's type. Literal annotations remain properties of the stored value.
 
 function run(source: string): ReturnType<typeof executeEpsil> {
   const ce = new ComputeEngine();
@@ -65,12 +57,18 @@ describe('EPSIL STATIC — arguments of a call to a function literal', () => {
     expect(literal.map(strip)).toEqual(clause.map(strip));
   });
 
-  test('a `const` binding and a `:=` assignment of a literal are checked the same way', () => {
-    for (const src of [
-      'const k = (n: integer) => n + 1\nk(1.5)',
-      'let k = 0\nk := (n: integer) => n + 1\nk(1.5)',
-    ])
-      expect(check(src).map((d) => d[1])).toEqual(['incompatible-type']);
+  test('a const callable value keeps its literal argument annotation', () => {
+    expect(check('const k = (n: integer) => n + 1\nk(1.5)').map((d) => d[1])).toEqual(['incompatible-type']);
+  });
+
+  test('a function value cannot replace a scalar Program binding', () => {
+    const source = 'let k = 0\nk := (n: integer) => n + 1\nk(1.5)';
+    expect(check(source).map((d) => d[1])).toEqual([
+      'assignment-type-mismatch', 'expected-function',
+    ]);
+    const ce = new ComputeEngine();
+    executeEpsil(ce, source);
+    expect(ce.symbol('k').evaluate().json).toBe(0);
   });
 
   test('a conforming call is clean', () => {
@@ -184,20 +182,16 @@ describe('EPSIL STATIC — arguments of a call to a function literal', () => {
   });
 
   describe('reassignment mirrors the run time', () => {
-    test('after one replacement the binding keeps the replacement signature', () => {
-      // Assigning a literal to a `let` binding that holds one converts it
-      // into an operator definition with the new literal's signature; a
-      // further incompatible reassignment is then refused at run time and
-      // the second literal stays in force.
+    test('successive replacements use the latest function value', () => {
+      // Assignments preserve the coarse function binding. Every replacement
+      // succeeds, and the call is checked against the latest reaching value.
       const src =
         'let k = (n: integer) => n\nk = (s: string) => s\nk = (n: integer) => n\n';
-      expect(check(src + 'k("a")')).toEqual([]);
+      expect(check(src + 'k("a")').map((d) => d[1])).toEqual(['incompatible-type']);
       const { value, diagnostics } = run(src + 'k("a")');
-      expect(diagnostics.map((d) => d.message[0])).toEqual(['runtime-error']);
-      expect(value.toString()).toBe('"a"');
-      expect(check(src + 'k(1)').map((d) => d[1])).toEqual([
-        'incompatible-type',
-      ]);
+      expect(diagnostics.map((d) => d.message[0])).toEqual(['static-type-error']);
+      expect(value.operator).toBe('Error');
+      expect(check(src + 'k(1)')).toEqual([]);
     });
 
     test('an unannotated replacement literal is a replacement too', () => {
@@ -253,10 +247,12 @@ describe('EPSIL STATIC — arguments of a call to a function literal', () => {
       expect(value.operator).toBe('k');
     });
 
-    test('a `let` binding reassigned to a non-literal is no longer checked', () => {
-      // `k = 5` replaces the binding at run time; the pass drops the pin and
-      // the assignment's own type effect takes over.
-      expect(check('let k = (n: integer) => n + 1\nk = 5\nk("a")')).toEqual([]);
+    test('a refused nonfunction write retains the earlier callable fact', () => {
+      const source = 'let k = (n: integer) => n + 1\nk = 5\nk("a")';
+      expect(check(source).map((d) => d[1])).toEqual([
+        'assignment-type-mismatch', 'incompatible-type',
+      ]);
+      expect(run(source).value.operator).toBe('Error');
     });
   });
 
@@ -286,14 +282,12 @@ describe('EPSIL STATIC — arguments of a call to a function literal', () => {
       expect(check('k = (s) => s\nk(1)', ce)).toEqual([]);
     });
 
-    test('a second reassignment in the next cell is checked against the first replacement', () => {
+    test('a second reassignment in the next cell is checked against its latest value', () => {
       const ce = new ComputeEngine();
       executeEpsil(ce, 'let k = (n: integer) => n');
       const src = 'k = (s: string) => s\nk = (n: integer) => n\n';
-      expect(check(src + 'k("a")', ce)).toEqual([]);
-      expect(check(src + 'k(1)', ce).map((d) => d[1])).toEqual([
-        'incompatible-type',
-      ]);
+      expect(check(src + 'k("a")', ce).map((d) => d[1])).toEqual(['incompatible-type']);
+      expect(check(src + 'k(1)', ce)).toEqual([]);
     });
 
     test('the pass leaves the engine as it found it', () => {
@@ -301,8 +295,7 @@ describe('EPSIL STATIC — arguments of a call to a function literal', () => {
       executeEpsil(ce, 'let k = (n: integer) => n + 1');
       check('k = (s: string) => s\nk(1)', ce);
       check('k(1.5)', ce);
-      expect(ce._staticPinnedCallees).toBeUndefined();
-      expect(ce.box('k').type.toString()).toBe('(n: integer) -> integer');
+      expect(ce.box('k').type.toString()).toBe('function');
       // Outside the pass, boxing still admits the call: the literal refuses
       // it at the application, as before.
       expect(ce.box(['k', 1.5]).isValid).toBe(true);
@@ -314,7 +307,7 @@ describe('EPSIL STATIC — arguments of a call to a function literal', () => {
 describe('AN ALIAS OF A BINDING THAT HOLDS A FUNCTION LITERAL', () => {
   // `let g = k` copies the literal that `k` holds, so the calls of `g` are
   // checked against the same signature as the calls of `k`
-  // (`pinnedAliasOf`, src/epsil/static-diagnostics.ts).
+  // (diagnostic-flow.ts).
   test.each([
     ['let k = (n: integer) => n + 1\nlet g = k\ng(1.5)'],
     ['let k = (n: integer) => n + 1\nconst g = k\ng(1.5)'],

@@ -1,0 +1,5 @@
+Compilation fallback for "Block" (target: javascript): Could not compile `Filter`: the callback parameter 'c' is annotated 'integer', which the argument type 'number' does not provably satisfy. The compiled callback cannot enforce the annotation, and the interpreter reports a per-element error when it does not hold. The interpreter evaluates it instead.
+Compilation fallback for "Block" (target: javascript): Could not compile invalid expression: "{    Declare(x, "integer", {"value" -> 1});
+     Declare(y, "integer", {"value" -> 2});
+     Error(ErrorCode("assignment-type-mismatch", "y", "integer", "4.5"))
+    }"

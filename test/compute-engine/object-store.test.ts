@@ -71,14 +71,17 @@ p.age`)
     ).toBe('43');
   });
 
-  test('the assignment EVALUATES to the stored value', () => {
-    // `Assign` yields the value it wrote, so a store is usable in expression
-    // position exactly as an ordinary assignment is.
+  test('Program returns Nothing while a direct Assign returns the stored value', () => {
     expect(
       value(`${PERSON}
 let p = Person(name: "Alan", age: 42)
 p.age = 43`)
-    ).toBe('43');
+    ).toBe('"Nothing"');
+    expect(value('p.age')).toBe('43');
+    expect(
+      ce.box(['Assign', ['Field', 'p', { str: 'age' }], 44]).evaluate().toString()
+    ).toBe('44');
+    expect(value('p.age')).toBe('44');
   });
 
   test('the OTHER fields are untouched', () => {
@@ -342,12 +345,12 @@ type Person is Nameable {
 }
 let r = Person(n: "Bob", age: 42)`;
     value(conformance('self.n = v\n    self'), engine);
-    expect(value('r.name = "Steve"', engine)).toBe('"Steve"');
+    expect(value('r.name = "Steve"', engine)).toBe('"Nothing"');
     expect(value('r', engine)).toBe('Person(n: "Steve", age: 42)');
 
     const rebuilding = new ComputeEngine();
     value(conformance('Person(n: v, age: self.age)'), rebuilding);
-    expect(value('r.name = "Steve"', rebuilding)).toBe('"Steve"');
+    expect(value('r.name = "Steve"', rebuilding)).toBe('"Nothing"');
     expect(value('r', rebuilding)).toBe('Person(n: "Bob", age: 42)');
   });
 });

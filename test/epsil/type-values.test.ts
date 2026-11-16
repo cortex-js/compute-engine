@@ -218,8 +218,8 @@ describe('the Type flip and its algebra (phase 3, ruling R3)', () => {
   test('Type returns a type value; StringFrom recovers the text', () => {
     const ce = new ComputeEngine();
     expect(run(ce, 'Type(3)')).toBe('TypeFrom("3")');
-    expect(run(ce, 'let x = 2047\nType(x)')).toBe('TypeFrom("integer")');
-    expect(run(ce, 'StringFrom(Type(x))')).toBe('"integer"');
+    expect(run(ce, 'let x = 2047\nType(x)')).toBe('TypeFrom("number")');
+    expect(run(ce, 'StringFrom(Type(x))')).toBe('"number"');
     // The breaking comparison the flip retires: never a text comparison.
     expect(run(ce, 'Type(x) == "integer"')).toBe('"False"');
     // The supported idioms.
@@ -230,7 +230,7 @@ describe('the Type flip and its algebra (phase 3, ruling R3)', () => {
   test('a type value interpolates as its bare text', () => {
     const ce = new ComputeEngine();
     expect(run(ce, 'let x = 2047\n"x has type \\(Type(x))"')).toBe(
-      '"x has type integer"'
+      '"x has type number"'
     );
   });
 

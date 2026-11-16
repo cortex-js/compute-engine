@@ -25,6 +25,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
+import { operand, operator } from '../../src/math-json/utils';
 
 const strip = (x: any) =>
   JSON.parse(
@@ -399,7 +400,9 @@ describe('a destructuring assign the interpreter would refuse fails closed', () 
   const boxedBlock = (src: string) => {
     const ce = new ComputeEngine();
     const [ast] = parseEpsil(src);
-    return ce.box(strip(ast));
+    expect(operator(ast!)).toBe('Program');
+    expect(operator(operand(ast!, 1))).toBe('Block');
+    return ce.box(strip(operand(ast!, 1)));
   };
 
   test('a DECLARED-TYPE target fails closed (it wrote both, atomically refused)', () => {
@@ -602,7 +605,9 @@ describe('the literal-tuple lowering is unchanged', () => {
   const boxed = (src: string) => {
     const ce = new ComputeEngine();
     const [ast] = parseEpsil(src);
-    return ce.box(strip(ast));
+    expect(operator(ast!)).toBe('Program');
+    expect(operator(operand(ast!, 1))).toBe('Block');
+    return ce.box(strip(operand(ast!, 1)));
   };
 
   test('a literal-tuple declare still lowers per leaf, with no temporary', () => {

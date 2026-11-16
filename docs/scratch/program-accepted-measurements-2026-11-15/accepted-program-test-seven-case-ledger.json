@@ -1,0 +1,185 @@
+[
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/epsil/redefinition-discipline.test.ts",
+    "case": "SAME-SCOPE RE-DECLARATION \u2014 `let`/`const` (ruled 2026-09-05) a second top-level `let` of one program is reported, with the first site",
+    "failureMessages": [
+      "Error: expect(received).toEqual(expected) // deep equality\n\n- Expected  - 1\n+ Received  + 1\n\n  Array [\n-   \"variable-redeclaration\",\n+   \"static-type-error\",\n  ]\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent",
+    "qualification": "Canonical wrapper/code migrated; first value1 and required first-site note/range remain. Missing note remains implementation repair."
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/epsil/redefinition-discipline.test.ts",
+    "case": "SAME-SCOPE RE-DECLARATION \u2014 `let`/`const` (ruled 2026-09-05) a destructuring `let` counts each pattern leaf",
+    "failureMessages": [
+      "Error: expect(received).toEqual(expected) // deep equality\n\n- Expected  - 1\n+ Received  + 1\n\n  Array [\n-   \"variable-redeclaration\",\n+   \"static-type-error\",\n  ]\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent"
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/epsil/redefinition-discipline.test.ts",
+    "case": "SAME-SCOPE RE-DECLARATION \u2014 `let`/`const` (ruled 2026-09-05) a refused destructuring `let` declares none of its leaves",
+    "failureMessages": [
+      "Error: expect(received).toEqual(expected) // deep equality\n\n- Expected  - 1\n+ Received  + 3\n\n  Array [\n    Array [\n+     \"static-type-error\",\n+     \"variable redeclaration: a\",\n+     \"let (a, b) = (2, 3)\",\n      \"variable-redeclaration\",\n-     \"a\",\n    ],\n  ]\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent"
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/epsil/redefinition-discipline.test.ts",
+    "case": "SAME-SCOPE RE-DECLARATION \u2014 `let`/`const` (ruled 2026-09-05) a re-run `let` that fails keeps the previous bindings",
+    "failureMessages": [
+      "Error: expect(received).toEqual(expected) // deep equality\n\n- Expected  - 2\n+ Received  + 2\n\n  Array [\n    \"Tuple\",\n-   1,\n-   2,\n+   \"a\",\n+   \"b\",\n  ]\n"
+    ],
+    "classification": "unchanged negative control",
+    "qualification": "Source probe after failed-cell repair now preserves previous a/b1/2. No expectation changed."
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/epsil/redefinition-discipline.test.ts",
+    "case": "REDEFINITION \u2014 the route/origin matrix a RE-ENTRANT box-route declaration mid-batch is unstamped, and the program may still declare that name",
+    "failureMessages": [
+      "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"tuple<a: integer>\"\nReceived: \"integer\"\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent",
+    "qualification": "Parent explicitly approved P2 runtime/type change; exact source probe and all tag/store/stamp/diagnostic controls retained."
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/epsil/redefinition-discipline.test.ts",
+    "case": "the discipline over function clauses provenance does not outlive the clause it describes an ASSIGNMENT between two clauses is not a redefinition",
+    "failureMessages": [
+      "Error: expect(received).toEqual(expected) // deep equality\n\n- Expected  -  1\n+ Received  + 36\n\n- Array []\n+ Array [\n+   Object {\n+     \"message\": Array [\n+       \"function-redefinition\",\n+       \"f\",\n+     ],\n+     \"notes\": Array [\n+       Object {\n+         \"message\": \"this clause of `f` is first defined here\",\n+         \"range\": Array [\n+           0,\n+           8,\n+         ],\n+       },\n+     ],\n+     \"range\": Array [\n+       23,\n+       31,\n+       23,\n+     ],\n+     \"severity\": \"error\",\n+   },\n+   Object {\n+     \"message\": Array [\n+       \"runtime-error\",\n+       \"function redefinition \u2014 A clause of \\\"f\\\" with this parameter list is already defined at characters 0-1 in this program, and this one would silently replace it. Give the clauses different parameter lists to dispatch between them, or edit the existing clause in place; to redefine it interactively, re-run it as a separate program.\",\n+       \"\",\n+       \"function-redefinition\",\n+     ],\n+     \"range\": Array [\n+       23,\n+       31,\n+     ],\n+     \"severity\": \"error\",\n+   },\n+ ]\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent",
+    "qualification": "Parent explicitly approved P2 final42/2; tests require exactly one function-redefinition at later clause. Runtime duplicate remains source bug, sent owner."
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/epsil/redefinition-discipline.test.ts",
+    "case": "the discipline over function clauses provenance does not outlive the clause it describes a clause defined after an assignment still installs",
+    "failureMessages": [
+      "Error: expect(received).toEqual(expected) // deep equality\n\n- Expected  -  1\n+ Received  + 36\n\n- Array []\n+ Array [\n+   Object {\n+     \"message\": Array [\n+       \"function-redefinition\",\n+       \"g\",\n+     ],\n+     \"notes\": Array [\n+       Object {\n+         \"message\": \"this clause of `g` is first defined here\",\n+         \"range\": Array [\n+           0,\n+           8,\n+         ],\n+       },\n+     ],\n+     \"range\": Array [\n+       20,\n+       28,\n+       20,\n+     ],\n+     \"severity\": \"error\",\n+   },\n+   Object {\n+     \"message\": Array [\n+       \"runtime-error\",\n+       \"function redefinition \u2014 A clause of \\\"g\\\" with this parameter list is already defined at characters 0-1 in this program, and this one would silently replace it. Give the clauses different parameter lists to dispatch between them, or edit the existing clause in place; to redefine it interactively, re-run it as a separate program.\",\n+       \"\",\n+       \"function-redefinition\",\n+     ],\n+     \"range\": Array [\n+       20,\n+       28,\n+     ],\n+     \"severity\": \"error\",\n+   },\n+ ]\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent",
+    "qualification": "Parent explicitly approved P2 final42/2; tests require exactly one function-redefinition at later clause. Runtime duplicate remains source bug, sent owner."
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/epsil/redefinition-discipline.test.ts",
+    "case": "the discipline over function clauses in a function body or a block a second clause with the same parameters in a body is reported",
+    "failureMessages": [
+      "Error: expect(received).toContain(expected) // indexOf\n\nExpected value: \"runtime-error\"\nReceived array: [\"static-type-error\"]\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent"
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/compute-engine/library-name-shadowing.test.ts",
+    "case": "a top-level binding of a library constant is refused \"let Pi = 3\\nPi\"",
+    "failureMessages": [
+      "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"pi\"\nReceived: \"3\"\n"
+    ],
+    "classification": "unchanged runtime contract; source repair in flight",
+    "qualification": "Global Pi/GoldenRatio refusal and retained values remain required."
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/compute-engine/library-name-shadowing.test.ts",
+    "case": "a top-level binding of a library constant is refused \"let Pi = 3\\nPi + 1\"",
+    "failureMessages": [
+      "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"1 + pi\"\nReceived: \"4\"\n"
+    ],
+    "classification": "unchanged runtime contract; source repair in flight",
+    "qualification": "Global Pi/GoldenRatio refusal and retained values remain required."
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/compute-engine/library-name-shadowing.test.ts",
+    "case": "a top-level binding of a library constant is refused \"const GoldenRatio = 3\\nGoldenRatio\"",
+    "failureMessages": [
+      "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"\\\"GoldenRatio\\\"\"\nReceived: \"3\"\n"
+    ],
+    "classification": "unchanged runtime contract; source repair in flight",
+    "qualification": "Global Pi/GoldenRatio refusal and retained values remain required."
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/compute-engine/constructor-functions.test.ts",
+    "case": "Epsil route (statement flow) function BEFORE the type declaration is the D5 collision",
+    "failureMessages": [
+      "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent",
+    "qualification": "Parent explicitly approved P2 runtime/type change; exact source probe and all tag/store/stamp/diagnostic controls retained."
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/compute-engine/block-locals-declaration-rules.test.ts",
+    "case": "A LOCAL IS DECLARED AT THE OWN LEVEL OF A BLOCK an assignment in a branch at the top level, in Epsil",
+    "failureMessages": [
+      "Error: expect(received).toEqual(expected) // deep equality\n\n- Expected  -  1\n+ Received  + 17\n\n- Array []\n+ Array [\n+   Object {\n+     \"code\": \"assignment-type-mismatch\",\n+     \"message\": Array [\n+       \"static-type-error\",\n+       \"`a` has the type `number`, and the value has the type `string`\",\n+       \"a := \\\"x\\\"\",\n+       \"assignment-type-mismatch\",\n+     ],\n+     \"range\": Array [\n+       10,\n+       17,\n+       10,\n+     ],\n+     \"severity\": \"error\",\n+   },\n+ ]\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent"
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/compute-engine/ce-43-block-local-statement-order.test.ts",
+    "case": "CE-43: an assignment in a match case is an assignment of the block local a while-let body that consumes the list",
+    "failureMessages": [
+      "Error: expect(received).toEqual(expected) // deep equality\n\n- Expected  - 1\n+ Received  + 1\n\n  Object {\n    \"sound\": true,\n-   \"type\": \"list<integer>\",\n+   \"type\": \"list<number>\",\n    \"value\": \"[]\",\n  }\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent"
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/compute-engine/ce-43-block-local-statement-order.test.ts",
+    "case": "CE-43: an assignment in a match case is an assignment of the block local a match case that assigns a value of another kind",
+    "failureMessages": [
+      "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"Error(ErrorCode(\\\"assignment-type-mismatch\\\", \\\"xs\\\", \\\"list<number>\\\", \\\"string\\\"))\"\nReceived: \"[1,2,3]\"\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent"
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/epsil/static-check-function-on-const.test.ts",
+    "case": "EPSIL CHECK: A FUNCTION STATEMENT ON A CONST BINDING a function statement after a const of a number",
+    "failureMessages": [
+      "Error: expect(received).toEqual(expected) // deep equality\n\n- Expected  - 10\n+ Received  +  5\n\n  Array [\n    Object {\n-     \"at\": \"function c(x) { x }\",\n+     \"at\": \"const c = 1\",\n      \"message\": Array [\n        \"static-type-error\",\n-       \"invalid clause definition \u2014 \\\"c\\\" is a constant; it cannot be redefined\",\n-       \"function c(x) {x}\",\n-       \"invalid-clause-definition\",\n-     ],\n-     \"notes\": Array [\n-       Object {\n-         \"at\": \"const c = 1\",\n-         \"message\": \"`c` is declared constant here\",\n-       },\n+       \"variable redeclaration: c\",\n+       \"const c = 1\",\n+       \"variable-redeclaration\",\n      ],\n+     \"notes\": Array [],\n    },\n  ]\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent",
+    "qualification": "P7 first-authored const remains winner; only canonical duplicate code/category migrated. Later error location and first-site notes retained."
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/epsil/static-check-function-on-const.test.ts",
+    "case": "EPSIL CHECK: A FUNCTION STATEMENT ON A CONST BINDING a definition with `=` after a const of a function literal",
+    "failureMessages": [
+      "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"invalid clause definition \u2014 \\\"k\\\" is a constant; it cannot be redefined\"\nReceived: \"variable redeclaration: k\"\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent",
+    "qualification": "P7 first-authored const remains winner; only canonical duplicate code/category migrated. Later error location and first-site notes retained."
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/epsil/static-check-function-on-const.test.ts",
+    "case": "EPSIL CHECK: A FUNCTION STATEMENT ON A CONST BINDING each refused statement is reported",
+    "failureMessages": [
+      "Error: expect(received).toEqual(expected) // deep equality\n\n- Expected  - 2\n+ Received  + 1\n\n  Array [\n-   \"function c(x) { x }\",\n-   \"function c(x, y) { x }\",\n+   \"const c = 1\",\n  ]\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent",
+    "qualification": "P7 first-authored const remains winner; only canonical duplicate code/category migrated. Later error location and first-site notes retained."
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/epsil/static-check-function-on-const.test.ts",
+    "case": "EPSIL CHECK: A FUNCTION STATEMENT ON A CONST BINDING the run time does not report the same problem a second time",
+    "failureMessages": [
+      "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"1\"\nReceived: \"c\"\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent",
+    "qualification": "P7 first-authored const remains winner; only canonical duplicate code/category migrated. Later error location and first-site notes retained."
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/epsil/static-check-function-on-const.test.ts",
+    "case": "EPSIL CHECK: NO REPORT a const whose initializer does not match its type binds nothing",
+    "failureMessages": [
+      "Error: expect(received).toEqual(expected) // deep equality\n\n- Expected  - 1\n+ Received  + 1\n\n  Array [\n-   \"incompatible-type\",\n+   \"variable-redeclaration\",\n  ]\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent",
+    "qualification": "Parent explicitly accepted failed first initializer reserving authored declaration name. Both mismatch/redeclaration codes and no callable binding required; duplicate runtime mismatch is source bug."
+  },
+  {
+    "file": "/private/tmp/wt-program-accepted-sol/test/compute-engine/constant-function-reassignment.test.ts",
+    "case": "CONSTANT \u2014 a function literal cannot replace a constant Epsil: a clause definition on a `const` function is refused",
+    "failureMessages": [
+      "Error: expect(received).toContain(expected) // indexOf\n\nExpected substring: \"\\\"k\\\" is a constant; it cannot be redefined\"\nReceived string:    \"variable redeclaration: k\"\n"
+    ],
+    "classification": "accepted test migration applied; validation delegated to parent",
+    "qualification": "P7 first-authored const remains winner; only canonical duplicate code/category migrated. Later error location and first-site notes retained."
+  }
+]

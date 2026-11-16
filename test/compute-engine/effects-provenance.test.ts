@@ -227,8 +227,7 @@ describe('EFFECTS PROVENANCE — the typed-`let` upgrade (W3)', () => {
       ['q + 1', 'let q: (number) pure -> number = (x) => x'].join('\n')
     );
     const entries = effectsEntries(ce, 'q');
-    expect(entries).toHaveLength(1);
-    expect(entries[0][1]).toBe('declared');
+    expect(entries.map((entry) => entry[1])).toEqual(['inferred', 'declared']);
   });
 
   test('a bare typed `let` records no effects entry', () => {

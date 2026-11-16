@@ -1,0 +1,160 @@
+[
+  {
+    "arm": "baseline",
+    "id": "shared-Limit-sum",
+    "source": "function f(){let L=[1,2];limit(sum(L),1)};f()",
+    "value": "1",
+    "json": 1,
+    "type": "1",
+    "diagnostics": []
+  },
+  {
+    "arm": "baseline",
+    "id": "shared-Limit-length",
+    "source": "function f(){let L=[1,2];limit(length(L),1)};f()",
+    "value": "lim_(L -> 1) {Length(L)}",
+    "json": [
+      "Limit",
+      [
+        "Function",
+        [
+          "Block",
+          [
+            "Length",
+            "L"
+          ]
+        ],
+        "L"
+      ],
+      1
+    ],
+    "type": "number",
+    "diagnostics": []
+  },
+  {
+    "arm": "baseline",
+    "id": "division-zero-let",
+    "source": "let x=0;x/x",
+    "value": "NaN",
+    "json": "NaN",
+    "type": "NaN",
+    "diagnostics": []
+  },
+  {
+    "arm": "baseline",
+    "id": "division-zero-const",
+    "source": "const x=0;x/x",
+    "value": "1",
+    "json": 1,
+    "type": "1",
+    "diagnostics": []
+  },
+  {
+    "arm": "baseline",
+    "id": "division-zero-alias-let",
+    "source": "let x=0;let y=x;y/y",
+    "value": "NaN",
+    "json": "NaN",
+    "type": "NaN",
+    "diagnostics": []
+  },
+  {
+    "arm": "baseline",
+    "id": "division-zero-alias-const",
+    "source": "const x=0;const y=x;y/y",
+    "value": "1",
+    "json": 1,
+    "type": "1",
+    "diagnostics": []
+  },
+  {
+    "arm": "baseline",
+    "id": "library-constant-quotient",
+    "source": "Pi/Pi",
+    "value": "1",
+    "json": 1,
+    "type": "1",
+    "diagnostics": []
+  },
+  {
+    "arm": "baseline",
+    "id": "earlier-const-default",
+    "source": "const W=5;function f(k=W){k+1};f()",
+    "value": "6",
+    "json": 6,
+    "type": "6",
+    "diagnostics": []
+  },
+  {
+    "arm": "candidate",
+    "id": "shared-Limit-sum",
+    "source": "function f(){let L=[1,2];limit(sum(L),1)};f()",
+    "value": "3",
+    "json": 3,
+    "type": "3",
+    "diagnostics": []
+  },
+  {
+    "arm": "candidate",
+    "id": "shared-Limit-length",
+    "source": "function f(){let L=[1,2];limit(length(L),1)};f()",
+    "value": "2",
+    "json": 2,
+    "type": "2",
+    "diagnostics": []
+  },
+  {
+    "arm": "candidate",
+    "id": "division-zero-let",
+    "source": "let x=0;x/x",
+    "value": "NaN",
+    "json": "NaN",
+    "type": "NaN",
+    "diagnostics": []
+  },
+  {
+    "arm": "candidate",
+    "id": "division-zero-const",
+    "source": "const x=0;x/x",
+    "value": "NaN",
+    "json": "NaN",
+    "type": "NaN",
+    "diagnostics": []
+  },
+  {
+    "arm": "candidate",
+    "id": "division-zero-alias-let",
+    "source": "let x=0;let y=x;y/y",
+    "value": "NaN",
+    "json": "NaN",
+    "type": "NaN",
+    "diagnostics": []
+  },
+  {
+    "arm": "candidate",
+    "id": "division-zero-alias-const",
+    "source": "const x=0;const y=x;y/y",
+    "value": "NaN",
+    "json": "NaN",
+    "type": "NaN",
+    "diagnostics": []
+  },
+  {
+    "arm": "candidate",
+    "id": "library-constant-quotient",
+    "source": "Pi/Pi",
+    "value": "1",
+    "json": 1,
+    "type": "1",
+    "diagnostics": []
+  },
+  {
+    "arm": "candidate",
+    "id": "earlier-const-default",
+    "source": "const W=5;function f(k=W){k+1};f()",
+    "value": "6",
+    "json": 6,
+    "type": "6",
+    "diagnostics": []
+  }
+]

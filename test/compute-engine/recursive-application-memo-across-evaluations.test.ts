@@ -224,7 +224,7 @@ f(1)`)
       '43',
     ]);
 
-    expect(run('p.age = 10')).toBe('10');
+    expect(run('p.age = 10')).toBe('"Nothing"');
 
     // The SAME node, so its own cached value is what answers unless the
     // store invalidated it.

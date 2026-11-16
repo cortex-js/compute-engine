@@ -1,3 +1,4 @@
+import { noteOverlapAdmitted } from '../boxed-expression/store-admission.js';
 import { installAnonymousCalleeDerivation } from '../boxed-expression/callee-type-derivation.js';
 import { provedAbsentDomainOf } from '../boxed-expression/proved-absent-domain.js';
 import { mayHoldRestriction } from '../boxed-expression/conditional-value.js';
@@ -38,6 +39,9 @@ import {
 } from '../boxed-expression/tuple-pattern.js';
 import {
   isInBodyOrBranch,
+  isProgramStatement,
+  programInitializerOuter,
+  priorProgramDeclaration,
   isInBranch,
   takePairedFunctionNames,
 } from '../statement-position.js';
@@ -170,7 +174,6 @@ import {
   throwIfCallerCancellation,
 } from '../../common/interruptible.js';
 import { typeToString } from '../../common/type/serialize.js';
-import { widenValueTypes } from '../../common/type/widen-value.js';
 
 import { randomExpression } from './random-expression.js';
 import { canonicalInvisibleOperator } from '../boxed-expression/invisible-operator.js';
@@ -212,7 +215,9 @@ import {
 import { findRoot, findRootAsync, fitRecordType } from '../nonlinear-fit.js';
 import {
   BLOCK_DEFINITION,
+  PROGRAM_DEFINITION,
   declareHasValue,
+  programStatementWrites,
   elementRebindingFailure,
   isDeclaredForAssignment,
 } from './control-structures.js';
@@ -415,6 +420,7 @@ import { splitByPattern, replaceByPattern } from './regexp.js';
 import {
   inferTypeFromValue,
   widenAssignedType,
+  widenLocalType,
 } from '../boxed-expression/boxed-value-definition.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
@@ -829,6 +835,8 @@ function withOuterNames<T>(
     const local = scope.bindings.get(name);
     if (local === undefined || !isValueDef(local) || !local.value._blockLocal)
       continue;
+    const priorProgram = local.value._programVariable ? programInitializerOuter(name) : undefined;
+    if (priorProgram !== undefined) { outer.set(name, priorProgram); continue; }
     for (let s = scope.parent; s; s = s.parent) {
       const found = s.bindings.get(name);
       if (found === undefined) continue;
@@ -4198,7 +4206,7 @@ function joinAssignmentEvidence(
     !def ||
     !isValueDef(def) ||
     !def.value.inferredType ||
-    def.value.isConstant ||
+    (def.value.isConstant && !(options?.currentScopeOnly && def.value._programVariable)) ||
     def.value.value !== undefined
   )
     return;
@@ -4262,67 +4270,6 @@ function joinAssignmentEvidence(
 }
 
 /**
- * The type that a local of a block takes from its first value, the value
- * type `t` widened: every numeric type to `number`, a string type to
- * `string`, a boolean type to `boolean`, and the element types of a list, a
- * set and a tuple the same way (a list loses its dimensions). Any other type
- * is kept.
- *
- * With `tiers`, a numeric type widens to its tier instead
- * (`widenAssignedType()`: `5` to `integer`, `0.5` to `real`), an element
- * type loses only its literal cargo (`widenValueTypes()`: `complex` stays
- * `complex`), and a character type is kept. That is the
- * type of a `let` with no declared type (see `Declare`): `let c = [(1, 2)]`
- * is a `list<tuple<integer, integer>>` of any length.
- */
-function widenLocalType(
-  ce: ComputeEngine,
-  t: Type,
-  tiers: boolean | 'nested' = false
-): Type {
-  if (t === 'never') return t;
-  if (typeof t === 'object') {
-    if (t.kind === 'list') {
-      // A list with n dimensions (a matrix `matrix<integer^(2x2)>` has two)
-      // widens to n nested lists: `list<list<number>>`. The lengths are not
-      // kept, so a local can hold a longer list later.
-      let widened: Type = widenLocalType(ce, t.elements, tiers && 'nested');
-      const rank = Math.max(1, t.dimensions?.length ?? 1);
-      for (let i = 0; i < rank; i++)
-        widened = { kind: 'list', elements: widened };
-      return widened;
-    }
-    if (t.kind === 'set')
-      return {
-        kind: 'set',
-        elements: widenLocalType(ce, t.elements, tiers && 'nested'),
-      };
-    if (t.kind === 'tuple')
-      return {
-        kind: 'tuple',
-        elements: t.elements.map((e) => ({
-          ...e,
-          type: widenLocalType(ce, e.type, tiers && 'nested'),
-        })),
-      };
-    if (t.kind === 'union') return t;
-  }
-  const bt = ce.type(t);
-  if (bt.matches('number')) {
-    if (tiers === 'nested') return widenValueTypes(t);
-    return tiers ? widenAssignedType(ce, t) : 'number';
-  }
-  // A character is a string of one character in a value, but the type
-  // `character` is not a subtype of `string`: both widen to `string`, so
-  // that `let prev = ""` then `prev = ch` is valid. A type of a local keeps
-  // `character`: a `list<string>` does not hold the characters of a word.
-  if (tiers && bt.matches('character')) return t;
-  if (bt.matches('string') || bt.matches('character')) return 'string';
-  if (bt.matches('boolean')) return 'boolean';
-  return t;
-}
-
-/**
  * Type the variable `name`, which a statement gives a function literal, as a
  * function before the literal is canonicalized, declaring it when no scope
  * does. A self-reference in the body (`f(n) = n * f(n-1)`) then resolves to
@@ -4372,7 +4319,7 @@ function functionLocalOf(
   const binding = ce.context.lexicalScope.bindings.get(name);
   return binding !== undefined &&
     isValueDef(binding) &&
-    binding.value._blockLocal === true
+    binding.value._blockLocal === true && !binding.value._programVariable
     ? binding.value
     : undefined;
 }
@@ -4473,7 +4420,7 @@ function localAssignmentMismatch(
   if (!def || !isValueDef(def)) return undefined;
   const local = def.value;
   if (local._blockLocal !== true || local.isConstant) return undefined;
-  if (local.value !== undefined) return undefined;
+  if (local.value !== undefined && !local._programVariable) return undefined;
   if (local.type.isUnknown || valueType.isUnknown) return undefined;
   // A declared type is the contract: a first value of type `unknown` does
   // not turn off the check of a local with a declared type.
@@ -4989,19 +4936,7 @@ function addClauseInstalledAhead(
   setClauseInstalledAhead(ce, record, installs);
 }
 
-/**
- * The installs of `installs` that a `Declare` statement may make again
- * now: the unstamped installs (the whole-block route, the host routes), and
- * the stamped installs of the Epsil program that is running.
- *
- * The stamped installs of another program are those of a program that
- * stopped (its time or step budget ran out) after the `DefineFunction`
- * canonical handler or the preparation step of the Epsil runner
- * (`prepareFunctionDeclarations()`, `src/epsil/execute-epsil.ts`) installed
- * them, and before the `DefineFunction` statement ran. A later program that
- * declares the same name must not install them again: `let g: (integer) ->
- * integer` then `g(2)` in that program stays `g(2)`.
- */
+
 function installsOfThisRun(
   ce: ComputeEngine,
   installs: ReadonlyArray<ClauseInstalledAhead> | undefined
@@ -5111,34 +5046,10 @@ function declareTypeStatement(
   if (!name)
     return ce.error(['invalid-type-declaration', 'Expected a type name']);
 
-  // Top-level only: the current lexical scope must be the engine's global
-  // scope (`_evalContextStack[1]` — `[0]` is the system scope). A `Block` or
-  // `Function` body canonicalizes AND evaluates its statements inside its own
-  // scope (`canonicalBlock` runs them under `ce._inScope(scope, …)`), so both
-  // routes are caught by the same comparison. The executeEpsil program
-  // wrapper unwraps its top-level `Block`, so genuine top-level statements
-  // run directly in the global scope. An engine without a global frame yet
-  // (bootstrap) never routes statements through here.
-  //
-  // One frame is a TOP-LEVEL SURROGATE: the Epsil static pre-pass
-  // (`src/epsil/static-diagnostics.ts`) canonicalizes each top-level
-  // statement inside a single pushed frame — named 'epsil:static-check' AND
-  // guarded by the engine's `_staticTypeCheckDepth` counter, so a host
-  // `pushScope` with the same public name cannot forge it — to keep binding
-  // side-effects out of the program scope. Statements boxed directly in that
-  // frame are top-level by construction, and registering there is what lets
-  // later statements of the same cell (and a statement-replace re-run) check
-  // against the NEW definition. A nested `DeclareType` under it still
-  // errors: the enclosing `Block` pushes its own (anonymous) frame on top.
-  const globalScope = ce._evalContextStack[1]?.lexicalScope;
-  const ctx = ce.context;
-  const inSurrogate =
-    ce._staticTypeCheckDepth > 0 && ctx.name === 'epsil:static-check';
-  if (
-    globalScope !== undefined &&
-    ctx.lexicalScope !== globalScope &&
-    !inSurrogate
-  )
+  // Program statements register in their caller scope. Standalone host
+  // declarations register only in the engine's global scope; a nested Block
+  // or function body cannot acquire Program declaration privileges.
+  if (notAtTopLevel(ce))
     return ce.error(
       [
         'invalid-type-declaration',
@@ -5301,17 +5212,9 @@ function declareSumTypeStatement(
   if (!name)
     return ce.error(['invalid-type-declaration', 'Expected a type name']);
 
-  // Top-level only — the identical rule (and the identical static-pre-pass
-  // surrogate exemption) as `declareTypeStatement`; see its comment.
-  const globalScope = ce._evalContextStack[1]?.lexicalScope;
-  const ctx = ce.context;
-  const inSurrogate =
-    ce._staticTypeCheckDepth > 0 && ctx.name === 'epsil:static-check';
-  if (
-    globalScope !== undefined &&
-    ctx.lexicalScope !== globalScope &&
-    !inSurrogate
-  )
+  // Top-level only: reuse the same placement rule as `declareTypeStatement`
+  // through `notAtTopLevel`.
+  if (notAtTopLevel(ce))
     return ce.error(
       [
         'invalid-type-declaration',
@@ -5396,24 +5299,11 @@ function declareSumTypeStatement(
   return null;
 }
 
-/**
- * The top-level gate shared by every DECLARATION statement: protocols, like
- * types, are engine-global, so a declaration is legal only at the top level of
- * a program. The Epsil static pre-pass frame is a top-level SURROGATE,
- * recognized by frame name AND `_staticTypeCheckDepth` (the name alone is
- * host-forgeable) — the identical rule as `declareTypeStatement`; see its
- * comment for the full reasoning.
- */
+/** Declaration placement shared by the type and protocol statement owners. */
 function notAtTopLevel(ce: ComputeEngine): boolean {
-  const globalScope = ce._evalContextStack[1]?.lexicalScope;
-  const ctx = ce.context;
-  const inSurrogate =
-    ce._staticTypeCheckDepth > 0 && ctx.name === 'epsil:static-check';
-  return (
-    globalScope !== undefined &&
-    ctx.lexicalScope !== globalScope &&
-    !inSurrogate
-  );
+  if (isProgramStatement()) return false;
+  const global = ce._evalContextStack[1]?.lexicalScope;
+  return isInBodyOrBranch() || (global !== undefined && ce.context.lexicalScope !== global);
 }
 
 /**
@@ -5836,6 +5726,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     // library list has `core` but not `control-structures` could not build
     // any function literal. Its handlers live in `control-structures.ts`.
     Block: BLOCK_DEFINITION,
+    Program: PROGRAM_DEFINITION,
 
     // The sole member of the unit type, `nothing`
     Nothing: {
@@ -8643,6 +8534,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             if (def && isValueDef(def)) isFirstValue(def.value, false);
           }
           if (declaresType || value === undefined) return;
+          if (isSymbol(symbolExpr) && value.type.matches('function')) {
+            typeFunctionTarget(ce, symbolExpr.symbol);
+            return;
+          }
           if (!value.isValid) return;
           if (isFunction(value, 'Function')) return;
           // The bindings of the declared names, read now: the type is read
@@ -14943,7 +14838,19 @@ function* assignSteps(
   // the same channel: errors are values for a program, even though the
   // host `ce.assign` keeps throwing.
   try {
-    ce.assign(symbolName, val);
+    const binding = ce.lookupDefinition(symbolName);
+    if (binding !== undefined && isValueDef(binding) && binding.value._programVariable &&
+        !(isFunction(val, 'Function') && containsSignatureArm(binding.value.type.type))) {
+      const local = binding.value;
+      if (local.isConstant || isDeclaredLocal(local)) {
+        if (assertAssignable(ce, symbolName, val) === 'overlap')
+          noteOverlapAdmitted(val);
+      } else {
+        const mismatch = localAssignmentMismatch(ce, symbolName, val.type, val);
+        if (mismatch !== undefined) return mismatch;
+      }
+      ce._setSymbolValue(symbolName, val);
+    } else ce.assign(symbolName, val);
   } catch (e) {
     if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
     if (isTypeCompatibilityError(e)) return typeCompatibilityErrorValue(ce, e);
@@ -14983,6 +14890,46 @@ function isElementRebinding(value: Expression, name: string): boolean {
 function* declareSteps(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
+): OperandSteps<Expression | undefined> {
+  let previous = priorProgramDeclaration(ops[0]);
+  if (previous === undefined) return yield* declareValueSteps(ce, ops);
+  let displaced: Map<string, BoxedDefinition | undefined> | undefined;
+  for (const [name, binding] of programStatementWrites(ops[0])) {
+    const current = ce.context.lexicalScope.bindings.get(name);
+    if (current !== binding || (isValueDef(binding) && binding.value.value !== undefined))
+      (displaced ??= new Map(previous)).set(name, current);
+    if (current !== binding) ce.context.lexicalScope.bindings.set(name, binding);
+  }
+  previous = displaced ?? previous;
+  let declared = false;
+  const restore = (): void => {
+    if (previous === undefined) return;
+    // A prepared declaration that has initialized already retains its own
+    // incumbent values on failure; only a fresh hoisted replacement is undone.
+    if (displaced === undefined && ![...previous.keys()].some((name) => {
+      const binding = ce.context.lexicalScope.bindings.get(name);
+      return binding !== undefined && isValueDef(binding) && binding.value._programVariable && binding.value.value === undefined;
+    })) return;
+    for (const [name, binding] of previous) {
+      if (binding === undefined) ce.context.lexicalScope.bindings.delete(name);
+      else ce.context.lexicalScope.bindings.set(name, binding);
+      forgetConstantDeclaration(ce, name, ce.context.lexicalScope);
+    }
+  };
+  try {
+    const result = yield* declareValueSteps(ce, ops, () => { declared = true; });
+    if (result?.operator === 'Error' && !declared) restore();
+    return result;
+  } catch (error) {
+    if (!isDependentRebuildError(error)) restore();
+    throw error;
+  }
+}
+
+function* declareValueSteps(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  didDeclare?: () => void
 ): OperandSteps<Expression | undefined> {
   for (const name of isFunction(ops[0], 'Tuple')
     ? tuplePatternNames(ops[0])
@@ -15152,23 +15099,22 @@ function* declareSteps(
       existing !== undefined &&
       isValueDef(existing) &&
       existing.value._blockLocal === true &&
-      activationRecordOf(existing.value, currentScope) !== undefined
+      (existing.value._programVariable || activationRecordOf(existing.value, currentScope) !== undefined)
     ) {
       const local = existing.value;
+      if (hasType) {
+        const before = effectsContractStateOf(local);
+        local.effectsDeclared = effectsDeclared;
+        recordEffectsTransition(local, before, effectsContractStateOf(local), local.type,
+          ce._inferenceCause?.expr ?? undefined);
+      }
       if (boundHasValue && hasType) {
         const declaredType = ce.type(type!);
-        if (
-          !declaredType.isUnknown &&
-          !isFunction(boundValue, 'Function') &&
-          storeAdmission(
-            ce,
-            boundValue!,
-            declaredType,
-            effectsDeclared,
-            symbolName
-          ) === 'refuse'
-        )
-          throw declaredTypeError(symbolName, boundValue!, declaredType);
+        if (!declaredType.isUnknown && !isFunction(boundValue, 'Function')) {
+          const admission = storeAdmission(ce, boundValue!, declaredType, effectsDeclared, symbolName);
+          if (admission === 'refuse') throw declaredTypeError(symbolName, boundValue!, declaredType);
+          if (admission === 'overlap') noteOverlapAdmitted(boundValue!);
+        }
       }
       if (holdUntil) local.holdUntil = holdUntil;
       // A function value under a declared type is assigned as an `Assign`
@@ -15176,7 +15122,8 @@ function* declareSteps(
       // declared signature and written in the activation. For a constant,
       // this write is its initialization, which `assignFn()` would refuse as
       // a write to a constant: the definition is writable for that write
-      // only, while its slot in the activation is empty.
+      // only. A persistent Program declaration initializes again on rerun;
+      // an actual Block local initializes its empty activation slot.
       if (
         boundHasValue &&
         hasType &&
@@ -15186,14 +15133,19 @@ function* declareSteps(
         const flags = local as unknown as { _isConstant: boolean };
         const initializes =
           flags._isConstant &&
-          activationRecordOf(local, currentScope)!.get(local) === undefined;
+          (local._programVariable || activationRecordOf(local, currentScope)!.get(local) === undefined);
         if (initializes) flags._isConstant = false;
         try {
           assignFn(ce, symbolName, boundValue!, { bindsLocal: true });
         } finally {
           if (initializes) flags._isConstant = true;
         }
-      } else local.value = boundValue;
+      } else {
+        const flags = local as unknown as { _isConstant: boolean };
+        const constant = flags._isConstant;
+        flags._isConstant = false;
+        try { local.value = boundValue; } finally { flags._isConstant = constant; }
+      }
       forgetConstantDeclaration(ce, symbolName, currentScope);
       return;
     }
@@ -15507,7 +15459,8 @@ function* declareSteps(
       return null;
     return typeCompatibilityErrorValue(
       ce,
-      declaredTypeError(symbolName, boundValue, declaredType)
+      declaredTypeError(symbolName, boundValue, declaredType),
+      ops[0]
     );
   };
 
@@ -15543,8 +15496,7 @@ function* declareSteps(
     // `Declare((x, y), "integer", (3, 4.5))` bound `x` and then errored
     // on `y`.
     try {
-      return (
-        bindTuplePattern(
+      const refused = bindTuplePattern(
           ce,
           ops[0],
           value!,
@@ -15556,12 +15508,14 @@ function* declareSteps(
             return null;
           },
           validateOne
-        ) ?? value!
-      );
+        );
+      if (refused !== null) return refused;
+      didDeclare?.();
+      return value!;
     } catch (e) {
       if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
       if (isTypeCompatibilityError(e))
-        return typeCompatibilityErrorValue(ce, e);
+        return typeCompatibilityErrorValue(ce, e, ops[0]);
       throw e;
     }
   }
@@ -15579,8 +15533,9 @@ function* declareSteps(
     declareOne(symbolName, hasValue ? value : undefined);
   } catch (e) {
     if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
-    if (isTypeCompatibilityError(e)) return typeCompatibilityErrorValue(ce, e);
+    if (isTypeCompatibilityError(e)) return typeCompatibilityErrorValue(ce, e, ops[0]);
     throw e;
   }
+  didDeclare?.();
   return hasValue ? value : ce.Nothing;
 }

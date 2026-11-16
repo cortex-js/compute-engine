@@ -1,3 +1,4 @@
+import { widenValueTypes } from '../../common/type/widen-value.js';
 import { inStaticTypingView } from '../static-typing-view.js';
 import { activationRecordOf, isActivatedDefinition } from './ambient-chain.js';
 import { valueIsHidden } from './hidden-values.js';
@@ -275,7 +276,7 @@ export class _BoxedValueDefinition
   // If true, the `_type` is inferred
   inferredType = false;
 
-  /** True for a block-local binding that `canonicalBlock` hoisted for a
+  /** True for a declaration binding that the shared sequence hoisted for a
    * `let` (or a block-introducing assignment) before the block's statements
    * were canonicalized, so that a reference from a nested block finds it. Such
    * a binding is `unknown`-typed until its statement runs or a literal
@@ -284,8 +285,12 @@ export class _BoxedValueDefinition
    * (`classifyCellD`, `library/collections.ts`) does not apply to it: in
    * `let c = match … ; out = join(out, [c])` the literal `[c]` is a `list`,
    * not a `vector<1>`, and `out` is not typed `list<number>` from it.
+   * A Program uses the same declaration/admission rules; `_programVariable`
+   * distinguishes its caller-owned lifetime from a Block activation.
    * @internal */
   _blockLocal = false;
+  /** A persistent variable declared by a Program, without a Block activation. */
+  _programVariable = false;
 
   /** The marks of a definition whose value an activation holds, of a
    * parameter of a function literal and of the variable of a binder
@@ -1057,6 +1062,7 @@ export class _BoxedValueDefinition
       _type: this._type,
       inferredType: this.inferredType,
       _blockLocal: this._blockLocal,
+      _programVariable: this._programVariable,
       _placeholderSkeleton: this._placeholderSkeleton,
       _signatureSkeleton: this._signatureSkeleton,
       _assignmentEvidence: this._assignmentEvidence,
@@ -1100,6 +1106,7 @@ export class _BoxedValueDefinition
     this._type = s._type as typeof this._type;
     this.inferredType = s.inferredType as boolean;
     this._blockLocal = s._blockLocal as boolean;
+    this._programVariable = s._programVariable as boolean;
     this._placeholderSkeleton = s._placeholderSkeleton as Type | undefined;
     this._signatureSkeleton = s._signatureSkeleton as Type | undefined;
     this._assignmentEvidence = s._assignmentEvidence as boolean;
@@ -1750,7 +1757,7 @@ export class _BoxedValueDefinition
   }
 
   private _writeType(t: Type | TypeString | BoxedType): void {
-    if (this._isConstant)
+    if (this._isConstant && !(this._programVariable && this.inferredType && this._value === undefined))
       throw new Error(
         `The type of the constant "${this.name}" cannot be changed`
       );
@@ -2358,4 +2365,65 @@ function holdsFunctionLiteral(x0: Expression | null | undefined): boolean {
   // literal inside, and reading its `ops` would box every element.
   if (x._numericStore !== undefined) return false;
   return x.ops?.some((o) => o.operator === 'Function') ?? false;
+}
+
+/**
+ * The type that a local of a block takes from its first value, the value
+ * type `t` widened: every numeric type to `number`, a string type to
+ * `string`, a boolean type to `boolean`, and the element types of a list, a
+ * set and a tuple the same way (a list loses its dimensions). Any other type
+ * is kept.
+ *
+ * With `tiers`, a numeric type widens to its tier instead
+ * (`widenAssignedType()`: `5` to `integer`, `0.5` to `real`), an element
+ * type loses only its literal cargo (`widenValueTypes()`: `complex` stays
+ * `complex`), and a character type is kept. That is the
+ * type of a `let` with no declared type (see `Declare`): `let c = [(1, 2)]`
+ * is a `list<tuple<integer, integer>>` of any length.
+ */
+export function widenLocalType(
+  ce: ComputeEngine,
+  t: Type,
+  tiers: boolean | 'nested' = false
+): Type {
+  if (t === 'never') return t;
+  if (typeof t === 'object') {
+    if (t.kind === 'list') {
+      // A list with n dimensions (a matrix `matrix<integer^(2x2)>` has two)
+      // widens to n nested lists: `list<list<number>>`. The lengths are not
+      // kept, so a local can hold a longer list later.
+      let widened: Type = widenLocalType(ce, t.elements, tiers && 'nested');
+      const rank = Math.max(1, t.dimensions?.length ?? 1);
+      for (let i = 0; i < rank; i++)
+        widened = { kind: 'list', elements: widened };
+      return widened;
+    }
+    if (t.kind === 'set')
+      return {
+        kind: 'set',
+        elements: widenLocalType(ce, t.elements, tiers && 'nested'),
+      };
+    if (t.kind === 'tuple')
+      return {
+        kind: 'tuple',
+        elements: t.elements.map((e) => ({
+          ...e,
+          type: widenLocalType(ce, e.type, tiers && 'nested'),
+        })),
+      };
+    if (t.kind === 'union') return t;
+  }
+  const bt = ce.type(t);
+  if (bt.matches('number')) {
+    if (tiers === 'nested') return widenValueTypes(t);
+    return tiers ? widenAssignedType(ce, t) : 'number';
+  }
+  // A character is a string of one character in a value, but the type
+  // `character` is not a subtype of `string`: both widen to `string`, so
+  // that `let prev = ""` then `prev = ch` is valid. A type of a local keeps
+  // `character`: a `list<string>` does not hold the characters of a word.
+  if (tiers && bt.matches('character')) return t;
+  if (bt.matches('string') || bt.matches('character')) return 'string';
+  if (bt.matches('boolean')) return 'boolean';
+  return t;
 }

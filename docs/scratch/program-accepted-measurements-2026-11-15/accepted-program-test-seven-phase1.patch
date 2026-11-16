@@ -1,0 +1,106 @@
+--- a/test/epsil/redefinition-discipline.test.ts
++++ b/test/epsil/redefinition-discipline.test.ts
+@@ -65,9 +65,14 @@
+   test('a second top-level `let` of one program is reported, with the first site', () => {
+     const source = 'let a = 1\nlet a = 2\na';
+     const { diagnostics } = checkSource(source);
+-    expect(codes(diagnostics)).toEqual(['variable-redeclaration']);
++    expect(codes(diagnostics)).toEqual(['static-type-error']);
+     const [d] = diagnostics;
+-    expect(d.message).toEqual(['variable-redeclaration', 'a']);
++    expect(d.message).toEqual([
++      'static-type-error',
++      'variable redeclaration: a',
++      'let a = 2',
++      'variable-redeclaration',
++    ]);
+     expect(source.slice(d.range[0], d.range[1])).toBe('let a = 2');
+     expect(d.notes).toHaveLength(1);
+     expect(source.slice(d.notes![0].range[0], d.notes![0].range[1])).toBe(
+@@ -77,15 +82,19 @@
+     // program keeps reading the FIRST binding.
+     const r = run(source);
+     expect(r.value).toBe(1);
+-    expect(r.codes).toEqual([['variable-redeclaration', 'a']]);
++    expect(r.codes).toEqual([d.message]);
+   });
+ 
+   test('a destructuring `let` counts each pattern leaf', () => {
+     expect(
+-      codes(checkSource('let (p, q) = (1, 2)\nlet p = 3').diagnostics)
++      checkSource('let (p, q) = (1, 2)\nlet p = 3').diagnostics.map((d) =>
++        staticCodeOf(d.message)
++      )
+     ).toEqual(['variable-redeclaration']);
+     expect(
+-      codes(checkSource('let p = 3\nlet (p, q) = (1, 2)').diagnostics)
++      checkSource('let p = 3\nlet (p, q) = (1, 2)').diagnostics.map((d) =>
++        staticCodeOf(d.message)
++      )
+     ).toEqual(['variable-redeclaration']);
+     // `_` declares nothing.
+     expect(
+@@ -190,7 +199,12 @@
+     const source = 'let a = 1\nlet (a, b) = (2, 3)\nlet b = 4\nb';
+     const { diagnostics } = checkSource(source);
+     expect(diagnostics.map((d) => d.message)).toEqual([
+-      ['variable-redeclaration', 'a'],
++      [
++        'static-type-error',
++        'variable redeclaration: a',
++        'let (a, b) = (2, 3)',
++        'variable-redeclaration',
++      ],
+     ]);
+     expect(run(source).value).toBe(4);
+     // The same, inside a block.
+@@ -1092,8 +1106,8 @@
+       const source = 'function g(a) {\n  f(y) := y + 1\n  f(x) := x + 3\n  f(a)\n}\n[g(5), g(6)]';
+       expect(staticCodes(source)).toEqual(['variable-redeclaration']);
+       const r = run(source);
+-      expect(r.codes).toContain('static-type-error');
+-      expect(r.codes).toContain('runtime-error');
++      // The canonical refusal is reported once, before execution.
++      expect(r.codes).toEqual(['static-type-error']);
+       // `g` is not defined, so each call stays unevaluated.
+       expect(r.value).toEqual(['List', ['g', 5], ['g', 6]]);
+     });
+--- a/test/compute-engine/block-locals-declaration-rules.test.ts
++++ b/test/compute-engine/block-locals-declaration-rules.test.ts
+@@ -259,12 +259,12 @@
+     ])
+       expect(codes(source)).toEqual(['assignment-to-undeclared-variable']);
+     // A name declared by an earlier top-level statement is written by an
+-    // assignment in a branch. A reassignment at the top level keeps the
+-    // interpreter rules and can change the type.
++    // assignment in a branch. An explicit `any` binding also admits a value
++    // of another kind.
+     for (const [source, value] of [
+       ['let c = true\nlet a = 1\nif c { a = 2 }\na', '2'],
+       ['let c = false\nlet a = 1\nif c { a = 2 }\na', '1'],
+-      ['let a = 1\na = "x"\na', '"x"'],
++      ['let a: any = 1\na = "x"\na', '"x"'],
+     ]) {
+       const r = executeEpsil(new ComputeEngine(), source);
+       expect(r.diagnostics).toEqual([]);
+--- a/test/compute-engine/ce-43-block-local-statement-order.test.ts
++++ b/test/compute-engine/ce-43-block-local-statement-order.test.ts
+@@ -64,7 +64,8 @@
+ describe('CE-43: an assignment in a match case is an assignment of the block local', () => {
+   function run(src: string): { type: string; value: string; sound: boolean } {
+     const ce = new ComputeEngine();
+-    const [ast, diags] = parseEpsil(src);
++    // These cases exercise Block locals rather than caller-namespace bindings.
++    const [ast, diags] = parseEpsil(`do { ${src} }`);
+     expect(diags).toEqual([]);
+     const e = ce.box(ast!);
+     const type = e.type.toString();
+@@ -97,7 +98,7 @@
+   test('the compiled while-let loop reads the block local', () => {
+     const ce = new ComputeEngine();
+     const [ast] = parseEpsil(
+-      'let xs = [1, 2, 3]\nlet s = 0\nwhile let [h, ...] = xs { s = s + h; xs = Rest(xs) }\ns'
++      'do { let xs = [1, 2, 3]\nlet s = 0\nwhile let [h, ...] = xs { s = s + h; xs = Rest(xs) }\ns }'
+     );
+     const result = compile(ce.box(ast!));
+     expect(result.success).toBe(true);

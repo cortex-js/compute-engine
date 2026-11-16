@@ -184,7 +184,7 @@ f(5)`
 q > 1 = 2`
       )
     ).toStrictEqual([
-      'Block',
+      'Program',
       ['KeyValuePair', ['p', 'n'], ['Less', 'n', 3]],
       // A chain of comparisons is an `And` of its links (CE-411).
       ['And', ['Greater', 'q', 1], ['Equal', 1, 2]],
@@ -205,7 +205,7 @@ q > 1 = 2`
 q >= 1 = 2`
       )
     ).toStrictEqual([
-      'Block',
+      'Program',
       ['KeyValuePair', ['p', 'n'], ['Less', 'n', 3]],
       // A chain of comparisons is an `And` of its links (CE-411).
       ['And', ['GreaterEqual', 'q', 1], ['Equal', 1, 2]],

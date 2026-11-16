@@ -3145,16 +3145,8 @@ export function serializeEpsil(
   // (`do { … }`). The parser adds that wrapper so that the block is a nested
   // scope, so the program is written as the inner block alone, which parses
   // back to the same wrapped shape.
-  if (
-    operator(expr) === 'Block' &&
-    nops(expr) === 1 &&
-    operator(operand(expr, 1)) === 'Block'
-  )
-    return serializeExpression(operand(expr, 1)).serialize(0);
-  if (operator(expr) === 'Block' && nops(expr) >= 2)
-    return fmt
-      .stack(...mapArgs<FormattingBlock>(expr, serializeExpression))
-      .serialize(0);
+  if (operator(expr) === 'Program')
+    return fmt.stack(...mapArgs<FormattingBlock>(expr, serializeExpression)).serialize(0);
   return serializeExpression(expr).serialize(0);
 }
 /**

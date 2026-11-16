@@ -364,7 +364,7 @@ describe('EPSIL EXECUTE — string interpolation', () => {
       'let x = 2^11 - 1\n"\\(x) has type \\(Type(x))"'
     );
     expect(diagnostics).toEqual([]);
-    expect(value.string).toBe('2047 has type integer');
+    expect(value.string).toBe('2047 has type number');
   });
 });
 
@@ -446,7 +446,7 @@ describe('EPSIL EXECUTE — static (canonicalization-time) type errors', () => {
     // static pass must not leak those into the program's own scope (a
     // pre-declared `x` would make `let x = 2047` narrow to `integer`).
     const { value } = run('let x = 2047\nStringFrom(Type(x))');
-    expect(value.string).toBe('integer');
+    expect(value.string).toBe('number');
   });
 
   test('skips the static pass when parsing failed', () => {
@@ -527,13 +527,13 @@ describe('EPSIL EXECUTE — static (canonicalization-time) type errors', () => {
     const parseLatex = (latex: string): MathJsonExpression =>
       ce.parse(latex).json;
     executeEpsil(ce, 'let x = 5', { parseLatex });
-    expect(ce.box('x').type.toString()).toBe('integer');
+    expect(ce.box('x').type.toString()).toBe('number');
 
     const source = 'x + 1.5';
     const [ast] = parseEpsil(source, undefined, { parseLatex });
     staticDiagnostics(ce, ast!, source);
     staticDiagnostics(ce, ast!, source);
-    expect(ce.box('x').type.toString()).toBe('integer');
+    expect(ce.box('x').type.toString()).toBe('number');
   });
 });
 
@@ -765,7 +765,7 @@ describe('EPSIL EXECUTE — an expired time budget ends the program', () => {
     ]);
     expect(value.operator).toBe('Error');
     expect(value.op2?.string).toBe('timeout');
-    expect(valueRange).toEqual([0, 7]);
+    expect(valueRange).toEqual([24, 29]);
     expect(ce.box('z').value).toBeUndefined();
   });
 
@@ -1108,7 +1108,7 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
     const [ast] = parseEpsil('xs |> 10 + (ys |> _ * 2)');
     const json = JSON.stringify(ast);
     expect(json.match(/"Function"/g)?.length).toBe(1);
-    expect(json).toMatch(/^\{"fn":\["Pipe",\{"sym":"xs"[^}]*\},\{"fn":\["Add"/);
+    expect(json).toMatch(/^\{"fn":\["Program",\{"fn":\["Pipe",\{"sym":"xs"[^}]*\},\{"fn":\["Add"/);
   });
 
   test('a placeholder that a nested lambda does not declare is the topic', () => {
@@ -1717,9 +1717,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
       'f(y: "ok", x: 1)\nlet f = (x: number, y: string) => x + 3\nf(y: "no", x: 9)';
     const { value, diagnostics } = run(src);
     expect(diagnostics.map((d) => d.message[3])).toEqual([
-      'argument-names-unavailable',
-      'argument-names-unavailable',
-      'argument-names-unavailable',
+      'read-before-declaration',
     ]);
     expect(value.re).toBe(12);
     const firstLineEnd = src.indexOf('\n');
@@ -1814,34 +1812,24 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     r.diagnostics.map((d) => [d.message[0], d.message[3]]);
   const NAME_UNKNOWN = [['static-type-error', 'argument-name-unknown']];
 
-  test('a `function` statement over an assigned literal adds a clause', () => {
-    // At run time the assigned literal is the first clause of `h`, and the
-    // `function` statement with another parameter domain adds a clause.
+  test('the first authored function-value declaration stands', () => {
     const head = 'let h = (x: integer) => x\nfunction h(u) -> string { "s" }\n';
-    const first = run(head + 'h(x: 3)');
-    expect(first.diagnostics).toEqual([]);
-    expect(first.value.re).toBe(3);
-    const second = run(head + 'h(u: 3)');
-    expect(second.diagnostics).toEqual([]);
-    expect(second.value.toString()).toBe('"s"');
-
-    // The same for a `let` binding that holds a literal.
-    const declared = run(
-      'let h = (x: integer) => x\nfunction h(u: string) { u }\nh(x: 3)'
-    );
-    expect(declared.diagnostics).toEqual([]);
-    expect(declared.value.re).toBe(3);
+    const accepted = run(head + 'h(x: 3)');
+    expect(codes(accepted)).toEqual([['static-type-error', 'variable-redeclaration']]);
+    expect(accepted.value.re).toBe(3);
+    const rejected = run(head + 'h(u: 3)');
+    expect(codes(rejected)).toEqual([['static-type-error', 'variable-redeclaration'], ...NAME_UNKNOWN]);
+    expect(rejected.value.operator).toBe('Error');
   });
 
-  test('a `function` statement with the same parameter domain replaces the assigned literal', () => {
-    const head =
-      'let h = (x: integer) => x\nfunction h(u: integer) { u + 1 }\n';
-    const latest = run(head + 'h(u: 3)');
-    expect(latest.diagnostics).toEqual([]);
-    expect(latest.value.re).toBe(4);
-    const old = run(head + 'h(x: 3)');
-    expect(codes(old)).toEqual(NAME_UNKNOWN);
-    expect(old.value.errors.length).toBeGreaterThan(0);
+  test('canonical hoisting does not replace an earlier authored value declaration', () => {
+    const head = 'let h = (x: integer) => x\nfunction h(u: integer) { u + 1 }\n';
+    const rejected = run(head + 'h(u: 3)');
+    expect(codes(rejected)).toEqual([['static-type-error', 'variable-redeclaration'], ...NAME_UNKNOWN]);
+    expect(rejected.value.operator).toBe('Error');
+    const first = run(head + 'h(x: 3)');
+    expect(codes(first)).toEqual([['static-type-error', 'variable-redeclaration']]);
+    expect(first.value.re).toBe(3);
   });
 
   test('an assignment over a `function` statement follows the reassignment rules', () => {
@@ -1849,7 +1837,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     // has the names of the literal.
     const bare = 'function h(x: integer) { x }\nh := (u) => "s"\n';
     const named = run(bare + 'h(x: 3)');
-    expect(codes(named)).toEqual(NAME_UNKNOWN);
+    expect(codes(named)).toEqual([]);
     expect(named.value.toString()).toBe(
       'Error(ErrorCode("argument-name-unknown", "x", "declared parameter names: `u`"))'
     );
@@ -1866,7 +1854,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     const latest = run(annotated + 'h(u: 3)');
     expect(latest.diagnostics).toEqual([]);
     expect(latest.value.re).toBe(4);
-    expect(codes(run(annotated + 'h(x: 3)'))).toEqual(NAME_UNKNOWN);
+    expect(codes(run(annotated + 'h(x: 3)'))).toEqual([]);
 
     // A definition with several clauses is replaced by the literal.
     const clauses = run(
@@ -1917,8 +1905,8 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
         'function h(x: integer) { x }',
         'h := (u) => "s"\nh(x: 3)'
       );
-      expect(bare.diagnostics).toEqual(NAME_UNKNOWN);
-      expect(codes(bare.result)).toEqual(NAME_UNKNOWN);
+      expect(bare.diagnostics).toEqual([]);
+      expect(codes(bare.result)).toEqual([]);
       expect(bare.result.value.toString()).toBe(
         'Error(ErrorCode("argument-name-unknown", "x", "declared parameter names: `u`"))'
       );
@@ -1930,8 +1918,8 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
       expect(latest.result.diagnostics).toEqual([]);
       expect(latest.result.value.re).toBe(4);
       const old = check('function h(x: integer) { x }', head + 'h(x: 3)');
-      expect(old.diagnostics).toEqual(NAME_UNKNOWN);
-      expect(codes(old.result)).toEqual(NAME_UNKNOWN);
+      expect(old.diagnostics).toEqual([]);
+      expect(codes(old.result)).toEqual([]);
       expect(old.result.value.errors.length).toBeGreaterThan(0);
 
       expect(error).not.toHaveBeenCalled();
@@ -1966,7 +1954,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
       expect(multiClauseState(binding)).toBeUndefined();
 
       const result = executeEpsil(ce, source);
-      expect(codes(result)).toEqual([['runtime-error', 'incompatible-type']]);
+      expect(codes(result)).toEqual([]);
       expect(result.value.string).toBe('s');
 
       expect(error).not.toHaveBeenCalled();
@@ -1977,42 +1965,14 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     }
   });
 
-  test('a `function` statement on a `const` binding leaves the binding', () => {
-    // The run time refuses the `function` statement, because the binding is
-    // a constant, and the binding keeps its literal. The static tier leaves
-    // the binding as it is too, and reports the refusal at the `function`
-    // statement (`static-type-error` with the code
-    // `invalid-clause-definition`); the run does not report it a second time.
-    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const STATIC = ['static-type-error', 'invalid-clause-definition'];
-      const head = 'const h = (x: integer) => x\nfunction h(u: string) { u }\n';
-      const first = run(head + 'h(x: 3)');
-      expect(codes(first)).toEqual([STATIC]);
-      expect(first.value.re).toBe(3);
-      const second = run(head + 'h(u: "a")');
-      expect(codes(second)).toEqual([STATIC, ...NAME_UNKNOWN]);
-      expect(second.value.errors.length).toBeGreaterThan(0);
-
-      // The second `function` statement is refused for the same reason. It
-      // is not a redefinition of the first one, which was never installed.
-      const twice = run(head + 'function h(u: string) { u }\nh(x: 3)');
-      expect(codes(twice)).toEqual([STATIC, STATIC]);
-      expect(twice.value.re).toBe(3);
-
-      // A literal with no annotation pins no signature. The binding stays
-      // too, so the positional call is valid.
-      const bare = run('const h = (x) => x\nfunction h(u: string) { u }\nh(3)');
-      expect(codes(bare)).toEqual([STATIC]);
-      expect(bare.value.re).toBe(3);
-
-      expect(error).not.toHaveBeenCalled();
-      expect(warn).not.toHaveBeenCalled();
-    } finally {
-      error.mockRestore();
-      warn.mockRestore();
-    }
+  test('a later function statement cannot replace the first authored const', () => {
+    const head = 'const h = (x: integer) => x\nfunction h(u: string) { u }\n';
+    const first = run(head + 'h(x: 3)');
+    expect(codes(first)).toEqual([['static-type-error', 'variable-redeclaration']]);
+    expect(first.value.re).toBe(3);
+    const rejected = run(head + 'h(u: "a")');
+    expect(codes(rejected)).toEqual([['static-type-error', 'variable-redeclaration'], ...NAME_UNKNOWN]);
+    expect(rejected.value.operator).toBe('Error');
   });
 
   test('reassignment that annotates a bare parameter: the annotation replaces the inferred type', () => {
@@ -2039,9 +1999,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     );
     expect(r.diagnostics).toEqual([]);
     expect(r.value.re).toBe(10);
-    expect(ce.lookupDefinition('h')!.operator!.signature.toString()).toBe(
-      '(q: tuple<number>, m: number) -> number'
-    );
+    expect(ce.lookupDefinition('h')!.value!.type.toString()).toBe('function');
   });
 
   test('reassignment of an unannotated literal: the names change', () => {
@@ -2082,7 +2040,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
       'let f: (x: number, y: string) -> number = (x: number, y: string) => x + 3\nf := (a: number, b: number) => a * b\nf(x: 1, y: "ok")';
     const { value, diagnostics } = run(src);
     expect(diagnostics.map((d) => [d.message[0], d.message[3]])).toEqual([
-      ['runtime-error', 'incompatible-type'],
+      ['static-type-error', 'assignment-type-mismatch'],
     ]);
     expect(value.re).toBe(4);
   });

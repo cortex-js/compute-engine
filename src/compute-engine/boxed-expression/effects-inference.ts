@@ -4047,7 +4047,7 @@ function valueSignatureOf(
   // (`docs/EFFECTS-MODEL.md`, "Inference").
   if (
     stated === undefined &&
-    def.value._blockLocal === true &&
+    def.value._blockLocal === true && !def.value._programVariable &&
     storedFunctionLiteral(ce, name) === undefined
   )
     return 'undeclared';
@@ -4075,7 +4075,7 @@ function storedFunctionLiteral(
   if (
     found !== undefined &&
     'value' in found.def &&
-    found.def.value._blockLocal === true
+    found.def.value._blockLocal === true && !found.def.value._programVariable
   ) {
     // A node boxed in a run reads the local in the activation of the
     // block: the text is the text of the block that it activates.

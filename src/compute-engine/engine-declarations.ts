@@ -2669,47 +2669,7 @@ export function declareFn(
   // earlier and has not run (`forgetConstantDeclaration()`).
   forgetConstantDeclaration(ce, id, scope);
 
-  // A declaration in the global scope must not shadow a constant of a library
-  // (`Pi`, `ExponentialE`, `GoldenRatio`, `True`, …), for the same reason that
-  // `ce.assign('Pi', 3)` is refused. Engine code builds results with the
-  // library constant, and the MathJSON of such a result is only the name
-  // (`"Pi"`). If a global binding shadows the name, boxing that MathJSON
-  // again reads the user binding: after `declare('Pi', { value: 3 })`, the
-  // closed form `π²/6` of `Sum(1/n², n, 1, ∞)` re-boxes to `1.5`.
-  //
-  // Two kinds of declaration are not refused:
-  // - A declaration in a nested scope: a function parameter, the index of a
-  //   `Sum`, a local of a `Block`. That binding exists only while its
-  //   expression is evaluated, and a result that leaves the scope is boxed
-  //   again where the name is the library constant.
-  //   A host that calls `ce.pushScope()` and declares `Pi` there also makes
-  //   a nested scope, so it is not refused either.
-  // - A constant whose name never occurs in the MathJSON of a result, because
-  //   the name boxes to another form: `e` boxes to the symbol `ExponentialE`,
-  //   `i` and `ImaginaryUnit` to the complex literal `0 + 1i`, `Half` to the
-  //   rational `1/2`, `NaN` to a number literal. A program that uses `i` or
-  //   `e` as a variable (`let i = 1`) keeps working.
-  //
-  // The library installs its constants in the system scope, or in the global
-  // scope for `loadLibrary()`.
-  const systemScope = ce.contextStack[0]?.lexicalScope;
-  const globalScope = ce.contextStack[1]?.lexicalScope;
-  if (scope === globalScope) {
-    const visible = lookup(id, scope);
-    if (
-      visible !== undefined &&
-      isValueDef(visible) &&
-      visible.value.isConstant &&
-      (systemScope?.bindings.get(id) === visible ||
-        ce._libraryProvenance.get(id)?.binding === visible)
-    ) {
-      const boxed = ce.symbol(id);
-      if (isSymbol(boxed) && boxed.symbol === id)
-        throw Error(
-          `Cannot declare "${id}" in the global scope: it is a library constant (declare it in a nested scope)`
-        );
-    }
-  }
+  assertDeclarationName(ce, id, scope);
 
   // Extend mode replaces a binding of the same scope on purpose, so it skips
   // the "already declared" check below.
@@ -4821,13 +4781,38 @@ function assumptionRefusalError(
   );
 }
 
+/** Refuse global shadowing of a library constant whose MathJSON keeps its name. */
+export function assertDeclarationName(ce: IComputeEngine, id: string, scope: Scope): void {
+  const systemScope = ce.contextStack[0]?.lexicalScope;
+  const globalScope = ce.contextStack[1]?.lexicalScope;
+  const checkingGlobal = ce._staticTypeCheckDepth > 0 &&
+    ce.context.name === 'epsil:static-check' && scope.parent === globalScope;
+  if (scope === globalScope || checkingGlobal) {
+    const visible = lookup(id, scope);
+    if (
+      visible !== undefined &&
+      isValueDef(visible) &&
+      visible.value.isConstant &&
+      (systemScope?.bindings.get(id) === visible ||
+        ce._libraryProvenance.get(id)?.binding === visible)
+    ) {
+      const boxed = ce.symbol(id);
+      if (isSymbol(boxed) && boxed.symbol === id)
+        throw Error(
+          `Cannot declare "${id}" in the global scope: it is a library constant (declare it in a nested scope)`
+        );
+    }
+  }
+}
+
 /**
  * Would `ce.assign(id, value)` be rejected? Answered WITHOUT writing anything,
  * so the `Assign` operator's destructuring route can validate every leaf of a
  * pattern before it writes the first one (`(a, b) := (1, 2.5)` with `b:integer`
  * must leave `a` alone). Throws exactly what the write would throw — the shared
  * {@link assertAssignableValueDef} is the single source of the verdict, so the
- * two cannot drift.
+ * two cannot drift. Returns `match` or `overlap` when the existing value
+ * contract decides admission, and `undefined` for the residuals below.
  *
  * Silent — the assignment is left to be attempted — for the cases whose
  * verdict is only reached by running the install machinery. Each is a
@@ -4849,7 +4834,7 @@ export function assertAssignable(
   ce: IComputeEngine,
   id: string,
   value: Expression
-): void {
+): 'match' | 'overlap' | undefined {
   if (id === 'Nothing') return; // `assignFn` no-ops on it
   const def = ce.lookupDefinition(id);
   if (def === undefined || !isValueDef(def)) return;
@@ -4861,7 +4846,7 @@ export function assertAssignable(
     hasFunctionSignature(def.value.type.type)
   )
     return;
-  assertAssignableValueDef(ce, id, def.value, v);
+  return assertAssignableValueDef(ce, id, def.value, v);
 }
 
 function assignValueAsValue(

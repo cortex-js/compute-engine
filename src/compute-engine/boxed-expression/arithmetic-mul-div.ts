@@ -1781,7 +1781,12 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // tan(π/2)/tan(π/2) during canonicalization. We use `unknowns` instead of
   // `symbols` because `symbols` includes mathematical constants like Pi and E,
   // which would let expressions like tan(π/2) slip through the guard.
-  const op2IsConstantExpression = op2.unknowns.length === 0 && !isNumber(op2);
+  const op2HasBlockLocal = op2.symbols.some((name) => {
+    const binding = ce.lookupDefinition(name);
+    return binding !== undefined && 'value' in binding && binding.value._blockLocal;
+  });
+  const op2IsConstantExpression =
+    !isNumber(op2) && (op2.unknowns.length === 0 || op2HasBlockLocal);
 
   // 0/0 = NaN, a/0 = ~∞ (a≠0)
   // Note: literal checks only — no value following (see isLiteral), and no
@@ -1889,7 +1894,8 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
       isSymbol(op1) &&
       isSymbol(op2) &&
       op1.symbol === op2.symbol &&
-      op1.isConstant
+      op1.isConstant &&
+      !op2HasBlockLocal
     )
       return ce.One;
 

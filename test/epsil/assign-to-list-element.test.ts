@@ -22,7 +22,7 @@ function codes(source: string): string[] {
 function lastStatement(source: string): unknown {
   const ce = new ComputeEngine();
   const block = ce.box(parseEpsil(source)[0] as never, { form: 'raw' }).json;
-  return Array.isArray(block) && block[0] === 'Block' ? block.at(-1) : block;
+  return Array.isArray(block) && block[0] === 'Program' ? block.at(-1) : block;
 }
 
 /** The number of nested `ReplaceAt`, `Insert` and `DeleteAt` views along
@@ -181,19 +181,25 @@ describe('a write that does not give a list is an error, and the variable keeps 
   test.each([
     [
       'a string',
-      'let s = "abc"\ns[1] = "z"\ns',
+      'let s: any = "abc"\ns[1] = "z"\ns',
       ['List', "'z'", ['CharacterFrom', "'b'"], ['CharacterFrom', "'c'"]],
     ],
-    ['a tuple', 'let t = (1, 2)\nt[1] = 5\nt', ['List', 5, 2]],
-    ['a tuple inside the list', 'let m = [(1, 2)]\nm[1, 1] = 9\nm', ['List', ['List', 9, 2]]],
+    ['a tuple', 'let t: any = (1, 2)\nt[1] = 5\nt', ['List', 5, 2]],
+    ['a tuple inside the list', 'let m: any = [(1, 2)]\nm[1, 1] = 9\nm', ['List', ['List', 9, 2]]],
   ])('%s gives the list that replaceAt gives', (_name, source, list) => {
     const { value, diagnostics } = run(source);
     expect(diagnostics).toEqual([]);
     expect(value.json).toEqual(list);
   });
 
+  test('an implicit string contract refuses a replacement list', () => {
+    const { value, diagnostics } = run('let s = "abc"\ns[1] = "z"\ns');
+    expect(diagnostics.map((d) => d.message[3])).toEqual(['assignment-type-mismatch']);
+    expect(value.json).toBe("'abc'");
+  });
+
   test('a string position past its last character is out-of-range', () => {
-    const { value, diagnostics } = run('let s = "abc"\ns[4] = "z"\ns');
+    const { value, diagnostics } = run('let s: any = "abc"\ns[4] = "z"\ns');
     expect(diagnostics.map((d) => d.message[3])).toEqual(['out-of-range']);
     expect(value.json).toBe("'abc'");
   });

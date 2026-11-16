@@ -1,3 +1,4 @@
+import { operand } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/free-functions';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -20,7 +21,7 @@ import { describe as describeOperand } from '../../src/compute-engine/boxed-expr
 function epsilJson(source: string): unknown {
   const [ast, diagnostics] = parseEpsil(source);
   expect(diagnostics).toEqual([]);
-  return stripOffsets(ast);
+  return stripOffsets(operand(ast, 1)!);
 }
 
 function stripOffsets(x: unknown): unknown {
@@ -582,7 +583,7 @@ describe('Rest parameter — named definitions', () => {
     // recovery: the spread is dropped, the other parameters survive.
     const [ast, diagnostics] = parseEpsil('h(a, ...rest, b) = a');
     expect(diagnostics.map((d) => d.message)).toEqual([['symbol-expected']]);
-    expect(stripOffsets(ast)).toEqual({
+    expect(stripOffsets(operand(ast, 1)!)).toEqual({
       fn: [
         'DefineFunction',
         { sym: 'h' },

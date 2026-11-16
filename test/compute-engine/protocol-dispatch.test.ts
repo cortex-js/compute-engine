@@ -1,3 +1,4 @@
+import { operand } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -775,7 +776,7 @@ type string is Comparable {
     // protocol and produces the qualified-call shape everything downstream
     // reads (`docs/plans/2026-09-04-protocol-member-dot-call.md`).
     const [ast] = parseEpsil('Comparable.compare(x, y)');
-    expect(JSON.parse(JSON.stringify(ast))).toMatchObject({
+    expect(JSON.parse(JSON.stringify(operand(ast, 1)))).toMatchObject({
       fn: [
         'MemberCall',
         { sym: 'Comparable' },
@@ -784,7 +785,7 @@ type string is Comparable {
         { sym: 'y' },
       ],
     });
-    expect(ce().box(ast!).toString()).toBe(
+    expect(ce().box(ast!).op1.toString()).toBe(
       'Apply(Field("Comparable", "compare"), x, y)'
     );
   });

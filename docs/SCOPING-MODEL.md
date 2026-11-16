@@ -313,12 +313,12 @@ its head, even when the name was assigned after the result was made: in
 value when the final fold reads it after the assignment at `k = 2`, and the
 sum is `10 + h(1)`. A later top-level evaluation resolves the head again, as
 for any call: with `r = g(3).evaluate()`, then `ce.assign('g', k ↦ k²)`,
-`r.evaluate()` is `9`. Each statement of an Epsil program, and each statement
-of a `Block` that the host evaluates directly, is its own top-level
+`r.evaluate()` is `9`. Each statement of a `Program` has its own top-level
 evaluation, so a statement that reads a value stored by an earlier statement
-resolves it; the statements of a nested block (a `do` block in an assignment,
-a function body, a `Sum` term) run in the evaluation of the enclosing
-statement. The original, unevaluated call is never sticky, and an expression
+resolves it. A `Block`, including one evaluated directly by the host, keeps
+one enclosing evaluation for its statements. A `do` block in an assignment,
+a function body and a `Sum` term likewise run in the evaluation of the
+enclosing statement. The original, unevaluated call is never sticky, and an expression
 rebuilt from a result (`subs()`) is a new call; both resolve their head as
 before (`EVALUATED_UNRESOLVED_CALLS`, `boxed-expression/boxed-function.ts`;
 decided in `docs/plans/2026-10-21-function-declaration-hoisting.md`, rule 1).
@@ -608,7 +608,7 @@ that type; the first boxing is discarded (CE-1270).
 ### Block locals
 
 A local of a block is made only by a `Declare` (in Epsil, `let`), and a
-`Declare` is allowed only at the top level of a block or of a function body.
+`Declare` is allowed only as a statement of a Block, Program or function body.
 The name means the local in the whole block.
 
 - `Block(Declare(c, 5), 2c)` is `10`.
@@ -617,8 +617,9 @@ The name means the local in the whole block.
   to a name that no scope declares is the error
   `assignment-to-undeclared-variable`: `Block(c := 5, 2c)` with no `c` in
   scope. With a global `c`, the same block gives `10` and the global `c` is
-  `5`. Outside every block (`ce.assign('c', 5)`, an `Assign` evaluated at the
-  host level), an `Assign` declares the variable in the current scope.
+  `5`. Outside every Block and Program (`ce.assign('c', 5)`, an `Assign`
+  evaluated at the host level), an `Assign` declares the variable in the current
+  scope.
 - A `Declare` below a statement (in a branch of an `If`, a loop body) is the
   error `declaration-below-statement`.
 - Two declarations of one name in one block are the error
@@ -644,6 +645,41 @@ list whole when the parameter type of the function value is a collection,
 and maps the call over the list otherwise: `(t: list) ↦ Count(t)` applied to
 `[1, 2]` is `2`, `(t) ↦ 2t` gives `[2, 4]`, and `(a) ↦ h(a)`, with `h` a
 local, maps the call (nothing is derived for `a` from `h`).
+
+### Program bindings
+
+`Program` uses the caller's scope; it does not create a Block activation.
+Epsil parsing always produces this container, including for an empty source or
+a single expression. Boxing uses the same sequence rules as Block, with type
+and protocol declarations first, then global function statements and their
+paired signatures, then the remaining statements in source order. The whole
+sequence is canonical before evaluation. Function statements keep their global
+clause semantics; a variable initialized with a function is still a variable
+and cannot be read before its declaration runs.
+
+A Program `Declare` establishes a value binding and its assignment contract.
+An unannotated mutable numeric initializer uses the existing widened `number`
+type; a function initializer or callable alias uses `function`. An explicit
+annotation supplies the contract, and a constant retains its data type and
+rejects writes. Replacing a function value does not turn the binding into an
+operator or adopt the replacement's signature as a new contract. The function
+value itself retains its parameter checks, defaults, effects and closure.
+
+Two declarations in one Program are refused. A declaration in a later Program
+may replace an earlier declaration, including its type; its initializer reads
+the earlier caller binding. Assignment in a later Program instead writes the
+existing binding and must satisfy its contract. As with other canonical
+expressions, an already boxed initializer keeps its original binding home;
+replaying that object does not rebind its initializer to a later declaration.
+Fresh Program boxing uses the current caller bindings. This captures binding
+identity, not an immutable value snapshot. These rules do not change host
+`ce.assign()` or promise snapshots of earlier caller scopes.
+
+Checking uses the canonical bindings and types. Its separate diagnostic flow
+can retain a reaching literal or function value at a particular use without
+changing a declaration or simulating assignment. Uncertain writes, branches or
+effects may discard these facts. Such facts provide argument diagnostics, not
+new binding contracts or compilation shape information.
 
 ### Activations
 

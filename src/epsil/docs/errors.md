@@ -111,7 +111,7 @@ In `f(1000, principal: 2000)` the first positional argument already occupies `pr
 
 ## `argument-names-unavailable`
 
-A call passed arguments by name, but the called function has no declaration the engine can read parameter names from — it is undefined, defined later in the program, or held in a variable whose declared type gives no parameter names (`function`, or a signature such as `(number, number) -> number`).
+A call passed arguments by name, but the called function has no declaration the engine can read parameter names from — it is undefined, a local function not yet declared, or held in a variable whose declared type gives no parameter names (`function`, or a signature such as `(number, number) -> number`).
 
 Named arguments are checked against the declaration the call resolves through; with no declaration visible there is nothing to check the names against. For a variable, only its declared type counts, never the function it holds now: that function can change after the call is written. Call it positionally, move the definition before the call, or declare the variable with a signature that names its parameters (`let g: (x: number, y: number) -> number = …`).
 
@@ -202,7 +202,7 @@ No warning does not make the `match` total. A `boolean` subject that stays symbo
 
 In expression position `=` is an equation, and only a statement assigns. So in `let a = 0; match 1 { 1 => a = 2 }; a` the case body compares `a` with `2`, nothing reads the result, and `a` stays `0`.
 
-Write `1 => do { a = 2 }` to assign, or `1 => a == 2` if the comparison was meant. The same applies to `{ a = 2 }` as a body, which is a set that holds an equation. In a function, a body that writes a variable also needs the `scope` effect when the function has a name: `let f: (number) scope -> nothing = x => do { a = 2 }`.
+Write `1 => do { a = 2 }` to assign, or `1 => a == 2` if the comparison was meant. The same applies to `{ a = 2 }` as a body, which is a set that holds an equation. A named `function` statement that writes an outer variable must declare the `scope` effect. An explicit function-type annotation on a variable must admit that effect too: `let f: (number) scope -> nothing = x => do { a = 2 }`. An unannotated function-valued variable keeps type `function`; its value carries its effects.
 
 The warning applies to the whole body of a `match` case, of a branch of a conditional expression and of a function, when the left side is a variable that the program declares, other than a constant, and nothing reads the value of the body. The body of a function counts as unread when each read of the function's name is a call whose value is discarded. A body whose value is read (`let r = match k { 1 => a = 2 }`, a lambda passed to `map` or `solve`, the last statement of the program) and an equation of a free name, of a constant, of a parameter or of a pattern variable get no warning. It is a warning: the program still runs.
 
@@ -256,13 +256,13 @@ A `let` or `const` declares a name that the same scope already declares: an earl
 
 A second declaration in one scope is a mistake in practice — a `let` where an assignment was meant, or a copied line — and the language cannot tell it from a legitimate second run of the same statement (a loop body on its next turn), so it used to overwrite the binding without a word. To update a binding, assign to it: `x = x + 1`. To hold a second value, choose another name.
 
-A `let` in a NESTED block is not a re-declaration: `for k in xs { if c { let k = 1 … } }` and a closure body that declares a name its enclosing scope also has are ordinary shadowing, and stay legal. The initializer of such a shadowing `let` reads the OUTER name. Across programs — a re-run notebook cell, a later REPL line — a top-level `let` re-declares legally; only a repeat within one program is reported.
+A `let` in a NESTED block is not a re-declaration: `for k in xs { if c { let k = 1 … } }` and a closure body that declares a name its enclosing scope also has are ordinary shadowing, and stay legal. The initializer of such a shadowing `let` reads the OUTER name. Across programs — a rerun notebook cell or a later REPL line — a top-level `let` or `const` may replace an earlier declaration and establish a new type. Assignment instead preserves the current binding and its contract. Only a repeat within one program is reported.
 
 ## `read-before-declaration`
 
-A statement of a block uses a local of the block before the statement that declares it. A local is declared by a `let` or a `const`. In `do { let a = k; let k = 2; a }` the first statement reads `k`, which the block declares only in the next statement. In `do { k = 5; let k = 2 }` the first statement assigns it.
+A statement of a program or block uses a variable before the statement that declares it. A variable is declared by a `let` or a `const`. This includes a variable initialized with a function: `let a = h(1); let h = (x) => x + 1; a` uses `h` too early. A top-level `function` statement is different: it is prepared before the other statements and can be called above its definition. In `do { let a = k; let k = 2; a }` the first statement reads `k`, which the block declares only in the next statement. In `do { k = 5; let k = 2 }` the first statement assigns it.
 
-The error is found before the program runs. Move the declaration before the first use, or give the local another name. The initializer of a `let` is not such a use: `let t = t * 2` in a nested block reads the OUTER `t`. A use in a function literal is not such a use either, because it runs when the function is called: a function can read a local that a later statement of the block declares.
+The error is found before the program runs. Move the declaration before the first use, or give the local another name. The initializer of a `let` is not such a use: `let t = t * 2` in a nested block reads the OUTER `t`. A use in a function literal is not such a use either, because it runs when the function is called: a function can read a variable that a later statement of the program or block declares.
 
 ## `declaration-without-value`
 
@@ -344,13 +344,13 @@ An assignment is a statement, not a value. In `f(a := 2)` and in `x = (a := 2) +
 
 ## `assignment-type-mismatch`
 
-An assignment gives a local a value whose type cannot be the type of the local. The type of a local is its declared type (`let n: integer = 0`), or else the type of its first value, widened: a number gives `number`, a string gives `string`, a boolean gives `boolean`, and the elements of a list, a set or a tuple widen the same way. So `s = 0` then `s = s + 0.5` is valid, and `s = 0` then `s = "x"` is this error. Use another name for a value of another type.
+An assignment gives a variable a value outside its binding type, at the top level as in a block. The type is its explicit annotation (`let n: integer = 0`), or else the type of its first value, widened: a number gives `number`, a string gives `string`, a boolean gives `boolean`, and the elements of a list, a set or a tuple widen the same way. So `let s = 0` then `s = s + 0.5` is valid, and `let s = 0` then `s = "x"` is this error. An unannotated function initializer gives the variable type `function`, rather than fixing the initializer’s full signature: another function value is allowed, but a nonfunction is not. Each function value keeps its own annotations and checks its arguments when called. Use another name for a value of another type, or redeclare the name in a later program to establish a new contract.
 
 ## `constant-assignment`
 
 A value was assigned to a constant: a name bound by `const`, or a constant of the library such as `Pi`. In `const c = 1` followed by `c = 2`, the assignment is refused and `c` keeps the value `1`. The same holds for an assignment of a function literal (`const k = (n) => n + 1` then `k = (s) => s`) and for each name of a destructuring assignment (`(a, c) := (3, 4)` writes neither `a` nor `c`).
 
-`epsil check` reports an assignment to a `const` of the same program (at any depth, and each name of a destructuring `const`) before anything runs, wherever the assignment is: at the top level, in a block, a loop body or a function body. The run does not report it a second time. A function defined before a `const` of the same block is included, because the `const` of a block is declared when the block starts: an assignment in the function writes the constant when the call comes after the `const`. A function defined before a top-level `const` does not write it: an assignment in a function body to a name that no enclosing scope declares when the function is defined makes a local of the body. A constant that the check cannot see — one declared by an earlier program on the same engine, or a library constant — is reported when the assignment runs, as a `runtime-error` with this code.
+`epsil check` reports an assignment to a `const` of the same program (at any depth, and each name of a destructuring `const`) before anything runs, wherever the assignment is: at the top level, in a block, a loop body or a function body. The run does not report it a second time. A function defined before a `const` of the same block is included, because the `const` of a block is declared when the block starts: an assignment in the function writes the constant when the call comes after the `const`. The declarations of a program are prepared together, so a function defined before a top-level `const` resolves that binding too. Moving the function above the declaration does not make the constant writable. A constant write that is not reported statically is reported when the assignment runs, as a `runtime-error` with this code.
 
 To change the value, declare the name with `let` instead of `const`. To hold a second value, choose another name, or declare a local that shadows the constant: `let c = 2` in a function body or a block makes a new binding, and an assignment to it is valid. An indexed assignment such as `c[1] = 2` is the rebinding `c = replaceAt(c, 1, 2)`, so it is an assignment to `c` too, and gives this error.
 

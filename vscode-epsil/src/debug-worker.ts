@@ -9,7 +9,7 @@
 // so watches and variable expansion run against the real paused scope.
 //
 // Pause points:
-//  - between top-level statements (the executeEpsil-mirror loop below);
+//  - before the Program's top-level statements;
 //  - before every source-mapped statement inside `Block` bodies — function
 //    bodies, loop bodies, `if` branches — via the engine's debug statement
 //    hook (`src/common/debug-hook.ts`), which this worker installs.
@@ -134,6 +134,10 @@ let stepDepth = 0;
 let servicing = false;
 /** Top-level statement index (for the bottom stack frame). */
 let topIndex = 0;
+/** Source spans identify top-level hooks without another execution loop. */
+const topStatementSpans = new Map<string, number>();
+let enteredProgram = false;
+let previousTopLine: number | undefined;
 /** Last hook statement seen per relative depth — the live call-stack
  * positions. `depth` is `contextStack.length - baseDepth` at fire time. */
 let hookStack: Array<{ depth: number; line: number; offset: number }> = [];
@@ -600,13 +604,40 @@ function statementHook(raw: unknown): void {
   drainCommands();
   exceptionHandled = false;
 
+  const offsets = stmt.sourceOffsets;
+  if (offsets === undefined) return;
+  const sourceIndex = topStatementSpans.get(offsets.join(':'));
+  if (sourceIndex !== undefined) {
+    topIndex = sourceIndex;
+    hookStack = [];
+    lastBreakpointStop = undefined;
+    const line = lineOfOffset(offsets[0]);
+    let reason: string | undefined;
+    if (pauseRequested) reason = 'pause';
+    else if (!config.noDebug) {
+      if (!enteredProgram && config.stopOnEntry) reason = 'entry';
+      else if (
+        breakpoints.has(line) &&
+        previousTopLine !== line &&
+        breakpointVerdict(breakpoints.get(line)!, line) === 'stop'
+      )
+        reason = 'breakpoint';
+      else if (stepMode !== undefined) reason = 'step';
+    }
+    enteredProgram = true;
+    previousTopLine = line;
+    if (reason !== undefined) {
+      stepMode = undefined;
+      pauseAt(reason, line, true);
+    }
+    return;
+  }
+
   // A bare Block statement never stops: its own statements fire next (the
   // loop-lowering wrapper starts on the same line as its first statement —
   // stopping on both would double-stop every iteration).
   if (stmt.operator === 'Block') return;
 
-  const offsets = stmt.sourceOffsets;
-  if (offsets === undefined) return;
   const line = lineOfOffset(offsets[0]);
   const depth = currentRelativeDepth();
 
@@ -762,11 +793,15 @@ function main(): void {
     throw error;
   }
 
-  const stmts = operator(ast) === 'Block' ? [...operands(ast)] : [ast];
+  const stmts = operator(ast) === 'Program' ? [...operands(ast)] : [ast];
   statements = stmts.map((stmt) => ({
     json: stmt,
     line: lineOfOffset((offsetsOf(stmt) ?? [0, 0])[0]),
   }));
+  stmts.forEach((stmt, i) => {
+    const offsets = offsetsOf(stmt);
+    if (offsets !== undefined) topStatementSpans.set(offsets.join(':'), i);
+  });
 
   collectFunctionSpans();
   post({ type: 'ready', breakpointableLines: collectBreakpointableLines(ast) });
@@ -790,35 +825,37 @@ function run(): void {
   setDebugStatementHook(statementHook);
   setDebugStatementResultHook(statementResultHook);
   try {
-    let lastValue: Expression | undefined;
-    for (topIndex = 0; topIndex < statements.length; topIndex++) {
-      const stmt = statements[topIndex];
-      hookStack = [];
-      exceptionHandled = false;
-      drainCommands();
-
-      // Top-level pause points (mirrors the Tier 1 loop).
-      let reason: string | undefined;
-      if (pauseRequested) reason = 'pause';
-      else if (config.noDebug) reason = undefined;
-      else if (topIndex === 0 && config.stopOnEntry) reason = 'entry';
-      else if (
-        breakpoints.has(stmt.line) &&
-        (topIndex === 0 || statements[topIndex - 1].line !== stmt.line) &&
-        breakpointVerdict(breakpoints.get(stmt.line)!, stmt.line) === 'stop'
-      )
-        reason = 'breakpoint';
-      else if (stepMode !== undefined) reason = 'step';
-      if (reason !== undefined) {
-        stepMode = undefined;
-        pauseAt(reason, stmt.line, true);
-      }
-
-      lastValue = executeTopLevel(stmt);
-    }
+    const result = executeEpsil(engine, sourceText, {
+      url: config.program,
+      parseLatex,
+      statementTimeLimitMs:
+        config.statementTimeLimit > 0 ? config.statementTimeLimit : undefined,
+      onStatement: ({ index, value, range }) => {
+        topIndex = index;
+        const errors = value.errors;
+        if (errors.length === 0) return;
+        const line = lineOfOffset(range[0]);
+        output(
+          'stderr',
+          `${basename(config.program)}:${line}: ${errors[0].toString()}\n`,
+          line
+        );
+        if (breakOnErrorValues && !config.noDebug && !exceptionHandled) {
+          exceptionHandled = true;
+          stepMode = undefined;
+          pauseAt('exception', line, true);
+        }
+      },
+    });
+    const lastValue = result.value;
+    if (result.diagnostics.length > 0)
+      output(
+        'stderr',
+        formatDiagnostics(result.diagnostics, sourceText, config.program, false) +
+          '\n'
+      );
 
     if (
-      lastValue !== undefined &&
       !(isSymbol(lastValue) && lastValue.symbol === 'Nothing') &&
       lastValue.errors.length === 0
     )
@@ -827,45 +864,6 @@ function run(): void {
     setDebugStatementHook(undefined);
     setDebugStatementResultHook(undefined);
   }
-}
-
-function executeTopLevel(stmt: StatementInfo): Expression {
-  // Mirrors `executeEpsil`: runtime problems become `["Error", …]` values;
-  // the try/catch is the backstop for the throwing paths (const
-  // reassignment, cap breaches). A debugger terminate unwinds through here
-  // and must NOT be converted to a value.
-  let value: Expression;
-  const run = () => engine.box(stmt.json).evaluate();
-  try {
-    const limit = config.statementTimeLimit;
-    value =
-      limit > 0
-        ? engine.withTimeLimit({ ms: limit, label: 'epsil:debug' }, run)
-        : run();
-  } catch (error) {
-    if (error instanceof TerminatedError) throw error;
-    value = engine.box([
-      'Error',
-      { str: error instanceof Error ? error.message : String(error) },
-    ]);
-  }
-
-  const errors = value.errors;
-  if (errors.length > 0) {
-    output(
-      'stderr',
-      `${basename(config.program)}:${stmt.line}: ${errors[0].toString()}\n`,
-      stmt.line
-    );
-    // The exception filter also covers a top-level statement whose value is
-    // an error — unless a body statement already paused for this wave.
-    if (breakOnErrorValues && !config.noDebug && !exceptionHandled) {
-      exceptionHandled = true;
-      stepMode = undefined;
-      pauseAt('exception', stmt.line, true);
-    }
-  }
-  return value;
 }
 
 main();

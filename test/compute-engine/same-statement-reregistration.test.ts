@@ -34,6 +34,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseSource } from '../../src/cli/check';
+import { operator, operands } from '../../src/math-json/utils';
 import {
   isSameStatementReRegistration,
   RedefinitionError,
@@ -475,8 +476,8 @@ type T = object{a: integer}`
     );
     const source = 'type T is P { function m(self: Self) -> integer { 1 } }';
     const { ast } = parseSource(source, undefined, ce);
-    const stmtJson =
-      Array.isArray(ast) && ast[0] === 'Block' ? (ast as unknown[])[1] : ast;
+    expect(operator(ast!)).toBe('Program');
+    const stmtJson = operands(ast!)[0];
 
     // Simulate the statement route: a live batch and the declaration-route
     // marker, exactly what `execute-epsil.ts` raises around the statement.

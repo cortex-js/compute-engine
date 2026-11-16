@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import {writeFileSync} from 'node:fs';
+import {performance} from 'node:perf_hooks';
+import {loadavg} from 'node:os';
+import {pathToFileURL} from 'node:url';
+import {resolve} from 'node:path';
+const importStart=performance.now();
+const {ComputeEngine,parseEpsil,resolveLibraryNames,executeEpsil,checkEpsil}=await import(pathToFileURL(resolve(process.env.CE_ROOT??'./ce','dist/esm-min/epsil.js')).href);
+const importMs=performance.now()-importStart;
+const output=process.argv[2],jit=process.argv[3]??'auto',rounds=7,warmup=100,iterations=100;
+const source='function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1';
+const heavy=Array.from({length:12},(_,i)=>`type alias Pair${i} = tuple<number, number>\nprotocol P${i} { function compare(self: Self, other: Self) -> string }`).join('\n');
+const records=[];
+function engine(){const ce=new ComputeEngine();if(jit==='off')ce.jit='off';return ce;}
+let t=performance.now();const ce=engine();const firstEngineMs=performance.now()-t;
+t=performance.now();const firstResult=executeEpsil(ce,source);const coldFullRunMs=performance.now()-t;
+assert.equal(firstResult.value.re,10);assert.equal(firstResult.diagnostics.length,0);
+assert.equal(executeEpsil(ce,'let z = "a" + 1\n5').value.re,5);
+assert.equal(checkEpsil(ce,heavy).diagnostics.length,0);
+const ast=resolveLibraryNames(parseEpsil(source)[0],source,ce);
+const prepared=ce.box(ast);assert.equal(prepared.evaluate().re,10);
+function timed(id,fn,n=iterations,w=warmup){for(let i=0;i<w;i++)fn();const samples=[];for(let r=0;r<rounds;r++){const start=performance.now();for(let i=0;i<n;i++)fn();samples.push((performance.now()-start)/n);}records.push({id,iterations:n,warmup:w,samplesMs:samples,medianMs:[...samples].sort((a,b)=>a-b)[3],minMs:Math.min(...samples),maxMs:Math.max(...samples)});}
+timed('control-parse-scalar',()=>parseEpsil('5'),1000);
+timed('parse-only',()=>parseEpsil(source));
+timed('box-only-current-parser-container',()=>ce.box(ast));
+timed('parse-and-box',()=>ce.box(resolveLibraryNames(parseEpsil(source)[0],source,ce)));
+timed('engine-construction',()=>engine(),20,20);
+timed('full-first-run',()=>{ce.pushScope();try{executeEpsil(ce,source);}finally{ce.popScope();}});
+timed('same-caller-namespace-rerun',()=>executeEpsil(ce,source));
+timed('prepared-container-repeat',()=>prepared.evaluate());
+const scalar=ce.box(5);timed('control-cached-scalar-repeat',()=>scalar.evaluate(),10000);
+timed('failed-statement-continuation',()=>executeEpsil(ce,'let z = "a" + 1\n5'));
+timed('check-only',()=>checkEpsil(ce,source));
+timed('type-protocol-heavy-check',()=>checkEpsil(ce,heavy),30);
+let changed=false;timed('whole-source-edit',()=>{changed=!changed;executeEpsil(ce,source.replace('let x = 3',`let x = ${changed?4:3}`));});
+writeFileSync(output,JSON.stringify({node:process.version,v8:process.versions.v8,execArgv:process.execArgv,nodeOptions:process.env.NODE_OPTIONS??'',jit,precision:ce.precision,load:loadavg(),startup:{importMs,firstEngineMs,coldFullRunMs},controls:{validResult:10,failureContinuation:5,typeProtocolDiagnostics:0,preparedContainerResult:10},records,source,heavy},null,2)+'\n');

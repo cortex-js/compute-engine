@@ -64,6 +64,8 @@ export function signatureNotes(
   ce: ComputeEngine,
   error: MathJsonExpression,
   options?: {
+    /** The reaching callable value at this use, when a diagnostic flow proved it. */
+    calleeType?: Type;
     /** Where this program binds its names, from `definitionSites()`. */
     definitionSites?: ReadonlyMap<string, DefinitionSite>;
     /** The range the diagnostic itself points at. A definition site
@@ -95,7 +97,7 @@ export function signatureNotes(
 
   const notes: DiagnosticNote[] = [];
 
-  const arms = signatureArms(calleeType(ce, frame.name));
+  const arms = signatureArms(options?.calleeType ?? calleeType(ce, frame.name));
   if (arms !== undefined && arms.length > 1)
     // An overload set: every arm, since the breadcrumb does not say which one
     // the engine was checking.

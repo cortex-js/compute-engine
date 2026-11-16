@@ -1,0 +1,31 @@
+--- a/test/epsil/static-check-function-on-const.test.ts
++++ b/test/epsil/static-check-function-on-const.test.ts
+@@ -10,8 +10,7 @@
+ // as a `static-type-error` with a note on the first declaration.
+ //
+ 
+-const DESCRIPTION = (name: string) =>
+-  `variable redeclaration: ${name}`;
++const DESCRIPTION = (name: string) => `variable redeclaration: ${name}`;
+ 
+ function check(source: string) {
+   return checkSource(source).diagnostics.map((d) => ({
+@@ -93,7 +92,6 @@
+       '2'
+     );
+   });
+-
+ });
+ 
+ describe('EPSIL CHECK: A REFUSED FIRST DECLARATION', () => {
+--- a/test/epsil/redefinition-discipline.test.ts
++++ b/test/epsil/redefinition-discipline.test.ts
+@@ -1043,7 +1043,7 @@
+       expect(source.slice(diagnostics[0].range[0], diagnostics[0].range[1])).toBe(
+         'f(m) = 2'
+       );
+-      const firstSite = diagnostics[0].notes![0].range;
++      const firstSite = diagnostics[0].notes![0].range!;
+       expect(source.slice(firstSite[0], firstSite[1])).toBe('f(n) = 1');
+       expect(codes(checkSource(source).diagnostics)).toEqual([
+         'function-redefinition',

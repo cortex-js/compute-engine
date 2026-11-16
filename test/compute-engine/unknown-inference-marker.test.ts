@@ -330,10 +330,10 @@ describe('D2, D3, R7: a declaration with contents left to inference refines from
     expect(() =>
       ce.assign('t', ce.box(['Tuple', 1.5, { str: 'y' }]))
     ).toThrow();
-    // The Epsil `let` route refines in the same way.
+    // Program variables retain the declared placeholder contract.
     const ce2 = new ComputeEngine();
     executeEpsil(ce2, 'let p: tuple<unknown, integer> = ("a", 2)');
-    expect(ce2.symbol('p').type.toString()).toBe('tuple<string, integer>');
+    expect(ce2.symbol('p').type.toString()).toBe('tuple<unknown, integer>');
   });
 
   test('a transparent alias carries the instruction of its definition', () => {
@@ -356,14 +356,14 @@ describe('D2, D3, R7: a declaration with contents left to inference refines from
     expect(ce.box('t').type.toString()).toBe('tuple<integer, string>');
   });
 
-  test('the Epsil let route and the MathJSON Declare route agree with ce.declare', () => {
+  test('Program placeholders remain stable while standalone Declare refines', () => {
     const ce = new ComputeEngine();
     executeEpsil(
       ce,
       ['let a: list<unknown> = [1, 2]', 'let t: tuple = (1, "a")'].join('\n')
     );
-    expect(ce.symbol('a').type.toString()).toBe('list<integer>');
-    expect(ce.symbol('t').type.toString()).toBe('tuple<integer, string>');
+    expect(ce.symbol('a').type.toString()).toBe('list<unknown>');
+    expect(ce.symbol('t').type.toString()).toBe('tuple');
     // A `Declare` has a value (`declaration-without-value` otherwise).
     const ce2 = new ComputeEngine();
     ce2

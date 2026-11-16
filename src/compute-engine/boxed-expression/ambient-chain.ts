@@ -200,10 +200,11 @@ export function scopeActivation(
     const def = binding.value as unknown as {
       isConstant: boolean;
       _blockLocal?: boolean;
+      _programVariable?: boolean;
       _isBinderVariable?: boolean;
     };
     if (
-      def._blockLocal === true ||
+      (def._blockLocal === true && !def._programVariable) ||
       (!def.isConstant &&
         (def._isBinderVariable === true ||
           scope.binderNames?.has(name) === true))

@@ -573,10 +573,15 @@ describe('Assign with a Tuple pattern', () => {
       ce,
       'let x: integer = 1\nlet y: integer = 2\n(x, y) := (7, 4.5)'
     );
-    // The failing statement is the LAST one, so the runtime error is the
-    // program's value (not a diagnostic).
+    // The rejected final assignment remains the error value, and the static
+    // diagnostic names its failing leaf before either target is written.
     expect(r.value.isValid).toBe(false);
-    expect(r.value.toString()).toContain('incompatible-type');
+    expect(r.value.toString()).toBe(
+      'Error(ErrorCode("assignment-type-mismatch", "y", "integer", "4.5"))'
+    );
+    expect(r.diagnostics.map((d: any) => d.message[3])).toEqual([
+      'assignment-type-mismatch',
+    ]);
     expect(ce.symbol('x').evaluate().isSame(1)).toBe(true);
     expect(ce.symbol('y').evaluate().isSame(2)).toBe(true);
   });

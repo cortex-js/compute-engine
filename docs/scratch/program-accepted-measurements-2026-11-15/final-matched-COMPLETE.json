@@ -1,0 +1,20 @@
+{
+  "complete": false,
+  "memoryControlsComplete": true,
+  "tychoTimingGaps": [
+    {
+      "mode": "off",
+      "missing": {
+        "baseline": {
+          "heat-spread": 1,
+          "burning-ship": 1
+        },
+        "candidate": {}
+      }
+    }
+  ],
+  "records": 112,
+  "sourceUnchanged": true,
+  "allControlsPassed": true,
+  "completedAtEpochSeconds": 1794815733.826231
+}

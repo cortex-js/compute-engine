@@ -2,6 +2,26 @@
 
 ### Breaking Changes
 
+- **`parseEpsil()` always returns a `Program`, including for empty or
+  single-statement source.** For example, `parseEpsil("2x + 1")[0]` has the
+  form `["Program", ["Add", ["Multiply", 2, "x"], 1]]`, omitting source metadata.
+  Whole-program boxing and direct evaluation now preserve the caller scope;
+  nested `Block` expressions still introduce a scope. Types and protocols
+  are prepared first, then function definitions, then the other statements
+  in source order. Invalid top-level siblings do not stop later statements.
+  A host-evaluated `Block` now consistently has local scope and one enclosing
+  evaluation; use `Program` for caller-scoped statement execution.
+- **Epsil program variables retain their declaration's type on assignment.**
+  `let a = 1; a = "x"; a` previously returned `"x"`; it now reports
+  `assignment-type-mismatch` and returns `1`. Unannotated function-valued
+  variables have type `function`, rather than inheriting the initializer's
+  full signature. They accept successive function values, whose own
+  annotations still check calls; an explicit variable signature remains its
+  contract. A later program may redeclare a name with a new type.
+- **A program ending in a declaration or assignment returns `Nothing`.**
+  `executeEpsil(ce, "let x = 1")` previously returned `1`; append `x` to
+  obtain the stored value. Property stores still return their assigned value
+  when evaluated directly, while a Program assignment statement is valueless.
 - **The Python compilation target is removed.** `compile(expr, { to:
   'python' })` now answers as for any target that is not registered
   ("Compilation target "python" is not registered"), and `PythonTarget` is
@@ -31,6 +51,14 @@
   `CE_JS_PROFILE_SHADOW=1` no longer turn anything on.
 
 ### Behavior Changes
+
+- **Runtime-local self-quotients evaluate before cancellation.**
+  `const x = 0; x/x` returned `1`; it now returns `NaN`. Nonzero library
+  constants retain their ordinary self-quotient simplification.
+
+- **A limit with no eligible numeric variable keeps nonnumeric bindings
+  constant.** `function f() { let L = [1, 2]; limit(sum(L), 1) }; f()`
+  returned `1`; it now returns `3`.
 
 - **In the experimental profile `'ir'`, a list or tuple result on JavaScript
   is no longer a copy.** `run()` returns the value as the code built it, as
@@ -899,6 +927,11 @@ This is the content first numbered 0.191.0, a version that was not published.
   `vector<integer^4>`, and `vector<integer^2>` after `L := [1, 2]`.
 
 ### New Features
+
+- **Epsil execution can report individual statements.** `executeEpsil()` and
+  `executeEpsilAsync()` accept `onStatement`, called after each top-level
+  statement with its value, expression, original source index and range.
+  `statementTimeLimitMs` sets an independent time limit for each statement.
 
 - **`Zeta(s, -k)` evaluates exactly for an integer `s > 1` and a negative
   integer `-k`.** It is `ζ(s)` plus the `k` terms before the omitted one:

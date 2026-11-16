@@ -12,7 +12,12 @@ describe('checkEpsil', () => {
   test('a static type error and a redeclaration are reported', () => {
     expect(
       codes('let a = 3\nlet b = "x" + 1\nfunction f(x: number) { x + 1 }\nf("no")\nlet a = 4')
-    ).toEqual(['static-type-error', 'static-type-error', 'variable-redeclaration']);
+    ).toEqual(['static-type-error', 'static-type-error', 'static-type-error']);
+  });
+
+  test('a redeclaration retains its specific error code', () => {
+    const result = checkEpsil(new ComputeEngine(), 'let a=1;let a=2');
+    expect(result.diagnostics.map((d) => d.code)).toEqual(['variable-redeclaration']);
   });
 
   test('a syntax error is reported, and the static pass is skipped', () => {

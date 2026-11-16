@@ -449,7 +449,7 @@ await scenario('representation views', undefined, async (c) => {
   const ast = await c.request('epsil/view', { uri: URI, view: 'ast' });
   check(
     'the parsed view shows shorthand MathJSON of the raw parse',
-    ast?.content.includes('"Block"') === true &&
+    ast?.content.includes('"Program"') === true &&
       ast.content.includes('"Declare"') &&
       // `let` parse sugar, still undesugared at this stage.
       ast.content.includes('"KeyValuePair"') &&

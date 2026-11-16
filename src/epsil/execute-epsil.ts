@@ -1,5 +1,6 @@
 import type { MathJsonExpression } from '../math-json/types.js';
 import { UnitEnvironment } from '../compute-engine/binding-unit.js';
+import { nextProgramBatchId } from '../compute-engine/statement-position.js';
 import {
   operator,
   operands,
@@ -12,7 +13,6 @@ import { isLiteralParamName } from '../math-json/symbols.js';
 import {
   budgetCauseOf,
   CancellationError,
-  checkDeadline,
   isTimeoutCancellation,
   type CancellationCause,
 } from '../common/interruptible.js';
@@ -22,7 +22,6 @@ import {
 // imports `epsil`). The engine is injected at call time, mirroring the
 // `parseLatex`/`ILatexSyntax` injection pattern used elsewhere in `src/epsil`.
 import type { Expression, ComputeEngine } from '../compute-engine.js';
-import type { Type } from '../common/type/types.js';
 
 import {
   DiagnosticNote,
@@ -35,20 +34,16 @@ import {
   isString,
   isSymbol,
 } from '../compute-engine/boxed-expression/type-guards.js';
+import { isDeclarationTypeErrorValue } from '../compute-engine/boxed-expression/type-compatibility-error.js';
 import { listedElement } from '../compute-engine/boxed-expression/listed-element.js';
 import { protocolExtendsConflicts } from '../compute-engine/engine-protocols.js';
 import {
-  isOperatorDef,
   isValueDef,
 } from '../compute-engine/boxed-expression/definition-guards.js';
-import { reduceType } from '../common/type/reduce.js';
 import {
-  closedLiteralType,
-  isHoistedFunctionDefinition,
-  staticDeclarations,
+  programSourceOrder,
+  programInterruption,
 } from '../compute-engine/library/control-structures.js';
-import { statementDeclaredNames } from '../compute-engine/boxed-expression/tuple-pattern.js';
-import { resolveEscapingLambda } from '../compute-engine/function-utils.js';
 import { parseEpsil } from './parse-epsil.js';
 import { resolveLibraryNames } from './resolve-library-names.js';
 import { epsilNameOf } from './library-names.js';
@@ -62,15 +57,10 @@ import {
 import { signatureNotes } from './signature-notes.js';
 import {
   calleeSlotNamesResolver,
-  constantAssignmentError,
   describeError,
   errorCode,
   frameOrderOf,
-  isDeclarationStatement,
-  boxTopLevelStatement,
-  declaredByEarlierStatement,
   staticDiagnostics,
-  declaredVariableNames,
 } from './static-diagnostics.js';
 
 export interface ExecuteEpsilOptions {
@@ -81,6 +71,10 @@ export interface ExecuteEpsilOptions {
   parseLatex?: (latex: string) => MathJsonExpression;
   /** Opt into the host-state pragmas `#env`/`#navigator` (default `false`). */
   allowHostPragmas?: boolean;
+  /** Called after each top-level statement, with its source index and range. */
+  onStatement?: (statement: { index: number; expression: Expression; value: Expression; range: [number, number] }) => void;
+  /** Independent time limit for each statement, in milliseconds. */
+  statementTimeLimitMs?: number;
 }
 
 export interface ExecuteEpsilAsyncOptions extends ExecuteEpsilOptions {
@@ -157,11 +151,11 @@ export function sumVariantNames(ce: ComputeEngine): Record<string, string> {
 /** Source of {@link executeEpsil}'s batch ids. Monotone and never reused: the
  * ids are only ever compared for equality with the stamp an earlier install of
  * the same run left on the protocol registry (ruling P47). */
-let epsilBatchCounter = 0;
+
 
 /** A new batch id, for a run of `executeEpsil` or a check by `checkEpsil`. */
 export function nextEpsilBatchId(): number {
-  return ++epsilBatchCounter;
+  return nextProgramBatchId();
 }
 
 export function executeEpsil(
@@ -415,7 +409,8 @@ function* executeEpsilSteps(
   // (Set/Dictionary), statement blocks parse only in keyword position, and a
   // program whose only statement is a `do { … }` block is wrapped too, so
   // that block stays a nested scope (`Block(Block(…))`).
-  const statements = operator(ast) === 'Block' ? [...operands(ast)] : [ast];
+  const sourceStatements = operator(ast) === 'Program' ? [...operands(ast)] : [ast];
+  let statements = sourceStatements;
 
   // Where this program binds each of its names, for the "defined here" note a
   // signature error carries. Read from the raw AST, the only tree with source
@@ -443,7 +438,7 @@ function* executeEpsilSteps(
   // cancellation as the program's value; the flag only spares the advisory
   // pre-evaluation scans, which walk the whole program and have no business
   // running once the budget is gone.
-  let budgetExpired = false;
+  let budgetExpired: unknown;
   if (!diagnostics.some((x) => x.severity === 'error')) {
     try {
       // The pass writes into `diagnostics` as it goes (rather than returning
@@ -456,7 +451,7 @@ function* executeEpsilSteps(
       // (its per-statement catch keeps only ordinary boxing failures) — and
       // the pass is a report, so there is nothing to convert it into here.
       if (!isTimeoutCancellation(e)) throw e;
-      budgetExpired = true;
+      budgetExpired = e;
     }
   }
 
@@ -468,7 +463,7 @@ function* executeEpsilSteps(
   // is a guess.
   if (!budgetExpired && !diagnostics.some((x) => x.severity === 'error')) {
     const reportedShadows = new Set<string>();
-    for (const stmt of statements)
+    for (const stmt of sourceStatements)
       scanConstantShadowingParams(
         ce,
         stmt,
@@ -494,34 +489,22 @@ function* executeEpsilSteps(
   // because without these names it would report a call of a local function.
   const programNames = collectNonHeadSymbols(statements);
 
-  // SAME-SCOPE RE-DECLARATION (ruled 2026-09-05), the top level's runtime
-  // tier: a `let`/`const` of a name an earlier top-level `let`/`const` of
-  // THIS program declared evaluates to the `variable-redeclaration` error
-  // value instead of re-declaring — the value the same statement has inside
-  // a block (`canonicalBlock`, `library/control-structures.ts`) — and the
-  // later statements keep reading the first binding. The set is per program:
-  // a later program on the same engine (a re-run notebook cell, a REPL line)
-  // re-declares legally. The static pass reports the same statement
-  // (`variableRedeclarationDiagnostic`); this is the behavior it describes.
-  const declaredAtTopLevel = new Set<string>();
-
-  // The `function` statements of the program, installed before the first
-  // statement runs, so that a call before its definition resolves when its
-  // statement runs (see `prepareFunctionDeclarations`). Skipped when the
-  // host's time budget expired during the static pass: the first deadline
-  // check of the loop below records the cancellation.
-  const prepared = budgetExpired
-    ? {
-        preboxed: new Map<number, Expression>(),
-        scanned: new Set<number>(),
-      }
-    : prepareFunctionDeclarations(
-        ce,
-        statements,
-        source,
-        reportedUnknowns,
-        diagnostics
-      );
+  // Advisory scans read the raw source before canonicalization. They do not
+  // install heads or declarations; Program owns all binding preparation.
+  for (const stmt of sourceStatements)
+    scanProtocolPropertyCalls(ce, stmt, reportedUnknowns, diagnostics, stmt, source);
+  if (budgetExpired !== undefined)
+    return canceledPreparation(ce, budgetExpired, sourceStatements, source, defSites, diagnostics);
+  let program: Expression;
+  try { program = ce.box(ast); }
+  catch (error) {
+    if (!isTimeoutCancellation(error)) throw error;
+    return canceledPreparation(ce, error, sourceStatements, source, defSites, diagnostics);
+  }
+  const order = programSourceOrder(program);
+  statements = order.map((i) => sourceStatements[i]);
+  const savedStatementLimit = ce._epsilStatementTimeLimitMs;
+  ce._epsilStatementTimeLimitMs = options?.statementTimeLimitMs;
 
   // A NESTED statement (in a loop body, a function body, an `if` branch)
   // whose value is discarded and holds an error is reported as a
@@ -534,175 +517,40 @@ function* executeEpsilSteps(
   // statement can hold the same failure, which is then not reported again.
   // Each failure maps to the diagnostic that reports it.
   const nestedFailures = new Map<object, ParsingDiagnostic | undefined>();
-  ce._epsilStatementResultHook = nestedStatementReporter(
-    ce,
-    statements,
-    defSites,
-    diagnostics,
-    nestedFailures
-  );
-
-  for (let i = 0; i < statements.length; i++) {
+  const reportNested = nestedStatementReporter(ce, statements, defSites, diagnostics, nestedFailures);
+  ce._epsilStatementResultHook = (boxedStmt, result, i, error) => {
+    if (i === undefined) { reportNested(boxedStmt, result); return; }
     const stmt = statements[i];
-    nestedFailures.clear();
-    // "Errors are values": a runtime problem becomes an `["Error", …]` value.
-    // Most engine problems already flow back as `["Error", …]` boxed values;
-    // the try/catch is the backstop for the few paths that throw (e.g.
-    // reassigning a `const`, or a cap breach such as `timeLimit`/
-    // `iterationLimit`/`recursionLimit`, which throw a `CancellationError`).
-    let cancellation: CancellationCause | undefined;
-    // The name of the constant and the source range of the assignment, when
-    // the statement threw the engine's `ConstantAssignmentError`.
-    let constantName: string | undefined;
-    let constantSite: [number, number] | undefined;
-    valueRange = statementRange(stmt, source);
+    value = result;
+    const range = statementRange(stmt, source);
+    valueRange = range;
     valueStatement = stmt;
-    // The name a top-level `let` of this statement re-declares, if any (see
-    // `declaredAtTopLevel`).
-    let redeclared: string | undefined;
-    // The canonical form of the statement, which maps an error's frame back
-    // to the written operand of a reordered call (`canonicalOrderOf`).
-    let boxedStmt: Expression | undefined;
-
-    // Run BEFORE the statement is boxed: this scan reads the RAW ast and needs
-    // no value, and boxing an application INFERS a function signature for an
-    // undeclared head — `area(c)` types `area` as `function`, which is exactly
-    // the evidence `bindsACallable` reads to tell a genuine local function
-    // binding from a bare name. Scanning afterwards let every call defeat its
-    // own diagnostic. It also runs ahead of `scanUnknownFunctions` below, so a
-    // head that is both a protocol property and a fuzzy match for some
-    // operator gets the specific message rather than a "did you mean?" guess;
-    // the two share `reportedUnknowns` and this scan adds to it only when it
-    // actually reports, so every head it passes over reaches the other scan
-    // unchanged. A `function` statement that the preparation step boxed
-    // before the loop was scanned there, before its boxing.
-    if (!prepared.scanned.has(i))
-      scanProtocolPropertyCalls(
-        ce,
-        stmt,
-        reportedUnknowns,
-        diagnostics,
-        stmt,
-        source
-      );
-    // REDEFINITION DISCIPLINE — the statement-route marker, raised only for a
-    // statement that itself declares. BOTH registrations this loop causes
-    // (canonicalization inside `box`, then evaluation) happen inside the
-    // window, and the static pre-pass raises the same marker around its own
-    // canonicalization, so all three of a statement's registrations carry one
-    // stamp and none of them looks like a second declaration of the name it
-    // declares. A `ce.box(["DeclareType", …]).evaluate()` a host
-    // operator makes re-entrantly runs with the marker DOWN — either because
-    // its enclosing statement is not a declaration, or because the `Declare*`
-    // handler cleared it around its own body — so it stays unstamped and
-    // freely replaceable. Restored, not cleared, so a nested `executeEpsil`
-    // leaves the outer marker intact.
-    // See `docs/TYPE-SYSTEM.md`.
-    const enclosingRoute = ce._epsilDeclarationRoute;
-    ce._epsilDeclarationRoute = isDeclarationStatement(stmt);
-    try {
-      // The host's time budget is one deadline for the whole program (an
-      // enclosing `withTimeLimit` span). The engine only checks it inside
-      // long-running work — every few hundred evaluations, inside collection
-      // walks — so a program of many cheap statements would otherwise run to
-      // completion no matter how far past its deadline it is: the check
-      // between statements bounds the overrun to one statement.
-      checkDeadline(ce._deadlineFrame);
-      redeclared = topLevelRedeclaration(stmt, declaredAtTopLevel);
-      if (redeclared === undefined) {
-        // A `function` statement that the preparation step boxed (and so
-        // installed) is not boxed a second time: it is evaluated here, at its
-        // own turn.
-        boxedStmt =
-          prepared.preboxed.get(i) ??
-          boxTopLevelStatement(ce, statements, i, stmt, () => ce.box(stmt));
-        // The driver evaluates the statement: `evaluate()` in
-        // `executeEpsil`, `evaluateAsync()` in `executeEpsilAsync`.
-        value = yield boxedStmt;
-        // A program of several statements is a `Block`: a result that names a
-        // user function is the function literal, as at the end of a `Block`
-        // (`resolveEscapingLambda`). A program of one statement is that
-        // statement, whose value is read as it is.
-        if (i > 0 && i === statements.length - 1 && isSymbol(value))
-          value = resolveEscapingLambda(ce, value);
-        // The result of the program is a value: a finite comprehension is
-        // listed, as it is when it is an element of a list literal
-        // (`listedElement`, the same rules and the same budget of
-        // `ce.maxCollectionSize` elements). Without this, the result was the
-        // lazy `Comprehension` itself, which a host that reads `value.json`
-        // receives as the recipe, not the elements. An infinite comprehension,
-        // or one whose elements cannot be computed, stays as it is. Only the
-        // last statement is listed: the value of another statement is not
-        // returned.
-        //
-        // The nested-statement hook stays on while the listing evaluates the
-        // clauses and the body, so a failure in a body statement whose value
-        // is discarded is reported as a diagnostic. The problems of the last
-        // statement stay in its value and are not reported as diagnostics:
-        // a failure that the listed value holds (a failed cell of a clause
-        // domain, `[x for x in [1, g("a"), 3]]`) is removed from the
-        // diagnostics that the hook added during the listing.
-        if (i === statements.length - 1 && isFunction(value, 'Comprehension')) {
-          const reportedBefore = new Set(nestedFailures.keys());
-          value = listedElement(ce, value, {
-            used: 0,
-            max: ce.maxCollectionSize,
-          });
-          const listed = value;
-          const held = new Set<object>();
-          walkValue({ error: undefined }, () => {
-            for (const error of listed.errors) held.add(failureKey(error));
-          });
-          for (const [failure, diagnostic] of nestedFailures) {
-            if (reportedBefore.has(failure) || !held.has(failure)) continue;
-            const k = diagnostic ? diagnostics.indexOf(diagnostic) : -1;
-            if (k >= 0) diagnostics.splice(k, 1);
-          }
-        }
-      } else value = ce.error(['variable-redeclaration', redeclared]);
-      // An error value narrows the anchor to its breadcrumb's innermost
-      // source-mapped frame, so a host that reports the error points at the
-      // offending subexpression, not the whole statement.
-      const errors = value.errors;
-      if (errors.length > 0)
-        valueRange = narrowErrorRange(
-          ce,
-          errors[0].json,
-          stmt,
-          valueRange,
-          boxedStmt
-        );
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      cancellation = cancellationCause(e);
-      constantName = constantAssignmentName(e);
-      constantSite = constantAssignmentSite(e);
-      // An expired time or step budget ends the program (see the `break`
-      // after the walks below), but the deadline stays expired. Every box
-      // operation checks the deadline once every 1024 calls
-      // (`boxFunctionInternal()`), so the code that boxes the error value of
-      // this statement, the walks of that value and the work after the loop
-      // would throw the cancellation to the host at an unpredictable point.
-      // The frame is removed for the rest of the run;
-      // `executeEpsilRun()` puts it back when the run ends.
-      if (cancellation === 'timeout' || cancellation === 'step-budget')
-        ce._deadlineFrame = undefined;
-      // A cancellation (cap breach) carries a machine-readable `cause` as a
-      // second Error operand — additively, so the message operand (which hosts
-      // may still string-match, e.g. "Operation canceled" /
-      // "Recursion limit exceeded") is unchanged. An assignment to a constant
-      // becomes an error value with the code `constant-assignment`. Other
-      // throws keep the single-operand shape.
-      value =
-        cancellation !== undefined
-          ? ce.box(['Error', { str: message }, { str: cancellation }])
-          : constantName !== undefined
-            ? ce.box(constantAssignmentError(constantName))
-            : ce.box(['Error', { str: message }]);
-    } finally {
-      ce._epsilDeclarationRoute = enclosingRoute;
+    const cancellation = cancellationCause(error);
+    const constantSite = constantAssignmentSite(error);
+    const declarationCode = isFunction(value, 'Error') && isFunction(value.op1, 'ErrorCode')
+      ? value.op1 : undefined;
+    const redeclared = declarationCode !== undefined &&
+      isString(declarationCode.op1) && declarationCode.op1.string === 'variable-redeclaration' &&
+      isString(declarationCode.op2) ? declarationCode.op2.string : undefined;
+    const walkFailure = { error: undefined as unknown };
+    if (i === statements.length - 1 && isFunction(value, 'Comprehension')) {
+      const reportedBefore = new Set(nestedFailures.keys());
+      value = listedElement(ce, value, { used: 0, max: ce.maxCollectionSize });
+      const held = new Set<object>();
+      walkValue(walkFailure, () => {
+        for (const error of value.errors) held.add(failureKey(error));
+      });
+      for (const [failure, diagnostic] of nestedFailures) {
+        if (reportedBefore.has(failure) || !held.has(failure)) continue;
+        const k = diagnostic ? diagnostics.indexOf(diagnostic) : -1;
+        if (k >= 0) diagnostics.splice(k, 1);
+      }
     }
-
+    walkValue(walkFailure, () => {
+      const heldErrors = value.errors;
+      if (heldErrors.length > 0)
+        valueRange = narrowErrorRange(ce, heldErrors[0].json, stmt, range, boxedStmt);
+    });
     // A runtime problem in a NON-final statement would otherwise vanish —
     // only the last statement's value is returned — so surface it as a
     // diagnostic (e.g. `xs[2] = 9`, an indexed assignment the engine rejects,
@@ -723,7 +571,6 @@ function* executeEpsilSteps(
     // A walk that throws is reported as a diagnostic of the statement
     // (`reportWalkFailure`), and the advisory result it was computing is
     // dropped.
-    const walkFailure = { error: undefined as unknown };
     const markerError = walkValue(walkFailure, () => value.errors[0]);
     const markerCode =
       isFunction(markerError, 'Error') &&
@@ -743,7 +590,21 @@ function* executeEpsilSteps(
       isString(markerCode[1])
         ? markerCode[1].string
         : undefined;
-    const reportedStatically =
+    const refusalCode = isFunction(markerError, 'Error')
+      ? isString(markerError.op1) ? markerError.op1.string
+        : isFunction(markerError.op1, 'ErrorCode') && isString(markerError.op1.op1)
+          ? markerError.op1.op1.string : undefined
+      : undefined;
+    const reportedStatically = walkValue(walkFailure, () =>
+      // A declaration refused during preparation and again by its ordinary
+      // runtime owner is one problem at the same authored statement.
+      (['Declare', 'DefineFunction'].includes(operator(stmt)) && markerError !== undefined &&
+        (['variable-redeclaration', 'function-redefinition', 'invalid-clause-definition'].includes(refusalCode ?? '') ||
+          (isFunction(boxedStmt, 'Declare') && isDeclarationTypeErrorValue(markerError, boxedStmt.op1))) &&
+        diagnostics.some((d) =>
+          (d.message[0] === refusalCode ||
+            (d.message[0] === 'static-type-error' && d.message[3] === refusalCode)) &&
+          d.range[0] === range[0] && d.range[1] === range[1])) ||
       (redeclared !== undefined &&
         diagnostics.some(
           (d) =>
@@ -796,19 +657,6 @@ function* executeEpsilSteps(
             d.range[0] === constantSite?.[0] &&
             d.range[1] === constantSite?.[1]
         )) ||
-      // An assignment to a name that an earlier `let` declares, refused
-      // because that declaration was refused: the declaration is the one
-      // problem (`declaredByEarlierStatement()`).
-      (isFunction(markerError, 'Error') &&
-        isFunction(markerError.op1, 'ErrorCode') &&
-        isString(markerError.op1.op1) &&
-        markerError.op1.op1.string === 'assignment-to-undeclared-variable' &&
-        isString(markerError.op1.op2) &&
-        declaredByEarlierStatement(
-          statements,
-          markerError.op1.op2.string,
-          i
-        )) ||
       // A use of a local before it has a value: see
       // `reportedAsBlockLocalError()`.
       (markerError !== undefined &&
@@ -816,7 +664,7 @@ function* executeEpsilSteps(
           markerError,
           diagnostics,
           statementRange(stmt, source)
-        ));
+        ))) ?? false;
     if (i < statements.length - 1 && !reportedStatically) {
       walkValue(walkFailure, () => {
         // A `Map` or `Filter` view that holds no error can still give one
@@ -839,63 +687,20 @@ function* executeEpsilSteps(
       });
     }
 
-    // An expired TIME budget ends the program: the deadline belongs to the
-    // enclosing span, not to this statement, so it stays expired — every later
-    // statement would fail the same check and none of them can run. Stopping
-    // here makes the cancellation the program's result: `value` is the
-    // `["Error", "Timeout exceeded", "timeout"]` of the statement that hit
-    // it and `valueRange` points at that statement (plus the
-    // `evaluation-canceled` diagnostic above when it was not the last one).
-    // The count-based caps (`iterationLimit`, `recursionLimit`) are
-    // per-construct configuration, not a shared budget: the next statement
-    // gets a fresh allowance, so a breach there is an ordinary error value
-    // and the program continues (see `docs/TIMEOUT-MODEL.md` §9).
-    if (cancellation === 'timeout' || cancellation === 'step-budget') {
-      reportWalkFailure(ce, walkFailure, stmt, source, defSites, diagnostics);
-      break;
-    }
-
-    // "Did you mean?" — calling an unknown function stays *silently* symbolic
-    // (an inert `["Quartile", …]` value), so the user never learns it did not
-    // run. Walk the result for function applications whose head is not a known
-    // operator and whose name is close to one, and emit a `warning`. The
-    // returned value is unchanged (still symbolic); this is advisory. Source
-    // ranges are lost from the evaluated tree, so the *statement's* range is
-    // attached.
-    walkValue(walkFailure, () =>
-      scanUnknownFunctions(
-        ce,
-        value.json,
-        reportedUnknowns,
-        diagnostics,
-        stmt,
-        source
-      )
-    );
-    // An unknown call that does not reach the result is not in the walk
-    // above: the source of a loop (`for i in rnage(1, 3) { … }` runs zero
-    // times and gives `Nothing`), a condition, a function body, a branch that
-    // was not taken. The canonical form of the statement holds every call of
-    // the statement, so it is walked too. `reportedUnknowns` keeps one
-    // report for each name, so a call in the result and in the canonical
-    // form is reported once.
-    if (boxedStmt !== undefined && programNames !== undefined) {
-      const canonical = boxedStmt;
-      walkValue(walkFailure, () =>
-        scanUnknownFunctions(
-          ce,
-          canonical.json,
-          reportedUnknowns,
-          diagnostics,
-          stmt,
-          source,
-          programNames
-        )
-      );
-    }
+    walkValue(walkFailure, () => scanUnknownFunctions(ce, value.json, reportedUnknowns, diagnostics, stmt, source));
+    if (programNames !== undefined)
+      walkValue(walkFailure, () => scanUnknownFunctions(ce, boxedStmt.json, reportedUnknowns, diagnostics, stmt, source, programNames));
     reportWalkFailure(ce, walkFailure, stmt, source, defSites, diagnostics);
+    options?.onStatement?.({ index: order[i], expression: boxedStmt, value, range: statementRange(stmt, source) });
+    nestedFailures.clear();
+  };
+  try {
+    const result = yield program;
+    // The shared Program evaluator determines the value (declarations and
+    // assignments as final statements produce Nothing, as in a Block).
+    if (!isFunction(result, 'Comprehension')) value = result;
   }
-
+  finally { ce._epsilStatementTimeLimitMs = savedStatementLimit; }
   ce._epsilStatementResultHook = enclosingStatementHook;
 
   // PENDING CONFORMANCES (protocols design P3). A conformance declared without
@@ -991,6 +796,24 @@ function* executeEpsilSteps(
   };
 }
 
+/** A preparation timeout has no statement value to report through the evaluator. */
+function canceledPreparation(
+  ce: ComputeEngine, error: unknown, statements: readonly MathJsonExpression[], source: string,
+  sites: ReturnType<typeof definitionSites>, diagnostics: ParsingDiagnostic[]
+): ExecuteEpsilResult {
+  const saved = ce._deadlineFrame;
+  ce._deadlineFrame = undefined;
+  try {
+    const value = ce._fn('Error', [ce.string(error instanceof Error ? error.message : String(error)), ce.string(budgetCauseOf(error))]);
+    const index = programInterruption(error)?.index ?? 0;
+    const statement = statements[index];
+    const valueRange: [number, number] = statement === undefined ? [0, source.length] : statementRange(statement, source);
+    if (statement !== undefined && index < statements.length - 1)
+      diagnostics.push(errorValueDiagnostic(ce, value, statement, valueRange, sites, cancellationCause(error)));
+    return { value, diagnostics, valueRange };
+  } finally { ce._deadlineFrame = saved; }
+}
+
 /**
  * The result of `walk`, a walk of the value of a statement that runs outside
  * the per-statement `try` of {@link executeEpsil}, or `undefined` when the
@@ -1044,741 +867,6 @@ function reportWalkFailure(
   const key = JSON.stringify([diagnostic.message, diagnostic.range]);
   if (!diagnostics.some((d) => JSON.stringify([d.message, d.range]) === key))
     diagnostics.push(diagnostic);
-}
-
-/**
- * A compact rendering of an error value's `ErrorTrace` breadcrumb —
- * `in Ln argument 1, in Add argument 2` — or `''` when it carries none.
- *
- * The breadcrumb is the LAST operand of an `["Error", …]` value and is
- * identified by its `ErrorTrace` head, never by position (engine design §2a):
- * `["ErrorTrace", ["ErrorFrame", "'Ln'", 1], ["ErrorFrame", "'Add'", 2]]`,
- * innermost frame first. Read here from MathJSON rather than through an
- * engine helper: `src/epsil` never statically imports the engine.
- *
- * The same breadcrumb also carries `["ErrorBroadcast", "'f'", index, length]`
- * entries — a user function with scalar parameters is auto-broadcast over a
- * collection argument, and a failure inside one element is unreadable without
- * saying so.
- */
-/**
- * The first name a top-level `Declare` statement declares that `declared`
- * already holds, or `undefined` after adding every name the statement
- * declares to `declared` (`declaredVariableNames`, shared with the static
- * pass). The statement is accepted or refused whole: a refused destructuring
- * `let` adds none of its leaves.
- */
-function topLevelRedeclaration(
-  statement: MathJsonExpression,
-  declared: Set<string>
-): string | undefined {
-  const names = declaredVariableNames(statement);
-  const repeated = names.find((name) => declared.has(name));
-  if (repeated !== undefined) return repeated;
-  for (const name of names) declared.add(name);
-  return undefined;
-}
-
-/**
- * DECLARATION PREPARATION: install the `function` statements of the program
- * before its first statement runs.
- *
- * A function declaration is available in its whole statement list, on every
- * route: in `let a = String(g(3)); function g(k) { k^2 }`, the call `g(3)`
- * resolves when its statement runs, and `a` is `"9"`. The whole-block
- * interpreter does this because the `DefineFunction` canonical handler
- * installs the clause when the block is canonicalized, before the first
- * statement runs (`library/core.ts`), and the compiler moves the definitions
- * to the front of the statement list. This runner boxes one statement at a
- * time, after the previous ones have run, so without this step a call before
- * the definition found no function. An assignment of a function literal
- * (`g = (k) => k^2`) is not a declaration: it takes effect when it runs.
- *
- * Which statements are declarations is the shared rule
- * `isHoistedFunctionDefinition()` (`library/control-structures.ts`). A
- * statement whose name a `type` statement of this program declares (the
- * name of a `DeclareType` or `DeclareSumType`, or a variant of a sum type)
- * is not prepared either: it is the smart constructor of that type, and it
- * can only be defined after the type statement has run. Nor is a statement
- * whose name an earlier statement of the program gives a value (an
- * assignment, or a `let`/`const` with an initial value, `writtenNames()`):
- * the definition then depends on that value (it adds a clause to a function
- * the assignment installs, it is refused on a name that holds a number, it
- * decides whether the assignment is accepted), so it runs in order. A `let`
- * with no value (`let g: (integer) -> integer`) does not prevent it. Nor is
- * a statement after the first statement that declares a type, a protocol or
- * a conformance: its annotations can name that type, which does not exist
- * before its statement runs. Nor is a statement whose name has another
- * `function` statement that the shared rule does not accept (a generic
- * definition, for example): that statement takes effect when it runs, and
- * the clauses of a name are prepared together or not at all. Nor is a
- * statement whose body uses a variable for which the preparation cannot
- * give the body the binding that the statement would see in order
- * (`isSettledBefore()`).
- *
- * Only the functions that the program can call before their definition are
- * prepared: a function that a statement other than a function definition
- * names, before the (last) `function` statement of that function, either
- * directly or through the bodies of the functions it names. Each other
- * function is installed at its turn, as it was before this step existed.
- *
- * For each such statement, in program order:
- *
- * 1. The names that the statements before it declare (each `let`/`const`
- *    target, with its static type, `staticDeclarations()`, and each target
- *    of an assignment, with the type of its first assigned value when that
- *    value is a closed literal, `closedLiteralType()`, as the assignment
- *    gives it when it runs) and that the program scope does not bind yet are
- *    declared in the program scope, valueless and inferred, as the block
- *    hoist does (`canonicalBlock()`). The body of the function is then
- *    canonicalized as it is when the statement is reached in order: a write
- *    to the target of an earlier `let` stays a `scope` write, a read of `i`
- *    after `let i = 2` reads the variable and not the imaginary unit, and
- *    `let g: (integer) -> integer` before `function g(k)` gives the binding
- *    the declared type, as the block hoist does. The clause itself is
- *    installed with its inferred signature until the `let` statement runs:
- *    the `Declare` handler then drops the early clause and, when the `let`
- *    has no value, installs it again at once under the declared signature
- *    (`CLAUSE_INSTALLED_AHEAD`, `library/core.ts`), so a call between the
- *    `let` and the `function` statement is resolved and checked against the
- *    declared signature. The target of an assignment that an enclosing
- *    scope declares is not declared: the assignment writes that binding. A
- *    later `let` upgrades the valueless binding in place, as it upgrades an
- *    auto-declared one.
- *
- *    One binding that the program scope holds is declared again: the
- *    binding that a statement of an earlier program on the same engine made
- *    for the name of a prepared function, when a `let`/`const` of this
- *    program declares that name before the `function` statement. In order,
- *    that `let` replaces the binding, and the `function` statement is then
- *    boxed against the new binding. The preparation does the same, so the
- *    clause gets the parameter types of the new declaration: after a first
- *    program `let f: (integer) -> integer`, `function f(n) { 2*n }`, a
- *    second program `let f: (real) -> real`, `function f(n) { 2*n }`,
- *    `f(2.5)` gives `5`, as on a new engine. A clause boxed against the old
- *    binding would get the parameter type `integer` of the old declaration
- *    (`ascribeDeclaredParameterTypes()`, `library/core.ts`), and the call
- *    would find no matching clause. A binding of this kind that an enclosing
- *    scope also defines is not removed by step 3.
- * 2. The statement is boxed, with the declaration-route marker raised as the
- *    statement loop raises it, which installs the clause. The loop evaluates
- *    the boxed statement at its turn and does not box it again. A boxing that
- *    throws leaves the statement to the loop, which boxes it at its turn and
- *    reports the error there. An expired time budget ends the preparation:
- *    the first deadline check of the loop records the cancellation.
- *
- *    A known difference from a program that runs in order: when the program
- *    stops before a prepared statement runs (a statement before it uses up
- *    the time or step budget, and the loop stops), the clause of the
- *    prepared statement stays installed, so the function is defined after
- *    the program although its statement did not run. The binding is not
- *    removed: the clause can have been added to a function that an earlier
- *    program defined, and removing the binding would remove that function
- *    too. A binding of an earlier program that step 1 declared again (a
- *    `let` of the name comes before the `function` statement) is replaced
- *    at the start of the program, also when the program stops before that
- *    `let` runs: the function of the earlier program is then gone, and the
- *    name holds the prepared clause. When the preparation does not box the
- *    statement (its time budget ran out, or the boxing threw), it puts that
- *    binding back.
- * 3. The bindings that step 1 made for a name that an enclosing scope
- *    defines (a library constant such as `i`, `e` or `Pi`, another library
- *    definition, a binding of a host scope around the program scope) are
- *    removed, so that a statement before the `let` of that name still reads
- *    the outer definition, as it does when the program runs in order (and,
- *    for a library constant, as on the block route). Step 1 still declares
- *    these names, so that the body boxed in step 2 binds the variable and
- *    not the outer definition; the body reads the variable once the `let`
- *    has run and declared it again. A call of the function made before that
- *    `let` runs reads the outer definition in the body, where the block
- *    route gives the `read-before-declaration` error: the top level of this
- *    runner has no binding that is declared and not yet initialized.
- *
- * `scanProtocolPropertyCalls` runs on a prepared statement before it is
- * boxed, for the reason the statement loop gives, and the loop does not scan
- * it again (`scanned`). The names that the statements before it declare are
- * passed to the scan as bound: their values are not assigned yet, so the
- * scan cannot see that one of them holds a function.
- *
- * Provenance: `docs/plans/2026-10-21-function-declaration-hoisting.md`,
- * section B.
- */
-function prepareFunctionDeclarations(
-  ce: ComputeEngine,
-  statements: ReadonlyArray<MathJsonExpression>,
-  source: string,
-  reportedUnknowns: Set<string>,
-  diagnostics: ParsingDiagnostic[]
-): {
-  /** The boxed `function` statements, keyed by statement index. */
-  preboxed: Map<number, Expression>;
-  /** The statements that `scanProtocolPropertyCalls` scanned already. */
-  scanned: Set<number>;
-} {
-  const preboxed = new Map<number, Expression>();
-  const scanned = new Set<number>();
-  if (!statements.some((s) => operator(s) === 'DefineFunction'))
-    return { preboxed, scanned };
-
-  // The names that a `type` statement of this program declares: the type,
-  // and each variant of a sum type (`["Tuple", {str: variant}, payload]`).
-  const typeNames = new Set<string>();
-  for (const s of statements) {
-    const head = operator(s);
-    if (head !== 'DeclareType' && head !== 'DeclareSumType') continue;
-    const name = symbol(operand(s, 1));
-    if (name) typeNames.add(name);
-    if (head === 'DeclareSumType')
-      for (const variant of operands(s).slice(1)) {
-        if (operator(variant) !== 'Tuple') continue;
-        const variantName = stringValue(operand(variant, 1));
-        if (variantName) typeNames.add(variantName);
-      }
-  }
-
-  // The statements boxed without canonicalization, which binds nothing and
-  // declares nothing: the shared rules read their structure only.
-  const raw = statements.map((s) => {
-    try {
-      return ce.box(s, { form: 'raw' });
-    } catch {
-      return undefined;
-    }
-  });
-
-  // The `function` statements of each name, by statement index. The clauses
-  // of a multi-clause function are prepared together, or not at all, so that
-  // they are installed in their written order.
-  const clauses = new Map<string, number[]>();
-  // The names that have a `DefineFunction` statement that is not prepared:
-  // a generic definition, a clause that is not a `Function` literal, or a
-  // statement whose raw boxing threw. Such a statement takes effect only
-  // when it runs, so no other clause of its name is prepared: a later clause
-  // installed ahead of an earlier generic definition would make the generic
-  // definition refused, where in written order the later clause is refused.
-  const notHoisted = new Set<string>();
-  statements.forEach((s, j) => {
-    if (operator(s) !== 'DefineFunction') return;
-    const name = symbol(operand(s, 1));
-    if (!name) return;
-    const candidate = raw[j];
-    if (
-      candidate === undefined ||
-      !isHoistedFunctionDefinition(ce, candidate)
-    ) {
-      notHoisted.add(name);
-      return;
-    }
-    const list = clauses.get(name);
-    if (list === undefined) clauses.set(name, [j]);
-    else list.push(j);
-  });
-
-  // For each name, the statements that declare it or write it, read in one
-  // pass over the program, each statement once.
-  const writes = statementWrites(ce, statements, raw);
-  const writesBefore = (n: string, j: number): NameWrite[] =>
-    (writes.get(n) ?? []).filter((w) => w.index < j);
-
-  // The names whose statements are not prepared.
-  const excluded = new Set<string>();
-  // The index of the first statement that declares a type, a protocol or a
-  // conformance. A `function` statement after it is not prepared: its
-  // annotations can name a type that this statement declares, and the type
-  // does not exist before the statement runs.
-  const firstTypeStatement = statements.findIndex(
-    (s) => isDeclarationStatement(s) && operator(s) !== 'DefineFunction'
-  );
-  for (const [name, indices] of clauses)
-    if (
-      notHoisted.has(name) ||
-      typeNames.has(name) ||
-      indices.some(
-        (j) =>
-          (firstTypeStatement >= 0 && j > firstTypeStatement) ||
-          writesBefore(name, j).some((w) => w.valued)
-      )
-    )
-      excluded.add(name);
-
-  // The names to prepare: the functions that a statement before their last
-  // `function` statement can call when it runs. A statement other than a
-  // function definition can call each function it names, each function that
-  // the `function` statements of those functions name, and so on
-  // (`reach`). A use in the body of a function defined earlier is not a call
-  // when its statement runs, and does not count by itself.
-  //
-  // The other functions are installed at their turn, as before this step
-  // existed: preparing them would change nothing that the program can
-  // observe, and preparing only some functions of a program installs them
-  // in another order than the written one. That order shows when a body
-  // calls a function with the wrong arguments: the error is the value of the
-  // definition that comes second.
-  const namesOf = statements.map((s) => namesIn(s));
-  const reach = (k: number): Set<string> => {
-    const found = new Set<string>();
-    const pending = [...namesOf[k]];
-    while (pending.length > 0) {
-      const n = pending.pop()!;
-      if (found.has(n)) continue;
-      found.add(n);
-      for (const c of clauses.get(n) ?? []) pending.push(...namesOf[c]);
-    }
-    return found;
-  };
-  // True when a statement before the statement at index `at` (other than a
-  // function definition) can call the function `name` when it runs.
-  const canCallBefore = (name: string, at: number): boolean =>
-    statements.some(
-      (s, k) => k < at && operator(s) !== 'DefineFunction' && reach(k).has(name)
-    );
-  const prepared = new Set<string>();
-  statements.forEach((s, k) => {
-    if (operator(s) === 'DefineFunction') return;
-    for (const n of reach(k)) {
-      const indices = clauses.get(n);
-      if (
-        indices !== undefined &&
-        !excluded.has(n) &&
-        k < indices[indices.length - 1]
-      )
-        prepared.add(n);
-    }
-  });
-
-  // A `function` statement whose body uses a variable that is not settled
-  // before it (`isSettledBefore()`) is not prepared either: the binding that
-  // the preparation would give the body differs from the binding that the
-  // statement sees when it runs in order. The names that the program defines
-  // with `function` statements and the names that the function binds for
-  // its own body (its parameters and the targets of the `let` statements of
-  // its body, `functionLocalNames()`) are not checked: a use of one of these
-  // in the body does not read a variable of the program. Read before any
-  // statement is prepared, while the program scope holds only the bindings
-  // made before the program runs.
-  const scope = ce.context.lexicalScope;
-  try {
-    for (const name of prepared) {
-      checkDeadline(ce._deadlineFrame);
-      for (const j of clauses.get(name)!) {
-        const own = functionLocalNames(statements[j]);
-        const unsettled = [...namesIn(statements[j])].some(
-          (n) =>
-            !own.has(n) &&
-            !clauses.has(n) &&
-            !notHoisted.has(n) &&
-            !isSettledBefore(scope, n, writesBefore(n, j))
-        );
-        if (unsettled) {
-          prepared.delete(name);
-          break;
-        }
-      }
-    }
-  } catch (e) {
-    // Nothing is prepared yet: the first deadline check of the statement
-    // loop records the cancellation.
-    if (isTimeoutCancellation(e)) return { preboxed, scanned };
-    throw e;
-  }
-  if (prepared.size === 0) return { preboxed, scanned };
-  const isOwnClause = (k: number, name: string) =>
-    clauses.get(name)!.includes(k);
-  // The names of the prepared functions whose binding in the program scope
-  // a statement of an earlier program on the same engine made. Step 1
-  // declares such a name again at the first prepared statement that comes
-  // after a `let`/`const` of the name, as that `let` does when the program
-  // runs in order, and removes it from this set: the binding that step 1
-  // made is the one that the later statements see. Such a name is in
-  // `replaced` from then on. An enclosing scope can also define it (a host
-  // binding of the same name), but the binding of the earlier program
-  // already hides that definition from this program: a statement before
-  // the `let` reads the binding of the program scope, not the outer
-  // definition. So step 1 gives it no union with the outer type, and step 3
-  // does not remove it, which would remove the prepared clause too.
-  const previousRun = new Set<string>();
-  const replaced = new Set<string>();
-  for (const name of prepared) {
-    const existing = scope.bindings.get(name);
-    if (
-      existing !== undefined &&
-      (existing as { _declaredByStatement?: boolean })._declaredByStatement ===
-        true
-    )
-      previousRun.add(name);
-  }
-
-  for (let j = 0; j < statements.length; j++) {
-    const name = symbol(operand(statements[j], 1));
-    if (!name || !prepared.has(name) || !isOwnClause(j, name)) continue;
-
-    // Step 1: the names that the statements before `j` declare. A name that
-    // a `let`/`const` declares has the static type of the last such
-    // statement that gives one (as `staticDeclarations()` reads a list of
-    // statements); a name that only assignments write and that no scope
-    // defines gets the static type of the first assignment.
-    const made: string[] = [];
-    const bound = new Set<string>();
-    // The bindings of an earlier program that this step replaces, by name.
-    // When the statement is not boxed below (the time budget ran out, or the
-    // boxing threw), no clause is installed on the new bindings, and each
-    // one is put back: the statement then runs in order, and its `let`
-    // replaces the binding at its turn. Without this, a program stopped by
-    // its budget at this point removed the function of the earlier program.
-    const replacedHere = new Map<
-      string,
-      NonNullable<ReturnType<typeof scope.bindings.get>>
-    >();
-    for (const [n, all] of writes) {
-      const before = all.filter((w) => w.index < j && w.kind !== 'other');
-      if (before.length === 0) continue;
-      bound.add(n);
-      const lets = before.filter((w) => w.kind === 'let');
-      if (lets.length > 0) {
-        if (n === 'Nothing') continue;
-        const existing = scope.bindings.get(n);
-        if (existing !== undefined) {
-          if (!previousRun.delete(n)) continue;
-          replaced.add(n);
-          replacedHere.set(n, existing);
-        }
-        let type: Type | undefined = undefined;
-        for (const w of lets) type = w.type ?? type;
-        // A name that an enclosing scope defines (the constant `i`, a host
-        // binding) has two bindings for the body: a call of the function
-        // made before the first `let` of the name reads the outer
-        // definition (step 3), and a call made after it reads the variable.
-        // When a statement before that `let` can call the function, the
-        // binding gets the union of the two types, so that the signature
-        // that the body infers holds the value of each call. In
-        // `let a = g(); let i = 2; function g() { i^2 }`, the first call
-        // gives `-1`, and the result type of `g` is not `integer<0..>`. A
-        // binding with no static type, or the type `unknown`, admits both
-        // values already, and is not changed. The union is a real union
-        // (`reduceType()`), not the inference join `widen()`: the join
-        // drops a `nothing` arm (a host binding that holds `Nothing`) and
-        // an `unknown` operand, and the type would then not hold the value
-        // of the early call. An outer type that is `unknown`, or that is
-        // not found, makes the binding `unknown`, which admits every value.
-        if (
-          type !== undefined &&
-          type !== 'unknown' &&
-          !replaced.has(n) &&
-          hasOuterDefinition(scope, n) &&
-          canCallBefore(name, lets[0].index)
-        ) {
-          const outer = outerDefinitionType(ce, n);
-          type =
-            outer === undefined || outer === 'unknown'
-              ? 'unknown'
-              : reduceType({ kind: 'union', types: [type, outer] });
-        }
-        ce._declareSymbolValue(
-          n,
-          { type: type ?? 'unknown', inferred: true },
-          scope
-        );
-      } else {
-        if (
-          n === 'Nothing' ||
-          n === '_' ||
-          ce.lookupDefinition(n) !== undefined
-        )
-          continue;
-        ce._declareSymbolValue(
-          n,
-          { type: before[0].type ?? 'unknown', inferred: true },
-          scope
-        );
-      }
-      made.push(n);
-    }
-
-    scanProtocolPropertyCalls(
-      ce,
-      statements[j],
-      reportedUnknowns,
-      diagnostics,
-      statements[j],
-      source,
-      bound
-    );
-    scanned.add(j);
-
-    // Step 2: box the statement, which installs the clause.
-    let expired = false;
-    const enclosingRoute = ce._epsilDeclarationRoute;
-    ce._epsilDeclarationRoute = isDeclarationStatement(statements[j]);
-    try {
-      checkDeadline(ce._deadlineFrame);
-      preboxed.set(j, ce.box(statements[j]));
-    } catch (e) {
-      // Any other failure leaves the statement to the loop.
-      expired = isTimeoutCancellation(e);
-    } finally {
-      ce._epsilDeclarationRoute = enclosingRoute;
-      if (!preboxed.has(j))
-        for (const [n, previous] of replacedHere) {
-          scope.bindings.set(n, previous);
-          replaced.delete(n);
-          previousRun.add(n);
-        }
-      // Step 3: a statement before the `let` of a name that an enclosing
-      // scope defines (a library constant, a library definition, a host
-      // binding) reads that definition.
-      for (const n of made)
-        if (replacedHere.has(n) && !preboxed.has(j)) continue;
-        else if (!replaced.has(n) && hasOuterDefinition(scope, n))
-          ce.undeclare(n);
-    }
-    if (expired) break;
-  }
-  return { preboxed, scanned };
-}
-
-/** True when a scope that encloses `scope` binds `name`: the library scope
- * (a constant such as `i`, or any other library definition), or a scope of
- * the host around the program scope. */
-function hasOuterDefinition(
-  scope: ComputeEngine['context']['lexicalScope'],
-  name: string
-): boolean {
-  // The parent of the root scope is `null` or absent.
-  for (let s = scope.parent; s; s = s.parent)
-    if (s.bindings.has(name)) return true;
-  return false;
-}
-
-/** The type of a read of `name` through the definition that a scope around
- * the program scope gives it: the type of a value binding (`imaginary` for
- * the constant `i`), or the signature of an operator. `undefined` when no
- * definition is found. */
-function outerDefinitionType(
-  ce: ComputeEngine,
-  name: string
-): Type | undefined {
-  const def = ce.lookupDefinition(name);
-  if (isValueDef(def)) return def.value.type.type;
-  if (isOperatorDef(def)) return def.operator.signature.type;
-  return undefined;
-}
-
-/** A top-level statement of the program that declares or writes a name
- * (`statementWrites()`). */
-type NameWrite = {
-  /** The index of the statement in the program. */
-  index: number;
-  /** `let`: a `let`/`const` of the name, with or without a value. `assign`:
-   * an assignment to the name. `other`: a statement whose boxing with
-   * `{ form: 'raw' }` failed and that gives the name a value
-   * (`writtenNames()`); nothing else is read from it. */
-  kind: 'let' | 'assign' | 'other';
-  /** True when the statement gives the name a value (`writtenNames()`). */
-  valued: boolean;
-  /** The static type that the statement gives the name: the declared type,
-   * or the type of a closed literal value, of a `let`/`const`
-   * (`staticDeclarations()`), or the type of a closed literal value that an
-   * assignment gives to a single name (`closedLiteralType()`). */
-  type: Type | undefined;
-  /** True when the statement gives the name a static picture: a binding
-   * that the preparation can declare before the statement runs and that
-   * boxes a function body as the binding that the statement makes does.
-   * That is a `let`/`const` with a declared type, with a closed literal
-   * value, or with neither a type nor a value (both bindings are then a
-   * valueless `unknown` variable), or an assignment of a closed literal to
-   * a single name. */
-  static: boolean;
-};
-
-/**
- * For each name, the top-level statements of the program that declare it
- * (a `let`/`const`, with or without a value) or write it (an assignment), in
- * program order, one entry per statement. Each statement is read once.
- * `raw` holds the statements boxed with `{ form: 'raw' }`; a statement whose
- * boxing failed contributes only its `writtenNames()`, as `other` entries.
- */
-function statementWrites(
-  ce: ComputeEngine,
-  statements: ReadonlyArray<MathJsonExpression>,
-  raw: ReadonlyArray<Expression | undefined>
-): Map<string, NameWrite[]> {
-  const writes = new Map<string, NameWrite[]>();
-  const add = (name: string, write: NameWrite): void => {
-    const list = writes.get(name);
-    if (list === undefined) writes.set(name, [write]);
-    else if (list[list.length - 1].index !== write.index) list.push(write);
-  };
-  statements.forEach((statement, index) => {
-    const valued = new Set(writtenNames(statement, raw[index]));
-    const s = raw[index];
-    if (s === undefined) {
-      for (const n of valued)
-        add(n, {
-          index,
-          kind: 'other',
-          valued: true,
-          type: undefined,
-          static: false,
-        });
-      return;
-    }
-    if (isFunction(s, 'Assign')) {
-      const targets = statementDeclaredNames(s);
-      // The type of the value is the type of the target only when the
-      // target is a single name, not a destructuring pattern.
-      const type =
-        targets.length === 1 && isSymbol(s.ops[0])
-          ? closedLiteralType(ce, s.ops[1])
-          : undefined;
-      for (const n of targets)
-        add(n, {
-          index,
-          kind: 'assign',
-          valued: true,
-          type,
-          static: type !== undefined,
-        });
-      return;
-    }
-    const own = staticDeclarations(ce, [s]);
-    // `writtenNames()` reads a plain `Declare` statement only: for another
-    // form, whether the statement gives a value is not known, and a name
-    // with no type then has no static picture.
-    const known = operator(statement) === 'Declare';
-    for (const n of own.declaredNames) {
-      const type = own.declaredTypes.get(n);
-      add(n, {
-        index,
-        kind: 'let',
-        valued: valued.has(n),
-        type,
-        static: type !== undefined || (known && !valued.has(n)),
-      });
-    }
-    for (const n of valued)
-      if (!own.declaredNames.includes(n))
-        add(n, {
-          index,
-          kind: 'other',
-          valued: true,
-          type: undefined,
-          static: false,
-        });
-  });
-  return writes;
-}
-
-/**
- * True when the preparation can box a function body that uses the variable
- * `name` with the binding that the body sees when its `function` statement
- * runs in order. `before` holds the statements before the `function`
- * statement that declare or write `name` (`statementWrites()`), and `scope`
- * is the program scope before any statement is prepared.
- *
- * With no such statement, the body sees the same binding on both routes.
- * Otherwise, all of these must hold:
- *
- * - `scope` does not bind `name`. A binding of an earlier program run on the
- *   same engine is replaced in order (a `let` declares the name again), but
- *   the preparation boxes the body against it: after `let c = "old"` in a
- *   first program, `let c = 2` then `function g() { c^2 }` in a second one
- *   boxed `c^2` against the string.
- * - Exactly one statement declares or writes `name`. With two, the binding
- *   that the body sees in order is the one the later statement leaves, and
- *   the preparation can only declare one type: after `let c = "old"` then
- *   `c = 2`, the preparation boxed `c^2` against the string.
- * - That statement gives `name` a static picture (`NameWrite.static`). The
- *   value of a `let` or an assignment with no static type is not known
- *   before the statement runs, and a use of the valueless variable in the
- *   body narrows its type: in `let value = {I -> 1, …}` then a body
- *   `value[String(c)]`, the use made `value` a string, and the `let` then
- *   gave it a dictionary, so the function was refused.
- */
-function isSettledBefore(
-  scope: ComputeEngine['context']['lexicalScope'],
-  name: string,
-  before: ReadonlyArray<NameWrite>
-): boolean {
-  if (before.length === 0) return true;
-  return !scope.bindings.has(name) && before.length === 1 && before[0].static;
-}
-
-/**
- * The names that the `function` statement `statement`
- * (`["DefineFunction", name, ["Function", body, ...parameters]]`) binds for
- * its own body: the names of its parameters (each leaf of a destructuring
- * parameter), and the targets of the `let`/`const` statements of its body
- * block. A use of one of these names in the body does not read a variable
- * of the program.
- */
-function functionLocalNames(statement: MathJsonExpression): Set<string> {
-  const names = new Set<string>();
-  const literal = operand(statement, 2);
-  if (literal === null) return names;
-  const leaves = (p: MathJsonExpression | null): void => {
-    if (p === null) return;
-    const head = operator(p);
-    if (head === 'Tuple') for (const el of operands(p)) leaves(el);
-    else if (head === 'Typed' || head === 'Spread' || head === 'Optional')
-      leaves(operand(p, 1));
-    else {
-      const name = symbol(p);
-      if (name) names.add(name);
-    }
-  };
-  for (const p of operands(literal).slice(1)) leaves(p);
-  // The body, inside the return marker of a declared signature
-  // (`["Typed", ["Block", …], "(x: T) -> T"]`) when there is one.
-  let body = operand(literal, 1);
-  if (body !== null && operator(body) === 'Typed') body = operand(body, 1);
-  if (body !== null)
-    for (const s of operator(body) === 'Block' ? operands(body) : [body])
-      for (const n of declaredVariableNames(s)) names.add(n);
-  return names;
-}
-
-/** The names that the MathJSON expression `expr` holds, as symbols or as
- * operators of applications, at any depth. */
-function namesIn(expr: MathJsonExpression): Set<string> {
-  const names = new Set<string>();
-  const walk = (e: MathJsonExpression): void => {
-    const name = symbol(e);
-    if (name) names.add(name);
-    const head = operator(e);
-    if (head) names.add(head);
-    for (const op of operands(e)) walk(op);
-  };
-  walk(expr);
-  return names;
-}
-
-/**
- * The names to which the top-level statement `statement` gives a value: the
- * targets of an assignment, and the targets of a `let`/`const` with an
- * initial value (`["Declare", name, ["Dictionary", ["KeyValuePair", "value",
- * …]]]`, or a positional value after the type). `boxed` is the statement
- * boxed with `{ form: 'raw' }`, read for the targets of an assignment.
- */
-function writtenNames(
-  statement: MathJsonExpression,
-  boxed: Expression | undefined
-): string[] {
-  const head = operator(statement);
-  if (head === 'Assign')
-    return boxed === undefined ? [] : statementDeclaredNames(boxed);
-  if (head !== 'Declare') return [];
-  const rest = operands(statement).slice(1);
-  const hasValue = rest.some(
-    (op, k) =>
-      (k >= 1 && operator(op) !== 'Dictionary') ||
-      (operator(op) === 'Dictionary' &&
-        operands(op).some(
-          (entry) =>
-            operator(entry) === 'KeyValuePair' &&
-            symbol(operand(entry, 1)) === 'value'
-        ))
-  );
-  return hasValue ? declaredVariableNames(statement) : [];
 }
 
 export function errorFrameChain(error: MathJsonExpression): string {
@@ -2276,6 +1364,7 @@ function nestedStatementReporter(
     // Building the diagnostic reads definitions and serializes the error;
     // the hook is removed while it runs, so that nothing it evaluates is
     // reported as a statement of the program.
+    const enclosingHook = ce._epsilStatementResultHook;
     ce._epsilStatementResultHook = undefined;
     try {
       // `errors` walks the value by recursion, so a deeply nested value can
@@ -2309,7 +1398,7 @@ function nestedStatementReporter(
       // not a failure of the report, and goes on.
       if (cancellationCause(e) !== undefined) throw e;
     } finally {
-      ce._epsilStatementResultHook = hook;
+      ce._epsilStatementResultHook = enclosingHook;
     }
   };
   return hook;
@@ -2825,6 +1914,7 @@ function constantAssignmentName(e: unknown): string | undefined {
  */
 const BLOCK_LOCAL_ERROR_CODES = [
   'read-before-declaration',
+  'variable-redeclaration',
   'declaration-without-value',
   'declaration-below-statement',
   'assignment-to-undeclared-variable',

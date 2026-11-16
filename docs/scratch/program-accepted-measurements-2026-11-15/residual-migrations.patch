@@ -1,0 +1,43 @@
+--- a/test/compute-engine/assignment-stores-lazy-collection.test.ts
++++ b/test/compute-engine/assignment-stores-lazy-collection.test.ts
+@@ -68,9 +68,18 @@
+   // The predicate kept `k` by name, and `k` does not exist after the loop.
+   test('in a loop, the predicate reads the loop variable of that iteration', () => {
+     const src =
++      'let xs: list<integer> = [1, 2, 3, 4, 5, 6]\nfor k in [1, 2, 3] { xs = filter(xs, c => c > k) }\nxs';
++    expect(run(src)).toBe('[4,5,6]');
++    expect(compiled(src)).toEqual([4, 5, 6]);
++  });
++
++  test('an inferred number list remains interpreted when the callback requires integers', () => {
++    const src =
+       'let xs = [1, 2, 3, 4, 5, 6]\nfor k in [1, 2, 3] { xs = filter(xs, c => c > k) }\nxs';
+     expect(run(src)).toBe('[4,5,6]');
+-    expect(compiled(src)).toEqual([4, 5, 6]);
++    expect(() => compiled(src)).toThrow(
++      /callback parameter 'c' is annotated 'integer'.*argument type 'number'/
++    );
+   });
+ });
+ 
+--- a/test/compute-engine/declare-destructure.test.ts
++++ b/test/compute-engine/declare-destructure.test.ts
+@@ -573,10 +573,15 @@
+       ce,
+       'let x: integer = 1\nlet y: integer = 2\n(x, y) := (7, 4.5)'
+     );
+-    // The failing statement is the LAST one, so the runtime error is the
+-    // program's value (not a diagnostic).
++    // The rejected final assignment remains the error value, and the static
++    // diagnostic names its failing leaf before either target is written.
+     expect(r.value.isValid).toBe(false);
+-    expect(r.value.toString()).toContain('incompatible-type');
++    expect(r.value.toString()).toBe(
++      'Error(ErrorCode("assignment-type-mismatch", "y", "integer", "4.5"))'
++    );
++    expect(r.diagnostics.map((d: any) => d.message[3])).toEqual([
++      'assignment-type-mismatch',
++    ]);
+     expect(ce.symbol('x').evaluate().isSame(1)).toBe(true);
+     expect(ce.symbol('y').evaluate().isSame(2)).toBe(true);
+   });

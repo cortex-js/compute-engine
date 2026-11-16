@@ -1,0 +1,211 @@
+{
+  "metric": "Exact nontrivia AST-leaf token sequence identity. A moved physical code line is neutral only if every code leaf on that line belongs to proved unchanged code. Mixed wrapper lines stay wholly charged to one dominant mechanism; partial fragment matches are supplementary proof only, with no fractional credit.",
+  "approvedFragments": [
+    {
+      "file": "src/epsil/execute-epsil.ts",
+      "beforeFirst": 865,
+      "beforeLast": 874,
+      "afterFirst": 664,
+      "afterLast": 664,
+      "tokenHash": "98d47647c9d334337739f63cd68ca4ecd8373b77de36c35f2415dc3a011f682e",
+      "kind": "ExpressionStatement",
+      "tokenCount": 25,
+      "rationale": "Unknown-function result scan retained in the Program result hook; only formatting/location changed.",
+      "currentSourceHash": "0d1742c458c2323741bcfcc1621ae99bc142439a8203ecf0ad7fe50cc89295b4"
+    },
+    {
+      "file": "src/epsil/execute-epsil.ts",
+      "beforeFirst": 580,
+      "beforeLast": 587,
+      "afterFirst": 494,
+      "afterLast": 494,
+      "tokenHash": "e08c761a658b28b4c196c79d560d74cbe4caf02e807fb70ec9c251b2ede7b44d",
+      "kind": "ExpressionStatement",
+      "tokenCount": 15,
+      "rationale": "Protocol-property advisory scan moved before common Program boxing, retaining the identical call.",
+      "currentSourceHash": "0d1742c458c2323741bcfcc1621ae99bc142439a8203ecf0ad7fe50cc89295b4"
+    },
+    {
+      "file": "src/epsil/execute-epsil.ts",
+      "beforeFirst": 537,
+      "beforeLast": 543,
+      "afterFirst": 519,
+      "afterLast": 519,
+      "tokenHash": "314a9c4946e87ab4c38713520bd9c3e39e52c609d89e935682de6f3bb9ef6f06",
+      "kind": "CallExpression",
+      "tokenCount": 12,
+      "rationale": "Existing nested-statement reporter construction reused by the new result-hook bridge; changed binding/assignment wrapper stays charged.",
+      "currentSourceHash": "0d1742c458c2323741bcfcc1621ae99bc142439a8203ecf0ad7fe50cc89295b4"
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeFirst": 811,
+      "beforeLast": 811,
+      "afterFirst": 625,
+      "afterLast": 625,
+      "tokenHash": "5cb4d4dc01e7383fe41aac90333203bd78a182e5b361530e40a44d6ea3c00492",
+      "kind": "IfStatement",
+      "tokenCount": 10,
+      "rationale": "Existing step-mode verdict moved from the top-level driver into statementHook.",
+      "currentSourceHash": "f44cf0de893c2c59f99961125970c87fce650ea6b3a5dc77727e995da1d51e97"
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeFirst": 609,
+      "beforeLast": 609,
+      "afterFirst": 608,
+      "afterLast": 608,
+      "tokenHash": "384b3a3d4502f77d9d1ec192a9d83edb0e2d002a1b70c7058ff8f30f5f30b511",
+      "kind": "IfStatement",
+      "tokenCount": 8,
+      "rationale": "Existing missing-source-offset guard moved before top-level hook dispatch.",
+      "currentSourceHash": "f44cf0de893c2c59f99961125970c87fce650ea6b3a5dc77727e995da1d51e97"
+    },
+    {
+      "file": "vscode-epsil/src/inline-runner.ts",
+      "beforeFirst": 118,
+      "beforeLast": 121,
+      "afterFirst": 101,
+      "afterLast": 104,
+      "tokenHash": "ffca2e178a3b6949e4af0c4074f989fc62ce2096418eee4437d3b9d1e08bf397",
+      "kind": "IfStatement",
+      "tokenCount": 43,
+      "rationale": "Existing inline-result value/error rendering moved unchanged into onStatement.",
+      "currentSourceHash": "284d51ded2fd8f6cd228929deffd7b664b8731a7eca06ad96a89f864f1d00f42"
+    },
+    {
+      "file": "vscode-epsil/src/inline-runner.ts",
+      "beforeFirst": 122,
+      "beforeLast": 122,
+      "afterFirst": 105,
+      "afterLast": 105,
+      "tokenHash": "c8124dd5c201bc7da16f4eaf964b0ce54a825a38d6025f732c198ab91b6a1e24",
+      "kind": "ExpressionStatement",
+      "tokenCount": 16,
+      "rationale": "Existing inline-result NDJSON write moved unchanged into onStatement.",
+      "currentSourceHash": "284d51ded2fd8f6cd228929deffd7b664b8731a7eca06ad96a89f864f1d00f42"
+    },
+    {
+      "file": "src/compute-engine/function-utils.ts",
+      "beforeFirst": 3909,
+      "beforeLast": 3915,
+      "afterFirst": 3953,
+      "afterLast": 3957,
+      "tokenHash": "d87a52fffa747807dfe164d1fe0a49d082f4e3478ebbbe4521df01c780f34f27",
+      "kind": "CallExpression",
+      "tokenCount": 31,
+      "rationale": "Existing asynchronous statement call/options reused inside the new evaluation thunk; await/result/thunk/budget wrappers stay charged.",
+      "currentSourceHash": "03273b007d09d29d873eb9674268451aebcc78ee605097f52b3bc59f19c4c54d"
+    }
+  ],
+  "approvedExactLinePairs": [
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeLine": 796,
+      "afterLine": 612,
+      "rationale": "Retained debugger pause/error-reporting syntax or state update in the corresponding new statement/result hook; source-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeLine": 801,
+      "afterLine": 615,
+      "rationale": "Retained debugger pause/error-reporting syntax or state update in the corresponding new statement/result hook; source-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeLine": 802,
+      "afterLine": 616,
+      "rationale": "Retained debugger pause/error-reporting syntax or state update in the corresponding new statement/result hook; source-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeLine": 810,
+      "afterLine": 624,
+      "rationale": "Retained debugger pause/error-reporting syntax or state update in the corresponding new statement/result hook; source-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeLine": 812,
+      "afterLine": 629,
+      "rationale": "Retained debugger pause/error-reporting syntax or state update in the corresponding new statement/result hook; source-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeLine": 813,
+      "afterLine": 630,
+      "rationale": "Retained debugger pause/error-reporting syntax or state update in the corresponding new statement/result hook; source-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeLine": 815,
+      "afterLine": 632,
+      "rationale": "Retained debugger pause/error-reporting syntax or state update in the corresponding new statement/result hook; source-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeLine": 853,
+      "afterLine": 835,
+      "rationale": "Retained debugger pause/error-reporting syntax or state update in the corresponding new statement/result hook; source-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeLine": 855,
+      "afterLine": 838,
+      "rationale": "Retained debugger pause/error-reporting syntax or state update in the corresponding new statement/result hook; source-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeLine": 856,
+      "afterLine": 839,
+      "rationale": "Retained debugger pause/error-reporting syntax or state update in the corresponding new statement/result hook; source-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeLine": 859,
+      "afterLine": 842,
+      "rationale": "Retained debugger pause/error-reporting syntax or state update in the corresponding new statement/result hook; source-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeLine": 862,
+      "afterLine": 843,
+      "rationale": "Retained debugger pause/error-reporting syntax or state update in the corresponding new statement/result hook; source-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeLine": 863,
+      "afterLine": 844,
+      "rationale": "Retained debugger pause/error-reporting syntax or state update in the corresponding new statement/result hook; source-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeLine": 864,
+      "afterLine": 845,
+      "rationale": "Retained debugger pause/error-reporting syntax or state update in the corresponding new statement/result hook; source-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/debug-worker.ts",
+      "beforeLine": 866,
+      "afterLine": 847,
+      "rationale": "Retained debugger pause/error-reporting syntax or state update in the corresponding new statement/result hook; source-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/inline-runner.ts",
+      "beforeLine": 113,
+      "afterLine": 96,
+      "rationale": "Retained inline-record declaration/type entry/closing syntax in onStatement; offset-to-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/inline-runner.ts",
+      "beforeLine": 114,
+      "afterLine": 97,
+      "rationale": "Retained inline-record declaration/type entry/closing syntax in onStatement; offset-to-range substitutions remain charged."
+    },
+    {
+      "file": "vscode-epsil/src/inline-runner.ts",
+      "beforeLine": 117,
+      "afterLine": 100,
+      "rationale": "Retained inline-record declaration/type entry/closing syntax in onStatement; offset-to-range substitutions remain charged."
+    }
+  ]
+}

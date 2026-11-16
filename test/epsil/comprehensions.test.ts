@@ -298,7 +298,6 @@ describe('EPSIL COMPREHENSIONS — the result is a list', () => {
   test.each([
     ['[k * 2 for k in 1..3]', '["List",2,4,6]'],
     ['[do { k * 2 } for k in 1..3]', '["List",2,4,6]'],
-    ['let xs = [do { k * 2 } for k in 1..3]', '["List",2,4,6]'],
     ['let xs = [do { k * 2 } for k in 1..3]; xs', '["List",2,4,6]'],
     [
       'let xs = [if k > 1 { k } else { 0 } for k in 1..3]; xs',
@@ -315,6 +314,21 @@ describe('EPSIL COMPREHENSIONS — the result is a list', () => {
     ],
   ])('%s', async (source, expected) => {
     expect(await resultJson(source)).toEqual([expected, expected]);
+  });
+
+  test('a final declaration returns Nothing and preserves the lazy collection', async () => {
+    const source = 'let xs = [do { k * 2 } for k in 1..3]';
+    const syncEngine = new ComputeEngine();
+    const sync = executeEpsil(syncEngine, source);
+    expect(sync.diagnostics).toEqual([]);
+    expect(sync.value.symbol).toBe('Nothing');
+    expect(syncEngine.box(['ListFrom', 'xs']).evaluate().json).toEqual(['List', 2, 4, 6]);
+
+    const asyncEngine = new ComputeEngine();
+    const async = await executeEpsilAsync(asyncEngine, source);
+    expect(async.diagnostics).toEqual([]);
+    expect(async.value.symbol).toBe('Nothing');
+    expect(asyncEngine.box(['ListFrom', 'xs']).evaluate().json).toEqual(['List', 2, 4, 6]);
   });
 
   test('an infinite comprehension stays as it is', async () => {
@@ -336,7 +350,7 @@ describe('EPSIL COMPREHENSIONS — the result is a list', () => {
       ce.parse(latex).json;
     const value = (source: string): string =>
       JSON.stringify(executeEpsil(ce, source, { parseLatex }).value.json);
-    expect(value('let c = 0')).toBe('0');
+    expect(value('let c = 0')).toBe('"Nothing"');
     expect(value('[do { c = c + 1; c } for i in 1..3, j in 1..i]')).toBe(
       '["List",1,2,3,4,5,6]'
     );
@@ -372,7 +386,7 @@ describe('EPSIL COMPREHENSIONS — the result is a list', () => {
       ce.parse(latex).json;
     const value = (source: string): string =>
       JSON.stringify(executeEpsil(ce, source, { parseLatex }).value.json);
-    expect(value('let calls = 0')).toBe('0');
+    expect(value('let calls = 0')).toBe('"Nothing"');
     value('function keep(j) scope { calls = calls + 1; j > 1 }');
     expect(
       value('[do { let t = i; t } for i in 1..3, j in 1..i if keep(j)]')

@@ -1,0 +1,38 @@
+{
+  "numTotalTestSuites": 2065,
+  "numPassedTestSuites": 2053,
+  "numFailedTestSuites": 1,
+  "numPendingTestSuites": 11,
+  "numTotalTests": 86488,
+  "numPassedTests": 85705,
+  "numFailedTests": 1,
+  "numPendingTests": 780,
+  "numTodoTests": 2,
+  "snapshot": {
+    "added": 0,
+    "didUpdate": false,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 4264,
+    "total": 4264,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0
+  },
+  "startTime": 1794812842648,
+  "success": false,
+  "integrationHead": "85752a2d0942",
+  "sourceFingerprintUnchanged": true,
+  "isolatedRerun": {
+    "file": "test/compute-engine/ir-colors.test.ts",
+    "passed": 68,
+    "exit": 0,
+    "seconds": 6.071,
+    "issue": "CE-1360"
+  }
+}

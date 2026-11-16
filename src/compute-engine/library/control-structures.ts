@@ -1,3 +1,5 @@
+import { assertDeclarationName } from '../engine-declarations.js';
+import { withEarlierConstantDeclarations } from '../boxed-expression/parameter-defaults.js';
 import { scopeActivation } from '../boxed-expression/ambient-chain.js';
 import {
   carryLazyViewContexts,
@@ -29,6 +31,12 @@ import {
   exitBody,
   exitFunctionBody,
   isInBodyOrBranch,
+  withPairedFunctionNames,
+  withProgramStatement,
+  nextProgramBatchId,
+  withProgramInitializerOuters,
+  noteProgramDeclarationPrevious,
+  noteProgramSourceOrder,
 } from '../statement-position.js';
 import {
   CLAUSE_ROLE,
@@ -46,7 +54,6 @@ import { checkConditions } from '../boxed-expression/rules.js';
 import { rangeElementIndexType } from '../boxed-expression/binding-sites.js';
 import {
   collectTuplePattern,
-  statementDeclaredNames,
   tuplePatternNames,
   typedStatement,
 } from '../boxed-expression/tuple-pattern.js';
@@ -131,6 +138,7 @@ import type {
   Scope,
   CollectionHandlers,
   BoxedValueDefinition,
+  BoxedDefinition,
 } from '../global-types.js';
 import {
   errorValue,
@@ -169,7 +177,7 @@ import {
   isStatementArm,
 } from '../boxed-expression/conditional-value.js';
 import { isValueDef } from '../boxed-expression/utils.js';
-import { widenAssignedType } from '../boxed-expression/boxed-value-definition.js';
+import { widenAssignedType, widenLocalType } from '../boxed-expression/boxed-value-definition.js';
 import {
   elementMemoFillTo,
   ELEMENT_MEMO_CAP,
@@ -192,7 +200,6 @@ import {
   bindIndexAuthoritatively,
   substituteBinderValues,
 } from './utils.js';
-import { asyncEvaluationOf } from '../boxed-expression/evaluation-epoch.js';
 import {
   coarsenEvidenceType,
   isInEvidenceSession,
@@ -377,6 +384,36 @@ export const BLOCK_DEFINITION: OperatorDefinition = {
   canonical: canonicalBlock,
   evaluate: evaluateBlock,
   evaluateAsync: evaluateBlockAsync,
+};
+
+/** A caller-scope statement sequence, with independent statement failures. */
+export const PROGRAM_DEFINITION: OperatorDefinition = {
+  ...BLOCK_DEFINITION,
+  description: 'Evaluate a program in the caller scope, continuing after statement errors.',
+  inspectsErrors: true,
+  scoped: false,
+  canonical: canonicalProgram,
+  evaluate: (ops, options) => {
+    const ce = options.engine;
+    const saved = ce._epsilBatchId;
+    const frame = ce._deadlineFrame;
+    ce._epsilBatchId = PROGRAM_BATCHES.get(ops[0]) ?? saved ?? nextProgramBatchId();
+    ce._liftDefaultIterationLimit();
+    try { return evaluateStatements(ce, ops, options.numericApproximation ? { numericApproximation: true } : undefined, true); }
+    finally { ce._epsilBatchId = saved; ce._deadlineFrame = frame; }
+  },
+  evaluateAsync: async (ops, options) => {
+    const ce = options.engine;
+    const saved = ce._epsilBatchId;
+    const frame = ce._deadlineFrame;
+    ce._epsilBatchId = PROGRAM_BATCHES.get(ops[0]) ?? saved ?? nextProgramBatchId();
+    ce._liftDefaultIterationLimit();
+    try { return await evaluateStatementsAsync(ce, ops, options.signal, options._effects, options._contextStack, options.numericApproximation ? true : undefined, options._precisionWindow, true); }
+    finally {
+      ce._epsilBatchId = saved;
+      ce.withEvaluationContext(options, () => { ce._deadlineFrame = frame; });
+    }
+  },
 };
 
 /**
@@ -3949,25 +3986,6 @@ function evaluateBlock(
 ): Expression {
   if (ops.length === 0) return ce.Nothing;
 
-  // If the block's final value is a bare symbol bound to a user-defined
-  // function literal (`helper(x) = …` → a block-local operator definition),
-  // return the underlying `Function` literal so the function escapes the
-  // block as a first-class value. Resolved here, while the block scope (which
-  // holds the operator definition) is still the current lexical scope.
-  //
-  // The numeric request of the block is forwarded to its LAST statement,
-  // whose value is the value of the block; the statements before it run
-  // exactly, so that a value a later statement reads (`a := √2; a^2`) is
-  // not rounded on the way. A jump in the last statement (`Floor(x)`) then
-  // reads an exact operand exactly, as at the top level. This is also the
-  // route of a user function under `.N()` whose body was parsed as one
-  // inner block of several statements: in such a body a parameter is bound
-  // to the float of the argument, and only a jump evaluated with the
-  // request reads the exact argument again (`exactRealValueOf`,
-  // `constraint-subject.ts`).
-  //
-  // A block that the host evaluates directly is a program: each of its
-  // statements is its own top-level evaluation (`runsAsProgram`).
   return lazyResultOverLocalValues(
     ce,
     resolveEscapingLambda(
@@ -3976,7 +3994,7 @@ function evaluateBlock(
         ce,
         ops,
         numericApproximation ? { numericApproximation: true } : undefined,
-        runsAsProgram(ce, false)
+        false
       )
     )
   );
@@ -4052,66 +4070,6 @@ function lazyResultOverLocalValues(
 }
 
 /**
- * True when the `Block` whose evaluate handler runs now is a program: a
- * block that the host evaluates directly, the counterpart of a run of
- * `executeEpsil`, where each statement is its own top-level evaluation. Its
- * statements are then run with `program` set (`evaluateStatements`,
- * `evaluateStatementsAsync`, `function-utils.ts`), so that a statement that
- * reads a result of an earlier statement (`r ≔ fn(3)` before
- * `fn ≔ z ↦ 2z`, then `r`) resolves it as the next Epsil statement does.
- * A block in a statement or an operand of another expression (a `Sum` term,
- * a function body, a `do` block in an assignment) is not a program: its
- * statements run in the top-level evaluation of the enclosing expression.
- *
- * On the synchronous route, the evaluation of the block is the outermost
- * evaluation, and it is not a part of an asynchronous evaluation: the
- * engine's stack is in place, not the context stack of an asynchronous
- * evaluation (`asyncEvaluationOf`, `boxed-expression/evaluation-epoch.ts`).
- * A synchronous evaluation that the host starts while an asynchronous one is
- * pending is a program too. On the asynchronous route, no synchronous
- * evaluation is running, the host started the asynchronous evaluation that
- * the block is part of (it is not nested in another evaluation, and it is
- * not a statement of a program block), and the evaluation of the block is
- * the only pending `evaluateAsync()` call of that evaluation
- * (`AsyncEvaluation.pending`). Other asynchronous evaluations that run at
- * the same time are not counted.
- *
- * The outermost evaluation is not always at depth 1 (pending count 1 on the
- * asynchronous route). A `Block` that is not canonical (boxed with
- * `{ form: 'raw' }` or `{ form: 'structural' }`) is evaluated by its
- * canonical form: its own `evaluate()` counts one level, and the
- * `evaluate()` of its canonical form, which runs this handler, counts a
- * second one. Each such delegation raises a count while it runs:
- * `_delegatedEvaluations` on the synchronous route, and
- * `AsyncEvaluation.delegated` until the delegated evaluation settles on the
- * asynchronous route (`delegateEvaluation()`, `delegateEvaluationAsync()`,
- * `boxed-function.ts`). So the test is that every other evaluation that is
- * counted is a delegation: the depth (the pending count on the
- * asynchronous route) is 1 plus the count of delegations. A block nested in
- * another expression has one more evaluation counted, the evaluation of
- * that expression, which is not a delegation.
- *
- * A block that is a statement of a run of `executeEpsil` (a top-level `do`
- * block) is not a program: it is a nested block of the program that the
- * runner executes, as for `isProgramBlock()` at canonicalization.
- */
-function runsAsProgram(ce: ComputeEngine, async: boolean): boolean {
-  if (ce._epsilBatchId !== undefined) return false;
-  const evaluation = asyncEvaluationOf(ce._evalContextStack);
-  if (async)
-    return (
-      ce._evaluationDepth === 0 &&
-      evaluation !== undefined &&
-      evaluation.startedByHost &&
-      evaluation.pending === 1 + evaluation.delegated
-    );
-  return (
-    ce._evaluationDepth === 1 + ce._delegatedEvaluations &&
-    evaluation === undefined
-  );
-}
-
-/**
  * The asynchronous twin of `evaluateBlock`: the statements awaited in order
  * (`evaluateStatementsAsync`), so a statement holding an asynchronous-only
  * application is evaluated instead of staying inert in the block's value.
@@ -4124,7 +4082,7 @@ async function evaluateBlockAsync(
   if (ops.length === 0) return ce.Nothing;
   // Read before the first `await`: the counts of running evaluations that
   // the test reads change while the statements run.
-  const program = runsAsProgram(ce, true);
+  const program = false;
   const result = await evaluateStatementsAsync(
     ce,
     ops,
@@ -4162,15 +4120,7 @@ async function evaluateBlockAsync(
  *
  */
 
-/**
- * The type of a CLOSED literal expression — a number, a string, or a
- * `List`/`Tuple` whose operands are closed literals — read by canonicalizing
- * it, which is side-effect free for such an expression (no symbol to bind,
- * no scope to write). `undefined` for anything else. Used by `canonicalBlock`
- * to hoist the static type of a `let` with a literal initial value, and by
- * the Epsil runner to tell whether an assignment gives its target a value
- * of static type (`prepareFunctionDeclarations()`, `execute-epsil.ts`).
- */
+
 export function closedLiteralType(
   ce: ComputeEngine,
   value: Expression
@@ -4212,11 +4162,13 @@ export function closedLiteralType(
  */
 export function staticDeclarations(
   ce: ComputeEngine,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  program = false
 ): {
   declaredNames: string[];
   declaredTypes: Map<string, Type>;
   explicitlyDeclared: Set<string>;
+  declaredConstants: Set<string>;
 } {
   const declaredNames: string[] = [];
   // The statically-readable declared type of each `Declare(name, "type")`
@@ -4235,9 +4187,12 @@ export function staticDeclarations(
   // The names in `declaredTypes` whose type is DECLARED, not read from a
   // literal initial value (see `markDeclaredLocal`).
   const explicitlyDeclared = new Set<string>();
+  const declaredConstants = new Set<string>();
   for (const statement of ops) {
     const op = typedStatement(statement);
     if (isFunction(op, 'Declare')) {
+      const attributes = op.ops[op.ops.length - 1];
+      const constant = isDictionary(attributes) ? isSymbol(attributes.get('constant'), 'True') : isFunction(attributes, 'Dictionary') && attributes.ops.some((pair) => isFunction(pair, 'KeyValuePair') && (isString(pair.op1) ? pair.op1.string : sym(pair.op1)) === 'constant' && isSymbol(pair.op2, 'True'));
       const nameExpr = op.ops[0];
       // A destructuring `Declare((a, b), …)` (`let (a, b) = v`) introduces
       // each leaf of its pattern as a block local, as `Declare(a, …)` does
@@ -4249,11 +4204,12 @@ export function staticDeclarations(
       // pattern carries no type, so nothing else is read here.
       if (nameExpr && isFunction(nameExpr, 'Tuple')) {
         for (const name of tuplePatternNames(nameExpr))
-          if (name !== 'Nothing') declaredNames.push(name);
+          if (name !== 'Nothing') { declaredNames.push(name); if (constant) declaredConstants.add(name); }
         continue;
       }
       if (nameExpr && isSymbol(nameExpr)) {
         declaredNames.push(nameExpr.symbol);
+        if (constant) declaredConstants.add(nameExpr.symbol);
         // The type may be the positional operand (`Declare(d, "list<…>")`)
         // or a literal `type` entry of an attributes dictionary
         // (`Declare(d, {type: "list<…>", value: …})`). The dictionary is
@@ -4268,7 +4224,10 @@ export function staticDeclarations(
         // `value` entry of the attributes dictionary (`let d = []` in Epsil
         // is `Declare(d, {value: []})`).
         let valueOp: Expression | undefined = op.ops[2];
-        if (typeOp !== undefined && typeOp.operator === 'Dictionary') {
+        if (isDictionary(typeOp)) {
+          valueOp = typeOp.get('value');
+          typeOp = typeOp.get('type');
+        } else if (typeOp !== undefined && typeOp.operator === 'Dictionary') {
           let entry: Expression | undefined = undefined;
           if (isFunction(typeOp)) {
             for (const pair of typeOp.ops) {
@@ -4324,30 +4283,113 @@ export function staticDeclarations(
           // one the program builds. Only a closed literal is read: an
           // expression that mentions a symbol would have to be bound here,
           // in the enclosing scope, before the block's own locals exist.
-          const literalType = closedLiteralType(ce, valueOp);
+          const literalType = program && isFunction(valueOp, 'Function') ? 'function' : closedLiteralType(ce, valueOp);
           if (literalType !== undefined)
             declaredTypes.set(nameExpr.symbol, literalType);
         }
       }
     }
   }
-  return { declaredNames, declaredTypes, explicitlyDeclared };
+  return { declaredNames, declaredTypes, explicitlyDeclared, declaredConstants };
 }
 
 function canonicalBlock(
   ops: ReadonlyArray<Expression>,
   options: { engine: ComputeEngine; scope: Scope | undefined }
 ): Expression | null {
+  return canonicalSequence(ops, options, false);
+}
+
+/** Shared binding and canonicalization of Block and Program statements. */
+export function canonicalProgram(ops: ReadonlyArray<Expression>, options: { engine: ComputeEngine; scope?: Scope }): Expression {
+  const ce = options.engine;
+  const saved = ce._epsilBatchId;
+  const batch = saved ?? nextProgramBatchId();
+  ce._epsilBatchId = batch;
+  try {
+    const result = canonicalSequence(ops, { ...options, scope: ce.context.lexicalScope }, true);
+    if (isFunction(result)) for (const statement of result.ops) PROGRAM_BATCHES.set(statement, batch);
+    return result;
+  } finally { ce._epsilBatchId = saved; }
+}
+
+const PROGRAM_INTERRUPTS = new WeakMap<object, { statements: readonly Expression[]; order: readonly number[]; index: number }>();
+export function programInterruption(error: unknown) {
+  return error !== null && typeof error === 'object' ? PROGRAM_INTERRUPTS.get(error) : undefined;
+}
+const PROGRAM_BATCHES = new WeakMap<Expression, number>();
+const DECLARATION_REFUSAL_SITES = new WeakMap<Expression, readonly [number, number]>();
+export function declarationRefusalSite(error: Expression | undefined): readonly [number, number] | undefined {
+  return error !== undefined && isFunction(error, 'Error') ? DECLARATION_REFUSAL_SITES.get(error.op1) : undefined;
+}
+const PROGRAM_WRITES = new WeakMap<Expression, ReadonlyMap<string, BoxedDefinition>>();
+export function programStatementWrites(statement: Expression): ReadonlyMap<string, BoxedDefinition> {
+  return PROGRAM_WRITES.get(statement) ?? new Map();
+}
+export { programSourceOrder } from '../statement-position.js';
+
+function canonicalSequence(
+  source: ReadonlyArray<Expression>,
+  options: { engine: ComputeEngine; scope: Scope | undefined },
+  program: boolean
+): Expression {
   const { engine: ce, scope } = options;
+  const order = source.map((_, i) => i);
+  const functions = new Set(source.map((x) => typedStatement(x)).filter((x) => isFunctionDeclarationStatement(ce, x)).map((x) => isFunction(x) ? sym(x.op1)! : ''));
+  const rank = (i: number): number => {
+    const op = typedStatement(source[i]);
+    if (['DeclareType', 'DeclareSumType', 'DeclareProtocol'].includes(op.operator)) return 0;
+    if (isFunctionDeclarationStatement(ce, op)) return 2;
+    if (isFunction(op, 'Declare') && functions.has(sym(op.op1) ?? '') && !declareHasValue(op.ops)) return 1;
+    return 3;
+  };
+  if (program) order.sort((a, b) => rank(a) - rank(b) || a - b);
+  const ops = order.map((i) => source[i]);
+  const head = program ? 'Program' : 'Block';
+  const previousBindings = new Map<string, BoxedDefinition>();
+  const sourceIndex = new Map(source.map((statement, i) => [statement, i]));
+  const constantIndexes = new Map<string, number>();
+  let constantDeclarations: ReadonlySet<string> = new Set();
+  const completed = new Map<Expression, Expression>();
+  const early = new Map<Expression, Expression>();
+  const canonicalizeStatement = (op: Expression): Expression => {
+    const canonicalize = () => program && isFunction(op) && !op.isCanonical
+      ? ce.function(op.operator, op.ops, { metadata: { sourceOffsets: op.sourceOffsets } })
+      : canonicalStatement(ce, op);
+  let statement: Expression;
+  const savedRoute = ce._epsilDeclarationRoute;
+  try {
+    if (program) {
+      checkDeadline(ce._deadlineFrame);
+      ce._epsilDeclarationRoute = ['DeclareType', 'DeclareSumType', 'DeclareProtocol', 'DeclareConformance', 'DefineFunction'].includes(typedStatement(op).operator);
+      const earlier = new Set([...constantIndexes].filter(([, index]) => index < (sourceIndex.get(op) ?? 0)).map(([name]) => name));
+      statement = withEarlierConstantDeclarations(ce, constantDeclarations, earlier, () => withProgramInitializerOuters(previousBindings, () => withProgramStatement(() => withPairedFunctionNames(functions, canonicalize))));
+    } else statement = canonicalize();
+  } catch (error) {
+    if (!program || error instanceof CancellationError) {
+      if (program && error instanceof CancellationError) {
+        const prefixOrder = order.filter((i) => completed.has(source[i]) || early.has(source[i]));
+        PROGRAM_INTERRUPTS.set(error, { statements: prefixOrder.map((i) => completed.get(source[i]) ?? early.get(source[i])!), order: prefixOrder, index: source.indexOf(op) });
+      }
+      throw error;
+    }
+    statement = ce.error(error instanceof Error ? error.message : String(error));
+  } finally { ce._epsilDeclarationRoute = savedRoute; }
+    return statement;
+  };
+  if (program) for (const i of order) {
+    if (rank(i) !== 0) break;
+    early.set(source[i], canonicalizeStatement(source[i]));
+  }
   // An empty block is canonical as it is: its type handler answers `nothing`
   // and its evaluate handler answers `Nothing`. Declining here (`null`) left
   // the node non-canonical and unbound, so neither handler ever ran and
   // `If(True, Block())` evaluated to the inert `Block()` itself, printed
   // `{}`, where the language documents `Nothing` as an empty block's value.
-  if (ops.length === 0) return ce._fn('Block', [], { scope });
+  if (ops.length === 0) return ce._fn(head, [], program ? undefined : { scope });
   // The text of the block, which the effects of a literal that calls one of
   // its locals read (`blockLocalLiteral()`, `effects-inference.ts`).
-  if (scope !== undefined) noteBlockStatements(scope, ops);
+  if (!program && scope !== undefined) noteBlockStatements(scope, ops);
 
   // A `Declare(name, …)` introduces a block-local `name` that shadows any
   // same-named constant (`i`, `e`, `Pi`, …) for the rest of the block. Push
@@ -4357,8 +4399,6 @@ function canonicalBlock(
   // instead of folding to the imaginary unit `1 + i`. The shadow is scoped to
   // this block: it is popped once the statements are canonicalized, so an `i`
   // outside the block is the imaginary unit again.
-  const { declaredNames, declaredTypes, explicitlyDeclared } =
-    staticDeclarations(ce, ops);
 
   // SAME-SCOPE RE-DECLARATION (ruled 2026-09-05): a `Declare` may not
   // re-declare a name this scope already binds — an earlier `Declare` of this
@@ -4388,22 +4428,42 @@ function canonicalBlock(
   // duplicate of it is refused.
   const refused = new Map<Expression, Expression>();
   const accepted = new Set<string>();
+  const acceptedFunctions = new Set<string>();
+  const acceptedDeclarations = new Set<string>();
+  const pairedSignatures = new Set<string>();
+  const firstDeclarations = new Map<string, Expression>();
+  const accept = (name: string, statement: Expression): void => {
+    accepted.add(name);
+    if (!firstDeclarations.has(name)) firstDeclarations.set(name, statement);
+  };
+  const duplicate = (statement: Expression, name: string): void => {
+    const error = ce.error(['variable-redeclaration', name]);
+    const span = firstDeclarations.get(name)?.sourceOffsets;
+    if (span !== undefined && isFunction(error, 'Error')) DECLARATION_REFUSAL_SITES.set(error.op1, span);
+    refused.set(statement, error);
+  };
   {
-    const parentBinderNames = scope?.parent?.binderNames;
+    const parentBinderNames = program ? undefined : scope?.parent?.binderNames;
     const redeclares = (name: string): boolean =>
       accepted.has(name) ||
-      (ce._isShadowedParameter(name) &&
+      (!program && ce._isFunctionLiteralParameter(name) &&
         scope !== undefined &&
         ce._shadowedParameterBoundary(name) === scope.parent) ||
       parentBinderNames?.has(name) === true;
     // A function statement declares a local too (`localFunctionName()`).
-    for (const statement of ops) {
+    for (const statement of program ? source : ops) {
       const op = typedStatement(statement);
       const local = localFunctionName(ce, op);
+      if (local !== undefined && program) {
+        if (accepted.has(local) && !acceptedFunctions.has(local) && !pairedSignatures.has(local))
+          duplicate(statement, local);
+        else { accept(local, statement); acceptedFunctions.add(local); }
+        continue;
+      }
       if (local !== undefined) {
         if (redeclares(local))
-          refused.set(statement, ce.error(['variable-redeclaration', local]));
-        else accepted.add(local);
+          duplicate(statement, local);
+        else accept(local, statement);
         continue;
       }
       if (!isFunction(op, 'Declare')) continue;
@@ -4415,36 +4475,47 @@ function canonicalBlock(
             ? tuplePatternNames(target)
             : []
       ).filter((name) => name !== 'Nothing');
-      const collision = names.find(redeclares);
+      if (program && scope !== undefined) {
+        try { for (const name of names) assertDeclarationName(ce, name, scope); }
+        catch (error) {
+          refused.set(statement, ce.error(error instanceof Error ? error.message : String(error)));
+          continue;
+        }
+      }
+      const pairsFunction = (name: string): boolean =>
+        program && functions.has(name) && !declareHasValue(op.ops) &&
+        acceptedFunctions.has(name) && !acceptedDeclarations.has(name);
+      const collision = names.find((name) => redeclares(name) && !pairsFunction(name));
       if (collision !== undefined)
-        refused.set(statement, ce.error(['variable-redeclaration', collision]));
-      else for (const name of names) accepted.add(name);
+        duplicate(statement, collision);
+      else for (const name of names) {
+        accept(name, statement);
+        acceptedDeclarations.add(name);
+        if (program && functions.has(name) && !declareHasValue(op.ops)) pairedSignatures.add(name);
+      }
     }
   }
-  const hoistedNames = declaredNames.filter((name) => accepted.has(name));
-
-  const programBlock = scope !== undefined && isProgramBlock(ce, scope);
-  // For the top-level block of a program (`isProgramBlock()`), the index of
-  // the first statement that declares each name.
-  const firstIndex = programBlock ? firstDeclarationIndex(ops) : undefined;
-  // In the top-level block of a program, the `let` or `const` names of a
-  // library constant (`i`, `e`, `Pi`, …) that a statement after the first
-  // one declares. The block declares such a name, and makes it shadow the
-  // constant, only when it reaches that statement. So a statement before
-  // it, such as `function g() { i + 1 }`, reads the constant, as
-  // `executeEpsil()` does when it canonicalizes one statement at a time.
-  // The other names are declared before the first statement (see the hoist
-  // below), so a function reads a name that a later `let` declares.
-  const deferred = new Set(
-    firstIndex === undefined
-      ? []
-      : hoistedNames.filter(
-          (name) =>
-            (firstIndex.get(name) ?? 0) > 0 &&
-            isLibraryConstant(ce, name) &&
-            !UNBINDABLE_NAMES.has(name)
-        )
-  );
+  // Source-first admission decides which names are function statements;
+  // a refused later function must not promote an earlier value declaration.
+  if (program) {
+    functions.clear();
+    for (const name of acceptedFunctions) functions.add(name);
+  }
+  // Only accepted statements contribute declaration metadata. A refused
+  // second declaration cannot change the first binding's type or constness.
+  const acceptedStatements = ops.filter((statement) => !refused.has(statement));
+  const { declaredNames, declaredTypes, explicitlyDeclared, declaredConstants } =
+    staticDeclarations(ce, acceptedStatements, program);
+  constantDeclarations = declaredConstants;
+  if (program) for (const statement of acceptedStatements) {
+    const op = typedStatement(statement);
+    if (!isFunction(op, 'Declare')) continue;
+    const target = op.op1;
+    const names = isSymbol(target) ? [target.symbol] : isFunction(target, 'Tuple') ? tuplePatternNames(target) : [];
+    for (const name of names)
+      if (declaredConstants.has(name)) constantIndexes.set(name, sourceIndex.get(statement)!);
+  }
+  const hoistedNames = declaredNames.filter((name) => (program ? acceptedDeclarations : accepted).has(name));
 
   // Hoist the block's own locals into the block scope BEFORE canonicalizing
   // the statements. `Declare` only registers its symbol at *evaluation*
@@ -4472,35 +4543,42 @@ function canonicalBlock(
   const hoistDeclared = (scope: Scope, name: string): void => {
     if (UNBINDABLE_NAMES.has(name)) return;
     const existing = scope.bindings.get(name);
-    if (existing !== undefined) {
+    if (existing !== undefined && !program) {
       markCallableHome(existing, scope);
       return;
     }
+    if (program && existing !== undefined) previousBindings.set(name, existing);
+    const knownType = declaredTypes.get(name);
+    const persistentType = program && knownType !== undefined && !explicitlyDeclared.has(name) && !declaredConstants.has(name)
+      ? widenLocalType(ce, knownType) : knownType;
     const hoisted = ce._declareSymbolValue(
       name,
       {
-        type: declaredTypes.get(name) ?? 'unknown',
-        inferred: !explicitlyDeclared.has(name),
+        type: persistentType ?? 'unknown',
+        isConstant: program && declaredConstants.has(name),
+        inferred: program && typeof knownType === 'string' && knownType !== 'unknown' ? false : !explicitlyDeclared.has(name),
       },
       scope
     );
     // A block local, not a free symbol: see `_blockLocal`.
     if (isValueDef(hoisted)) {
-      hoisted.value._blockLocal = true;
+      hoisted.value._blockLocal = !program || !functions.has(name);
+      if (program && !functions.has(name)) hoisted.value._programVariable = true;
+      if (program && functions.has(name))
+        (hoisted as typeof hoisted & { _declaredByStatement?: boolean })._declaredByStatement = true;
       markCallableHome(hoisted, scope);
       if (explicitlyDeclared.has(name)) markDeclaredLocal(hoisted.value);
     }
   };
   if (scope) {
     for (const name of hoistedNames)
-      if (!deferred.has(name) && !scope.bindings.has(name))
-        hoistDeclared(scope, name);
+      if (program || !scope.bindings.has(name)) hoistDeclared(scope, name);
     // A function statement of a block (`localFunctionName()`) makes a
     // local, as a `Declare` does: a variable whose type is the signature
     // that the statement writes (`writtenSignatureOf()`) and whose value, in
     // a run of the block, is the function value that the statement makes
     // when it runs.
-    for (const statement of ops) {
+    for (const statement of program ? [] : ops) {
       const name = localFunctionName(ce, typedStatement(statement));
       if (name === undefined || scope.bindings.has(name)) continue;
       if (refused.has(statement)) continue;
@@ -4521,14 +4599,13 @@ function canonicalBlock(
 
   // The scope that encloses the block: the boundary of the shadow of its
   // names (`_shadowedParameterBoundary()`).
-  const boundary = ce.context.lexicalScope;
   ce._pushShadowedParameters(
-    hoistedNames.filter(
-      (name) => !deferred.has(name) && !UNBINDABLE_NAMES.has(name)
-    )
+    [...(program ? hoistedNames : accepted)].filter((name) => !UNBINDABLE_NAMES.has(name))
   );
-  // The number of frames pushed for the names in `deferred`.
-  let deferredFrames = 0;
+  if (program && scope !== undefined) for (const name of hoistedNames) {
+    const binding = scope.bindings.get(name);
+    if (binding !== undefined) ce._setShadowedParameterDef(name, binding);
+  }
   let statements: Expression[];
   enterBody();
   try {
@@ -4540,46 +4617,62 @@ function canonicalBlock(
     // later assignment of the same loop records (`withEvidenceSession`).
     statements = withEvidenceSession(ce, () =>
       ce._inScope(scope, () =>
-        ops.map((op, i) => {
-          // Declare the names in `deferred` that this statement declares
-          // first, and make them shadow the library constants from here on.
-          const declaredHere = [...deferred].filter(
-            (name) => firstIndex?.get(name) === i
-          );
-          if (declaredHere.length > 0) {
-            for (const name of declaredHere) hoistDeclared(scope!, name);
-            ce._pushShadowedParameters(
-              declaredHere,
-              undefined,
-              undefined,
-              boundary
-            );
-            deferredFrames += 1;
-          }
+        ops.map((op) => {
           const refusal = refused.get(op);
-          if (refusal !== undefined) return refusal;
+          if (refusal !== undefined && isFunction(refusal)) {
+            const result = ce._fn(refusal.operator, refusal.ops, { metadata: { sourceOffsets: op.sourceOffsets } });
+            completed.set(op, result);
+            return result;
+          }
           // A bare `N` or `D` statement is a value: when it still names the
           // library operator (no local of the block or parameter of the
           // literal binds it), it is a variable, as in `x + N`.
           // The repair runs here, once the scope of the block and its locals
           // exist, so that a local `N` stays the local.
-          const statement = canonicalStatement(ce, op);
-          return isSymbol(statement)
-            ? canonicalValueOperand(ce, statement)
-            : statement;
+          const statement = early.get(op) ?? canonicalizeStatement(op);
+          if (program && (isFunction(statement, 'Declare') || isFunction(statement, 'Assign'))) {
+            const names = isFunction(statement.op1, 'Tuple') ? tuplePatternNames(statement.op1) : isSymbol(statement.op1) ? [statement.op1.symbol] : [];
+            const writes = new Map<string, BoxedDefinition>();
+            for (const name of names) {
+              const binding = ce.lookupDefinition(name);
+              if (binding !== undefined) writes.set(name, binding);
+            }
+            PROGRAM_WRITES.set(statement, writes);
+            if (isFunction(statement, 'Declare')) {
+              PROGRAM_WRITES.set(statement.op1, writes);
+              noteProgramDeclarationPrevious(statement.op1,
+                new Map([...writes.keys()].map((name) => [name, previousBindings.get(name)])));
+            }
+          }
+          const result = isSymbol(statement) ? canonicalValueOperand(ce, statement) : statement;
+          completed.set(op, result);
+          return result;
         })
       )
     );
   } finally {
     exitBody();
-    for (; deferredFrames > 0; deferredFrames -= 1) ce._popShadowedParameters();
     ce._popShadowedParameters();
   }
 
   if (scope !== undefined)
-    statements = withUseBeforeDeclarationErrors(ce, ops, statements);
+    statements = withUseBeforeDeclarationErrors(ce, ops, statements, program);
 
-  return ce._fn('Block', statements, { scope });
+  if (program) {
+    for (const name of hoistedNames) {
+      const binding = scope?.bindings.get(name);
+      if (binding !== undefined && isValueDef(binding) && binding.value._programVariable) {
+        if (!explicitlyDeclared.has(name) && !binding.value.isConstant && !binding.value.type.matches('function')) {
+          const widened = widenLocalType(ce, binding.value.type.type);
+          binding.value._setType(() => ce.type(widened));
+        }
+        binding.value.inferredType = false;
+      }
+    }
+  }
+  const result = ce._fn(head, statements, program ? undefined : { scope });
+  if (program) noteProgramSourceOrder(result, order);
+  return result;
 }
 
 /**
@@ -4693,7 +4786,8 @@ function writtenSignatureOf(op: Expression): Type {
 function withUseBeforeDeclarationErrors(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
-  statements: Expression[]
+  statements: Expression[],
+  program = false
 ): Expression[] {
   // A block built again from statements that are canonical already (a
   // rebuild of a part of a canonical expression) was checked when the
@@ -4703,8 +4797,9 @@ function withUseBeforeDeclarationErrors(
   const declaredAt = new Map<string, number>();
   ops.forEach((raw, i) => {
     const op = typedStatement(raw);
+    if (program && !isFunction(statements[i], 'Declare')) return;
     const local = localFunctionName(ce, op);
-    if (local !== undefined && !declaredAt.has(local)) declaredAt.set(local, i);
+    if (!program && local !== undefined && !declaredAt.has(local)) declaredAt.set(local, i);
     if (!isFunction(op, 'Declare')) return;
     const names = isFunction(op.ops[0], 'Tuple')
       ? tuplePatternNames(op.ops[0])
@@ -4714,19 +4809,13 @@ function withUseBeforeDeclarationErrors(
   });
   if (declaredAt.size === 0) return statements;
   const check = useBeforeDeclarationCheck(ce, declaredAt);
-  return statements.map((statement, i) => check(statement, i) ?? statement);
+  return statements.map((statement, i) => {
+    const error = check(statement, i);
+    return error === undefined || !isFunction(error) ? statement : ce._fn(error.operator, error.ops, { metadata: { sourceOffsets: ops[i].sourceOffsets } });
+  });
 }
 
-/**
- * The check of `withUseBeforeDeclarationErrors()` for a list of statements
- * whose locals are declared at the indexes `declaredAt`: a function that
- * gives, for the canonical form `statement` of the statement at index `i`,
- * the static error `read-before-declaration` when the statement uses a local
- * before the statement that declares it, else `undefined`. The top level of
- * an Epsil program, which the runner boxes one statement at a time, uses it
- * for each statement (`boxTopLevelStatement()`,
- * `src/epsil/static-diagnostics.ts`).
- */
+
 export function useBeforeDeclarationCheck(
   ce: ComputeEngine,
   declaredAt: ReadonlyMap<string, number>
@@ -4893,50 +4982,6 @@ function containsAssignment(e: Expression): boolean {
 }
 
 /**
- * True when the standard library defines `name` as a constant (`i`, `e`,
- * `Pi`, `ExponentialE`, …): the system scope, where the library is
- * installed, binds it to a constant value definition.
- */
-function isLibraryConstant(ce: ComputeEngine, name: string): boolean {
-  const def = ce.contextStack[0]?.lexicalScope.bindings.get(name);
-  return def !== undefined && isValueDef(def) && def.value.isConstant === true;
-}
-
-/**
- * True when `scope` is the scope of the top-level block of a program: a
- * block written directly in the global scope, outside `executeEpsil()`, and
- * not in a function literal or another block that is being canonicalized
- * (the body of a function literal written in the global scope is also a
- * block whose scope has the global scope as parent).
- *
- * `executeEpsil()` does not canonicalize the top-level block of its program,
- * only its statements, one at a time. A `do` block that is a top-level
- * statement of an Epsil program is a nested block in the program block, so
- * it is not a top-level block when `executeEpsil()` canonicalizes it.
- */
-function isProgramBlock(ce: ComputeEngine, scope: Scope): boolean {
-  return (
-    ce._epsilBatchId === undefined &&
-    !ce._hasShadowedParameterFrame() &&
-    scope.parent !== null &&
-    scope.parent === ce._evalContextStack[1]?.lexicalScope
-  );
-}
-
-/** For each name that a statement of `ops` declares
- * (`statementDeclaredNames()`), the index of the first such statement. */
-function firstDeclarationIndex(
-  ops: ReadonlyArray<Expression>
-): Map<string, number> {
-  const result = new Map<string, number>();
-  ops.forEach((op, i) => {
-    for (const name of statementDeclaredNames(op))
-      if (!result.has(name)) result.set(name, i);
-  });
-  return result;
-}
-
-/**
  * The names that cannot be bound: a definition of one of them installs
  * nothing and evaluates to the `absence-marker-binding` error (`Nothing`,
  * `Missing`) or the `module-binding` error (`Module`). The same names as
@@ -4990,26 +5035,7 @@ export function isFunctionDeclarationStatement(
   return type?.def === undefined || type.alias === true;
 }
 
-/**
- * True when the statement `statement` is a function declaration
- * (`isFunctionDeclarationStatement()`) that the interpreter makes available
- * in its whole statement list, before the first statement runs: the
- * `DefineFunction` canonical handler (`library/core.ts`) installs its clause
- * when the statement is canonicalized.
- *
- * A generic definition is not (`isGenericDefinition`). The canonical
- * handler installs no generic clause at canonicalization, and installs no
- * clause onto a name whose definition is generic already: rule G2 of the
- * generic functions (a generic function has one clause, and
- * `defineFunctionClause()` refuses any clause onto a generic definition)
- * would make the evaluation of the statement refuse its own clause if it
- * were installed ahead. So a generic definition takes effect when its
- * statement runs, and a call before it stays unresolved, on the whole-block
- * route and on the Epsil runner alike.
- *
- * Used by the Epsil runner to install a function before the first statement
- * of the program runs (`prepareFunctionDeclarations()`, `execute-epsil.ts`).
- */
+
 export function isHoistedFunctionDefinition(
   ce: ComputeEngine,
   statement: Expression

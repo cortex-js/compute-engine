@@ -1,3 +1,4 @@
+import { operand, operands, operator } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -37,7 +38,8 @@ function parseDiagnostics(source: string) {
 function lowered(source: string): unknown {
   const [expr, diags] = parseEpsil(source);
   expect(diags).toEqual([]);
-  return strip(expr);
+  expect(operator(expr)).toBe('Program');
+  return strip(operands(expr).length === 1 ? operand(expr, 1)! : expr);
 }
 
 function strip(e: unknown): unknown {
@@ -140,7 +142,7 @@ describe('M2 SUGARED GENERICS — lowering (§3.1/§3.2)', () => {
     expect(
       lowered('type Tx = integer\nfunction f<T>(x: T, y: Tx) -> T { x }')
     ).toEqual([
-      'Block',
+      'Program',
       ['DeclareType', 'Tx', { str: 'integer' }],
       [
         'DefineFunction',
@@ -391,7 +393,7 @@ describe('M2 SUGARED GENERICS — grammar diagnostics (§3.1/§3.2)', () => {
     expect((diags ?? []).map((d) => d.message)).toEqual([
       ['generic-clause-unsupported', 'f'],
     ]);
-    expect(strip(expr)).toEqual([
+    expect(strip(operand(expr, 1)!)).toEqual([
       'DefineFunction',
       'f',
       [
@@ -424,7 +426,7 @@ describe('M2 SUGARED GENERICS — grammar diagnostics (§3.1/§3.2)', () => {
     const [expr, diags] = parseEpsil('f<T>(x) = x');
     expect(diags ?? []).toEqual([]);
     // A chain of comparisons is an `And` of its links (CE-411).
-    expect(strip(expr)).toEqual([
+    expect(strip(operand(expr, 1)!)).toEqual([
       'And',
       ['Less', 'f', 'T'],
       ['Greater', 'T', 'x'],
@@ -632,7 +634,7 @@ describe('WHERE-CLAUSE BINDER — the five declaration spellings', () => {
     // `f(x) where T = 5` stays an ORDINARY expression statement — the `where`
     // is an unexpected symbol, not a clause.
     const [expr, diags] = parseEpsil('f(x) where T = 5');
-    expect(strip(expr)).toEqual(['f', 'x']);
+    expect(strip(operand(expr, 1)!)).toEqual(['f', 'x']);
     expect((diags ?? []).map((d) => d.message)).toEqual([
       ['unexpected-symbol', 'where'],
     ]);
@@ -803,7 +805,7 @@ describe('WHERE-CLAUSE BINDER — clause-failure recovery', () => {
     // quantifies `T` and the body must not be ascribed `-> T`.
     const [expr, diags] = parseEpsil('function f(x: T) -> T where T is { x }');
     expect((diags ?? []).map((d) => d.message)).toEqual([['symbol-expected']]);
-    expect(strip(expr)).toEqual([
+    expect(strip(operand(expr, 1)!)).toEqual([
       'DefineFunction',
       'f',
       ['Function', ['Block', 'x'], ['Typed', 'x', { str: 'T' }]],
@@ -815,7 +817,7 @@ describe('WHERE-CLAUSE BINDER — clause-failure recovery', () => {
     expect((diags ?? []).map((d) => d.message)).toEqual([
       ['type-annotation-error', 'Expected a type'],
     ]);
-    expect(strip(expr)).toEqual([
+    expect(strip(operand(expr, 1)!)).toEqual([
       'DefineFunction',
       'f',
       ['Function', ['Block', 'x'], ['Typed', 'x', { str: 'T' }]],
@@ -834,7 +836,7 @@ describe('WHERE-CLAUSE BINDER — clause-failure recovery', () => {
   test('a SYNTACTICALLY malformed clause, math form', () => {
     const [expr, diags] = parseEpsil('f(x: T) -> T where T is = x');
     expect((diags ?? []).map((d) => d.message)).toEqual([['symbol-expected']]);
-    expect(strip(expr)).toEqual([
+    expect(strip(operand(expr, 1)!)).toEqual([
       'DefineFunction',
       'f',
       ['Function', 'x', ['Typed', 'x', { str: 'T' }]],
@@ -854,7 +856,7 @@ describe('WHERE-CLAUSE BINDER — clause-failure recovery', () => {
         'unsolvable-type-variable: The type variable `U` is quantified but never used',
       ],
     ]);
-    expect(strip(expr)).toEqual([
+    expect(strip(operand(expr, 1)!)).toEqual([
       'DefineFunction',
       'f',
       [
@@ -879,7 +881,7 @@ describe('WHERE-CLAUSE BINDER — clause-failure recovery', () => {
         'unsolvable-type-variable: The type variable `U` is quantified but never used',
       ],
     ]);
-    expect(strip(expr)).toEqual([
+    expect(strip(operand(expr, 1)!)).toEqual([
       'DefineFunction',
       'f',
       ['Function', 'x', ['Typed', 'x', { str: 'T' }]],
@@ -909,7 +911,7 @@ describe('WHERE-CLAUSE BINDER — a clause in a comma-delimited annotation', () 
       ['type-annotation-error', NESTED],
     ]);
     expect(diags![0].range[0]).toBe(source.indexOf('where'));
-    expect(strip(expr)).toEqual([
+    expect(strip(operand(expr, 1)!)).toEqual([
       'DefineFunction',
       'f',
       ['Function', ['Block', 'y'], 'x', ['Typed', 'y', { str: 'real' }]],

@@ -549,7 +549,6 @@ True iff the subject conforms to EVERY named protocol. A `type` VALUE subject as
 protocol Copyable {}
 type string is Copyable
 conforms("abc", "Copyable")
-// ➔ "True"
 ```
 
 ### Declare
@@ -573,7 +572,6 @@ Declare that a type CONFORMS to one or more protocols — the lowering of the Ep
 protocol Copyable {}
 type string is Copyable
 "abc" is Copyable
-// ➔ "True"
 ```
 
 ### DeclareProtocol
@@ -1169,6 +1167,12 @@ Print the operands to the host console, separated by spaces and followed by a ne
 print("Hello", 42)
 ```
 
+### program
+
+MathJSON `Program` · `(unknown*) -> unknown`
+
+Evaluate a program in the caller scope, continuing after statement errors.
+
 ### ProtocolMember
 
 `(protocol: string, member: string, arguments: any*) -> unknown`
@@ -1179,7 +1183,6 @@ Invoke a protocol member on a value — the lowering of a QUALIFIED protocol cal
 protocol Negatable { function negated(self: Self) -> Self }
 type number is Negatable { function negated(self) -> number { -self } }
 Negatable.negated(5)
-// ➔ -5
 ```
 
 ### ProtocolProperty

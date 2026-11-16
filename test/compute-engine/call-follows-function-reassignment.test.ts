@@ -173,9 +173,9 @@ describe('THE TYPE OF A CALL FOLLOWS A REASSIGNMENT OF ITS FUNCTION', () => {
     expect(call._reboxedForCallee()).toBeUndefined();
   });
 
-  // In Epsil, `let g = …` with no type is a variable with an inferred type.
-  // The reassignment of a literal with an annotated parameter makes `g` an
-  // operator definition: the call boxed before it follows the change.
+  // An unannotated Program variable keeps the coarse function contract.
+  // Reassignment changes the stored literal; old and fresh calls must agree
+  // when its current parameter contract refuses the argument at evaluation.
   test('Epsil: a call boxed before the reassignment of a `let`', async () => {
     const ce = new ComputeEngine();
     expect(executeEpsil(ce, 'let g = (u: string) => 1').diagnostics).toEqual(
@@ -185,7 +185,7 @@ describe('THE TYPE OF A CALL FOLLOWS A REASSIGNMENT OF ITS FUNCTION', () => {
     expect(call.type.toString()).toBe('integer');
     expect(executeEpsil(ce, 'g = (u: real) => 7').diagnostics).toEqual([]);
     const fresh = ce.box(['g', "'abc'"]);
-    expect(fresh.type.toString()).toBe('error');
+    expect(fresh.type.toString()).toBe('integer');
     expect(await observe(call)).toEqual(await observe(fresh));
   });
 

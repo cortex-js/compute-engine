@@ -27,10 +27,11 @@ flowchart TD
   latex["$…$ LaTeX islands"] -. "parseLatex" .-> parse
   pragmas["pragma values"] -. "computed at parse time" .-> parse
   parse --> diag1["diagnostics"]
-  parse --> json["MathJSON<br/>(spellings as written: sin, pi)"]
+  parse --> json["Program MathJSON<br/>(spellings as written: sin, pi)"]
   json --> resolve["resolveLibraryNames()"]
   resolve --> bound["MathJSON<br/>(library names: Sin, Pi)"]
-  bound --> ce["Compute Engine<br/>evaluates each statement"]
+  bound --> canonical["Compute Engine<br/>prepares the whole Program"]
+  canonical --> ce["evaluates the Program statements"]
   ce --> value["value of the last statement"]
   ce --> diag2["runtime diagnostics"]
   bound -. "serializeEpsil()" .-> out["Epsil source, regenerated"]
@@ -55,8 +56,8 @@ import {
 
 ### Parsing
 
-`parseEpsil(source, url?, options?)` returns a MathJSON expression and an
-array of diagnostics:
+`parseEpsil(source, url?, options?)` returns a MathJSON `Program` and an
+array of diagnostics, including for empty or single-statement source:
 
 ```js
 const [expression, diagnostics] = parseEpsil("2x + 1");
@@ -65,11 +66,11 @@ const [expression, diagnostics] = parseEpsil("2x + 1");
 Ignoring source-location metadata, the expression is:
 
 ```json
-["Add", ["Multiply", 2, "x"], 1]
+["Program", ["Add", ["Multiply", 2, "x"], 1]]
 ```
 
-The parser recovers from most syntax errors and returns a partial expression
-alongside its diagnostics. Every parsed node also carries source offsets so a
+Empty source gives `["Program"]`. The parser recovers from most syntax errors
+and returns a partial expression alongside its diagnostics. Every parsed node also carries source offsets so a
 host can associate a diagnostic or expression with the original text.
 
 The tree is exactly what was written: the lowercase spelling of a library
@@ -94,10 +95,12 @@ import {
   binderSitesOf,
   parseEpsil,
 } from "@cortex-js/compute-engine/epsil";
+import { operand } from "@cortex-js/compute-engine/math-json";
 
 const ce = new ComputeEngine();
 const source = "sum(k^2, k, 1, n)";
-const [call] = parseEpsil(source);
+const [program] = parseEpsil(source);
+const call = operand(program, 1);
 binderSitesOf(ce, call, source);
 // ➔ [{ name: "k", operands: [0, 1, 2, 3] }]
 ```
@@ -109,10 +112,10 @@ bindings of the program: call it only for a call whose callee the program
 does not define. A `limit`, `nLimit`, `nd` or `nIntegrate` that does not
 write its variable binds the variable that the engine chooses, in its first
 operand only: `limit(sin(h)/h, 0)` gives `[{ name: "h", operands: [0] }]`.
-The engine reads the value of a name that the program binds, so its choice
-can depend on that value: after `let L = [1, 2]`, the variable of
-`limit(total(L)*t, 0)` is `t`, because `L` is a list, and the engine does not
-choose a `const` name. A host that knows the names the program binds at the
+The engine can read values already installed by an earlier program or the
+host, so its choice can depend on that state. When `L` already holds
+`[1, 2]`, the variable of `limit(total(L)*t, 0)` is `t`, because `L` is a
+list. The engine does not choose a `const` name. A host that knows the names the program binds at the
 call gives them as a fifth argument,
 `binderSitesOf(ce, call, source, undefined, (name) => …)`: when such a name
 comes first and other names follow, the result is `[]`. Without it, the
@@ -123,21 +126,24 @@ function that returns a `ProgramDeclaration` for the name, or `undefined`:
 top level of the program that no other statement writes. `constant` is
 `true` for a `const`, `annotated` is `true` when the statement has a type
 annotation, `value` is the raw initializer, and `boxedEarly` is `true` when
-the call is in the body of a `function` statement that the program can call
-above that statement. With it, a `let` whose initializer is a number, a
-string, a list or a function literal, and a `const`, give the variable that
-the engine chooses: after `let L = [1, 2]` the result for
-`limit(total(L)*t, 0)` is `[{ name: "t", operands: [0] }]`, and after
-`const h = 5` the result for `limit(sin(h)/h, 0)` is `[]`. In the body of a
-function that the program can call above its `function` statement, the
-engine can box the body before the declaration runs, so a `const` whose
-initializer is a number, and a name with a type annotation, are not decided
-there.
+the call is boxed before value declarations have executed. Every occurrence
+in a `Program` has this timing, including direct top-level statements and
+function bodies: the whole program is prepared before its first statement
+runs. Constness is already known, so the helper excludes a `const` name
+without evaluating its initializer. A mutable variable's execution value is
+unavailable during that preparation, even when its declaration appears
+earlier in the text; an annotation does not supply that value. The helper
+leaves a value-dependent choice undecided rather than predicting execution.
+For a host that really boxes a call after the relevant declarations have
+executed, `boxedEarly: false` allows the later-value evidence instead.
 
 ### Execution
 
-`executeEpsil(ce, source, options?)` parses a program and evaluates its
-top-level statements sequentially in the current scope of `ce`:
+`executeEpsil(ce, source, options?)` parses, resolves and boxes one `Program`,
+then evaluates it in the current scope of `ce`. Boxing prepares every
+statement before the first runs. The canonical order is types and protocols,
+then function definitions with their paired signatures, then the other
+statements in source order:
 
 ```js
 const ce = new ComputeEngine();
@@ -256,7 +262,9 @@ serializeEpsil(["Sin", "x"], { libraryNames: "mathjson" });
 ## How Epsil lowers to MathJSON
 
 The examples in this section omit the `sourceOffsets` metadata that every
-parsed node carries.
+parsed node carries. Except in [Blocks and programs](#blocks-and-programs),
+they show individual statements or nested expressions inside the outer
+`Program`, rather than the whole return value of `parseEpsil()`.
 
 ### Heads at a glance
 
@@ -274,7 +282,8 @@ parsed node carries.
 | `p₁ \| p₂` in a pattern | `Alternatives` |
 | `while`, `for … in …` | `Loop` |
 | `break`, `continue` | `Break()`, `Continue()` |
-| `{ … }` after a keyword, `do { … }`, a multi-statement program | `Block` |
+| A whole program, including empty or single-statement source | `Program` |
+| `{ … }` after a keyword, `do { … }` | `Block` |
 | `[a, b]` | `List` |
 | `{a, b}` | `Set` |
 | `(a, b)` | `Tuple` |
@@ -313,9 +322,12 @@ let x = 5
 ["Declare", "x", ["Dictionary", ["KeyValuePair", "value", 5]]]
 ```
 
-The type is inferred (`integer`, here) when no annotation is given. With an
-annotation, the type appears as a positional argument before the attributes
-dictionary:
+For a mutable variable without an annotation, the initializer determines a
+widened binding type (`number`, here). A function initializer or an alias
+known to hold a function gives `function`; the value retains its own
+annotations without making them a permanent variable contract. With an
+annotation, that contract appears as a positional argument before the
+attributes dictionary:
 
 ```epsil
 let x: real = 5
@@ -948,8 +960,10 @@ to `v` — has no Epsil spelling yet.
 
 ### Blocks and programs
 
-A statement block is the engine's `Block`. A multi-statement program is wrapped
-in one; a program consisting of a single statement is returned unwrapped:
+A whole source file is always a `Program`. It has no scope of its own: its
+declarations stay in the caller's scope. A statement block is a nested
+`Block`, with its own lexical scope. These examples show the complete parser
+result, omitting source metadata:
 
 ```epsil
 a
@@ -957,7 +971,7 @@ a
 ```
 
 ```json
-["Block", "a", 2]
+["Program", "a", 2]
 ```
 
 ```epsil
@@ -965,7 +979,7 @@ a; 2
 ```
 
 ```json
-["Block", "a", 2]
+["Program", "a", 2]
 ```
 
 A `{ … }` that follows a keyword is a `Block`, while a bare `{ … }` is the
@@ -976,7 +990,7 @@ collection grammar:
 ```
 
 ```json
-["Set", 1, 2]
+["Program", ["Set", 1, 2]]
 ```
 
 ```epsil
@@ -984,7 +998,7 @@ if a { }
 ```
 
 ```json
-["If", "a", ["Block"]]
+["Program", ["If", "a", ["Block"]]]
 ```
 
 ```epsil
@@ -992,7 +1006,7 @@ if a { if b { 1 } }
 ```
 
 ```json
-["If", "a", ["Block", ["If", "b", ["Block", 1]]]]
+["Program", ["If", "a", ["Block", ["If", "b", ["Block", 1]]]]]
 ```
 
 `do { … }` produces the same `Block` in expression position, so a `let` bound
@@ -1003,9 +1017,9 @@ let y = do { let t = 3; t + 1 }
 ```
 
 ```json
-["Declare", "y", ["Dictionary", ["KeyValuePair", "value",
+["Program", ["Declare", "y", ["Dictionary", ["KeyValuePair", "value",
   ["Block", ["Declare", "t", ["Dictionary", ["KeyValuePair", "value", 3]]],
-    ["Add", "t", 1]]]]]
+    ["Add", "t", 1]]]]]]
 ```
 
 ### Collections, calls, indexing and field access
@@ -1130,8 +1144,11 @@ place. See [Errors are values](/epsil/evaluation/#errors-are-values).
 
 `serializeEpsil` and `parseEpsil` are inverses over the MathJSON the grammar
 can produce, up to a small set of documented normalizations.
-`parseEpsil(serializeEpsil(e))` is **structurally** equal to `e` after
-applying:
+A parser-produced `Program` keeps its outer `Program` when serialized and
+parsed again. Serializing a standalone expression instead gives source whose
+parsed result wraps that expression in `Program`; compare its first operand
+when checking an expression-only round trip. Within that outer form, the
+round trip is **structurally** equal after applying:
 
 - **Number formatting** — `2`, `{num: "2"}` and `"2"` are the same number;
   the serializer emits a single canonical spelling (with `_` digit grouping),
@@ -1171,7 +1188,8 @@ do not have a special surface form serialize as ordinary function calls.
 Epsil is a **programming-language** syntax. The Compute Engine also ships a
 *loose math parser* (`ce.parse(src, { canonical: false })`) that reads
 LaTeX/ASCII-math notation. The two share a few surface forms but are **not** the
-same language, and they overlap only partially:
+same language, and they overlap only partially. The Epsil column below shows
+the statement inside its outer `Program`:
 
 | Source     | Epsil `parseEpsil`                | Loose `ce.parse` (non-canonical)              | Agree? |
 | ---------- | ----------------------------------- | --------------------------------------------- | ------ |

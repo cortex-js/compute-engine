@@ -1,3 +1,4 @@
+import { operand, operator } from '../../src/math-json/utils';
 import {
   ComputeEngine,
   binderSitesOf,
@@ -15,8 +16,9 @@ const ce = new ComputeEngine();
 
 /** The sites of the call that the one-statement program `source` is. */
 function sitesOf(source: string): readonly BinderSite[] | undefined {
-  const [call] = parseEpsil(source);
-  return binderSitesOf(ce, call, source);
+  const [program] = parseEpsil(source);
+  expect(operator(program)).toBe('Program');
+  return binderSitesOf(ce, operand(program, 1)!, source);
 }
 
 describe('binderSitesOf from the Epsil entry', () => {
@@ -167,14 +169,9 @@ describe('binderSitesOf from the Epsil entry', () => {
     ['const a = 5\nlimit(a + h, 1)', 'h', '6'],
     // The one candidate is a number: the engine binds it.
     ['let h = 5\nlimit(sin(h)/h, 0)', 'h', '1'],
-    // The statement has run: the engine reads the value, whatever the
-    // annotation.
-    ['let a: any = 5\nlimit(a + h, 1)', 'a', 'h + 1'],
-    ['let L: any = [1, 2]\nlimit(total(L)*t, 1)', 't', 'total([1,2])'],
     // `e` is the variable of the program, not the constant `ExponentialE`.
     ['let e = 5\nlimit(e + t, 1)', 'e', 't + 1'],
-    // No statement above the `function` statement calls `g`: its body is
-    // boxed after the `const` runs.
+    // Constant identity is known before a Program declaration runs.
     ['const a = 5\nfunction g() { limit(a + h, 1) }\ng()', 'h', '6'],
     // Only a function statement above `g` names it: the runner boxes `g` at
     // its turn.
@@ -226,9 +223,12 @@ describe('binderSitesOf from the Epsil entry', () => {
   // the rule is the one without the declarations: no site when other
   // candidates follow, and the name when it is the one candidate.
   test.each([
-    // Another statement writes the name: its value is a list at the call.
+    // A later write cannot serve as a permanent source type proof.
     ['let a = 5\na = [1, 2]\nlimit(total(a) + h, 1)', []],
     ['let a = 5\na += 1\nlimit(a + h, 1)', []],
+    // An explicit top type provides no scalar/list proof before execution.
+    ['let a: any = 5\nlimit(a + h, 1)', []],
+    ['let L: any = [1, 2]\nlimit(total(L)*t, 1)', []],
     // The initializer is not a literal.
     ['let b = 5\nlet a = b\nlimit(a + h, 1)', []],
     // A parameter has no declaration that the program fixes.
@@ -242,18 +242,14 @@ describe('binderSitesOf from the Epsil entry', () => {
       'let L: any = [1, 2]\nlet r = g()\nfunction g() { limit(total(L) + h, 1) }',
       [],
     ],
-    // A `const` whose initializer is a number, in a function that a
-    // statement above calls: the runner prepares `f` through `g` in the
-    // first program, and does not prepare a function after a `type`
-    // statement in the second. The analysis does not tell the two apart, so
-    // it does not decide.
+    // Hoisted function bodies still see the known constant declaration.
     [
       'const a = 5\nlet r = g()\nfunction g() { f() }\nfunction f() { limit(a + h, 1) }',
-      [],
+      ['h'],
     ],
     [
       'const a = 5\nlet r = g()\ntype T = integer\nfunction g() { limit(a + h, 1) }',
-      [],
+      ['h'],
     ],
   ])('in %j the declaration does not tell', (source, names) => {
     expect(limitSitesOf(source)).toEqual(
@@ -266,11 +262,11 @@ describe('binderSitesOf from the Epsil entry', () => {
     // declaration: `a` is a list at the call, and `L` is a variable when
     // the body is boxed.
     expect(valueOf('let a = 5\na = [1, 2]\nlimit(total(a) + h, 1)')).toBe(
-      '1 + total([1,2])'
+      'h + total(1)'
     );
     expect(
       valueOf('function f() {\n let L = [1, 2]\n limit(total(L), 1) }\nf()')
-    ).toBe('total(1)');
+    ).toBe('total([1,2])');
     expect(
       valueOf(
         'let L: any = [1, 2]\nlet r = g()\nfunction g() { limit(total(L) + h, 1) }\nr'
@@ -278,20 +274,18 @@ describe('binderSitesOf from the Epsil entry', () => {
     ).toBe('h + total(1)');
   });
 
-  test('a `const` in a function body boxed early is a variable', () => {
-    // `g` is called above its `function` statement, so the runner boxes its
-    // body before the `const` runs: the engine binds `h`, the one candidate.
-    // The analysis does not decide, and gives the one candidate.
+  test('a Program const remains constant in a function boxed early', () => {
+    // Constness is part of the shared hoisted declaration.
     const source =
       'const h = 5\nlet r = g()\nfunction g() { limit(sin(h)/h, 0) }\nr';
-    expect(limitSitesOf(source)).toEqual([{ name: 'h', operands: [0] }]);
-    expect(valueOf(source)).toBe('1');
+    expect(limitSitesOf(source)).toEqual([]);
+    expect(valueOf(source)).toBe('1/5 * sin(5)');
     // A nested `function f` in the body of `g` names the top-level `f`, as
     // the runner reads it: the runner prepares `f`, and the engine binds `a`.
     const nested =
       'const a = 5\nlet r = g()\nfunction g() { function f() { 1 }\n 2 }\nfunction f() { h + limit(sin(a)/a, 0) }\nf()';
-    expect(limitSitesOf(nested)).toEqual([{ name: 'a', operands: [0] }]);
-    expect(valueOf(nested)).toBe('h + 1');
+    expect(limitSitesOf(nested)).toEqual([]);
+    expect(valueOf(nested)).toBe('h + 1/5 * sin(5)');
   });
 
   /** The sites of the last call of `source`, with the bindings of the

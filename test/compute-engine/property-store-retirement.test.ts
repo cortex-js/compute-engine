@@ -9,8 +9,8 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 // available in a language whose values are all immutable. With mutable objects
 // in the language (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B) the assignment is a
 // STORE instead: it runs the property's `set` accessor against the object the
-// receiver refers to, every alias of that object sees the change, and the
-// statement evaluates to the value assigned. It is legal on objects and on
+// receiver refers to, and every alias of that object sees the change. A raw
+// Assign returns its stored value; a Program assignment statement gives Nothing. It is legal on objects and on
 // nothing else — a value receiver is `immutable-value-assignment`.
 //
 // What this file pins is the part that is easy to get half-right: the two
@@ -113,18 +113,19 @@ let q = Pt(1)`);
 });
 
 describe('an OBJECT receiver stores, on BOTH timings', () => {
-  test('ONE batch: the store runs and the assignment answers the value', () => {
-    const { value, diagnostics } = run(`${PERSON}
+  test('ONE batch: the store runs and Program answers Nothing', () => {
+    const { value, diagnostics, ce } = run(`${PERSON}
 let p = Person(n: "Bob", age: 42)
 p.name = "Ada"`);
     expect(diagnostics).toEqual([]);
-    expect(value).toBe('"Ada"');
+    expect(value).toBe('"Nothing"');
+    expect(run('p.name', ce).value).toBe('"Ada"');
   });
 
-  test('TWO batches: same answer', () => {
+  test('TWO batches: the store persists across Programs', () => {
     const { ce } = run(`${PERSON}
 let p = Person(n: "Bob", age: 42)`);
-    expect(run('p.name = "Ada"', ce).value).toBe('"Ada"');
+    expect(run('p.name = "Ada"', ce).value).toBe('"Nothing"');
     expect(run('p', ce).value).toBe('Person(n: "Ada", age: 42)');
   });
 
@@ -267,7 +268,7 @@ let q = Pt(1)`;
     const { ce } = run(`${PERSON}
 ${COUNTER}
 let p = Person(n: "Bob", age: 42)`);
-    expect(run('p.(Nameable.name) = bump()', ce).value).toBe('"z"');
+    expect(run('p.(Nameable.name) = bump()', ce).value).toBe('"Nothing"');
     expect(run('calls', ce).value).toBe('1');
     expect(run('p.n', ce).value).toBe('"z"');
   });
@@ -296,14 +297,22 @@ type Q = object{n: integer} is Aged {
 
   test('the QUALIFIED write stays symbolic', () => {
     const ce = declared();
-    expect(run('q.(Aged.age) = 5', ce).value).toBe(
-      'ProtocolProperty("Aged", "age", q, 5)'
-    );
+    expect(run('q.(Aged.age) = 5', ce).value).toBe('"Nothing"');
+    expect(
+      ce.box([
+        'Assign',
+        ['ProtocolProperty', { str: 'Aged' }, { str: 'age' }, 'q'],
+        5,
+      ]).evaluate().toString()
+    ).toBe('ProtocolProperty("Aged", "age", q, 5)');
   });
 
   test('the UNQUALIFIED write stays symbolic', () => {
     const ce = declared();
-    expect(run('q.age = 5', ce).value).toBe('Assign(Field(q, "age"), 5)');
+    expect(run('q.age = 5', ce).value).toBe('"Nothing"');
+    expect(
+      ce.box(['Assign', ['Field', 'q', { str: 'age' }], 5]).evaluate().toString()
+    ).toBe('Assign(Field(q, "age"), 5)');
   });
 });
 

@@ -87,12 +87,12 @@ function g(B: list<integer>, k: integer) -> integer {
   });
 
   test('a captured name with an inferred type keeps the list arm', () => {
-    // `X` is inferred `integer` when `f` is boxed, then holds a list: the
-    // local `n` keeps its scalar type, and the value of the call is a list.
+    // An explicitly dynamic captured value can change from scalar to list.
+    // The body-local `n` keeps its scalar type and the result keeps the list arm.
     const ce = new ComputeEngine();
     const checked = executeEpsil(
       ce,
-      `let X = 1
+      `let X: any = 1
 function f(B: list<integer>, k: integer) -> integer {
   let n = 0
   for j in 1..k { n = n + j + X }
@@ -107,11 +107,11 @@ X = [1, 2]
   });
 
   test('a call of a user function in the body keeps the list arm', () => {
-    // The result of `g` reads `X`, whose inferred type widens later.
+    // The result of `g` reads the explicitly dynamic captured value `X`.
     const ce = new ComputeEngine();
     const checked = executeEpsil(
       ce,
-      `let X = 1
+      `let X: any = 1
 function g(m: integer) { X + m }
 function f(B: list<integer>, k: integer) -> integer {
   let n = 0

@@ -392,7 +392,7 @@ match p { pt(a, b) => a + b }`
     expect(r.value!.toString()).toBe('3');
   });
 
-  test('function BEFORE the type declaration is the D5 collision', () => {
+  test('a constructor function authored before its type uses canonical type-first order', () => {
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
@@ -400,11 +400,9 @@ match p { pt(a, b) => a + b }`
 type circle = record{x: number, y: number, r: number}
 circle(1, 2, 3)`
     );
-    expect(
-      (r.diagnostics ?? []).some((d) =>
-        String(d.message).includes('runtime-error')
-      )
-    ).toBe(true);
+    expect(r.diagnostics ?? []).toEqual([]);
+    expect(r.value!.json).toEqual(['circle', { dict: { x: 1, y: 2, r: 3 } }]);
+    expect(r.value!.type.toString()).toBe('circle');
   });
 
   test('an alias type´s same-name function is an ordinary function (no tagging)', () => {

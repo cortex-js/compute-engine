@@ -130,7 +130,7 @@ describe('an isMissing guard narrows the guarded symbol', () => {
 describe('the rewrite the check boxes', () => {
   test('wraps the guarded read only', () => {
     expect(narrowed('if isMissing(v) { g(v) } else { f(v) }')).toBe(
-      '{"fn":["If",{"fn":["IsMissing",{"sym":"v"}]},{"fn":["Block",{"fn":["g",{"sym":"v"}]}]},{"fn":["Block",{"fn":["f",{"fn":["AssertPresent",{"sym":"v"}]}]}]}]}'
+      '{"fn":["Program",{"fn":["If",{"fn":["IsMissing",{"sym":"v"}]},{"fn":["Block",{"fn":["g",{"sym":"v"}]}]},{"fn":["Block",{"fn":["f",{"fn":["AssertPresent",{"sym":"v"}]}]}]}]}]}'
     );
   });
 

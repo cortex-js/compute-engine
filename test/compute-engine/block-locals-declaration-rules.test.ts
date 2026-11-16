@@ -259,12 +259,12 @@ describe('A LOCAL IS DECLARED AT THE OWN LEVEL OF A BLOCK', () => {
     ])
       expect(codes(source)).toEqual(['assignment-to-undeclared-variable']);
     // A name declared by an earlier top-level statement is written by an
-    // assignment in a branch. A reassignment at the top level keeps the
-    // interpreter rules and can change the type.
+    // assignment in a branch. An explicit `any` binding also admits a value
+    // of another kind.
     for (const [source, value] of [
       ['let c = true\nlet a = 1\nif c { a = 2 }\na', '2'],
       ['let c = false\nlet a = 1\nif c { a = 2 }\na', '1'],
-      ['let a = 1\na = "x"\na', '"x"'],
+      ['let a: any = 1\na = "x"\na', '"x"'],
     ]) {
       const r = executeEpsil(new ComputeEngine(), source);
       expect(r.diagnostics).toEqual([]);

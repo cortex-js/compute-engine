@@ -1,3 +1,4 @@
+import { operands } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
@@ -42,7 +43,7 @@ describe('A DECLARED SIGNATURE BEFORE THE DEFINITION, IN ONE BLOCK', () => {
     expect(epsil(SIGNATURE + 'g(1.5)')).toBe(expected);
     // In a block, the signature and the function statement are two
     // declarations.
-    expectRedeclared(parseEpsil(SIGNATURE + 'g(1.5)')[0]);
+    expectRedeclared(['Block', ...operands(parseEpsil(SIGNATURE + 'g(1.5)')[0])]);
     expectEpsilRedeclared('do {\n' + SIGNATURE + 'g(1.5) }');
   });
 
@@ -93,7 +94,7 @@ function epsilWithDiagnostics(source: string): {
 describe('A CALL BETWEEN THE DECLARED SIGNATURE AND THE DEFINITION', () => {
   test('the call is resolved', () => {
     const src = BETWEEN + 'function g(k) { 2 * k }\na';
-    expectRedeclared(parseEpsil(src)[0]);
+    expectRedeclared(['Block', ...operands(parseEpsil(src)[0])]);
     expect(epsilWithDiagnostics(src)).toEqual({
       value: '"4"',
       diagnostics: [],
@@ -114,7 +115,7 @@ describe('A CALL BETWEEN THE DECLARED SIGNATURE AND THE DEFINITION', () => {
       'let g: (integer) -> integer\nlet a = String(g(1.5))\nfunction g(k) { 2 * k }\na';
     const expected =
       'Error(ErrorCode("incompatible-type", "integer", "1.5"), 1.5)';
-    expectRedeclared(parseEpsil(src)[0]);
+    expectRedeclared(['Block', ...operands(parseEpsil(src)[0])]);
     expect(epsil(src)).toBe(expected);
   });
 
@@ -193,7 +194,7 @@ describe('A CALL BETWEEN THE DECLARED SIGNATURE AND THE DEFINITION', () => {
 
   test('in a nested block', () => {
     const src = 'do {\n' + BETWEEN + 'function g(k) { 2 * k }\na }';
-    expectRedeclared(parseEpsil(src)[0]);
+    expectRedeclared(['Block', ...operands(parseEpsil(src)[0])]);
     expectEpsilRedeclared(src);
   });
 
@@ -201,7 +202,7 @@ describe('A CALL BETWEEN THE DECLARED SIGNATURE AND THE DEFINITION', () => {
     const src =
       'let r = []\nfor i in [1, 2] {\nlet g: (integer) -> integer\n' +
       'let a = String(g(i))\nfunction g(k) { 2 * k }\nr = [...r, a] }\nr';
-    expectRedeclared(parseEpsil(src)[0]);
+    expectRedeclared(['Block', ...operands(parseEpsil(src)[0])]);
     expectEpsilRedeclared(src);
   });
 

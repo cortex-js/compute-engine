@@ -1,0 +1,56 @@
+[
+  {
+    "id": "shared-Limit-sum",
+    "mechanism": "M5",
+    "file": "src/compute-engine/library/calculus.ts",
+    "source": "function f(){let L=[1,2];limit(sum(L),1)};f()",
+    "observed": "Exact matched frozen production bundles: baseline `1` \u2192 candidate `3`; diagnostics 0/0.",
+    "accountingReason": "Shared Limit binder/argument consumer repair; separate runtime value difference, not hidden inside sequence-owner totals.",
+    "evidence": "final-matched-runtime-witnesses.json"
+  },
+  {
+    "id": "shared-Limit-length",
+    "mechanism": "M5",
+    "file": "src/compute-engine/library/calculus.ts",
+    "source": "function f(){let L=[1,2];limit(length(L),1)};f()",
+    "observed": "Exact matched frozen production bundles: baseline `lim_(L -> 1) {Length(L)}` \u2192 candidate `2`; diagnostics 0/0.",
+    "accountingReason": "Same shared argument-owner repair; distinct observable case retained explicitly.",
+    "evidence": "final-matched-runtime-witnesses.json"
+  },
+  {
+    "id": "division-zero-let",
+    "mechanism": "M5",
+    "file": "src/compute-engine/boxed-expression/arithmetic-mul-div.ts",
+    "source": "let x=0;x/x",
+    "observed": "Exact matched frozen production bundles: baseline `NaN` \u2192 candidate `NaN`; diagnostics 0/0.",
+    "accountingReason": "Division folding must not turn a Program-bound zero denominator into finite1; Program fixture test/epsil/program.test.ts zero aliases.",
+    "evidence": "final-matched-runtime-witnesses.json"
+  },
+  {
+    "id": "division-zero-const",
+    "mechanism": "M5",
+    "file": "src/compute-engine/boxed-expression/arithmetic-mul-div.ts",
+    "source": "const x=0;x/x",
+    "observed": "Exact matched frozen production bundles: baseline `1` \u2192 candidate `NaN`; diagnostics 0/0.",
+    "accountingReason": "Constant alias zero stays subject to the same pole guard; no numeric-context change.",
+    "evidence": "final-matched-runtime-witnesses.json"
+  },
+  {
+    "id": "division-zero-alias-let",
+    "mechanism": "M5",
+    "file": "src/compute-engine/boxed-expression/arithmetic-mul-div.ts",
+    "source": "let x=0;let y=x;y/y",
+    "observed": "Exact matched frozen production bundles: baseline `NaN` \u2192 candidate `NaN`; diagnostics 0/0.",
+    "accountingReason": "Runtime-local division guard; alias case recorded separately. No numeric-context change.",
+    "evidence": "final-matched-runtime-witnesses.json"
+  },
+  {
+    "id": "division-zero-alias-const",
+    "mechanism": "M5",
+    "file": "src/compute-engine/boxed-expression/arithmetic-mul-div.ts",
+    "source": "const x=0;const y=x;y/y",
+    "observed": "Exact matched frozen production bundles: baseline `1` \u2192 candidate `NaN`; diagnostics 0/0.",
+    "accountingReason": "Runtime-local division guard; alias case recorded separately. No numeric-context change.",
+    "evidence": "final-matched-runtime-witnesses.json"
+  }
+]

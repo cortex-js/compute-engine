@@ -1,3 +1,4 @@
+import { operand } from '../../src/math-json/utils';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { Formatter, StackBlock } from '../../src/epsil/formatter';
@@ -335,14 +336,14 @@ describe('EPSIL FORMATTER — string literals keep interior spaces', () => {
     const [value] = parseEpsil('"""\nhello   \nworld\n"""');
     // The multi-line literal keeps the three spaces at the end of the first
     // interior line.
-    expect((value as { str: string }).str).toBe('hello   \nworld');
+    expect((operand(value, 1) as { str: string }).str).toBe('hello   \nworld');
 
     const out = serializeEpsil(value);
     expect(out).toBe('"hello   \\nworld"');
 
     // Round-trip: re-parsing the serialized literal yields the same string.
     const [reparsed] = parseEpsil(out);
-    expect((reparsed as { str: string }).str).toBe('hello   \nworld');
+    expect((operand(reparsed, 1) as { str: string }).str).toBe('hello   \nworld');
   });
 });
 

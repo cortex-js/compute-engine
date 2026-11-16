@@ -1,0 +1,1933 @@
+{
+  "baseline": "ffff1d44fc566ef01fb52a0ce67b6797797f4dcf",
+  "command": "timeout -k 30 600 npm test -- --watchman=false --json --outputFile=/private/tmp/program-full-census.json",
+  "cwd": "/tmp/wt-program-accepted-sol",
+  "exit": 1,
+  "sourceHashManifestUnchanged": true,
+  "durationSeconds": 179.656,
+  "suites": {
+    "failed": 141,
+    "passed": 1907,
+    "skipped": 11,
+    "total": 2059
+  },
+  "tests": {
+    "failed": 1019,
+    "passed": 84306,
+    "skipped": 780,
+    "todo": 2,
+    "total": 86107
+  },
+  "snapshots": {
+    "failed": 39,
+    "passed": 4221,
+    "total": 4260
+  },
+  "jsonExportFailure": "Jest attempted to serialize circular Expression failureDetails after completing the run; raw log has full results.",
+  "loadAtAcquire": [
+    4.6,
+    11.7,
+    16.6
+  ],
+  "loadAtRelease": [
+    35.6,
+    23.9,
+    20.8
+  ],
+  "failures": [
+    {
+      "file": "test/epsil/static-check-rollback.test.ts",
+      "cases": [
+        "STATIC CHECK \u2014 engine state rolls back \u203a a pinned `:=` signature registration is undone"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/presence-narrowing.test.ts",
+      "cases": [
+        "the rewrite the check boxes \u203a wraps the guarded read only"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/static-lambda-callee-arguments.test.ts",
+      "cases": [
+        "EPSIL STATIC \u2014 arguments of a call to a function literal \u203a a `const` binding and a `:=` assignment of a literal are checked the same way",
+        "EPSIL STATIC \u2014 arguments of a call to a function literal \u203a reassignment mirrors the run time \u203a after one replacement the binding keeps the replacement signature",
+        "EPSIL STATIC \u2014 arguments of a call to a function literal \u203a reassignment mirrors the run time \u203a a `let` binding reassigned to a non-literal is no longer checked",
+        "EPSIL STATIC \u2014 arguments of a call to a function literal \u203a across cells \u203a a previous cell's `let` binding is checked in the next cell",
+        "EPSIL STATIC \u2014 arguments of a call to a function literal \u203a across cells \u203a a second reassignment in the next cell is checked against the first replacement",
+        "EPSIL STATIC \u2014 arguments of a call to a function literal \u203a across cells \u203a the pass leaves the engine as it found it"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/compiled-declared-function-type.test.ts",
+      "cases": [
+        "A `let` DECLARATION THEN A DEFINITION \u203a a program compiled as one block declares `g` twice"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/function-declaration-hoisting.test.ts",
+      "cases": [
+        "A CALL BEFORE A FUNCTION STATEMENT RESOLVES WHEN ITS STATEMENT RUNS \u203a a single clause",
+        "A CALL BEFORE A FUNCTION STATEMENT RESOLVES WHEN ITS STATEMENT RUNS \u203a a multi-clause definition, called before both clauses",
+        "A CALL BEFORE A FUNCTION STATEMENT RESOLVES WHEN ITS STATEMENT RUNS \u203a a function that a prepared function calls is prepared too",
+        "A CALL BEFORE A FUNCTION STATEMENT RESOLVES WHEN ITS STATEMENT RUNS \u203a a hold function",
+        "THE DECLARED SIGNATURE IS KEPT \u203a a call in the declared signature",
+        "THE DECLARED SIGNATURE IS KEPT \u203a a call before both statements",
+        "THE DECLARED SIGNATURE IS KEPT \u203a the declared signature does not apply before its `let` runs",
+        "THE BINDINGS OF EARLIER STATEMENTS ARE KEPT \u203a an earlier assignment with no `let` does not declare the variable",
+        "THE BINDINGS OF EARLIER STATEMENTS ARE KEPT \u203a a call between the `let` and the function statement",
+        "THE BINDINGS OF EARLIER STATEMENTS ARE KEPT \u203a a call before the function statement, with a `scope` write",
+        "THE BINDINGS OF EARLIER STATEMENTS ARE KEPT \u203a a write in a function before the `let` of the name is an error",
+        "THE BINDINGS OF EARLIER STATEMENTS ARE KEPT \u203a a `scope` write in a function before the `let` of the name is an error",
+        "THE BINDINGS OF EARLIER STATEMENTS ARE KEPT \u203a a `scope` write in a function after the `let` of the name",
+        "THE NAMES THAT A FUNCTION BINDS FOR ITS BODY \u203a a parameter with the name of an earlier variable with no static type",
+        "THE NAMES THAT A FUNCTION BINDS FOR ITS BODY \u203a a local `let` with the name of an earlier variable",
+        "A LIBRARY CONSTANT AND A VARIABLE OF THE SAME NAME \u203a a statement before the `let` reads the constant",
+        "A LIBRARY CONSTANT AND A VARIABLE OF THE SAME NAME \u203a a body before the `let` reads the constant",
+        "A LIBRARY CONSTANT AND A VARIABLE OF THE SAME NAME \u203a a call after the `let` of a constant prepares the function",
+        "A LIBRARY CONSTANT AND A VARIABLE OF THE SAME NAME \u203a a call before the `let` of a constant reads the constant",
+        "A HOST BINDING AND A VARIABLE OF THE SAME NAME \u203a a call before the `let` reads the host binding in the body",
+        "THE SIGNATURE OF A PREPARED FUNCTION HOLDS A CALL BEFORE THE `let` \u203a a body that squares the constant `i`",
+        "THE SIGNATURE OF A PREPARED FUNCTION HOLDS A CALL BEFORE THE `let` \u203a a body that adds 1 to the constant `i`",
+        "THE SIGNATURE OF A PREPARED FUNCTION HOLDS A CALL BEFORE THE `let` \u203a a host binding of another type",
+        "THE SIGNATURE OF A PREPARED FUNCTION HOLDS A CALL BEFORE THE `let` \u203a a host binding that holds `Nothing`",
+        "THE SIGNATURE OF A PREPARED FUNCTION HOLDS A CALL BEFORE THE `let` \u203a a host binding of type `unknown`",
+        "THE SIGNATURE OF A PREPARED FUNCTION HOLDS A CALL BEFORE THE `let` \u203a no call before the `let`: the signature keeps the variable type",
+        "STATEMENTS THAT ARE NOT HOISTED \u203a the constructor of a nominal type runs after its type statement",
+        "STATEMENTS THAT ARE NOT HOISTED \u203a the constructor of a variant of a sum type",
+        "STATEMENTS THAT ARE NOT HOISTED \u203a a function statement for a name that holds a value keeps its error",
+        "STATEMENTS THAT ARE NOT HOISTED \u203a a function statement for a name that an earlier `let` binds",
+        "STATEMENTS THAT ARE NOT HOISTED \u203a a function statement after a type statement",
+        "STATEMENTS THAT ARE NOT HOISTED \u203a a function that uses an earlier variable with no static type",
+        "STATEMENTS THAT ARE NOT HOISTED \u203a a body that reads an earlier dictionary-valued variable",
+        "STATEMENTS THAT ARE NOT HOISTED \u203a a body that uses a variable that two earlier statements write",
+        "STATEMENTS THAT ARE NOT HOISTED \u203a a body that uses a variable that an earlier program declared",
+        "STATEMENTS THAT ARE NOT HOISTED \u203a a body that calls a lambda bound by an earlier `let`",
+        "STATEMENTS THAT ARE NOT HOISTED \u203a a generic function",
+        "STATEMENTS THAT ARE NOT HOISTED \u203a an ordinary clause after a generic function of the same name",
+        "STATEMENTS THAT ARE NOT HOISTED \u203a a `let` of a function literal takes effect when it runs",
+        "A PROGRAM RUN AGAIN ON THE SAME ENGINE WITH ANOTHER SIGNATURE \u203a a preparation that cannot box the statement keeps the earlier binding",
+        "THE COMPILER \u203a a call before a function statement"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/execute.test.ts",
+      "cases": [
+        "EPSIL EXECUTE \u2014 string interpolation \u203a the epsil.md headline example",
+        "EPSIL EXECUTE \u2014 static (canonicalization-time) type errors \u203a the check does not perturb the session it checks",
+        "EPSIL EXECUTE \u2014 static (canonicalization-time) type errors \u203a a repeated check leaves a declared symbol typed as it was",
+        "EPSIL EXECUTE \u2014 an expired time budget ends the program \u203a a budget spent DURING the static pass keeps the diagnostics found so far",
+        "EPSIL EXECUTE \u2014 pipe-stage sugar \u203a a placeholder inside a nested literal does not make an implicit lambda",
+        "EPSIL EXECUTE \u2014 named calls to `:=`-assigned callees (static tier) \u203a a named call written BEFORE the assignment still declines",
+        "EPSIL EXECUTE \u2014 named calls to `:=`-assigned callees (static tier) \u203a a `function` statement over an assigned literal adds a clause",
+        "EPSIL EXECUTE \u2014 named calls to `:=`-assigned callees (static tier) \u203a a `function` statement with the same parameter domain replaces the assigned literal",
+        "EPSIL EXECUTE \u2014 named calls to `:=`-assigned callees (static tier) \u203a an assignment over a `function` statement follows the reassignment rules",
+        "EPSIL EXECUTE \u2014 named calls to `:=`-assigned callees (static tier) \u203a an assignment over a function of an earlier program follows the reassignment rules",
+        "EPSIL EXECUTE \u2014 named calls to `:=`-assigned callees (static tier) \u203a a refused assignment over a function of an earlier program leaves its definition",
+        "EPSIL EXECUTE \u2014 named calls to `:=`-assigned callees (static tier) \u203a a `function` statement on a `const` binding leaves the binding",
+        "EPSIL EXECUTE \u2014 named calls to `:=`-assigned callees (static tier) \u203a reassignment that leaves a bare parameter bare: the inferred type stays",
+        "EPSIL EXECUTE \u2014 named calls to `:=`-assigned callees (static tier) \u203a incompatible reassignment: the first names keep working, no false static diagnostics"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/compile-string-fail-closed.test.ts",
+      "cases": [
+        "a wide index-slot union is not string evidence \u203a the `parseDigits` loop condition compiles \u2014 and so does its IndexOf"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/design-d-callback-contract.test.ts",
+      "cases": [
+        "phase 0b: `Filter` converts, on the LAZY path \u203a stamps an inline literal identically on every route",
+        "phase 1: `FlatMap` \u2014 R-D2\u2032 result inference \u203a a PROVABLY DISJOINT named callback is rejected at canonicalization",
+        "phase 1: route parity (box / Epsil / LaTeX) \u203a `TakeWhile` (lazy) stamps identically on every route",
+        "phase 1: route parity (box / Epsil / LaTeX) \u203a `IndexWhere` (eager) stamps identically on every route",
+        "phase 2: route parity (box / Epsil / LaTeX) \u203a `Partition` (eager, union slot) stamps identically on every route",
+        "phase 2: route parity (box / Epsil / LaTeX) \u203a `Reduce` (lazy) stamps identically on every route",
+        "contextual stamping: shapes the first pass did not cover \u203a `CountIf` stamps identically on every route (box / Epsil / LaTeX)",
+        "phase 2/3: route parity for the remaining shapes \u203a `Fold` (callback FIRST) stamps identically on every route",
+        "phase 2/3: route parity for the remaining shapes \u203a `Scan` stamps identically on every route",
+        "phase 2/3: route parity for the remaining shapes \u203a `Any`'s OPTIONAL slot stamps identically on every route"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/protocols.test.ts",
+      "cases": [
+        "conformance-widens-declared-contract \u203a a VALUE-half contract \u2014 a `let` holding a literal \u2014 is covered too"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/epsil-parse.test.ts",
+      "cases": [
+        "EPSIL PARSING SHEBANG \u203a Valid shebang",
+        "EPSIL PARSING DIRECTIVES \u203a Navigator directive (host pragmas enabled)",
+        "EPSIL PARSING DIRECTIVES \u203a Environment variable directive (host pragmas enabled)",
+        "EPSIL PARSING DIRECTIVES \u203a Warning directive",
+        "EPSIL PARSING DIRECTIVES \u203a Date directive",
+        "EPSIL PARSING SPACES \u203a Whitespace",
+        "EPSIL PARSING COMMENTS \u203a Single-line comments",
+        "EPSIL PARSING COMMENTS \u203a Multi-line comments;",
+        "EPSIL PARSING NUMBERS \u203a Constants",
+        "EPSIL PARSING NUMBERS \u203a Integers",
+        "EPSIL PARSING NUMBERS \u203a Signed Integers",
+        "EPSIL PARSING NUMBERS \u203a Floating-point number",
+        "EPSIL PARSING NUMBERS \u203a A literal the machine float cannot hold keeps its digits",
+        "EPSIL PARSING NUMBERS \u203a Signed Floating-point number",
+        "EPSIL PARSING NUMBERS \u203a Binary numbers",
+        "EPSIL PARSING NUMBERS \u203a Invalid Floating-point number",
+        "EPSIL PARSING NUMBERS \u203a Hex numbers",
+        "EPSIL PARSING SYMBOLS \u203a Symbols",
+        "EPSIL PARSING SYMBOLS \u203a Verbatim symbols",
+        "EPSIL PARSING FANCY SYMBOLS \u203a Fancy symbols",
+        "EPSIL PARSING FANCY SYMBOLS \u203a Big operators name their library function",
+        "EPSIL PARSING FANCY SYMBOLS \u203a Double-struck letters are type names in a type annotation",
+        "EPSIL PARSING FANCY SYMBOLS \u203a Radical signs are prefix operators",
+        "EPSIL PARSING FANCY SYMBOLS \u203a A number coefficient multiplies a radical",
+        "EPSIL PARSING FANCY SYMBOLS \u203a Superscripts are exponents",
+        "EPSIL PARSING FANCY SYMBOLS \u203a Subscripts name a symbol or build a Subscript",
+        "EPSIL PARSING FANCY SYMBOLS \u203a Radical signs in match patterns",
+        "EPSIL PARSING SINGLE-LINE STRINGS \u203a Valid string",
+        "EPSIL PARSING SINGLE-LINE STRINGS \u203a String escaping",
+        "EPSIL PARSING SINGLE-LINE STRINGS \u203a String interpolating",
+        "EPSIL PARSING MULTILINE STRINGS \u203a Valid string",
+        "EPSIL PARSING EXTENDED STRINGS \u203a Valid string",
+        "EPSIL PARSING DICTIONARY \u203a Empty dictionary",
+        "EPSIL PARSING DICTIONARY \u203a Empty dictionary",
+        "EPSIL PARSING DICTIONARY \u203a Valid dictionary",
+        "EPSIL PARSING DICTIONARY \u203a Valid dictionary",
+        "EPSIL PARSING DICTIONARY \u203a Valid dictionary",
+        "EPSIL PARSING DICTIONARY \u203a Valid dictionary",
+        "EPSIL PARSING DICTIONARY \u203a Nested dictionary",
+        "EPSIL PARSING DICTIONARY \u203a Invalid dictionary",
+        "EPSIL PARSING COLLECTIONS \u203a Sets",
+        "EPSIL PARSING COLLECTIONS \u203a Sets",
+        "EPSIL PARSING COLLECTIONS \u203a Sets",
+        "EPSIL PARSING COLLECTIONS \u203a Sets",
+        "EPSIL PARSING COLLECTIONS \u203a Sets",
+        "EPSIL PARSING COLLECTIONS \u203a Sets",
+        "EPSIL PARSING COLLECTIONS \u203a Sets",
+        "EPSIL PARSING COLLECTIONS \u203a Lists",
+        "EPSIL PARSING COLLECTIONS \u203a Lists",
+        "EPSIL PARSING COLLECTIONS \u203a Lists",
+        "EPSIL PARSING COLLECTIONS \u203a Lists",
+        "EPSIL PARSING COLLECTIONS \u203a Lists",
+        "EPSIL PARSING COLLECTIONS \u203a Lists",
+        "EPSIL PARSING COLLECTIONS \u203a Lists",
+        "EPSIL PARSING COLLECTIONS \u203a Sequence",
+        "EPSIL PARSING COLLECTIONS \u203a Sequence",
+        "EPSIL PARSING COLLECTIONS \u203a Sequence",
+        "EPSIL PARSING COLLECTIONS \u203a Tuple",
+        "EPSIL PARSING COLLECTIONS \u203a Tuple",
+        "EPSIL PARSING COLLECTIONS \u203a Tuple",
+        "EPSIL PARSING OPERATORS \u203a Unary Operators",
+        "EPSIL PARSING OPERATORS \u203a Arithmetic Operators",
+        "EPSIL PARSING OPERATORS \u203a Logic Operators",
+        "EPSIL PARSING OPERATORS \u203a Relational Operators",
+        "EPSIL PARSING OPERATORS \u203a Equality ladder: == / === / IdenticallyEqual(\u2026)",
+        "EPSIL PARSING OPERATORS \u203a Invisible Operators",
+        "EPSIL PARSING OPERATORS \u203a Invisible Operators",
+        "EPSIL PARSING OPERATORS \u203a Invisible Operators",
+        "EPSIL PARSING OPERATORS \u203a Invisible Operators",
+        "EPSIL PARSING OPERATORS \u203a Power",
+        "EPSIL PARSING OPERATORS \u203a Mod (`%`)",
+        "EPSIL PARSING OPERATORS \u203a Factorial (postfix `!`)",
+        "EPSIL PARSING OPERATORS \u203a Range operator `..` (and Unicode `\u2025`)",
+        "EPSIL PARSING OPERATORS \u203a `..` does not disturb decimal literals",
+        "EPSIL PARSING BOOLEAN LITERALS \u203a `true`/`false` are input aliases for `True`/`False`",
+        "EPSIL PARSING BOOLEAN LITERALS \u203a the verbatim form still names a plain symbol",
+        "EPSIL OPERATOR ROUND-TRIP \u203a parse(serialize(row)) is identity",
+        "EPSIL OPERATOR ROUND-TRIP \u203a parse(serialize(x)) for collections, calls and indexing",
+        "EPSIL PARSING FUNCTIONS \u203a Functions",
+        "EPSIL PARSING FUNCTIONS \u203a Functions",
+        "EPSIL PARSING FUNCTIONS \u203a Functions",
+        "EPSIL PARSING FUNCTIONS \u203a Functions",
+        "EPSIL PARSING FUNCTIONS \u203a Functions",
+        "EPSIL PARSING FUNCTIONS \u203a Functions",
+        "EPSIL PARSING FUNCTIONS \u203a Functions",
+        "EPSIL PARSING `do { \u2026 }` BLOCK EXPRESSIONS \u203a a do-block in expression position is a Block",
+        "EPSIL PARSING `do { \u2026 }` BLOCK EXPRESSIONS \u203a a do-block as an assignment RHS",
+        "EPSIL PARSING `do { \u2026 }` BLOCK EXPRESSIONS \u203a a do-block as a lambda body",
+        "EPSIL PARSING `do { \u2026 }` BLOCK EXPRESSIONS \u203a an empty do-block is `[\"Block\"]`",
+        "EPSIL PARSING `do { \u2026 }` BLOCK EXPRESSIONS \u203a a single-statement do-block",
+        "EPSIL PARSING `do { \u2026 }` BLOCK EXPRESSIONS \u203a a program whose only statement is a do-block is wrapped once",
+        "EPSIL PARSING `do { \u2026 }` BLOCK EXPRESSIONS \u203a a bare `{\u2026}` lambda body stays a Set (no regression)",
+        "EPSIL PARSING ZERO-PARAMETER LAMBDAS \u203a `() => expr` is a zero-parameter Function",
+        "EPSIL PARSING ZERO-PARAMETER LAMBDAS \u203a a zero-argument call `c()` parses",
+        "EPSIL PARSING SPREAD ARGUMENTS \u203a `f(...p)` is a Spread argument",
+        "EPSIL PARSING SPREAD ARGUMENTS \u203a spread mixes with positional arguments",
+        "EPSIL PARSING SPREAD ARGUMENTS \u203a a parenthesized tuple can be spread",
+        "EPSIL PARSING SPREAD ARGUMENTS \u203a multiple spreads in one call",
+        "EPSIL ABSENCE COALESCING `??` \u203a `a ?? b` is Coalesce",
+        "EPSIL ABSENCE COALESCING `??` \u203a right-associative: a chain falls through left to right",
+        "EPSIL ABSENCE COALESCING `??` \u203a LOOSER than `|>`: the default is for the pipeline result",
+        "EPSIL ABSENCE COALESCING `??` \u203a TIGHTER than `=>`: the default is inside the lambda body",
+        "EPSIL ABSENCE COALESCING `??` \u203a looser than `||` (the C# position)",
+        "EPSIL PARSING PIPE-STAGE SUGAR \u203a a `=>` after a pipe operand forms the stage lambda",
+        "EPSIL PARSING PIPE-STAGE SUGAR \u203a a curried stage lambda right-associates",
+        "EPSIL PARSING PIPE-STAGE SUGAR \u203a a stage lambda still yields the pipeline result to `??`",
+        "EPSIL PARSING PIPE-STAGE SUGAR \u203a an operator-written placeholder stage becomes a Function literal",
+        "EPSIL PARSING PIPE-STAGE SUGAR \u203a a CALL stage with a placeholder is left alone (`_` is the topic)",
+        "EPSIL PARSING PIPE-STAGE SUGAR \u203a a bare `_` stage stays the identity shorthand",
+        "EPSIL PARSING LIST SPREAD \u203a spread elements parse to Spread nodes",
+        "EPSIL PARSING LIST SPREAD \u203a the spread operand is a full expression",
+        "EPSIL PARSING LIST SPREAD \u203a call-argument spread is unchanged",
+        "EPSIL PARSING LIST SPREAD \u203a brace spread: a `->`-free brace is a set-spread",
+        "EPSIL PARSING LIST SPREAD \u203a brace spread: any `->` element makes it a dictionary merge",
+        "EPSIL PARSING LIST SPREAD \u203a tighter than `=`, so it is the whole initializer",
+        "EPSIL PARSING LIST SPREAD \u203a an index access is a natural left operand",
+        "EPSIL TYPE TEST `is` \u203a `x is integer` lowers to the MatchesType test",
+        "EPSIL TYPE TEST `is` \u203a it binds tighter than `&&`/`||`, so tests conjoin",
+        "EPSIL TYPE TEST `is` \u203a it binds looser than arithmetic",
+        "EPSIL TYPE TEST `is` \u203a it is usable as an `if` condition",
+        "EPSIL TYPE TEST `is` \u203a a COMPOUND type is supported, carrying its source text",
+        "EPSIL TYPE TEST `is` \u203a `is` stays an ordinary identifier outside the test position",
+        "EPSIL TYPE TEST `is` \u203a the TYPE must be on the same line as `is` too",
+        "EPSIL TYPE TEST `is` \u203a it must be on the SAME LINE as its left operand"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/declare-type.test.ts",
+      "cases": [
+        "EPSIL TYPE DECLARATIONS \u203a a bare `type` lowers to a NOMINAL DeclareType (no attributes)",
+        "EPSIL TYPE DECLARATIONS \u203a a simple nominal body",
+        "EPSIL TYPE DECLARATIONS \u203a `type alias` lowers to a STRUCTURAL DeclareType",
+        "EPSIL TYPE DECLARATIONS \u203a `type alias = \u2026` declares a type NAMED `alias` (D8 lookahead pin)",
+        "EPSIL TYPE DECLARATIONS \u203a the declared name is visible to a later annotation",
+        "EPSIL `type` IS A CONTEXTUAL KEYWORD \u203a assignment to a variable named `type`",
+        "EPSIL `type` IS A CONTEXTUAL KEYWORD \u203a `let type = 5`",
+        "EPSIL `type` IS A CONTEXTUAL KEYWORD \u203a an annotation on a variable named `type`",
+        "EPSIL `type` IS A CONTEXTUAL KEYWORD \u203a a bare `type` expression",
+        "EPSIL `type` IS A CONTEXTUAL KEYWORD \u203a `type` used as a value in a later statement",
+        "EPSIL GENERIC TYPE ALIASES (lowering) \u203a a clause lowers to a `typeParams` attrs entry",
+        "EPSIL GENERIC TYPE ALIASES (lowering) \u203a a multi-parameter, bounded clause keeps the author\u2019s spelling",
+        "EPSIL TYPE SELF-REFERENCE \u203a the `type X` forward spelling in the body",
+        "EPSIL TYPE SELF-REFERENCE \u203a a bare self-reference (the name is seeded before the body parses)",
+        "EPSIL TYPE SELF-REFERENCE \u203a the `alias` form seeds its name too",
+        "EPSIL RECURSIVE TYPES \u203a a self-recursive JSON alias \u203a rejects a function with a type error, not a stack overflow",
+        "EPSIL RECURSIVE TYPES \u203a a mutually recursive JSON alias \u203a rejects a function with a type error, not a stack overflow"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/protocols.test.ts",
+      "cases": [
+        "EPSIL PROTOCOL DECLARATIONS \u203a a function member lowers to a `function` Pair of the signature SOURCE",
+        "EPSIL PROTOCOL DECLARATIONS \u203a `readonly` and `readwrite` property members",
+        "EPSIL PROTOCOL DECLARATIONS \u203a a SEMANTIC protocol declares no members and carries no dictionary",
+        "EPSIL CONFORMANCE DECLARATIONS \u203a `type string is Hashable` lowers to DeclareConformance",
+        "EPSIL CONFORMANCE DECLARATIONS \u203a the `&` form lists protocol NAMES (not a type intersection)",
+        "EPSIL CONFORMANCE DECLARATIONS \u203a the target may be a ground APPLICATION, captured as source text",
+        "EPSIL CONFORMANCE DECLARATIONS \u203a the COMBINED form lowers to TWO top-level statements",
+        "EPSIL CONFORMANCE DECLARATIONS \u203a an implementation block is carried syntactically",
+        "EPSIL CONFORMANCE DECLARATIONS \u203a `get`/`set` members ride under mangled keys",
+        "EPSIL CONFORMANCE DECLARATIONS \u203a the expression-position `is` type test is UNAFFECTED",
+        "EPSIL CONFORMANCE DECLARATIONS \u203a an EXPRESSION headed by a binding named `type` is not hijacked",
+        "EPSIL CONFORMANCE DECLARATIONS \u203a a target that DOES denote a type still claims the statement",
+        "EPSIL CONFORMANCE DECLARATIONS \u203a an ordinary `type` declaration is unaffected",
+        "EPSIL CONFORMANCE DECLARATIONS \u203a a line break before the first scanned token is a boundary too",
+        "EPSIL CONFORMANCE DECLARATIONS \u203a the protocol names sit on the SAME LINE as the `is`",
+        "EPSIL PROTOCOL `Self` INFERENCE \u203a an unannotated first parameter is normalized to `self: Self`",
+        "EPSIL PROTOCOL `Self` INFERENCE \u203a the zero-annotation SINGLE parameter form",
+        "EPSIL PROTOCOL `Self` INFERENCE \u203a an EXPLICIT `Self` is unchanged",
+        "EPSIL PROTOCOL `Self` INFERENCE \u203a an explicit NON-`Self` first parameter is left alone for the engine",
+        "EPSIL CONDITIONAL CONFORMANCE (phase 5) \u203a the clause rides as a STRING operand",
+        "EPSIL CONDITIONAL CONFORMANCE (phase 5) \u203a an ELIDED bound is legal",
+        "EPSIL CONDITIONAL CONFORMANCE (phase 5) \u203a the clause`s names are in scope for the implementation block, whose quantified parameters are ERASED",
+        "EPSIL CONDITIONAL CONFORMANCE (phase 5) \u203a a member that mentions NO clause variable keeps the ordinary ascription"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/protocol-type-redefinition.test.ts",
+      "cases": [
+        "a redefinition RE-SETTLES the conformance edges of the type \u203a an OLD instance cannot answer a requirement added AFTER it was built",
+        "a redefinition RE-SETTLES the conformance edges of the type \u203a object \u2192 record re-applies the B1 mutability gate",
+        "a pinned layout is SHALLOW, so the stored value is the last check \u203a a WRITE is judged on the value being STORED, not the one being replaced",
+        "a stale receiver gets the SAME verdict reading and writing \u203a a refused WRITE costs the right-hand side nothing"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/parallel-for.test.ts",
+      "cases": [
+        "the parse \u203a parallel for k in 1..3 { L[k] += 1 }",
+        "the parse \u203a parallel for (p, q) in pairs { s += p * q }",
+        "the parse \u203a [k^2 parallel for k in 1..3]",
+        "the parse \u203a [(k, j) parallel for k in 1..3 if k > 1, j in 1..k]",
+        "the parse \u203a {k -> 1 parallel for k in 1..3}",
+        "the parse \u203a s += 1",
+        "the parse \u203a s+=1",
+        "the parse \u203a m[1][2] += x",
+        "the parse \u203a m[1, 2] += x",
+        "the parse \u203a only the first clause can be parallel: [k for k in 1..3, parallel for j in 1..k]",
+        "the parse \u203a only the first clause can be parallel: [k for k in 1..3, parallel j in 1..k]",
+        "`parallel` is a contextual keyword \u203a the library function `parallel`",
+        "the static rules: calls, local writes, and checks that cannot decide \u203a rule 2, a call of a variable bound to a function literal has no diagnostic",
+        "the static rules: calls, local writes, and checks that cannot decide \u203a the rules, also the effect rule, apply when the statement cannot be boxed",
+        "rule 2: programs that the checker accepts \u203a a pipeline of library functions and a literal",
+        "rule 2: programs that the checker accepts \u203a a library function with a parameter that can be a function (`partition`) is valid in a loop with no accumulator",
+        "rule 2: programs that the checker accepts \u203a a constant that holds a function literal is valid in a loop with no accumulator"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/function-body-local-assignment.test.ts",
+      "cases": [
+        "THE SCOPE OF A NAME IS DECIDED WHERE THE FUNCTION IS DEFINED \u203a a top-level `let` after the function does not declare its name in the body",
+        "THE SCOPE OF A NAME IS DECIDED WHERE THE FUNCTION IS DEFINED \u203a a function with the `scope` specifier: a `let` is still a local",
+        "THE COMPILED ROUTES CHECK THE EFFECTS OF A DEFINITION \u203a a `let` of a function literal that writes a `let` before it",
+        "THE COMPILED ROUTES CHECK THE EFFECTS OF A DEFINITION \u203a stated effects that do not cover the body",
+        "THE COMPILED ROUTES CHECK THE EFFECTS OF A DEFINITION \u203a a declaration with the `scope` effect is the contract",
+        "A FUNCTION DECLARED WITH A TYPE, THEN DEFINED, COMPILES \u203a a `function` statement",
+        "A FUNCTION DECLARED WITH A TYPE, THEN DEFINED, COMPILES \u203a a one-step definition",
+        "A FUNCTION DECLARED WITH A TYPE, THEN DEFINED, COMPILES \u203a a call before the declaration",
+        "A FUNCTION DECLARED WITH A TYPE, THEN DEFINED, COMPILES \u203a a name that holds a value is not defined",
+        "A TOP-LEVEL `let` OF A LIBRARY CONSTANT SHADOWS IT FROM ITS STATEMENT ON \u203a `i` read by a function defined before the `let`",
+        "A TOP-LEVEL `let` OF A LIBRARY CONSTANT SHADOWS IT FROM ITS STATEMENT ON \u203a `e` read by a function defined before the `let`",
+        "A TOP-LEVEL `let` OF A LIBRARY CONSTANT SHADOWS IT FROM ITS STATEMENT ON \u203a `Pi`: the block and the compiled program agree"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/lambda-param-element-inference.test.ts",
+      "cases": [
+        "builtin contextual trigger: Filter/Map over a typed collection \u203a route parity: Epsil, ce.box and ce.parse agree"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/protocol-dispatch.test.ts",
+      "cases": [
+        "P14: qualified calls through `Field` \u203a `Comparable.compare(x, y)` parses as a member call and canonicalizes to Apply(Field(\u2026), \u2026)"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/redefinition-discipline.test.ts",
+      "cases": [
+        "SAME-SCOPE RE-DECLARATION \u2014 `let`/`const` (ruled 2026-09-05) \u203a a second top-level `let` of one program is reported, with the first site",
+        "SAME-SCOPE RE-DECLARATION \u2014 `let`/`const` (ruled 2026-09-05) \u203a a destructuring `let` counts each pattern leaf",
+        "SAME-SCOPE RE-DECLARATION \u2014 `let`/`const` (ruled 2026-09-05) \u203a shadowing an OUTER name in a nested block stays legal",
+        "SAME-SCOPE RE-DECLARATION \u2014 `let`/`const` (ruled 2026-09-05) \u203a a shadowing `let` in a re-entered block reads the OUTER name every turn",
+        "SAME-SCOPE RE-DECLARATION \u2014 `let`/`const` (ruled 2026-09-05) \u203a a refused destructuring `let` declares none of its leaves",
+        "SAME-SCOPE RE-DECLARATION \u2014 `let`/`const` (ruled 2026-09-05) \u203a a re-run `let` that fails keeps the previous bindings",
+        "REDEFINITION \u2014 the route/origin matrix \u203a a RE-ENTRANT box-route declaration mid-batch is unstamped, and the program may still declare that name",
+        "the discipline over function clauses \u203a provenance does not outlive the clause it describes \u203a an ASSIGNMENT between two clauses is not a redefinition",
+        "the discipline over function clauses \u203a provenance does not outlive the clause it describes \u203a a clause defined after an assignment still installs",
+        "the discipline over function clauses \u203a in a function body or a block \u203a a second clause with the same parameters in a body is reported"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/cli.test.ts",
+      "cases": [
+        "Epsil CLI check --effects \u203a prints one line per top-level function, on standard output",
+        "Epsil CLI evaluation \u203a keeps declarations in one session and resets them on request",
+        "Epsil CLI evaluation \u203a JSON output materializes finite lazy collections",
+        "Epsil CLI --compile \u203a an empty program prints nothing"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/lazy-view-scope.test.ts",
+      "cases": [
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION \u203a TakeWhile",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION \u203a a finite source, which the assignment lists",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION \u203a a view per iteration in a list",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION \u203a TakeWhile, with the debug check",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION \u203a a finite source, which the assignment lists, with the debug check",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION \u203a a view per iteration in a list, with the debug check",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION \u203a a view read in its own iteration reads the index of the iteration",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES \u203a a Take of a local that holds a view of the iteration",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES \u203a a view in a dictionary",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES \u203a a field reads a local of the scope of its object when an element is computed",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES \u203a a view under a node that stays unevaluated",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES \u203a a Take of a local that holds a view of the iteration, with the debug check",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES \u203a a view in a dictionary, with the debug check",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES \u203a a field reads a local of the scope of its object when an element is computed, with the debug check",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES \u203a a view under a node that stays unevaluated, with the debug check",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES \u203a a call of a local that a local of an inner block shadows with a number",
+        "A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES \u203a a value that nests tuples of a view"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/error-propagation.test.ts",
+      "cases": [
+        "ERROR PROPAGATION \u2014 rung 3: the breadcrumb (\u00a72a) \u203a an `Error(c)` pattern destructures a bubbled error like a raw one",
+        "ERROR PROPAGATION \u2014 rung 3: the breadcrumb (\u00a72a) \u203a an `Error(c, w)` pattern binds the site operand when it wants it",
+        "ERROR PROPAGATION \u2014 rung 3: the breadcrumb (\u00a72a) \u203a the where-slot rule is uniform: a legacy string context is ignored and bindable the same way"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/epsil-serialize.test.ts",
+      "cases": [
+        "EPSIL SERIALIZING OPERATORS \u203a Operators re-parse to the same tree",
+        "EPSIL SERIALIZING OPERATORS \u203a Fancy symbols re-parse to the same tree"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/compile-block-local-function.test.ts",
+      "cases": [
+        "COMPILE a `function` definition \u203a is a local: a call before the definition reads it before its declaration",
+        "COMPILE a `function` definition \u203a is usable as a VALUE \u2014 passed as a callback",
+        "COMPILE a `function` definition \u203a a second function statement of a name is a second declaration"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/programs.test.ts",
+      "cases": [
+        "EPSIL PROGRAMS \u2014 strings \u203a string interpolation splices expression values",
+        "EPSIL PROGRAMS \u2014 collection literals evaluate their elements \u203a accumulating list literals through a loop yields evaluated elements",
+        "EPSIL PROGRAMS \u2014 a list of functions applied by name \u203a a for loop gives [0, 6]",
+        "EPSIL PROGRAMS \u2014 destructuring assignment \u203a the targets keep their declared type"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/mcp.test.ts",
+      "cases": [
+        "MCP server tools \u203a parse returns clean MathJSON without evaluating",
+        "MCP Streamable HTTP transport \u203a initializes, lists tools, evaluates and reads resources",
+        "MCP Streamable HTTP transport \u203a returns 202 for accepted notifications",
+        "MCP Streamable HTTP transport \u203a enforces endpoint, method, media type and protocol headers",
+        "MCP Streamable HTTP transport \u203a rejects unapproved browser origins and allows configured origins",
+        "MCP Streamable HTTP transport \u203a requires a configured bearer token when one is enabled",
+        "MCP Streamable HTTP transport \u203a reports malformed JSON as a JSON-RPC parse error",
+        "MCP server engine version \u203a a running server whose engine is not the installed one warns"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/compile-references.test.ts",
+      "cases": [
+        "COMPILE: `unsupported` of a program that defines a function \u203a still reports a definition that the target declines"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/protocol-properties.test.ts",
+      "cases": [
+        "assignment to a property is a STORE \u203a the assignment evaluates to the ASSIGNED VALUE, not the setter result",
+        "assignment to a property is a STORE \u203a a NON-variable root STORES: `xs[1].tag = v` reaches the element",
+        "P6: the qualified property form `p.(P.name)` \u203a qualified ASSIGNMENT stores through the named protocol",
+        "P6: the qualified property form `p.(P.name)` \u203a a BARE four-operand node keeps the generic call form",
+        "an unqualified write resolves against the RECEIVER, every time \u203a the write follows the receiver, not any earlier resolution",
+        "an unqualified write resolves against the RECEIVER, every time \u203a a receiver no protocol answers for is refused",
+        "an unqualified write resolves against the RECEIVER, every time \u203a \u2026and the Epsil spelling of that qualified write agrees",
+        "a `set` handler\u2019s result is DISCARDED \u203a an ANNOTATED result of an unrelated type registers fine",
+        "a `set` handler\u2019s result is DISCARDED \u203a a handler that returns the receiver reads the same way",
+        "a `set` handler\u2019s result is DISCARDED \u203a an UNANNOTATED handler stays trusted at registration (P28)",
+        "a WRITE checks the value against the property\u2019s type \u203a the store refuses it, and the handler is not invoked",
+        "a WRITE checks the value against the property\u2019s type \u203a an EPSIL setter refuses it as well"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/whole-collection-parameter.test.ts",
+      "cases": [
+        "Element-wise uses still broadcast \u203a an index of At is a gather, which is element-wise",
+        "Limitations of the rule, as they behave today \u203a a call to a lifted user function is a whole use, in either order"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/function-literal-rest-parameter.test.ts",
+      "cases": [
+        "Rest parameter \u2014 construction routes \u203a Epsil parse route: `(a, ...rest) => \u2026` lowers to a Spread parameter",
+        "Rest parameter \u2014 construction routes \u203a Epsil parse route: `(...args) => \u2026` is a rest-only literal",
+        "Rest parameter \u2014 named definitions \u203a Epsil rejects a misplaced or malformed spread in a definition head"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/object-store.test.ts",
+      "cases": [
+        "THE STORE \u2014 a field of an object can be assigned \u203a the assignment EVALUATES to the stored value",
+        "PRECEDENCE \u2014 the object's own layout beats a protocol property \u203a a protocol property that is NOT a stored field reaches its setter"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/generic-function-sugar.test.ts",
+      "cases": [
+        "M2 SUGARED GENERICS \u2014 lowering (\u00a73.1/\u00a73.2) \u203a a quantified parameter lowers to a BARE symbol",
+        "M2 SUGARED GENERICS \u2014 lowering (\u00a73.1/\u00a73.2) \u203a a GROUND annotation keeps its `Typed` marker; the clause carries both",
+        "M2 SUGARED GENERICS \u2014 lowering (\u00a73.1/\u00a73.2) \u203a an annotation that MENTIONS a variable is quantified \u2014 `list<T>` counts",
+        "M2 SUGARED GENERICS \u2014 lowering (\u00a73.1/\u00a73.2) \u203a a ground name that merely LOOKS like a variable is not quantified",
+        "M2 SUGARED GENERICS \u2014 lowering (\u00a73.1/\u00a73.2) \u203a with no `->` the result is the wide-result `unknown`",
+        "M2 SUGARED GENERICS \u2014 lowering (\u00a73.1/\u00a73.2) \u203a the effects slot composes with the clause",
+        "M2 SUGARED GENERICS \u2014 lowering (\u00a73.1/\u00a73.2) \u203a a bound is preserved verbatim, including a MUNCHED `>>` close",
+        "M2 SUGARED GENERICS \u2014 lowering (\u00a73.1/\u00a73.2) \u203a a SIGNATURE bound puts a `>` inside an `->` token and still parses",
+        "M2 SUGARED GENERICS \u2014 grammar diagnostics (\u00a73.1/\u00a73.2) \u203a a REJECTED clause leaves the parameter annotations untouched",
+        "M2 SUGARED GENERICS \u2014 grammar diagnostics (\u00a73.1/\u00a73.2) \u203a `f<T>(x) = x` is NOT a definition",
+        "WHERE-CLAUSE BINDER \u2014 the five declaration spellings \u203a block form, annotated return",
+        "WHERE-CLAUSE BINDER \u2014 the five declaration spellings \u203a block form, return inferred \u2014 the wide-result `unknown`",
+        "WHERE-CLAUSE BINDER \u2014 the five declaration spellings \u203a block form with an effects slot \u2014 the clause still comes last",
+        "WHERE-CLAUSE BINDER \u2014 the five declaration spellings \u203a math form (with `->`)",
+        "WHERE-CLAUSE BINDER \u2014 the five declaration spellings \u203a \u2026and the math form WITHOUT `->` is NOT claimed",
+        "WHERE-CLAUSE BINDER \u2014 binding, bounds and generic behavior \u203a a BOUND containing `->` and brackets keeps the clause extent right",
+        "WHERE-CLAUSE BINDER \u2014 clause-failure recovery \u203a a SYNTACTICALLY malformed clause leaves no dangling ascription (block form)",
+        "WHERE-CLAUSE BINDER \u2014 clause-failure recovery \u203a \u2026a bound-less `where T:` too",
+        "WHERE-CLAUSE BINDER \u2014 clause-failure recovery \u203a a SYNTACTICALLY malformed clause, math form",
+        "WHERE-CLAUSE BINDER \u2014 clause-failure recovery \u203a a SEMANTICALLY rejected clause keeps the parameter annotations (block form)",
+        "WHERE-CLAUSE BINDER \u2014 clause-failure recovery \u203a a SEMANTICALLY rejected clause keeps the parameter annotations (math form)",
+        "WHERE-CLAUSE BINDER \u2014 a clause in a comma-delimited annotation \u203a \u2026and it does not EAT the following parameter",
+        "WHERE-CLAUSE BINDER \u2014 a clause in a comma-delimited annotation \u203a a `where` inside a STRING literal is not a clause either",
+        "WHERE-CLAUSE BINDER \u2014 a clause in a comma-delimited annotation \u203a a PARENTHESIZED clause is admitted anywhere"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/match.test.ts",
+      "cases": [
+        "EPSIL MATCH \u2014 parse (each \u00a72 form \u2192 MathJSON) \u203a literal case + wildcard fallback",
+        "EPSIL MATCH \u2014 parse (each \u00a72 form \u2192 MathJSON) \u203a bare identifier binds (lowered to `_n`), body uses the bare name",
+        "EPSIL MATCH \u2014 parse (each \u00a72 form \u2192 MathJSON) \u203a or-alternatives (top level) with a pin, lowered to Alternatives",
+        "EPSIL MATCH \u2014 parse (each \u00a72 form \u2192 MathJSON) \u203a pin of a numeric constant (== Infinity) drops the Pin head (Infinity is a literal)",
+        "EPSIL MATCH \u2014 parse (each \u00a72 form \u2192 MathJSON) \u203a pin of a computed expression \u2192 Pin(expr)",
+        "EPSIL MATCH \u2014 parse (each \u00a72 form \u2192 MathJSON) \u203a pin of a literal drops the Pin head (matches structurally)",
+        "EPSIL MATCH \u2014 parse (each \u00a72 form \u2192 MathJSON) \u203a typed binding `n: integer` \u2192 binding + implicit MatchesType guard",
+        "EPSIL MATCH \u2014 parse (each \u00a72 form \u2192 MathJSON) \u203a typed binding without an explicit guard emits just the type guard",
+        "EPSIL MATCH \u2014 parse (each \u00a72 form \u2192 MathJSON) \u203a list-destructuring with a rest \u2192 List with `___rest`",
+        "EPSIL MATCH \u2014 parse (each \u00a72 form \u2192 MathJSON) \u203a dictionary pattern \u2192 literal keys, patternized values",
+        "EPSIL MATCH \u2014 parse (each \u00a72 form \u2192 MathJSON) \u203a operator/algebraic pattern with a guard (operands patternized)",
+        "EPSIL MATCH \u2014 parse (each \u00a72 form \u2192 MathJSON) \u203a tuple pattern binds positionally",
+        "EPSIL MATCH \u2014 parse (each \u00a72 form \u2192 MathJSON) \u203a call/constructor pattern keeps the head, patternizes operands",
+        "EPSIL MATCH \u2014 parse (each \u00a72 form \u2192 MathJSON) \u203a cases may be `;`-separated as well as newline-separated",
+        "EPSIL MATCH \u2014 parse (each \u00a72 form \u2192 MathJSON) \u203a `match` is an expression (usable as an assignment RHS)",
+        "EPSIL MATCH \u2014 reserved-word interaction \u203a `` `match` `` (verbatim) is usable as an ordinary symbol",
+        "EPSIL MATCH \u2014 `otherwise` (wildcard synonym) \u203a lowers to the `_` wildcard",
+        "EPSIL MATCH \u2014 `otherwise` (wildcard synonym) \u203a `otherwise` stays an ordinary identifier outside the pattern head",
+        "EPSIL MATCH \u2014 range patterns (parse) \u203a `lo..hi` lowers to a held two-operand Range pattern",
+        "EPSIL MATCH \u2014 range patterns (parse) \u203a the call form `Range(lo, hi)` lowers identically (patternize keys on the operator)",
+        "EPSIL MATCH \u2014 range patterns (parse) \u203a negated and infinite bounds are numeric literals",
+        "EPSIL MATCH \u2014 range patterns (parse) \u203a ranges are binding-free, so they are legal in or-alternatives",
+        "EPSIL MATCH \u2014 error subjects (rung 1) \u203a an `Error(\u2026)` pattern destructures the error deliberately"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/protocol-property-effects.test.ts",
+      "cases": [
+        "the runtime channel: `expr.effects` of a store \u203a a `Field` target on a RECORD stays `scope` \u2014 records have no slots",
+        "the runtime channel: `expr.effects` of a store \u203a \u2026and boxed AFTER the `let`, it still reports `state` \u2014 and why",
+        "the inference channel: a function body that stores \u203a \u2026and annotating that function `pure` is REFUSED, as an error value",
+        "the inference channel: a function body that stores \u203a \u2026and annotating THAT function `pure` is refused too",
+        "the inference channel: a function body that stores \u203a a body-local object aliased from OUTSIDE is a store"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/declare-destructure.test.ts",
+      "cases": [
+        "Assign with a Tuple pattern \u203a the Epsil route: a rejected leaf leaves the first target alone"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/library-names.test.ts",
+      "cases": [
+        "the resolution pass \u203a a call head",
+        "the resolution pass \u203a a value-position name (a callback)",
+        "the resolution pass \u203a a constant",
+        "the resolution pass \u203a the raw tree keeps what was written",
+        "the resolution pass \u203a a program-bound name is not a library name, in every binding form",
+        "the resolution pass \u203a a variable a binder operator binds is not a library name",
+        "the resolution pass \u203a a variable an operator takes as a plain operand is not a library name",
+        "the resolution pass \u203a an iterator clause binds its variable from its own clause onward",
+        "the resolution pass \u203a a parallel loop and comprehension bind their variables",
+        "the resolution pass \u203a a verbatim callee borrows nothing from the library",
+        "the resolution pass \u203a the compiled lane",
+        "the serializer \u203a a spelling the expression writes keeps the MathJSON name",
+        "the serializer \u203a a repeated constant reads back as the constant",
+        "the serializer \u203a every spelling reads back to its library name"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/bound-once.test.ts",
+      "cases": [
+        "activations, debug false \u203a a closure made in an iteration keeps the value of the index in that iteration",
+        "activations, debug true \u203a a closure made in an iteration keeps the value of the index in that iteration",
+        "a local of a block is declared \u203a a typed constant local is initialized once and then refuses a write",
+        "a local of a block is declared \u203a a program that ends with the name of a function gives its literal on both routes",
+        "a held argument of a hold function with a bound variable \u203a every occurrence of a caller-frame name is replaced"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/declare-type.test.ts",
+      "cases": [
+        "DeclareType is top-level only \u203a a host-forged pre-pass frame name does not bypass the rule"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/compile-destructuring-from-call.test.ts",
+      "cases": [
+        "a destructuring assign the interpreter would refuse fails closed \u203a a CONST target fails closed (it was silently overwritten)"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/ir-point-list-inputs.test.ts",
+      "cases": [
+        "IR profile, batch G14: a union of tuple types in WebGL2 \u203a an input, a parameter and a result of a union of tuples are a vec2, with the interpreter's values"
+      ],
+      "chromiumUnavailable": true
+    },
+    {
+      "file": "test/compute-engine/spread-literal-result-kind.test.ts",
+      "cases": [
+        "Serialization of a list literal with a spread \u203a [...a, 0]",
+        "Serialization of a list literal with a spread \u203a [1, ...a, 2, 3]",
+        "Serialization of a list literal with a spread \u203a [...a, ...b]",
+        "Serialization of a list literal with a spread \u203a [...a]",
+        "Serialization of a list literal with a spread \u203a [...f(x), 1]",
+        "A spread of an absent operand \u203a Epsil round trip",
+        "Compilation of a consumer of a join over an inferred collection \u203a the result of a call, in a function body"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/indeterminate.test.ts",
+      "cases": [
+        "INDETERMINATE FORMS \u2014 the producers: the arithmetic forms \u203a the Epsil route"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/ir-points.test.ts",
+      "cases": [
+        "IR profile, batch G11: the values in WebGL2 \u203a each shader agrees with the profile's JavaScript value within single-float precision"
+      ],
+      "chromiumUnavailable": true
+    },
+    {
+      "file": "test/compute-engine/ir-glsl-profile.test.ts",
+      "cases": [
+        "IR profile on GLSL: the values in WebGL2 \u203a the shaders give the interpreter values within single-float precision",
+        "IR profile on GLSL: points in WebGL2 \u203a each component gives the interpreter value within single-float precision",
+        "IR profile on GLSL: arrays, At, the cap, point parameters in WebGL2 \u203a each component gives the interpreter value (NaN where it is NaN)",
+        "IR profile on GLSL: storage and function results in WebGL2 \u203a a list in a texture of width 1, 3, 7 or 10 gives the interpreter values; the existing target reads the same values from the same texture",
+        "IR profile on GLSL: storage and function results in WebGL2 \u203a Sum(2\u00b7E64 + x) and a chain of 100 reads give their values",
+        "IR profile on GLSL: storage and function results in WebGL2 \u203a a point or list result of a user function gives the interpreter values",
+        "IR profile on GLSL: callerLocals in WebGL2 \u203a the inputs as parameters of the host function give the interpreter values",
+        "IR profile, batch G6: the values in WebGL2 \u203a each row against the interpreter, and NaN outside its domain"
+      ],
+      "chromiumUnavailable": true
+    },
+    {
+      "file": "test/epsil/round-trip.test.ts",
+      "cases": [
+        "EPSIL ROUND-TRIP \u203a integer",
+        "EPSIL ROUND-TRIP \u203a negative literal",
+        "EPSIL ROUND-TRIP \u203a decimal",
+        "EPSIL ROUND-TRIP \u203a num object",
+        "EPSIL ROUND-TRIP \u203a symbol",
+        "EPSIL ROUND-TRIP \u203a reserved-word symbol",
+        "EPSIL ROUND-TRIP \u203a string literal",
+        "EPSIL ROUND-TRIP \u203a string with control chars",
+        "EPSIL ROUND-TRIP \u203a Add binary",
+        "EPSIL ROUND-TRIP \u203a Add n-ary",
+        "EPSIL ROUND-TRIP \u203a Subtract",
+        "EPSIL ROUND-TRIP \u203a Subtract chain",
+        "EPSIL ROUND-TRIP \u203a Multiply binary (symbols)",
+        "EPSIL ROUND-TRIP \u203a Multiply n-ary",
+        "EPSIL ROUND-TRIP \u203a Divide",
+        "EPSIL ROUND-TRIP \u203a Mod",
+        "EPSIL ROUND-TRIP \u203a Mod in Add",
+        "EPSIL ROUND-TRIP \u203a Mod of a sum",
+        "EPSIL ROUND-TRIP \u203a invisible 2x",
+        "EPSIL ROUND-TRIP \u203a symbol\u00d7number stays explicit",
+        "EPSIL ROUND-TRIP \u203a number\u00d7group stays explicit",
+        "EPSIL ROUND-TRIP \u203a Power",
+        "EPSIL ROUND-TRIP \u203a Power negative exponent",
+        "EPSIL ROUND-TRIP \u203a Power right-assoc",
+        "EPSIL ROUND-TRIP \u203a Power of a sum",
+        "EPSIL ROUND-TRIP \u203a Factorial literal",
+        "EPSIL ROUND-TRIP \u203a Factorial symbol",
+        "EPSIL ROUND-TRIP \u203a Factorial of a sum",
+        "EPSIL ROUND-TRIP \u203a Factorial nested",
+        "EPSIL ROUND-TRIP \u203a Factorial in Power exponent",
+        "EPSIL ROUND-TRIP \u203a Factorial of a Power",
+        "EPSIL ROUND-TRIP \u203a Factorial of a call",
+        "EPSIL ROUND-TRIP \u203a Rational",
+        "EPSIL ROUND-TRIP \u203a Rational in Add",
+        "EPSIL ROUND-TRIP \u203a Equal",
+        "EPSIL ROUND-TRIP \u203a Same",
+        "EPSIL ROUND-TRIP \u203a NotEqual",
+        "EPSIL ROUND-TRIP \u203a Less",
+        "EPSIL ROUND-TRIP \u203a Greater",
+        "EPSIL ROUND-TRIP \u203a LessEqual",
+        "EPSIL ROUND-TRIP \u203a GreaterEqual",
+        "EPSIL ROUND-TRIP \u203a Element",
+        "EPSIL ROUND-TRIP \u203a NotElement",
+        "EPSIL ROUND-TRIP \u203a relational chain",
+        "EPSIL ROUND-TRIP \u203a And",
+        "EPSIL ROUND-TRIP \u203a Or",
+        "EPSIL ROUND-TRIP \u203a And/Or nesting",
+        "EPSIL ROUND-TRIP \u203a Not",
+        "EPSIL ROUND-TRIP \u203a KeyValuePair",
+        "EPSIL ROUND-TRIP \u203a Assign",
+        "EPSIL ROUND-TRIP \u203a Pipe",
+        "EPSIL ROUND-TRIP \u203a Coalesce",
+        "EPSIL ROUND-TRIP \u203a Coalesce variadic",
+        "EPSIL ROUND-TRIP \u203a Coalesce nested",
+        "EPSIL ROUND-TRIP \u203a Negate symbol",
+        "EPSIL ROUND-TRIP \u203a Negate literal",
+        "EPSIL ROUND-TRIP \u203a Negate negative literal",
+        "EPSIL ROUND-TRIP \u203a Negate of a sum",
+        "EPSIL ROUND-TRIP \u203a List",
+        "EPSIL ROUND-TRIP \u203a List empty",
+        "EPSIL ROUND-TRIP \u203a List nested",
+        "EPSIL ROUND-TRIP \u203a Set",
+        "EPSIL ROUND-TRIP \u203a Set empty",
+        "EPSIL ROUND-TRIP \u203a Tuple",
+        "EPSIL ROUND-TRIP \u203a Tuple 3",
+        "EPSIL ROUND-TRIP \u203a Tuple nested",
+        "EPSIL ROUND-TRIP \u203a Dictionary",
+        "EPSIL ROUND-TRIP \u203a Dictionary empty",
+        "EPSIL ROUND-TRIP \u203a call (bare symbol)",
+        "EPSIL ROUND-TRIP \u203a call (no args)",
+        "EPSIL ROUND-TRIP \u203a Apply (non-symbol callee)",
+        "EPSIL ROUND-TRIP \u203a At",
+        "EPSIL ROUND-TRIP \u203a At multi-index",
+        "EPSIL ROUND-TRIP \u203a At of a call",
+        "EPSIL ROUND-TRIP \u203a Block",
+        "EPSIL ROUND-TRIP \u203a Block (3 statements)",
+        "EPSIL ROUND-TRIP \u203a Block empty",
+        "EPSIL ROUND-TRIP \u203a Block single statement",
+        "EPSIL ROUND-TRIP \u203a Block nested in expression",
+        "EPSIL ROUND-TRIP \u203a Function with do-block body",
+        "EPSIL ROUND-TRIP \u203a typed math-style def",
+        "EPSIL ROUND-TRIP \u203a typed math-style def with return type",
+        "EPSIL ROUND-TRIP \u203a typed block def with return type",
+        "EPSIL ROUND-TRIP \u203a literal-parameter def (multi-clause clause)",
+        "EPSIL ROUND-TRIP \u203a typed mapsto (single param)",
+        "EPSIL ROUND-TRIP \u203a typed mapsto (multiple params)",
+        "EPSIL ROUND-TRIP \u203a If (generic function form)",
+        "EPSIL ROUND-TRIP \u203a for loop",
+        "EPSIL ROUND-TRIP \u203a for loop (tuple pattern)",
+        "EPSIL ROUND-TRIP \u203a for loop (several statements)",
+        "EPSIL ROUND-TRIP \u203a for loop (empty body)",
+        "EPSIL ROUND-TRIP \u203a for loop containing break",
+        "EPSIL ROUND-TRIP \u203a while loop",
+        "EPSIL ROUND-TRIP \u203a while loop (several statements)",
+        "EPSIL ROUND-TRIP \u203a top-level Break",
+        "EPSIL ROUND-TRIP \u203a top-level Continue",
+        "EPSIL ROUND-TRIP \u203a for loop containing continue",
+        "EPSIL ROUND-TRIP \u203a break inside a nested if in a loop",
+        "EPSIL ROUND-TRIP \u203a break inside a match arm in a loop",
+        "EPSIL ROUND-TRIP \u203a valued Break in a loop (no keyword spelling)",
+        "EPSIL ROUND-TRIP \u203a Break in a function literal in a loop",
+        "EPSIL ROUND-TRIP \u203a loop in a function literal in a loop",
+        "EPSIL ROUND-TRIP \u203a Break in a generic Loop nested in a loop",
+        "EPSIL ROUND-TRIP \u203a infinite Loop (no surface spelling)",
+        "EPSIL ROUND-TRIP \u203a Loop with several iterator clauses (no surface spelling)",
+        "EPSIL ROUND-TRIP \u203a destructuring assign",
+        "EPSIL ROUND-TRIP \u203a destructuring assign (nested, wildcard)",
+        "EPSIL ROUND-TRIP \u203a String interpolation",
+        "EPSIL ROUND-TRIP \u203a nested arithmetic",
+        "EPSIL ROUND-TRIP \u203a deep mixed",
+        "EPSIL UNSPELLABLE PARAMETER PATTERN \u203a an annotated literal with an unspellable pattern takes the call form",
+        "EPSIL RULE ARGUMENTS AND PAIR KEYS \u203a a library name as the key of a pair in a list",
+        "EPSIL RULE ARGUMENTS AND PAIR KEYS \u203a a rule as the only argument of a call",
+        "EPSIL RULE ARGUMENTS AND PAIR KEYS \u203a a rule as the second argument of a call",
+        "EPSIL RULE ARGUMENTS AND PAIR KEYS \u203a two rules as the arguments of a call",
+        "EPSIL RULE ARGUMENTS AND PAIR KEYS \u203a a rule as the first of several arguments of a call",
+        "EPSIL RULE ARGUMENTS AND PAIR KEYS \u203a a rule as the first argument of a library call",
+        "EPSIL RULE ARGUMENTS AND PAIR KEYS \u203a a rule at the function parameter of `map`",
+        "EPSIL RULE ARGUMENTS AND PAIR KEYS \u203a a rule with a library-name key as the only argument of a call",
+        "EPSIL RULE ARGUMENTS AND PAIR KEYS \u203a a plain name that is also an Epsil spelling, as a key",
+        "EPSIL RULE ARGUMENTS AND PAIR KEYS \u203a a library name outside key position keeps its Epsil spelling",
+        "EPSIL RULE ARGUMENTS AND PAIR KEYS \u203a source keys are not resolved to library names",
+        "EPSIL vs loose math parser \u203a [1, 2, 3] \u2014 SAME (List)",
+        "EPSIL vs loose math parser \u203a x^2 \u2014 SAME (Power)",
+        "EPSIL vs loose math parser \u203a |> \u2014 SAME (Pipe)",
+        "EPSIL vs loose math parser \u203a ** \u2014 DIVERGES (Power vs math-parser artifact)",
+        "EPSIL vs loose math parser \u203a f(x, y) \u2014 DIVERGES (call vs InvisibleOperator/Delimiter)",
+        "EPSIL vs loose math parser \u203a bare function name \u2014 DIVERGES (symbol vs letter split)",
+        "EPSIL vs loose math parser \u203a 2x \u2014 DIVERGES (Multiply vs InvisibleOperator)",
+        "EPSIL FLOAT LITERAL ROUND-TRIP \u203a 2.0",
+        "EPSIL FLOAT LITERAL ROUND-TRIP \u203a -2.0",
+        "EPSIL FLOAT LITERAL ROUND-TRIP \u203a 1_000.0",
+        "EPSIL FLOAT LITERAL ROUND-TRIP \u203a 2.5",
+        "EPSIL FLOAT LITERAL ROUND-TRIP \u203a 2"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/named-arguments-record-field.test.ts",
+      "cases": [
+        "route parity \u203a Epsil: a lazy operator through a const"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/absent-argument-annotated-parameter.test.ts",
+      "cases": [
+        "an absent value at a parameter with no annotation \u203a the body runs with the absent value, all parameters bare",
+        "an absent value at a parameter with no annotation \u203a the body runs with the absent value, another parameter annotated",
+        "the engine admits an argument that may be absent \u203a the call is valid, and its type has no `missing` member",
+        "the Epsil static pre-pass does not report an argument that may be absent \u203a a bare parameter is not reported",
+        "the Epsil static pre-pass does not report an argument that may be absent \u203a a bare parameter beside an annotated one is not reported",
+        "a value typed `never` is no assignment evidence \u203a a list reassigned in a loop over tuples keeps its list type"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/static-check-const-assignment.test.ts",
+      "cases": [
+        "EPSIL CHECK: AN ASSIGNMENT TO A CONST BINDING \u203a an assignment in a function body",
+        "EPSIL CHECK: NO REPORT \u203a a `const` that re-declares a `let` does not make a constant",
+        "RUN: ONE REPORT, WITH THE CODE \u203a a call of a function that assigns the constant",
+        "EPSIL CHECK: A CONST IN A FUNCTION BODY OR A BLOCK \u203a a top-level const and a local const of the same name",
+        "RUN: LOCAL CONSTANTS ARE REPORTED ONCE \u203a a top-level const and a local const of the same name",
+        "ONE REPORT FOR EACH ASSIGNMENT \u203a a function defined before a top-level `const` does not write it",
+        "ONE REPORT FOR EACH ASSIGNMENT \u203a two assignments to the same name",
+        "ONE REPORT FOR EACH ASSIGNMENT \u203a a local constant and a top-level constant of the same name",
+        "EPSIL CHECK: A FUNCTION DEFINED BEFORE THE CONST \u203a the top-level const is not written: \"function f() scope -> integer { c = 3; if true { c = 2 }; 0 }\\nconst c = 1\\nf()\\nc\"",
+        "EPSIL CHECK: A FUNCTION DEFINED BEFORE THE CONST \u203a the top-level const is not written: \"let g = () => do { c = 2 }\\nconst c = 1\\ng()\\nc\"",
+        "EPSIL CHECK: A FUNCTION DEFINED BEFORE THE CONST \u203a the top-level const is not written: \"function f() scope -> integer { c = 2; 0 }\\nf()\\nconst c = 1\\nc\"",
+        "EPSIL CHECK: A FUNCTION DEFINED BEFORE THE CONST \u203a the top-level const is not written: \"do { c = 2 }\\nconst c = 1\\n4\""
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/statements.test.ts",
+      "cases": [
+        "EPSIL DECLARATIONS \u203a untyped let",
+        "EPSIL DECLARATIONS \u203a untyped const",
+        "EPSIL DECLARATIONS \u203a typed let with initializer",
+        "EPSIL DECLARATIONS \u203a typed let, declaration only (no initializer)",
+        "EPSIL DECLARATIONS \u203a untyped let, declaration only",
+        "EPSIL DECLARATIONS \u203a typed const with initializer",
+        "EPSIL DECLARATIONS \u203a a let initializer may be an expression",
+        "EPSIL REASSIGNMENT VS DECLARATION \u203a bare `x = 5` (no keyword, no annotation) is a reassignment",
+        "EPSIL REASSIGNMENT VS DECLARATION \u203a a bare annotation `x: T = e` implies a declaration (Declare)",
+        "EPSIL REASSIGNMENT VS DECLARATION \u203a a bare annotation without an initializer is a Declare",
+        "EPSIL FUNCTION DEFINITIONS \u203a math-style `f(x) = expr`",
+        "EPSIL FUNCTION DEFINITIONS \u203a math-style with multiple params",
+        "EPSIL FUNCTION DEFINITIONS \u203a math-style with typed params (annotated function literal)",
+        "EPSIL FUNCTION DEFINITIONS \u203a math-style with a return type (ascribed onto the body)",
+        "EPSIL FUNCTION DEFINITIONS \u203a block-style `function f(x) { \u2026 }`",
+        "EPSIL FUNCTION DEFINITIONS \u203a block-style with a return type (ascribed onto the body)",
+        "EPSIL FUNCTION DEFINITIONS \u203a anonymous mapsto with a typed parameter `(x: integer) => \u2026`",
+        "EPSIL FUNCTION DEFINITIONS \u203a anonymous mapsto with typed parameters `(x: integer, y: real) => \u2026`",
+        "EPSIL FUNCTION DEFINITIONS \u203a anonymous mapsto `x => expr`",
+        "EPSIL FUNCTION DEFINITIONS \u203a anonymous mapsto with a parameter list `(x, y) => expr`",
+        "EPSIL FUNCTION DEFINITIONS \u203a a mapsto binds loosely enough to be a Let/Assign RHS",
+        "EPSIL CONTROL FLOW \u203a if / else",
+        "EPSIL CONTROL FLOW \u203a if with no else",
+        "EPSIL CONTROL FLOW \u203a else-if chains into a nested If",
+        "EPSIL CONTROL FLOW \u203a a dangling else binds across a linebreak",
+        "EPSIL CONTROL FLOW \u203a while lowers to Loop(Block(If(Not(cond), Break), body))",
+        "EPSIL CONTROL FLOW \u203a for \u2026 in (the iterator clause is Element)",
+        "EPSIL CONTROL FLOW \u203a `in` inside the for-collection still parses as the Element operator",
+        "EPSIL CONTROL FLOW \u203a `if` is an expression (usable as an assignment RHS)",
+        "EPSIL CONTROL FLOW \u203a `if` is an expression (usable as an operand)",
+        "EPSIL CONDITIONAL EXPRESSION \u203a lowers to If(cond, consequent, alternative) \u2014 no Block branches",
+        "EPSIL CONDITIONAL EXPRESSION \u203a binds looser than the ordinary operators",
+        "EPSIL CONDITIONAL EXPRESSION \u203a binds tighter than `=`: the whole conditional is the RHS",
+        "EPSIL CONDITIONAL EXPRESSION \u203a binds tighter than `=>`: the whole conditional is the body",
+        "EPSIL CONDITIONAL EXPRESSION \u203a binds tighter than `|>`: the whole conditional is the piped value",
+        "EPSIL CONDITIONAL EXPRESSION \u203a binds tighter than `->`: a dictionary value can be conditional",
+        "EPSIL CONDITIONAL EXPRESSION \u203a binds looser than `||` (as in Python)",
+        "EPSIL CONDITIONAL EXPRESSION \u203a chains right-nested (no `else if` spelling needed)",
+        "EPSIL CONDITIONAL EXPRESSION \u203a usable as an argument and a list element",
+        "EPSIL CONDITIONAL EXPRESSION \u203a an `if` on the next line is a statement, not a conditional tail",
+        "EPSIL CONDITIONAL EXPRESSION \u203a does not capture a match-case guard",
+        "EPSIL BLOCKS \u203a empty block",
+        "EPSIL BLOCKS \u203a multi-statement block (value is the last expression)",
+        "EPSIL BLOCKS \u203a semicolon-separated statements in a block",
+        "EPSIL BLOCKS \u203a nested blocks",
+        "EPSIL BLOCKS \u203a a bare top-level `{\u2026}` is the collection grammar, not a block",
+        "EPSIL MULTI-STATEMENT PROGRAM \u203a declarations and control flow sequence into a Block",
+        "EPSIL STATEMENTS \u2014 destructuring declarations \u203a `let (x, y) = p` lowers to Declare of a Tuple pattern",
+        "EPSIL STATEMENTS \u2014 destructuring declarations \u203a `const` adds the constant attribute",
+        "EPSIL STATEMENTS \u2014 destructuring declarations \u203a nested patterns and `_` wildcards parse",
+        "EPSIL STATEMENTS \u2014 destructuring declarations \u203a `(x, y) := v` lowers to Assign of a Tuple target",
+        "EPSIL STATEMENTS \u2014 destructuring declarations \u203a nested patterns and `_` wildcards parse in a target",
+        "EPSIL `break` AND `continue` \u203a they lower to the engine `Break()` / `Continue()` FUNCTION forms",
+        "EPSIL `break` AND `continue` \u203a they round-trip in call form outside a loop"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/protocol-effects.test.ts",
+      "cases": [
+        "Phase 0a: a VALUE-bound intermediate propagates the derived union \u203a an INFERRED arrow of a value-bound literal follows a later conformance (CE-62.2)"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/multi-clause.test.ts",
+      "cases": [
+        "EPSIL MULTI-CLAUSE \u2014 literal parameter lowering (\u00a74.5) \u203a a number literal parameter (math form)",
+        "EPSIL MULTI-CLAUSE \u2014 literal parameter lowering (\u00a74.5) \u203a a negative decimal literal parameter",
+        "EPSIL MULTI-CLAUSE \u2014 literal parameter lowering (\u00a74.5) \u203a a string literal parameter, mixed with a symbol parameter",
+        "EPSIL MULTI-CLAUSE \u2014 literal parameter lowering (\u00a74.5) \u203a a boolean literal parameter (block form)",
+        "EPSIL MULTI-CLAUSE \u2014 literal parameter lowering (\u00a74.5) \u203a repeated literal parameters get distinct generated names",
+        "EPSIL MULTI-CLAUSE \u2014 literal parameter lowering (\u00a74.5) \u203a Infinity and NaN are literal parameters (lowered to oo/NaN)",
+        "EPSIL MULTI-CLAUSE \u2014 literal parameter lowering (\u00a74.5) \u203a `oo` is an input alias for Infinity (canonical output spelling)",
+        "EPSIL MULTI-CLAUSE \u2014 accumulation and dispatch \u203a a declared function type is a contract with and without an initial value"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/ir-bounds-apply.test.ts",
+      "cases": [
+        "IR profile, batch G12: the values in WebGL2 \u203a each shader agrees with the profile's JavaScript value within single-float precision"
+      ],
+      "chromiumUnavailable": true
+    },
+    {
+      "file": "test/compute-engine/ir-list-operators.test.ts",
+      "cases": [
+        "IR profile, batch G17: the boolean If in WebGL2 \u203a agrees with JavaScript"
+      ],
+      "chromiumUnavailable": true
+    },
+    {
+      "file": "test/compute-engine/protocol-dispatch-compile.test.ts",
+      "cases": [
+        "properties \u203a a SET on a value receiver never reaches the compiler at all"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/ir-glsl-complex.test.ts",
+      "cases": [
+        "IR profile, complex lane on GLSL: the values in WebGL2 \u203a the re and the im of the profile's shader agree with the JavaScript value within single-float precision"
+      ],
+      "chromiumUnavailable": true
+    },
+    {
+      "file": "test/epsil/comprehensions.test.ts",
+      "cases": [
+        "EPSIL COMPREHENSIONS \u2014 parse \u203a list comprehension, one clause",
+        "EPSIL COMPREHENSIONS \u2014 parse \u203a a guard is the third operand of its clause",
+        "EPSIL COMPREHENSIONS \u2014 parse \u203a several clauses, comma-separated, each with its own guard",
+        "EPSIL COMPREHENSIONS \u2014 parse \u203a a tuple destructuring binding",
+        "EPSIL COMPREHENSIONS \u2014 parse \u203a set comprehension is SetFrom of the comprehension",
+        "EPSIL COMPREHENSIONS \u2014 parse \u203a dictionary comprehension is DictionaryFrom of (key, value) pairs",
+        "EPSIL COMPREHENSIONS \u2014 parse \u203a the dictionary key is an expression, not a literal name",
+        "EPSIL COMPREHENSIONS \u2014 parse \u203a a conditional body reads before the clause",
+        "EPSIL COMPREHENSIONS \u2014 parse \u203a a second `in` in the collection is the membership operator",
+        "EPSIL COMPREHENSIONS \u2014 parse \u203a the literals are unchanged",
+        "EPSIL COMPREHENSIONS \u2014 diagnostics \u203a a pipeline in the collection must be parenthesized",
+        "EPSIL COMPREHENSIONS \u2014 the result is a list \u203a let xs = [do { k * 2 } for k in 1..3]",
+        "EPSIL COMPREHENSIONS \u2014 the result is a list \u203a the body is evaluated once for each element",
+        "EPSIL COMPREHENSIONS \u2014 the result is a list \u203a a dependent comprehension with an impure guard is listed, and the guard runs once for each combination",
+        "EPSIL COMPREHENSIONS \u2014 serialization \u203a the engine's set-builder prints as a set comprehension"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/ir-census-defects.test.ts",
+      "cases": [
+        "IR profile, batch G13: the quotients in WebGL2 \u203a a sample of the sweep equals the interpreter",
+        "IR profile, batch G13: the quotients in WebGL2 \u203a a dividend from 2^23 is not repaired; a point times p/q is"
+      ],
+      "chromiumUnavailable": true
+    },
+    {
+      "file": "test/compute-engine/same-statement-reregistration.test.ts",
+      "cases": [
+        "Test suite failed to run"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/ir-colors-names.test.ts",
+      "cases": [
+        "IR profile, batch G9: colours on GLSL, the values in WebGL2 \u203a each channel of the profile's shader agrees with the JavaScript value within single-float precision"
+      ],
+      "chromiumUnavailable": true
+    },
+    {
+      "file": "test/compute-engine/call-follows-function-reassignment.test.ts",
+      "cases": [
+        "THE TYPE OF A CALL FOLLOWS A REASSIGNMENT OF ITS FUNCTION \u203a Epsil: a call boxed before the reassignment of a `let`",
+        "A NAMED CALL THROUGH AN UNTYPED VARIABLE MATCHES THE NAMES AT EVALUATION \u203a Epsil: every argument named",
+        "A NAMED CALL THROUGH AN UNTYPED VARIABLE MATCHES THE NAMES AT EVALUATION \u203a Epsil: a positional and a named argument",
+        "A NAMED CALL THROUGH AN UNTYPED VARIABLE MATCHES THE NAMES AT EVALUATION \u203a a variable that holds a function with the same names"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/ir-glsl-list-params.test.ts",
+      "cases": [
+        "IR profile, batch G10: the values in WebGL2 \u203a each shader agrees with the profile's JavaScript value within single-float precision"
+      ],
+      "chromiumUnavailable": true
+    },
+    {
+      "file": "test/compute-engine/block-locals-declaration-rules.test.ts",
+      "cases": [
+        "A LOCAL IS DECLARED AT THE OWN LEVEL OF A BLOCK \u203a an assignment in a branch at the top level, in Epsil"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/type-variables-epsil.test.ts",
+      "cases": [
+        "EPSIL `where` ANNOTATIONS (D13: full-literal positions) \u203a a `where` annotation parses via the shared type DSL",
+        "EPSIL `where` ANNOTATIONS (D13: full-literal positions) \u203a a bare (keyword-less) annotation takes the clause too",
+        "EPSIL `where` ANNOTATIONS (D13: full-literal positions) \u203a multiple variables, bounds, and nested signatures all parse",
+        "EPSIL `where` ANNOTATIONS (D13: full-literal positions) \u203a an effects specifier composes with the clause",
+        "EPSIL `where` ANNOTATIONS (D13: full-literal positions) \u203a a function-literal body INSTALLS, and instantiates per call",
+        "EPSIL `where` ANNOTATIONS (D13: full-literal positions) \u203a \u2026and the per-arm spelling parenthesizes each arm",
+        "EPSIL `where` ANNOTATIONS (D13: prefix-mode termination) \u203a a SIGNATURE-typed bound has an unbounded right edge and still ends",
+        "EPSIL `where` ANNOTATIONS (D13: prefix-mode termination) \u203a the annotation terminates at `=` (initializer boundary)",
+        "EPSIL `where` ANNOTATIONS (D13: prefix-mode termination) \u203a the annotation terminates at the end of the statement (newline)",
+        "EPSIL `where` ANNOTATIONS (D13: prefix-mode termination) \u203a the annotation terminates at `)` (parameter-list boundary)",
+        "EPSIL `where` ANNOTATIONS (D13: prefix-mode termination) \u203a a decimal-looking bound does not run into the next entry",
+        "EPSIL `where` ANNOTATIONS (D13: prefix-mode termination) \u203a a BRACKETED comma inside a bound does not split the clause"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/parameter-default-values.test.ts",
+      "cases": [
+        "PARAMETER DEFAULT VALUES \u2014 parse \u203a a typed parameter of a function definition",
+        "PARAMETER DEFAULT VALUES \u2014 parse \u203a an untyped parameter of an anonymous function",
+        "PARAMETER DEFAULT VALUES \u2014 parse \u203a a typed parameter of an anonymous function",
+        "PARAMETER DEFAULT VALUES \u2014 parse \u203a the only parameter of an anonymous function",
+        "PARAMETER DEFAULT VALUES \u2014 parse \u203a the math form of a definition",
+        "PARAMETER DEFAULT VALUES \u2014 parse \u203a each kind of default value",
+        "PARAMETER DEFAULT VALUES \u2014 parse \u203a `-NaN` is `NaN`",
+        "PARAMETER DEFAULT VALUES \u2014 parse \u203a a wrong-arrow lambda (x, k: number = 2) -> x",
+        "PARAMETER DEFAULT VALUES \u2014 parse \u203a a wrong-arrow lambda (k: number = 2) -> k",
+        "PARAMETER DEFAULT VALUES \u2014 parse \u203a a wrong-arrow lambda (x, k = 2) -> x",
+        "PARAMETER DEFAULT VALUES \u2014 parse \u203a a wrong-arrow lambda (k = 2) -> k",
+        "PARAMETER DEFAULT VALUES \u2014 parse \u203a `(k == 2) -> k` is a pair, not a lambda",
+        "PARAMETER DEFAULT VALUES \u2014 invalid defaults \u203a a refused default leaves the parameter required",
+        "PARAMETER DEFAULT VALUES \u2014 evaluate \u203a a `const` of the program declared before the function",
+        "PARAMETER DEFAULT VALUES \u2014 evaluate \u203a a run on an engine that an earlier run left a binding in",
+        "PARAMETER DEFAULT VALUES \u2014 print \u203a `epsil doc` shows the default in the signature"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/hold-functions.test.ts",
+      "cases": [
+        "hold: contextual keyword and lowering \u203a lowers to a DefineFunction attributes operand",
+        "bind: bound-variable parameters of a hold function \u203a lowers to a `bind` list of names and round-trips"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/point-function-call-typing.test.ts",
+      "cases": [
+        "CE-468: a valueless list of points keeps the call \u203a an Epsil function with an annotated point parameter"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/effects.test.ts",
+      "cases": [
+        "EPSIL EFFECTS \u2014 declaration form \u203a a `random` arrow in a `let` declaration",
+        "EPSIL EFFECTS \u2014 declaration form \u203a a `pure` arrow in a `let` declaration",
+        "EPSIL EFFECTS \u2014 declaration form \u203a a multi-label arrow in a `let` declaration",
+        "EPSIL EFFECTS \u2014 parameter annotation \u203a an effectful callback parameter",
+        "EPSIL EFFECTS \u2014 definition form (block) \u203a the marker carries the FULL signature, not the return type",
+        "EPSIL EFFECTS \u2014 definition form (block) \u203a an annotated parameter contributes its type to the marker",
+        "EPSIL EFFECTS \u2014 definition form (block) \u203a effects-only: no arrow, wide result",
+        "EPSIL EFFECTS \u2014 definition form (block) \u203a `pure` is a stated-empty effect set and survives the marker",
+        "EPSIL EFFECTS \u2014 definition form (math) \u203a the marker carries the FULL signature",
+        "EPSIL EFFECTS \u2014 regressions (no specifier anywhere) \u203a a return-type-only block definition is unchanged",
+        "EPSIL EFFECTS \u2014 regressions (no specifier anywhere) \u203a a typed-parameter block definition is unchanged",
+        "EPSIL EFFECTS \u2014 regressions (no specifier anywhere) \u203a a PARENTHESIZED effect-bearing return type is a grouped type, not a contract (ruled 2026-08-01)",
+        "EPSIL EFFECTS \u2014 regressions (no specifier anywhere) \u203a an EFFECT-FREE grouped return type is a grouped type too (ruled 2026-08-04)",
+        "EPSIL EFFECTS \u2014 anonymous contract literals (option B, ruled 2026-08-01) \u203a a specifier-carrying anonymous literal round-trips via explicit Typed(\u2026)",
+        "EPSIL EFFECTS \u2014 anonymous contract literals (option B, ruled 2026-08-01) \u203a an EFFECT-FREE ground marker round-trips the same way (ruled 2026-08-04)"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/tycho-item-332-compiled-program-parity.test.ts",
+      "cases": [
+        "Compiled program parity (Tycho item 332) \u203a positive control: a while loop appends to a list",
+        "Compiled program parity (Tycho item 332) \u203a Apollonian gasket (tuples), first 30 gaps, interpreter parity",
+        "Evidence read again after the block is canonicalized (Tycho item 332) \u203a a loop index whose collection loses its element type is widened to unknown",
+        "Evidence read again after the block is canonicalized (Tycho item 332) \u203a the leaves of a loop pattern whose collection loses its tuple type are widened to unknown",
+        "Evidence read again after the block is canonicalized (Tycho item 332) \u203a a destructuring assignment from a union of tuple types joins the leaf types of the arms",
+        "Evidence read again after the block is canonicalized (Tycho item 332) \u203a a destructuring assignment whose value loses its tuple type widens its leaves to unknown"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/effects-provenance.test.ts",
+      "cases": [
+        "EFFECTS PROVENANCE \u2014 the typed-`let` upgrade (W3) \u203a an explicit effect specifier records the `declared` transition"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/ir-colors.test.ts",
+      "cases": [
+        "IR profile, colours on GLSL: the values in WebGL2 \u203a each channel of the profile's shader and of the existing target's agrees with the JavaScript value within single-float precision"
+      ],
+      "chromiumUnavailable": true
+    },
+    {
+      "file": "test/epsil/while-let.test.ts",
+      "cases": [
+        "EPSIL WHILE LET \u2014 parse (the lowering to Loop + Match) \u203a a Loop over a two-case Match whose wildcard arm breaks",
+        "EPSIL WHILE LET \u2014 parse (the lowering to Loop + Match) \u203a a typed binding lands its MatchesType guard in the guard slot",
+        "EPSIL WHILE LET \u2014 parse (the lowering to Loop + Match) \u203a the full case-pattern grammar: ranges, alternatives, pins",
+        "EPSIL WHILE LET \u2014 parse (the lowering to Loop + Match) \u203a the `=` ends the pattern; a `=` in the subject compares",
+        "EPSIL WHILE LET \u2014 parse (the lowering to Loop + Match) \u203a a plain `while` is untouched",
+        "EPSIL WHILE LET \u2014 serialize (the lowering spells back as while let) \u203a a Loop whose Match is not the lowering keeps the call spelling"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/closure-frame-retained.test.ts",
+      "cases": [
+        "CLOSURE MADE IN A LOOP OR A BLOCK, debug true \u203a each element of a comprehension gives its closure its own index",
+        "CLOSURE MADE IN A LOOP OR A BLOCK, debug false \u203a each element of a comprehension gives its closure its own index"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/field-accessor.test.ts",
+      "cases": [
+        "Epsil `.` grammar \u203a p.x lowers to Field",
+        "Epsil `.` grammar \u203a chains left-associate: a.b.c",
+        "Epsil `.` grammar \u203a 2.x stays invisible multiplication (the lexer owns the dot)",
+        "Epsil `.` grammar \u203a the range operator is untouched: 1..5",
+        "Epsil `.` grammar \u203a a call on a field value: p.x(2) parses as a member call and canonicalizes to Apply(Field(p, \"x\"), 2)"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/formatter.test.ts",
+      "cases": [
+        "EPSIL FORMATTER \u2014 string literals keep interior spaces \u203a spaces before an escaped newline are preserved"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/unknown-inference-marker.test.ts",
+      "cases": [
+        "D2, D3, R7: a declaration with contents left to inference refines from each assignment \u203a a nested unknown position re-refines, and the other positions stay the contract",
+        "D2, D3, R7: a declaration with contents left to inference refines from each assignment \u203a the Epsil let route and the MathJSON Declare route agree with ce.declare"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/sticky-unresolved-call.test.ts",
+      "cases": [
+        "a program block that is not canonical \u203a the canonical route, synchronous",
+        "a program block that is not canonical \u203a the raw route, synchronous",
+        "a program block that is not canonical \u203a the structural route, synchronous",
+        "a program block that is not canonical \u203a the structural ce.function route, synchronous",
+        "a program block that is not canonical \u203a the canonical route, asynchronous",
+        "a program block that is not canonical \u203a the raw route, asynchronous",
+        "a program block that is not canonical \u203a the structural route, asynchronous",
+        "a program block that is not canonical \u203a the structural ce.function route, asynchronous",
+        "two host asynchronous evaluations of blocks at the same time \u203a at the same time, each block is a program",
+        "two host asynchronous evaluations of blocks at the same time \u203a at the same time, with statements that wait",
+        "two host asynchronous evaluations of blocks at the same time \u203a a synchronous evaluation while an asynchronous one is pending",
+        "two host asynchronous evaluations of blocks at the same time \u203a a nested block stays nested while another evaluation is pending",
+        "two host asynchronous evaluations of blocks at the same time \u203a one after the other, each block is a program",
+        "the evaluation number on the routes that copy the context stack \u203a a symbol that holds a program block"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/ce-473-captured-free-symbol.test.ts",
+      "cases": [
+        "CE-473: THE EPSIL ROUTE \u203a a captured symbol declared by a later let makes the call an error"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/iterate-list-with-failed-cell.test.ts",
+      "cases": [
+        "EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER \u203a a comprehension that is the value of the program is read by the host",
+        "EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER \u203a a list built in the loop keeps the failed cell, and the statement is reported",
+        "EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER \u203a an operation on the failed cell gives the error",
+        "EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER \u203a a comprehension reads each cell"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/if-let.test.ts",
+      "cases": [
+        "EPSIL IF LET \u2014 parse (the lowering to Match) \u203a with an else: two cases, the second the wildcard",
+        "EPSIL IF LET \u2014 parse (the lowering to Match) \u203a without an else: the wildcard arm yields Missing",
+        "EPSIL IF LET \u2014 parse (the lowering to Match) \u203a a typed binding lands its MatchesType guard in the guard slot",
+        "EPSIL IF LET \u2014 parse (the lowering to Match) \u203a else if chains nest in the wildcard arm \u2014 plain and if-let alike",
+        "EPSIL IF LET \u2014 parse (the lowering to Match) \u203a an if-let can follow a plain else if",
+        "EPSIL IF LET \u2014 parse (the lowering to Match) \u203a the full case-pattern grammar: alternatives, pins, ranges",
+        "EPSIL IF LET \u2014 parse (the lowering to Match) \u203a a nested match or if-let inside a pin keeps the outer type guards",
+        "EPSIL IF LET \u2014 parse (the lowering to Match) \u203a the `=` ends the pattern; a `=` in the subject compares",
+        "EPSIL IF LET \u2014 evaluation \u203a the block is statement position: assignment and loop control work"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/ir-apply-lists.test.ts",
+      "cases": [
+        "IR profile, batch G18: Apply and Map in WebGL2 \u203a Apply of a scalar agrees with JavaScript",
+        "IR profile, batch G18: Apply and Map in WebGL2 \u203a Apply of a literal list agrees with JavaScript",
+        "IR profile, batch G18: Apply and Map in WebGL2 \u203a Apply of a list<real^3> agrees with JavaScript",
+        "IR profile, batch G18: Apply and Map in WebGL2 \u203a Apply of a list of 6 agrees with JavaScript",
+        "IR profile, batch G18: Apply and Map in WebGL2 \u203a Map of a literal list agrees with JavaScript",
+        "IR profile, batch G18: Apply and Map in WebGL2 \u203a a body that calls a user function agrees with JavaScript",
+        "IR profile, batch G18: Apply and Map in WebGL2 \u203a a list of 4 agrees with JavaScript",
+        "IR profile, batch G18: Apply and Map in WebGL2 \u203a a list of 5 agrees with JavaScript"
+      ],
+      "chromiumUnavailable": true
+    },
+    {
+      "file": "test/compute-engine/constructor-functions.test.ts",
+      "cases": [
+        "Epsil route (statement flow) \u203a function BEFORE the type declaration is the D5 collision"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/member-call.test.ts",
+      "cases": [
+        "parse \u203a `c.area()` is a MemberCall with no arguments",
+        "parse \u203a `c.scale(2)` carries its arguments after the member name",
+        "parse \u203a chains nest, receiver first: `c.scale(2).area()`",
+        "parse \u203a any receiver expression: `(a + b).area()`",
+        "parse \u203a the qualified form `c.(Shape.scale)(2)` lowers to ProtocolMember",
+        "parse \u203a a parenthesized read applied to arguments is NOT a member call",
+        "what the dot does NOT do \u203a a library function is not reached: `xs.Sort()`",
+        "the qualified call `Shape.area(c)` is unchanged \u203a parses as a member call on the protocol name and canonicalizes to Apply(Field(\u2026))"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/use-driven-element-inference.test.ts",
+      "cases": [
+        "route parity \u203a Epsil route: a lambda and a named function"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/use-narrowing-evidence-guard.test.ts",
+      "cases": [
+        "use-narrowing evidence guard \u203a ONE-SHOT program: an evidence-type mismatch flags statically (linter is stricter than the engine)",
+        "use-narrowing evidence guard \u203a the stricter evidence verdict is LINT-ONLY: the program still runs",
+        "use-narrowing evidence guard \u203a OVERLOADS: evidence fitting ANY arm stays clean",
+        "use-narrowing evidence guard \u203a an assigned symbol whose type already fits is admitted without a write (pre-existing matches branch)",
+        "use-narrowing evidence guard \u203a a typed declaration with a concrete initializer flags statically again",
+        "use-narrowing evidence guard \u203a an UNTYPED concrete literal initializer flags statically too"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/binder-sites-of.test.ts",
+      "cases": [
+        "binderSitesOf from the Epsil entry \u203a a sum binds its index in the body and the bounds",
+        "binderSitesOf from the Epsil entry \u203a a sum whose upper bound is a name it does not bind reads that name",
+        "binderSitesOf from the Epsil entry \u203a a limit that writes its variable binds it in the whole call",
+        "binderSitesOf from the Epsil entry \u203a limit(sin(h)/h, 0) binds its implicit variable h in its first operand",
+        "binderSitesOf from the Epsil entry \u203a limit(sin(h)/h, 0, 1) binds its implicit variable h in its first operand",
+        "binderSitesOf from the Epsil entry \u203a nLimit(sin(h)/h, 0) binds its implicit variable h in its first operand",
+        "binderSitesOf from the Epsil entry \u203a nd(h^3, 1) binds its implicit variable h in its first operand",
+        "binderSitesOf from the Epsil entry \u203a nIntegrate(sqrt(h), 0, 1) binds its implicit variable h in its first operand",
+        "binderSitesOf from the Epsil entry \u203a limit(sin(h)/h, h) binds its implicit variable h in its first operand",
+        "binderSitesOf from the Epsil entry \u203a limit(y*z, 0) binds its implicit variable y in its first operand",
+        "binderSitesOf from the Epsil entry \u203a limit(x*pi, 0) binds its implicit variable x in its first operand",
+        "binderSitesOf from the Epsil entry \u203a limit(sum(k*h, k, 1, 3), 0) binds its implicit variable h in its first operand",
+        "binderSitesOf from the Epsil entry \u203a limit(N + h, 1) binds its implicit variable N in its first operand",
+        "binderSitesOf from the Epsil entry \u203a limit((1 + 1/N)^N, infinity) binds its implicit variable N in its first operand",
+        "binderSitesOf from the Epsil entry \u203a limit(`pi`*x, 0) binds its implicit variable pi in its first operand",
+        "binderSitesOf from the Epsil entry \u203a limit(h + (1 |> _^2), 0) binds its implicit variable h in its first operand",
+        "binderSitesOf from the Epsil entry \u203a in \"let L: any = [1, 2]\\nlimit(total(L)*t, 1)\" the limit binds t",
+        "binderSitesOf from the Epsil entry \u203a in \"const a = 5\\nfunction g() { limit(a + h, 1) }\\ng()\" the limit binds h",
+        "binderSitesOf from the Epsil entry \u203a in \"const a = 5\\nfunction f() { g() }\\nfunction g() { limit(a + h, 1) }\\ng()\" the limit binds h",
+        "binderSitesOf from the Epsil entry \u203a in \"let L = [1, 2]\\nlimit(total(L), 0)\" the limit binds no name",
+        "binderSitesOf from the Epsil entry \u203a in \"const h = 5\\nfunction g() { limit(sin(h)/h, 0) }\\ng()\" the limit binds no name",
+        "binderSitesOf from the Epsil entry \u203a the engine values of the programs whose declaration does not tell",
+        "binderSitesOf from the Epsil entry \u203a an integral binds its variable",
+        "binderSitesOf from the Epsil entry \u203a a call of a name that is not a library operator gives undefined"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/lambda-arrow.test.ts",
+      "cases": [
+        "EPSIL LAMBDA ARROW `=>` \u2014 parsing \u203a a bare parameter",
+        "EPSIL LAMBDA ARROW `=>` \u2014 parsing \u203a a parameter tuple",
+        "EPSIL LAMBDA ARROW `=>` \u2014 parsing \u203a a typed parameter",
+        "EPSIL LAMBDA ARROW `=>` \u2014 parsing \u203a an empty parameter list",
+        "EPSIL LAMBDA ARROW `=>` \u2014 parsing \u203a right-associates for currying",
+        "EPSIL LAMBDA ARROW `=>` \u2014 parsing \u203a binds looser than `:=`, so an assignment captures the whole lambda",
+        "EPSIL LAMBDA ARROW `=>` \u2014 parsing \u203a binds looser than `??`, so the default lands inside the body",
+        "EPSIL LAMBDA ARROW `=>` \u2014 parsing \u203a no whitespace around the arrow",
+        "EPSIL LAMBDA ARROW `=>` \u2014 parsing \u203a a pipe stage lambda needs no parentheses",
+        "EPSIL LAMBDA ARROW `=>` \u2014 parsing \u203a a lambda inside a pipe stage argument",
+        "EPSIL LAMBDA ARROW `=>` \u2014 parsing \u203a `->` still writes dictionary entries",
+        "EPSIL LAMBDA ARROW `=>` \u2014 Unicode spellings \u203a `\u21a6` (U+21A6) is the arrow",
+        "EPSIL LAMBDA ARROW `=>` \u2014 Unicode spellings \u203a `\u21d2` (U+21D2) is the arrow",
+        "EPSIL LAMBDA ARROW `=>` \u2014 Unicode spellings \u203a a typed parameter list before `\u21a6`",
+        "EPSIL LAMBDA ARROW `=>` \u2014 Unicode spellings \u203a both glyphs are a `match` case arrow too",
+        "EPSIL LAMBDA ARROW `=>` \u2014 sharing the glyph with `match` \u203a a guard is terminated by the case arrow",
+        "EPSIL LAMBDA ARROW `=>` \u2014 sharing the glyph with `match` \u203a a relational guard is terminated by the case arrow",
+        "EPSIL LAMBDA ARROW `=>` \u2014 sharing the glyph with `match` \u203a a PIPE guard is terminated by the case arrow",
+        "EPSIL LAMBDA ARROW `=>` \u2014 sharing the glyph with `match` \u203a a bare pattern is terminated by the case arrow",
+        "EPSIL LAMBDA ARROW `=>` \u2014 sharing the glyph with `match` \u203a an arm BODY may be a lambda",
+        "EPSIL LAMBDA ARROW `=>` \u2014 sharing the glyph with `match` \u203a a `match` may be a lambda BODY",
+        "EPSIL LAMBDA ARROW `=>` \u2014 sharing the glyph with `match` \u203a a PARENTHESIZED lambda in a guard is an ordinary lambda",
+        "EPSIL LAMBDA ARROW `=>` \u2014 sharing the glyph with `match` \u203a an UNPARENTHESIZED lambda in a guard: the FIRST arrow is the case arrow",
+        "EPSIL LAMBDA ARROW `=>` \u2014 serialization \u203a both spellings read back to the same expression",
+        "EPSIL LAMBDA ARROW \u2014 the retired `|->` spelling \u203a `|->` reports `mapsto-arrow-legacy` with a fixit to `=>`",
+        "EPSIL LAMBDA ARROW \u2014 the retired `|->` spelling \u203a `|->` in a pipe stage is diagnosed and recovered"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/assign-overlap-declared-type.test.ts",
+      "cases": [
+        "a store accepts a value whose type overlaps the declared type \u203a an Epsil typed let follows the rule"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/ir-slice-glsl.test.ts",
+      "cases": [
+        "IR slice: GLSL run in WebGL2 \u203a the shaders give the JavaScript values, with the passes on and off",
+        "IR slice: GLSL run in WebGL2 \u203a integer programs within 2^24 give the interpreter value exactly"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/type-annotations.test.ts",
+      "cases": [
+        "EPSIL TYPE ANNOTATIONS \u203a standalone annotation",
+        "EPSIL TYPE ANNOTATIONS \u203a annotated assignment",
+        "EPSIL TYPE ANNOTATIONS \u203a annotated assignment with an expression initializer",
+        "EPSIL TYPE ANNOTATIONS \u203a generic type annotation",
+        "EPSIL TYPE ANNOTATIONS \u203a function-signature type annotation",
+        "EPSIL TYPE ANNOTATIONS \u203a type-syntax tokens do not leak into the expression grammar",
+        "EPSIL TYPE ANNOTATIONS \u203a whitespace around the colon does not matter",
+        "EPSIL \u2014 a record/object field list vs. a block body \u203a a bare `record` return type leaves the block body to Epsil",
+        "EPSIL \u2014 a record/object field list vs. a block body \u203a a field list and a block body in the same signature",
+        "EPSIL \u2014 a record/object field list vs. a block body \u203a an EMPTY body after a bare `record` return type is the body",
+        "EPSIL \u2014 a record/object field list vs. a block body \u203a an EMPTY body after a bare `object` return type is the body",
+        "EPSIL \u2014 a record/object field list vs. a block body \u203a a body whose first statement is a bare annotation is the body",
+        "EPSIL \u2014 a record/object field list vs. a block body \u203a a bare `record` annotation with no block following it",
+        "EPSIL \u2014 a record/object field list vs. a block body \u203a an EMPTY object layout is admitted inline",
+        "EPSIL \u2014 a record/object field list vs. a block body \u203a a record annotation with a field list",
+        "EPSIL \u2014 a record/object field list vs. a block body \u203a a space before the brace is accepted",
+        "EPSIL \u2014 a record/object field list vs. a block body \u203a the empty field list `record{}`",
+        "EPSIL \u2014 a record/object field list vs. a block body \u203a an object layout is the body of a `type` declaration"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/type-values.test.ts",
+      "cases": [
+        "the Type flip and its algebra (phase 3, ruling R3) \u203a Type returns a type value; StringFrom recovers the text",
+        "the Type flip and its algebra (phase 3, ruling R3) \u203a a type value interpolates as its bare text"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/assign-to-list-element.test.ts",
+      "cases": [
+        "an assignment to a list element rebinds the list \u203a the parsed form",
+        "an assignment to a list element rebinds the list \u203a a matrix element: two positions",
+        "an assignment to a list element rebinds the list \u203a a matrix element: nested brackets",
+        "a write that does not give a list is an error, and the variable keeps its value \u203a a string gives the list that replaceAt gives",
+        "a write that does not give a list is an error, and the variable keeps its value \u203a a tuple gives the list that replaceAt gives",
+        "a write that does not give a list is an error, and the variable keeps its value \u203a a tuple inside the list gives the list that replaceAt gives",
+        "a write that does not give a list is an error, and the variable keeps its value \u203a a string position past its last character is out-of-range"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/integrate-block-integrand.test.ts",
+      "cases": [
+        "Integrate of any other block stays unevaluated under evaluate() \u203a a value that fails and that no statement reads"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/lints.test.ts",
+      "cases": [
+        "positional `=` \u203a the canonical trap is now simply an equation",
+        "positional `=` \u203a a condition compares rather than assigning",
+        "positional `=` \u203a a statement with a binding target still assigns",
+        "positional `=` \u203a the target must be a WRITTEN name, not one a fold produced"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/effects-seam.test.ts",
+      "cases": [
+        "The Function-literal construction seam is the only builder \u203a the seam is imported only by the reviewed consumers"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/type-conformance-multiline.test.ts",
+      "cases": [
+        "EPSIL MULTI-LINE TYPE BODY + `is` CONFORMANCE \u203a a multi-line `record{\u2026}` body lowers to declaration + conformance",
+        "EPSIL MULTI-LINE TYPE BODY + `is` CONFORMANCE \u203a the combined declare-and-conform form still lowers to TWO statements",
+        "EPSIL MULTI-LINE TYPE BODY + `is` CONFORMANCE \u203a a multi-line conformance to SEVERAL protocols",
+        "EPSIL FORMS THAT MUST BE UNAFFECTED \u203a a multi-line `type alias` declares an alias, with no conformance"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/tuple-param-destructuring.test.ts",
+      "cases": [
+        "EPSIL TUPLE PARAMETER DESTRUCTURING \u2014 diagnostics \u203a a duplicate PLAIN parameter is the same diagnostic (user-ruled 2026-08-15)"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/join-append-literal-fold.test.ts",
+      "cases": [
+        "the accumulator loop holds a list literal \u203a the Epsil growing-list idioms"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/property-store-retirement.test.ts",
+      "cases": [
+        "an OBJECT receiver stores, on BOTH timings \u203a ONE batch: the store runs and the assignment answers the value",
+        "an OBJECT receiver stores, on BOTH timings \u203a TWO batches: same answer",
+        "a refused write costs the RIGHT-HAND SIDE nothing \u203a a well-typed qualified write still reaches the setter",
+        "a receiver whose VALUE is not an object yet stays symbolic \u203a the QUALIFIED write stays symbolic",
+        "a receiver whose VALUE is not an object yet stays symbolic \u203a the UNQUALIFIED write stays symbolic"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/std-qualified-name.test.ts",
+      "cases": [
+        "parse \u203a a qualified constant",
+        "parse \u203a a qualified call",
+        "parse \u203a a qualified name as a call argument is not a named argument",
+        "parse \u203a the resolution pass gives the library name, in either spelling",
+        "static errors \u203a a module other than `std` is unknown-module"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/tycho-item-330-loop-var-recursion.test.ts",
+      "cases": [
+        "closure over a nested-block local \u203a for loop index captured per iteration, at top level"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/compile-fold-list-accumulator.test.ts",
+      "cases": [
+        "issue #369: the consumers of a list-building fold compile \u203a At of a block local typed as an inferred abstract collection reads it through the run-time check"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/declare-statement-scope-ceiling.test.ts",
+      "cases": [
+        "a top-level `let` of an Epsil program \u203a `let f: () -> number = () => do { c = c + 1; c }` is refused and the variable does not change",
+        "a top-level `let` of an Epsil program \u203a `let f = () => do { c = c + 1; c }` is refused and the variable does not change",
+        "a top-level `let` of an Epsil program \u203a `const f = () => do { c = c + 1; c }` is refused and the variable does not change",
+        "a top-level `let` of an Epsil program \u203a is refused when a host runs the program in a scope that it pushed",
+        "a refused `Declare` statement \u203a leaves the binding of a previous run of a value of another type"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/tycho-item-332-untyped-program-compile.test.ts",
+      "cases": [
+        "Tycho 332: whole Epsil programs compile to JavaScript \u203a a: an unconstrained predicate source compiles the user functions",
+        "Tycho 332: whole Epsil programs compile to JavaScript \u203a a: a numeric circle source compiles the user functions"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/block-declared-signature-clause.test.ts",
+      "cases": [
+        "A DECLARED SIGNATURE BEFORE THE DEFINITION, IN ONE BLOCK \u203a a float argument is refused against the declared parameter type",
+        "A CALL BETWEEN THE DECLARED SIGNATURE AND THE DEFINITION \u203a the call is resolved",
+        "A CALL BETWEEN THE DECLARED SIGNATURE AND THE DEFINITION \u203a the call is checked against the declared parameter type",
+        "A CALL BETWEEN THE DECLARED SIGNATURE AND THE DEFINITION \u203a a declaration with a value keeps its value until the definition"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/recursive-application-memo-across-evaluations.test.ts",
+      "cases": [
+        "pure-application memo across top-level evaluations \u203a a field store is seen through a cached node that applies an object-reading function"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/recursive-list-builder-compile.test.ts",
+      "cases": [
+        "the natural recursive gasket program compiles (Tycho row 339) \u203a numeric accumulator and predicate source contracts compile the 224 circles"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/protocol-extends.test.ts",
+      "cases": [
+        "PARSING the `extends` tail \u203a the parents lower to a third `List` operand",
+        "PARSING the `extends` tail \u203a a protocol with members and one parent",
+        "PARSING the `extends` tail \u203a with no tail, the two-operand form is unchanged",
+        "PARSING the `extends` tail \u203a a hard-reserved parent name is written in its verbatim form"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/ce-1303-while-undecided-condition.test.ts",
+      "cases": [
+        "CE-1303: while with an undecided condition \u203a a condition undecided on the first turn ends the loop before the body runs"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/definition-head-multiline.test.ts",
+      "cases": [
+        "EPSIL MULTI-LINE DEFINITION HEAD \u203a a spaced `<` is a comparison, not the start of a generic",
+        "EPSIL MULTI-LINE DEFINITION HEAD \u203a `>=` cannot close a group, so an unspaced `<` still bounds nothing"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/compile-collection-parameter-check.test.ts",
+      "cases": [
+        "COMPILE a collection parameter \u203a a list and a tuple of the right shape pass",
+        "COMPILE a collection parameter \u203a the elements are not checked, as in the interpreter"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/named-arguments-declared-callee.test.ts",
+      "cases": [
+        "Epsil \u203a `let alias: function`: the static check and the run agree"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/function-values-review-fixes.test.ts",
+      "cases": [
+        "A default that names a constant of the host \u203a a default that names an Epsil `const` declines"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/d17-run-keeps-type-caches.test.ts",
+      "cases": [
+        "D17: a run keeps the cached types \u203a a constant local of a block is typed without its value, inside the run and after it"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/paren-operand-source-range.test.ts",
+      "cases": [
+        "a binary operator covers the parentheses of its operands \u203a a nested sum covers the parentheses of its own operands only",
+        "a statement covers its last parenthesis \u203a a declaration",
+        "other operators cover the parentheses of their operands \u203a a lambda whose parameter is a destructured pair",
+        "a single parenthesized expression keeps the range of its content \u203a `(x) = 5` assigns",
+        "parentheses around the receiver of a binding target \u203a (p).x = 1 assigns",
+        "parentheses around the receiver of a binding target \u203a (xs)[1] = 1 assigns",
+        "parentheses around the receiver of a binding target \u203a ((p)).x = 1 assigns",
+        "parentheses around the receiver of a binding target \u203a ((xs))[1] = 1 assigns",
+        "parentheses around the receiver of a binding target \u203a (p).x[1] = 1 assigns",
+        "parentheses around the receiver of a binding target \u203a ((p).x).y = 1 assigns",
+        "parentheses around the receiver of a binding target \u203a (p)[1].x = 1 assigns",
+        "parentheses around the receiver of a binding target \u203a (p.x) = 1 assigns",
+        "parentheses around the receiver of a binding target \u203a (+p).x = 1 compares",
+        "parentheses around the receiver of a binding target \u203a +(p).x = 1 compares",
+        "parentheses around the receiver of a binding target \u203a +p.x = 1 compares",
+        "parentheses around the receiver of a binding target \u203a (true).x = 1 compares"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/named-arguments-parse.test.ts",
+      "cases": [
+        "the named-argument carrier \u203a a lone named argument",
+        "the named-argument carrier \u203a positional arguments and named arguments mix",
+        "the named-argument carrier \u203a a verbatim symbol names an argument",
+        "the named-argument carrier \u203a a trailing comma is still allowed",
+        "the named-argument carrier \u203a the value is a full expression, not just a primary",
+        "what the named-argument production does NOT claim \u203a `f(a := 1)` is still an assignment operand",
+        "what the named-argument production does NOT claim \u203a a mapsto parameter list still reads `x: T` as an annotation",
+        "what the named-argument production does NOT claim \u203a a match pattern still reads `P(a: integer)` as a type guard",
+        "the lexer munch hazard (design \u00a71) \u203a `f(a: -1)` parses",
+        "the lexer munch hazard (design \u00a71) \u203a `f(a:-1)` parses the same way (the `:-` token is split)",
+        "the lexer munch hazard (design \u00a71) \u203a the split leaves a prefix operator to start the value"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/shared-collection-literal-evaluation.test.ts",
+      "cases": [
+        "a shared operand of a collection literal is evaluated once \u203a a chain of tuples of depth 20 in a loop",
+        "a shared operand of a collection literal is evaluated once \u203a a chain of lists of depth 20 in a loop",
+        "the entry of a tuple does not serve a read after a write \u203a each iteration of a loop reads its own index"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/list-join-nesting-and-if-frame.test.ts",
+      "cases": [
+        "A LIST WITH A FAILED CELL GROWN IN A LOOP \u203a every cell fails: 1000 turns give a flat list",
+        "A LIST WITH A FAILED CELL GROWN IN A LOOP \u203a only the first cell fails: 3200 turns give a flat list",
+        "A LIST WITH A FAILED CELL GROWN IN A LOOP \u203a a cell added at the front keeps the list flat",
+        "A LIST WITH A FAILED CELL GROWN IN A LOOP \u203a a list without a failed cell is unchanged",
+        "A WALK OF A STATEMENT VALUE THAT THROWS \u203a a throwing `json` of a non-final statement is a diagnostic",
+        "A WALK OF A STATEMENT VALUE THAT THROWS \u203a a throwing `json` of the final statement is a diagnostic"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/library-name-shadowing.test.ts",
+      "cases": [
+        "a top-level binding of a library constant is refused \u203a \"let Pi = 3\\nPi\"",
+        "a top-level binding of a library constant is refused \u203a \"let Pi = 3\\nPi + 1\"",
+        "a top-level binding of a library constant is refused \u203a \"const GoldenRatio = 3\\nGoldenRatio\""
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/declared-type-unknown-value.test.ts",
+      "cases": [
+        "a declared type admits a value of unknown type \u203a an admitted unknown value does not harden the placeholder slot",
+        "a declared type admits a value of unknown type \u203a a call with a known return type refines as usual"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/documentation.test.ts",
+      "cases": [
+        "EPSIL DOCUMENTATION \u203a live blocks and complete examples execute independently"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/nested-function-statement.test.ts",
+      "cases": [
+        "A CONSTANT OF THE PROGRAM \u203a a top-level `function` statement cannot replace a top-level `const`",
+        "A CONSTANT OF THE PROGRAM \u203a a nested function with the name of a `const` shadows it in the body"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/nested-statement-diagnostics.test.ts",
+      "cases": [
+        "EPSIL NESTED STATEMENT DIAGNOSTICS \u203a an error cell in a list built in a loop is reported once",
+        "EPSIL NESTED STATEMENT DIAGNOSTICS \u203a the same statement at the top level gives the same diagnostic",
+        "EPSIL NESTED STATEMENT DIAGNOSTICS \u203a nested loops report the inner statement once",
+        "EPSIL NESTED STATEMENT DIAGNOSTICS \u203a an error in some iterations only is reported at the branch statement",
+        "EPSIL NESTED STATEMENT DIAGNOSTICS \u203a the last statement of a loop body that is an `if` reports inside the branch",
+        "EPSIL NESTED STATEMENT DIAGNOSTICS \u203a a `while` loop body reports its statement",
+        "EPSIL NESTED STATEMENT DIAGNOSTICS \u203a a `do` block in a loop body reports its statement",
+        "EPSIL NESTED STATEMENT DIAGNOSTICS \u203a a loop with no error gives no diagnostic",
+        "EPSIL NESTED STATEMENT DIAGNOSTICS \u203a a function of an earlier program is not reported in a later one",
+        "EPSIL NESTED STATEMENT DIAGNOSTICS \u203a a call that does not match its signature keeps the signature notes"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/error-argument-unknown-parameter.test.ts",
+      "cases": [
+        "AN ERROR ARGUMENT AT A FUNCTION WITH TWO CLAUSES SELECTS NO CLAUSE \u203a a value that fits no clause is still refused",
+        "THE OTHER ARGUMENT CHECKS ARE UNCHANGED \u203a a value of the wrong type is refused",
+        "THE OTHER ARGUMENT CHECKS ARE UNCHANGED \u203a a missing argument is the `missing` error"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/tycho-item-332-block-let-literal-type.test.ts",
+      "cases": [
+        "Tycho item 332: a block-local let with a literal value is typed from it \u203a the positive control: a let list grown by a spread in a while loop",
+        "Tycho item 332: a block-local let with a literal value is typed from it \u203a a let counter hoists the tier integer, not the singleton literal type",
+        "Tycho item 332: a block-local let with a literal value is typed from it \u203a the hoisted type is list-shaped after the first use and the assignment",
+        "Tycho item 332: a block-local let with a literal value is typed from it \u203a a nested-block reference binds to the hoisted binding, not a copy",
+        "Tycho item 332: a block-local let with a literal value is typed from it \u203a a scalar literal widens by the assignment table: real after a float assignment"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/placeholder-element-refinement.test.ts",
+      "cases": [
+        "Phase 1: placeholder element refinement \u203a declare-with-initializer refines identically to the split spelling",
+        "Phase 1: placeholder element refinement \u203a STATIC: the refined element type flows through the one-shot pre-pass"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/compile-function-returned-by-call.test.ts",
+      "cases": [
+        "COMPILE a call of a function returned by a call \u203a declines when the callee does not return a function on every path"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/ce-1179-loop-body-scalar-result.test.ts",
+      "cases": [
+        "CE-1179: a declared scalar result after a loop \u203a a captured name with an inferred type keeps the list arm",
+        "CE-1179: a declared scalar result after a loop \u203a a call of a user function in the body keeps the list arm"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/function-body-error-location.test.ts",
+      "cases": [
+        "an error in the body of a called function \u203a function g(x) { Ln(x) + 1 }, let v = 0"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/check-epsil.test.ts",
+      "cases": [
+        "checkEpsil \u203a a static type error and a redeclaration are reported"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/block-later-declarations.test.ts",
+      "cases": [
+        "A PROGRAM READ AS ONE BLOCK: NAMES DECLARED LATER \u203a an assignment without let in a function with no scope effect",
+        "A PROGRAM READ AS ONE BLOCK: A LIBRARY CONSTANT DECLARED LATER \u203a a function defined before the `let` reads the constant",
+        "A PROGRAM READ AS ONE BLOCK: A LIBRARY CONSTANT DECLARED LATER \u203a a statement before the `let` reads the constant",
+        "A PROGRAM READ AS ONE BLOCK: A LIBRARY CONSTANT DECLARED LATER \u203a a host block of MathJSON"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/block-locals-per-run.test.ts",
+      "cases": [
+        "what does not change \u203a the initializer of a shadowing `let` reads the outer name"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/number-literals.test.ts",
+      "cases": [
+        "a decimal literal keeps its value \u203a 0.75",
+        "a decimal literal keeps its value \u203a 0.7",
+        "a decimal literal keeps its value \u203a 0.3",
+        "a decimal literal keeps its value \u203a 0.000001",
+        "a decimal literal keeps its value \u203a 123.456",
+        "a decimal literal keeps its value \u203a 1.2000",
+        "a decimal literal keeps its value \u203a -0.75",
+        "a decimal literal keeps its value \u203a 12345678901234567890.5",
+        "a literal with a fraction part is a float \u203a 1.0",
+        "a literal with a fraction part is a float \u203a 2.0",
+        "a literal with a fraction part is a float \u203a 1.5e3",
+        "a literal with a fraction part is a float \u203a 0.0",
+        "a literal with a fraction part is a float \u203a an integer, with or without an exponent, stays exact",
+        "a literal with a fraction part is a float \u203a a trailing point with no digit is not a fraction part",
+        "a literal with a fraction part is a float \u203a the fraction digits are read after separators and in fullwidth",
+        "a literal with a fraction part is a float \u203a an exponent after a fraction part keeps the point",
+        "a literal with a fraction part is a float \u203a a literal a double cannot hold keeps its digits",
+        "invisible multiplication after an explicit * or / \u203a a * 2n",
+        "invisible multiplication after an explicit * or / \u203a a / 2n",
+        "invisible multiplication after an explicit * or / \u203a a * 3x^2",
+        "invisible multiplication after an explicit * or / \u203a a * 2(x + 1)"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/static-check-function-on-const.test.ts",
+      "cases": [
+        "EPSIL CHECK: A FUNCTION STATEMENT ON A CONST BINDING \u203a a function statement after a const of a number",
+        "EPSIL CHECK: A FUNCTION STATEMENT ON A CONST BINDING \u203a a definition with `=` after a const of a function literal",
+        "EPSIL CHECK: A FUNCTION STATEMENT ON A CONST BINDING \u203a each refused statement is reported",
+        "EPSIL CHECK: A FUNCTION STATEMENT ON A CONST BINDING \u203a the run time does not report the same problem a second time",
+        "EPSIL CHECK: NO REPORT \u203a a function statement in a function body shadows the constant",
+        "EPSIL CHECK: NO REPORT \u203a a const whose initializer does not match its type binds nothing"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/item-400-assign-function.test.ts",
+      "cases": [
+        "EPSIL f(x) := body DEFINES A FUNCTION (#400) \u203a a non-application target is still a plain assignment"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/compiled-function-redefinition-effects.test.ts",
+      "cases": [
+        "A FUNCTION DEFINED UNDER A DECLARATION THAT STATES ITS EFFECTS \u203a the compilation is refused"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/ce-43-block-local-statement-order.test.ts",
+      "cases": [
+        "CE-43: an assignment in a match case is an assignment of the block local \u203a a while-let body that consumes the list",
+        "CE-43: an assignment in a match case is an assignment of the block local \u203a a match case that assigns a value of another kind"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/constant-function-reassignment.test.ts",
+      "cases": [
+        "CONSTANT \u2014 a function literal cannot replace a constant \u203a Epsil: a clause definition on a `const` function is refused"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/runtime-error.test.ts",
+      "cases": [
+        "EPSIL RuntimeError \u203a `if let v: !error` refuses it and `match Error(c)` reads its code"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/latex-islands.test.ts",
+      "cases": [
+        "EPSIL LATEX ISLANDS (stub parser) \u203a an island is spliced in as a primary",
+        "EPSIL LATEX ISLANDS (stub parser) \u203a an island composes inside a larger expression",
+        "EPSIL LATEX ISLANDS (real engine) \u203a wires the real engine as the injected LaTeX parser"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/single-block-program.test.ts",
+      "cases": [
+        "a program whose only statement is a block \u203a the parsed shape is the block inside the program block"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/epsil/while-let-body-diagnostics.test.ts",
+      "cases": [
+        "EPSIL WHILE LET BODY DIAGNOSTICS \u203a the last statement of a `while let` body is reported",
+        "EPSIL WHILE LET BODY DIAGNOSTICS \u203a a value passed up from an `if` in a `while let` body is reported where it was made"
+      ],
+      "chromiumUnavailable": false
+    },
+    {
+      "file": "test/compute-engine/ce-108-2-tabulate-error-generator.test.ts",
+      "cases": [
+        "CE-108.2: Tabulate with a generator that holds an error \u203a the Epsil route"
+      ],
+      "chromiumUnavailable": false
+    }
+  ]
+}

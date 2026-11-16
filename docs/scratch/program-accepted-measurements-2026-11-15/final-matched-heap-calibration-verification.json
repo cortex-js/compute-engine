@@ -1,0 +1,82 @@
+{
+  "checks": [
+    {
+      "mode": "normal",
+      "arm": "baseline",
+      "arrayProcesses": 3,
+      "closureProcesses": 3,
+      "closureResults": [
+        5,
+        5,
+        5
+      ],
+      "arrayPayloadBytes": 13107200,
+      "arrayReleasedBytes": [
+        13130224,
+        13130224,
+        13130224
+      ],
+      "arrayMedianReleasedMiB": 12.521957397460938,
+      "calibrationDistinguishesRetention": true
+    },
+    {
+      "mode": "normal",
+      "arm": "candidate",
+      "arrayProcesses": 3,
+      "closureProcesses": 3,
+      "closureResults": [
+        5,
+        5,
+        5
+      ],
+      "arrayPayloadBytes": 13107200,
+      "arrayReleasedBytes": [
+        13130224,
+        13130224,
+        13130224
+      ],
+      "arrayMedianReleasedMiB": 12.521957397460938,
+      "calibrationDistinguishesRetention": true
+    },
+    {
+      "mode": "off",
+      "arm": "baseline",
+      "arrayProcesses": 3,
+      "closureProcesses": 3,
+      "closureResults": [
+        5,
+        5,
+        5
+      ],
+      "arrayPayloadBytes": 13107200,
+      "arrayReleasedBytes": [
+        13130224,
+        13130224,
+        13130224
+      ],
+      "arrayMedianReleasedMiB": 12.521957397460938,
+      "calibrationDistinguishesRetention": true
+    },
+    {
+      "mode": "off",
+      "arm": "candidate",
+      "arrayProcesses": 3,
+      "closureProcesses": 3,
+      "closureResults": [
+        5,
+        5,
+        5
+      ],
+      "arrayPayloadBytes": 13107200,
+      "arrayReleasedBytes": [
+        13130224,
+        13130224,
+        13130224
+      ],
+      "arrayMedianReleasedMiB": 12.521957397460938,
+      "calibrationDistinguishesRetention": true
+    }
+  ],
+  "durationTimingAcceptanceNotChanged": true,
+  "sourceUnchanged": true
+}

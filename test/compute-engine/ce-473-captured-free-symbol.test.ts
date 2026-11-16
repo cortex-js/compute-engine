@@ -188,15 +188,15 @@ describe('CE-473: THE EPSIL ROUTE', () => {
   // A `let` of a function literal is a variable that holds the function, as a
   // global assigned the literal: the call checks the captured values, as in
   // CE-473 (c) above. The variable `y` is declared by a later `let`.
-  test('a captured symbol declared by a later let makes the call an error', () => {
+  test('a later Program declaration settles the captured string before the literal', () => {
     const ce = new ComputeEngine();
     const result = executeEpsil(
       ce,
       'let g = (x) => [-x, y]\nlet y = "abc"\ng(3)'
     );
     expect(result.diagnostics).toEqual([]);
-    expect(isTypeError(result.value!)).toBe(true);
-    expect(isTypeError(sound(ce.box(['g', 3])))).toBe(true);
+    expect(result.value.json).toEqual(['List', -3, "'abc'"]);
+    expect(sound(ce.box(['g', 3])).json).toEqual(['List', -3, "'abc'"]);
   });
 
   test('a value assigned before the literal is read by its type', () => {

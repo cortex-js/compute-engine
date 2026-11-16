@@ -69,15 +69,22 @@ describe('CONSTANT — a function literal cannot replace a constant', () => {
     // The static check reports the refusal before the program runs, and the
     // run does not report it a second time.
     expect(diagnostics.map((d) => d.message[0])).toEqual(['static-type-error']);
-    for (const d of diagnostics)
-      expect(String(d.message[1])).toContain(
-        '"k" is a constant; it cannot be redefined'
-      );
+    for (const d of diagnostics) {
+      expect(d.message[1]).toBe('variable redeclaration: k');
+      expect(d.message[3]).toBe('variable-redeclaration');
+    }
     expect(value.re).toBe(3);
   });
 
-  test('Epsil: a `let` function is still replaceable by both routes', () => {
+  test('Epsil: a `let` function remains replaceable by assignment', () => {
     expect(run('let k = (n) => n + 1\nk = (s) => s\nk(1)').value.re).toBe(1);
-    expect(run('let k = (n) => n\nk(x) = x * 2\nk(3)').value.re).toBe(6);
+  });
+
+  test('Epsil: a math-style function declaration cannot replace an earlier `let`', () => {
+    const { value, diagnostics } = run('let k = (n) => n\nk(x) = x * 2\nk(3)');
+    expect(diagnostics.map((d) => d.message[3])).toEqual([
+      'variable-redeclaration',
+    ]);
+    expect(value.re).toBe(3);
   });
 });

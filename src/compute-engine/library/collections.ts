@@ -8864,6 +8864,12 @@ function canonicalMemberCall(
       ce.typeError('string', member.type, member.toString()),
       ...args.map((x) => x.canonical),
     ]);
+  // A Program constant has no field value until its declaration runs.
+  // The field can hold a lazy operator, so resolve this parse carrier at
+  // evaluation with the original arguments, as for any unresolved member.
+  if (isSymbol(base) && base.valueDefinition?._programVariable &&
+      base.valueDefinition.isConstant && base.valueDefinition.value === undefined)
+    return ce._fn('MemberCall', [base, member, ...args]);
   const storedCall = (): Expression =>
     ce.function('Apply', [
       ce.function('Field', [base, ce.string(name)]),

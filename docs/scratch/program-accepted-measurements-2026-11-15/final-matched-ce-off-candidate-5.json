@@ -1,0 +1,249 @@
+{
+  "node": "v26.13.0",
+  "v8": "14.6.202.34-node.40",
+  "execArgv": [],
+  "nodeOptions": "",
+  "jit": "off",
+  "precision": 21,
+  "load": [
+    3.39306640625,
+    5.88037109375,
+    10.07568359375
+  ],
+  "startup": {
+    "importMs": 84.238208,
+    "firstEngineMs": 22.54279199999999,
+    "coldFullRunMs": 17.977334000000013
+  },
+  "controls": {
+    "validResult": 10,
+    "failureContinuation": 5,
+    "typeProtocolDiagnostics": 0,
+    "preparedContainerResult": 10
+  },
+  "records": [
+    {
+      "id": "control-parse-scalar",
+      "iterations": 1000,
+      "warmup": 100,
+      "samplesMs": [
+        0.002341207999999995,
+        0.0009794170000000121,
+        0.0017355839999999886,
+        0.0005839579999999955,
+        0.001927457999999973,
+        0.0015080829999999993,
+        0.0021507080000000085
+      ],
+      "medianMs": 0.0017355839999999886,
+      "minMs": 0.0005839579999999955,
+      "maxMs": 0.002341207999999995
+    },
+    {
+      "id": "parse-only",
+      "iterations": 100,
+      "warmup": 100,
+      "samplesMs": [
+        0.008805419999999913,
+        0.007894159999999886,
+        0.006700000000000159,
+        0.0068587500000001,
+        0.0066762500000001525,
+        0.006101669999999899,
+        0.005951670000000036
+      ],
+      "medianMs": 0.006700000000000159,
+      "minMs": 0.005951670000000036,
+      "maxMs": 0.008805419999999913
+    },
+    {
+      "id": "box-only-current-parser-container",
+      "iterations": 100,
+      "warmup": 100,
+      "samplesMs": [
+        0.2367433299999999,
+        0.16078332999999986,
+        0.12363124999999997,
+        0.10461958000000038,
+        0.10692125000000033,
+        0.10119208999999955,
+        0.09339375000000018
+      ],
+      "medianMs": 0.10692125000000033,
+      "minMs": 0.09339375000000018,
+      "maxMs": 0.2367433299999999
+    },
+    {
+      "id": "parse-and-box",
+      "iterations": 100,
+      "warmup": 100,
+      "samplesMs": [
+        0.11439666000000046,
+        0.1115579200000002,
+        0.10535583000000032,
+        0.11392916000000014,
+        0.10703082999999992,
+        0.09756082999999989,
+        0.09134250000000009
+      ],
+      "medianMs": 0.10703082999999992,
+      "minMs": 0.09134250000000009,
+      "maxMs": 0.11439666000000046
+    },
+    {
+      "id": "engine-construction",
+      "iterations": 20,
+      "warmup": 20,
+      "samplesMs": [
+        1.5979603999999994,
+        1.4456375000000008,
+        1.5883687499999979,
+        1.2901666500000033,
+        1.3706083499999977,
+        1.7278937499999985,
+        1.2741687500000012
+      ],
+      "medianMs": 1.4456375000000008,
+      "minMs": 1.2741687500000012,
+      "maxMs": 1.7278937499999985
+    },
+    {
+      "id": "full-first-run",
+      "iterations": 100,
+      "warmup": 100,
+      "samplesMs": [
+        0.5744683299999997,
+        0.5433208400000001,
+        0.5227020799999991,
+        0.5057929200000001,
+        0.48544667,
+        0.46853625000000076,
+        0.4966333399999985
+      ],
+      "medianMs": 0.5057929200000001,
+      "minMs": 0.46853625000000076,
+      "maxMs": 0.5744683299999997
+    },
+    {
+      "id": "same-caller-namespace-rerun",
+      "iterations": 100,
+      "warmup": 100,
+      "samplesMs": [
+        0.48763582999999927,
+        0.5214649999999983,
+        0.48895874999999933,
+        0.5154879100000016,
+        0.4324695799999995,
+        0.4294775000000004,
+        0.4386520799999994
+      ],
+      "medianMs": 0.48763582999999927,
+      "minMs": 0.4294775000000004,
+      "maxMs": 0.5214649999999983
+    },
+    {
+      "id": "prepared-container-repeat",
+      "iterations": 100,
+      "warmup": 100,
+      "samplesMs": [
+        0.04184083000000101,
+        0.050045419999999015,
+        0.04238833000000113,
+        0.04264167000000043,
+        0.045918329999999515,
+        0.03924125000000003,
+        0.04043999999999869
+      ],
+      "medianMs": 0.04238833000000113,
+      "minMs": 0.03924125000000003,
+      "maxMs": 0.050045419999999015
+    },
+    {
+      "id": "control-cached-scalar-repeat",
+      "iterations": 10000,
+      "warmup": 100,
+      "samplesMs": [
+        0.000016020899999989525,
+        0.000014445799999998599,
+        0.000014829199999985577,
+        0.000017604199999982483,
+        0.000013879199999996672,
+        0.000013737500000002001,
+        0.000013745800000015151
+      ],
+      "medianMs": 0.000014445799999998599,
+      "minMs": 0.000013737500000002001,
+      "maxMs": 0.000017604199999982483
+    },
+    {
+      "id": "failed-statement-continuation",
+      "iterations": 100,
+      "warmup": 100,
+      "samplesMs": [
+        0.3015425000000005,
+        0.27657166999999844,
+        0.2616450000000009,
+        0.27546833000000104,
+        0.2623262499999987,
+        0.2600362499999983,
+        0.26101291000000176
+      ],
+      "medianMs": 0.2623262499999987,
+      "minMs": 0.2600362499999983,
+      "maxMs": 0.3015425000000005
+    },
+    {
+      "id": "check-only",
+      "iterations": 100,
+      "warmup": 100,
+      "samplesMs": [
+        0.1764754199999993,
+        0.17527791999999864,
+        0.1712350000000015,
+        0.16660916999999928,
+        0.17365125000000034,
+        0.16249000000000025,
+        0.18213707999999998
+      ],
+      "medianMs": 0.17365125000000034,
+      "minMs": 0.16249000000000025,
+      "maxMs": 0.18213707999999998
+    },
+    {
+      "id": "type-protocol-heavy-check",
+      "iterations": 30,
+      "warmup": 100,
+      "samplesMs": [
+        1.1716444333333356,
+        1.0873514000000037,
+        1.0848888999999873,
+        1.0753000000000006,
+        1.7780013666666643,
+        1.0675222333333294,
+        1.050523599999997
+      ],
+      "medianMs": 1.0848888999999873,
+      "minMs": 1.050523599999997,
+      "maxMs": 1.7780013666666643
+    },
+    {
+      "id": "whole-source-edit",
+      "iterations": 100,
+      "warmup": 100,
+      "samplesMs": [
+        0.4151150000000007,
+        0.4238020800000004,
+        0.4095570799999996,
+        0.40796083000000183,
+        0.41709749999999984,
+        0.4052166699999998,
+        0.3941829199999984
+      ],
+      "medianMs": 0.4095570799999996,
+      "minMs": 0.3941829199999984,
+      "maxMs": 0.4238020800000004
+    }
+  ],
+  "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+  "heavy": "type alias Pair0 = tuple<number, number>\nprotocol P0 { function compare(self: Self, other: Self) -> string }\ntype alias Pair1 = tuple<number, number>\nprotocol P1 { function compare(self: Self, other: Self) -> string }\ntype alias Pair2 = tuple<number, number>\nprotocol P2 { function compare(self: Self, other: Self) -> string }\ntype alias Pair3 = tuple<number, number>\nprotocol P3 { function compare(self: Self, other: Self) -> string }\ntype alias Pair4 = tuple<number, number>\nprotocol P4 { function compare(self: Self, other: Self) -> string }\ntype alias Pair5 = tuple<number, number>\nprotocol P5 { function compare(self: Self, other: Self) -> string }\ntype alias Pair6 = tuple<number, number>\nprotocol P6 { function compare(self: Self, other: Self) -> string }\ntype alias Pair7 = tuple<number, number>\nprotocol P7 { function compare(self: Self, other: Self) -> string }\ntype alias Pair8 = tuple<number, number>\nprotocol P8 { function compare(self: Self, other: Self) -> string }\ntype alias Pair9 = tuple<number, number>\nprotocol P9 { function compare(self: Self, other: Self) -> string }\ntype alias Pair10 = tuple<number, number>\nprotocol P10 { function compare(self: Self, other: Self) -> string }\ntype alias Pair11 = tuple<number, number>\nprotocol P11 { function compare(self: Self, other: Self) -> string }"
+}

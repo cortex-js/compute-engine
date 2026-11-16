@@ -766,16 +766,7 @@ export interface IComputeEngine {
    * @internal */
   _evaluationDepth: number;
 
-  /** How many of the synchronous evaluations counted by `_evaluationDepth`
-   * are delegations: the `evaluate()` of an expression that is not
-   * canonical evaluates its canonical form in its place, and the count is
-   * raised while it does. So a synchronous evaluation is the outermost
-   * evaluation of the host when `_evaluationDepth` is
-   * `1 + _delegatedEvaluations`: every evaluation below it on the stack
-   * only hands its expression over to its canonical form. The `Block`
-   * evaluate handler reads it to tell whether the host evaluates the block
-   * directly (`runsAsProgram()`, `library/control-structures.ts`).
-   * @internal */
+
   _delegatedEvaluations: number;
 
   /** The `ce.effects` registry captured by the synchronous evaluation that is
@@ -1017,25 +1008,8 @@ export interface IComputeEngine {
    * held VALUE's type: widening stores a `Complex` under `number`, which a
    * `complex` parameter must still admit). `undefined` outside the pass.
    * @internal */
-  _staticAssignmentEvidence: Map<BoxedValueDefinition, Type> | undefined;
 
-  /** The value definitions the Epsil static pre-pass pinned from a FUNCTION
-   * LITERAL the checked program declares or assigns (`registerPinnedSignature`
-   * in `src/epsil/static-diagnostics.ts`). Set (and restored) only by
-   * `staticDiagnostics`, like {@link IComputeEngine._staticAssignmentEvidence}.
-   * Boxing validates the arguments of a call to one of these as if its
-   * signature were declared (`staticallyPinnedCallee`, `box.ts`), so the pass
-   * reports `k(1.5)` after `let k = (n: integer) => n + 1` — a refusal the run
-   * time leaves to the literal itself, when applied, because the definition
-   * stays INFERRED. `undefined` outside the pass.
-   *
-   * Each definition maps to the function LITERAL the pin came from. Boxing
-   * reads the literal's parameter operands to know which parameters the
-   * author annotated: only those are checked at a call, and the slot of a
-   * bare parameter, whose type was inferred from the body, admits any
-   * argument (`pinnedValidationSignature`, `box.ts`).
-   * @internal */
-  _staticPinnedCallees: Map<BoxedValueDefinition, Expression> | undefined;
+
 
   /** `true` only while the Epsil interpreter is canonicalizing or evaluating a
    * top-level statement whose AST head is `DeclareType`, `DeclareSumType` or
@@ -1060,7 +1034,11 @@ export interface IComputeEngine {
    * @internal */
   _epsilDeclarationRoute: boolean;
 
-  /** Called with each NESTED statement and its value, after the statement
+  /** Independent Epsil time limit per Program statement, in milliseconds.
+   * @internal */
+  _epsilStatementTimeLimitMs: number | undefined;
+
+  /** Called with each statement and its value, after the statement
    * evaluated: a statement of a statement list (a `Block` body, a function
    * body, an `if` branch, a loop body) that carries `sourceOffsets`, that
    * is, a statement written in Epsil source. Called by `evaluateStatements`
@@ -1072,7 +1050,9 @@ export interface IComputeEngine {
    * header written in Epsil source) and its value, each time the clause
    * evaluates it (`runNested`, `library/control-structures.ts`).
    *
-   * Set by `executeEpsil` for the duration of its evaluation loop, so that
+   * A top-level Program statement also supplies its canonical index and any
+   * caught failure. Nested statements and collection headers omit the index.
+   * Set by `executeEpsil` for the duration of Program evaluation, so that
    * a nested statement whose value is discarded and holds an error (an
    * `Error` cell in a list built in a loop) is reported as a diagnostic, as
    * a top-level statement is. `undefined` (the default) outside a run.
@@ -1085,7 +1065,7 @@ export interface IComputeEngine {
    * value both bundles share.
    * @internal */
   _epsilStatementResultHook:
-    ((statement: Expression, result: Expression) => void) | undefined;
+    ((statement: Expression, result: Expression, programIndex?: number, error?: unknown) => void) | undefined;
 
   /** Absolute time (`Date.now()` epoch ms) beyond which evaluation should
    * not proceed, or `undefined` when no time limit is active. A derived view

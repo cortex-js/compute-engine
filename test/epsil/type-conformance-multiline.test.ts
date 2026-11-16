@@ -93,7 +93,7 @@ Tup("yy").qq`
 } is Sized`
       )
     ).toStrictEqual([
-      'Block',
+      'Program',
       [
         'DeclareType',
         'Rec',
@@ -202,7 +202,7 @@ Obj(nn: "xx").nn`
 } is Named`
       )
     ).toStrictEqual([
-      'Block',
+      'Program',
       ['DeclareType', 'Obj', { str: 'object{\n  nn: string\n}' }],
       ['DeclareConformance', { str: 'Obj' }, ['List', 'Named']],
     ]);
@@ -216,7 +216,7 @@ Obj(nn: "xx").nn`
 } is Named & Sized`
       )
     ).toStrictEqual([
-      'Block',
+      'Program',
       ['DeclareType', 'Obj', { str: 'object{\n  nn: string\n}' }],
       ['DeclareConformance', { str: 'Obj' }, ['List', 'Named', 'Sized']],
     ]);

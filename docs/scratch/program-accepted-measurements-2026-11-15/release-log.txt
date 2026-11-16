@@ -1,0 +1,3 @@
+box-lock: RELEASED by codex-program-accepted:baseline
+box-lock: now reserved for ce-interval for 3 min (first in the queue)
+box-lock: load 5.0 / 6.6 / 9.3 on 18 cores at release

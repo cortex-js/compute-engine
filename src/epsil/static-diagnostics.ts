@@ -1,7 +1,8 @@
+import { clauseRedefinitionMessage } from '../compute-engine/declaration-origin.js';
 import type { MathJsonExpression } from '../math-json/types.js';
 import {
+  CancellationError,
   checkDeadline,
-  isTimeoutCancellation,
 } from '../common/interruptible.js';
 import {
   isDictionaryObject,
@@ -19,7 +20,6 @@ import type {
   EffectSet,
   FunctionSignature,
   Type,
-  TypeString,
 } from '../common/type/types.js';
 import {
   isGroupedTypeText,
@@ -28,7 +28,6 @@ import {
   resolveTypeAlias,
   stripMissingFromType,
   typeContainsMissing,
-  withParameterNamesOf,
 } from '../common/type/utils.js';
 import { isSubtype } from '../common/type/subtype.js';
 import { typesOverlap } from '../common/type/reduce.js';
@@ -52,28 +51,8 @@ import { unboundSignatureHint } from '../compute-engine/boxed-expression/type-co
 // the conversion, `isSingleGraphemeCluster` decides which literals qualify.
 import { expectsCharacterNotString } from '../compute-engine/boxed-expression/validate.js';
 import { isSingleGraphemeCluster } from '../compute-engine/boxed-expression/boxed-character.js';
-import {
-  enterBody,
-  exitBody,
-  withPairedFunctionNames,
-} from '../compute-engine/statement-position.js';
-import { isLibraryDefinition } from '../compute-engine/boxed-expression/implicit-variable-rule.js';
-import { useBeforeDeclarationCheck } from '../compute-engine/library/control-structures.js';
-import { tuplePatternNames } from '../compute-engine/boxed-expression/tuple-pattern.js';
-import {
-  functionLiteralDeclaredSignature,
-  functionLiteralReturnType,
-} from '../compute-engine/boxed-expression/function-literal.js';
-import {
-  functionLiteralHasAnnotation,
-  reassignmentBaseSignature,
-  validationSignatureOf,
-} from '../compute-engine/engine-declarations.js';
-import {
-  inferTypeFromValue,
-  refineConstructorPlaceholder,
-  widenAssignedType,
-} from '../compute-engine/boxed-expression/boxed-value-definition.js';
+import { declarationRefusalSite, programSourceOrder, programInterruption } from '../compute-engine/library/control-structures.js';
+import { diagnosticFlow } from './diagnostic-flow.js';
 import {
   isDictionary,
   isFunction,
@@ -105,17 +84,12 @@ import {
   calleeSlotNames,
   errorIndexCountsWrittenArguments,
 } from '../compute-engine/boxed-expression/named-arguments.js';
-import {
-  isOperatorDef,
-  isValueDef,
-} from '../compute-engine/boxed-expression/utils.js';
 // `clause-identity.ts` is an engine-free leaf too (its only runtime dependency
 // is `common/type/subtype.js`), so the redefinition discipline's two tiers can
 // share ONE definition of clause identity without this module importing the
 // engine — the same arrangement as `unboundSignatureHint` above.
 import {
   canonInstallSkipped,
-  noteCanonInstallSkipped,
   clauseSignatureOf,
   sameParameterDomain,
 } from '../compute-engine/clause-identity.js';
@@ -485,66 +459,7 @@ function isCanonicalizationError(code: string): boolean {
   return CANONICALIZATION_ERROR_CODES.has(code) || code.startsWith('expected-');
 }
 
-/**
- * Diagnostics for the problems the engine detects at **canonicalization**
- * time: `"a" + 1` folds into a tree embedding `["Error", …]` nodes, a static
- * type error that would otherwise stay invisible until the program runs
- * (`docs/LANGUAGE-MODEL.md`).
- *
- * Nothing is evaluated. Each top-level statement is boxed canonically, in
- * source order: boxing resolves operators, signatures and types but never
- * runs user code — a `RandomInteger` call stays symbolic, an infinite `while`
- * lowers to a `Loop` that is not iterated, an unknown `print(…)` stays inert.
- *
- * **Anchoring.** The canonical tree carries no source offsets, so a
- * diagnostic cannot read its position off the node that failed. Instead the
- * error's POSITION in that tree names the call it belongs to
- * (`enclosingFrame`), and that call is matched back onto the raw AST by
- * operator name (`locateError`) — the same matcher the run phase uses on its
- * breadcrumb frames. So `IndexOf(xs, v, 23)` inside a forty-line definition
- * underlines the `23`, not the definition. When the match is ambiguous (two
- * `IndexOf` calls in one statement) or the operator does not survive
- * canonicalization, the anchor falls back to the enclosing statement's range
- * — or to the whole program when the statement carries no offsets, rather
- * than dropping the diagnostic.
- *
- * The caller supplies the engine: `epsil check` uses a fresh one, and
- * `executeEpsil()` uses the session engine (so the pass sees the same
- * library and the declarations of previous cells).
- *
- * **What is contained.** The walk runs in a scope pushed on the way in and
- * popped (in a `finally`) on the way out; that contains the **declarations**
- * canonicalization creates: boxing an expression auto-declares the symbols it
- * mentions, and leaving those behind would change how the program then
- * evaluates (a pre-declared `x` makes `let x = 2047` NARROW that existing
- * declaration instead of creating one). The pass additionally puts back
- * what the scope never shielded (see `staticDiagnostics` below): writes on
- * definitions that already exist in an outer scope. Checking `u + 1`
- * still narrows a previous cell's unknown-typed `u` to `number` *while the
- * pass runs* — later statements of the same program check against it — but
- * the definition is put back when the pass ends, so a checked-but-never-run
- * program leaves outer definitions untouched.
- *
- * **Prior declarations are mostly not modeled.** Each statement is
- * canonicalized in source order but *without* applying the bindings the
- * preceding statements declare — `Declare`/`Assign` only take effect when they
- * evaluate, which this pass never does. The pass is therefore incomplete
- * rather than unsound: a mistake that depends on a declared type is missed
- * (`let x: string = "a"` followed by `x + 1` checks clean), and the program
- * reports it when it runs. One carve-out: a top-level statement that pins a
- * names-carrying function signature (`f := ⟨annotated literal⟩`,
- * `let f : ⟨arrow type⟩ …`) registers that signature for the LATER statements
- * of the same program — see {@link registerPinnedSignature} — because without
- * it a named call to such a callee drew false `argument-names-unavailable`
- * diagnostics for a program that runs fine.
- *
- * `into`, when given, receives each diagnostic as it is found and is also the
- * returned array. It exists for the time-budget path: the pass checks the
- * host's deadline before every statement and lets an expired budget propagate
- * as a throw, and a caller that passed `into` keeps everything the pass had
- * established before the deadline (a static type error in statement 1 is a
- * fact about the program whether or not statement 400 reached the budget).
- */
+
 /**
  * The effects the engine inferred for one function the program defines at
  * its top level — what `epsil check --effects` prints and what the editor
@@ -636,21 +551,8 @@ export function staticDiagnostics(
   outerDefinitions.open();
   const narrowingSink = ce._narrowingSink;
   ce._narrowingSink = undefined;
-  // Assignment EVIDENCE for this pass (see `applyAssignmentTypeEffect`):
-  // maps a symbol's value-definition record to the RAW type of the last
-  // top-level assignment's right-hand side, so the evidence-beats-requirement
-  // guard in argument validation treats the symbol as ASSIGNED during the
-  // pass. Restored (not cleared) so a nested pass leaves the outer one's
-  // evidence intact, mirroring `_epsilBatchId`.
-  const enclosingEvidence = ce._staticAssignmentEvidence;
-  ce._staticAssignmentEvidence = new Map();
-  // The value definitions this pass pinned from a FUNCTION LITERAL the
-  // program declares or assigns (`registerPinnedSignature`), so boxing
-  // validates the arguments of a later call against the literal's signature
-  // — the run time defers that refusal to the application itself. Restored
-  // for the same reason as the evidence map.
-  const enclosingPinnedCallees = ce._staticPinnedCallees;
-  ce._staticPinnedCallees = new Map();
+
+
   ce._factSuppressionDepth += 1;
   let bodyFailed = false;
   try {
@@ -689,8 +591,6 @@ export function staticDiagnostics(
         failure ??= { error };
       }
     };
-    ce._staticAssignmentEvidence = enclosingEvidence;
-    ce._staticPinnedCallees = enclosingPinnedCallees;
     ce._narrowingSink = narrowingSink;
     run(() => ce.popScope());
     ce._factSuppressionDepth -= 1;
@@ -727,260 +627,6 @@ export function staticDiagnostics(
   }
 }
 
-/**
- * The STATIC TYPE EFFECT of a top-level assignment (`docs/INFERENCE_ROADMAP.md`,
- * Phase 0 guard — the whole-program half, 2026-08-18).
- *
- * At run time, evaluating `x = g()` gives `x` an inferred type
- * (`inferTypeFromValue`, widened) and assignment EVIDENCE, so a later use is
- * checked against the evidence instead of narrowing it. The Assign write
- * happens in the EVALUATE handler, which this pass never runs — so without
- * this, the pass checked `k(x)` against an `x` that never learned `number`,
- * and the mismatch a whole-file run reports at the `k(x)` statement was
- * invisible to `epsil check`. This applies the same effect statically: the
- * type is computable from the canonical right-hand side's STATIC type
- * (nothing is evaluated), written through the journaled `_infer` channel
- * with `replace` (assignment is last-write-wins), and the raw (unwidened)
- * type is recorded as evidence — raw for the same reason the runtime guard
- * checks the held VALUE's type: widening stores a `Complex` under `number`,
- * which a `complex` parameter must still admit.
- *
- * Deliberately narrow: TOP-LEVEL statements only (the caller iterates the
- * program's `Block`; an assignment nested in an `If` body is one statement
- * here and contributes nothing — conservative, matching what the pass can
- * know without control-flow analysis), symbol left-hand sides only, and
- * only when the statement carries no error and the right-hand side has a
- * usable static type. A `Function` right-hand side is left to
- * `registerPinnedSignature`, which owns function-signature effects. An
- * EXPLICITLY TYPED declaration contributes nothing either — its annotation
- * is a contract, and `declaredTypeMismatch` owns conflicts with it.
- */
-function applyAssignmentTypeEffect(
-  ce: ComputeEngine,
-  boxed: ReturnType<ComputeEngine['box']>,
-  effectDeclared: Set<string>
-): void {
-  const evidence = ce._staticAssignmentEvidence;
-  if (evidence === undefined) return;
-
-  let target: ReturnType<ComputeEngine['box']> | undefined;
-  let rhs: ReturnType<ComputeEngine['box']> | undefined;
-  if (isFunction(boxed, 'Assign')) {
-    target = boxed.ops[0];
-    rhs = boxed.ops[1];
-  } else if (isFunction(boxed, 'Declare')) {
-    // `["Declare", sym, type?, value?, attrs?]` — positional type and value,
-    // or a trailing attributes dictionary carrying `type`/`value` entries
-    // (the Epsil `let x = …` lowering). An explicit type annotation makes
-    // the declaration a CONTRACT: the annotation is installed, and only the
-    // initializer's EVIDENCE is recorded. NOTE: the attrs-vs-positional
-    // split assumes Epsil-parser-shaped `Declare` nodes (the parser always
-    // wraps a `let` initializer in the attributes dictionary); a
-    // hand-constructed `Declare(sym, type, ⟨dictionary VALUE⟩)` would read
-    // its positional dictionary value as the attributes bag and skip the
-    // effect — harmless (the effect is best-effort) but worth knowing.
-    target = boxed.ops[0];
-    const rest = boxed.ops.slice(1);
-    const last = rest[rest.length - 1];
-    const attrs = isDictionary(last) ? last : undefined;
-    const positional = attrs === undefined ? rest : rest.slice(0, -1);
-    const typeOp = positional.find((op) => isString(op)) ?? attrs?.get('type');
-    if (typeOp !== undefined) {
-      // An explicit annotation is a CONTRACT. `Declare` installs it at
-      // EVALUATE time, which this pass never runs — and
-      // `registerPinnedSignature` covers only names-carrying function
-      // signatures — so without this, `let f: () -> integer` left `f`
-      // unknown for the pass and every later statement using `f` was
-      // uncheckable. Install a pass-scoped declaration with the same
-      // contract; it dies when the pass pops its scope.
-      const source = isString(typeOp)
-        ? typeOp.string
-        : isSymbol(typeOp)
-          ? typeOp.symbol
-          : null;
-      if (target !== undefined && isSymbol(target) && source !== null) {
-        try {
-          ce.declare(target.symbol, source as TypeString);
-          effectDeclared.add(target.symbol);
-        } catch {
-          // Already declared in this scope (a forward use auto-declared
-          // it), or a malformed annotation — both already have their own
-          // diagnostics; the effect is best-effort.
-        }
-        // A typed declaration WITH an initializer still contributes
-        // assignment EVIDENCE (the raw initializer type): the contract
-        // stays the reported type, but a later use that the contract merely
-        // OVERLAPS (`let x: number = 1.5` at an `integer` parameter —
-        // `number` and `integer` are not disjoint, so the free-variable
-        // un-rejection would otherwise call the mismatch provisional) is
-        // checked against what the program actually assigned.
-        const initOp =
-          positional.find((op) => !isString(op)) ?? attrs?.get('value');
-        if (initOp !== undefined && initOp.operator !== 'Function') {
-          const init = initOp.canonical;
-          if (init.isValid && !init.type.isUnknown) {
-            const def = ce.box(target.symbol).valueDefinition;
-            if (def !== undefined) {
-              // A concrete literal initializer records its handler-visible
-              // literal type (`1.5`, not `real`): exact evidence a
-              // parameter can provably refute, which is what restores the
-              // static line for `let x: number = 1.5; k(x)` under overlap
-              // admission (path 1 of the ROADMAP entry "Epsil static
-              // evidence diagnostics lost to overlap admission", ruled
-              // 2026-08-23). A non-literal initializer keeps its public
-              // type.
-              evidence.set(def, init._literalType ?? init.type.type);
-              // A pass-declared PLACEHOLDER skeleton (`let a: list = ["x"]`)
-              // refines from its initializer here too, so element uses in
-              // later statements (`k(a[1])`) are checkable — mirroring the
-              // assignment branch below (review catch, 2026-08-18).
-              if (
-                def._placeholderSkeleton !== undefined &&
-                effectDeclared.has(target.symbol)
-              ) {
-                const refined = refineConstructorPlaceholder(
-                  def._placeholderSkeleton,
-                  init.type.type
-                );
-                if (refined !== def.type.type)
-                  def._setElementRefinement(ce.type(refined));
-              }
-            }
-          }
-        }
-      }
-      return;
-    }
-    rhs = positional.find((op) => !isString(op)) ?? attrs?.get('value');
-    // An untyped `let` creates a binding in the current scope when it runs,
-    // and that binding shadows a library name of the same spelling: after
-    // `let i = 1`, `i` is the local, not the imaginary unit. Boxing the
-    // statement does not create the binding for a name that the library
-    // defines, so the pass declares it here, in its own scope, before it
-    // infers the type. Without this, `let i = 1\nlet y: integer = i` read `i`
-    // as `ImaginaryUnit` and reported a type error that the run does not have.
-    // Only a library name is declared: the binding of a name of the program or
-    // of an earlier run, such as a `const` that a later parameter default
-    // reads as a constant, is left to the rules that already handle it.
-    if (
-      isSymbol(target) &&
-      !ce.context.lexicalScope.bindings.has(target.symbol) &&
-      isLibraryDefinition(ce, target.symbol, ce.lookupDefinition(target.symbol))
-    ) {
-      try {
-        ce.declare(target.symbol, { type: 'unknown', inferred: true });
-      } catch {
-        // A name that cannot be declared here has its own diagnostic; the
-        // effect is best-effort.
-      }
-    }
-  } else return;
-
-  if (target === undefined) return;
-  if (rhs === undefined || rhs.operator === 'Function') return;
-  // `Assign`/`Declare` are LAZY: their held operands arrive UNBOUND, typing
-  // `unknown`. Canonicalizing binds structure — resolving `f()` to its
-  // declared result type — without substituting values or evaluating
-  // anything (`op.canonical` is value-safe).
-  rhs = rhs.canonical;
-  if (!rhs.isValid) return;
-  const raw = rhs.type;
-  if (raw.isUnknown) return;
-
-  // A DESTRUCTURING target (`let (a, b) = v`, `(a, b) = v`) distributes the
-  // effect per leaf when the right-hand side's static type pins a matching
-  // tuple shape; anything else (mismatched arity, non-tuple type, nested
-  // patterns) contributes nothing — conservative, like the rest of this
-  // function.
-  if (isFunction(target, 'Tuple')) {
-    const t = raw.type;
-    if (
-      typeof t === 'object' &&
-      t.kind === 'tuple' &&
-      t.elements.length === target.nops &&
-      target.ops.every((o) => isSymbol(o))
-    ) {
-      target.ops.forEach((leaf, idx) => {
-        const leafType = t.elements[idx].type;
-        // A component typed `never` claims no value, so it is no evidence
-        // for the leaf's type (the same rule as `joinEvidenceOnBinding` in
-        // `library/core.ts`).
-        if (leafType === 'unknown' || leafType === 'never' || !isSymbol(leaf))
-          return;
-        const leafSym = ce.box(leaf.symbol);
-        const leafDef = leafSym.valueDefinition;
-        if (leafDef === undefined) return;
-        leafSym._infer(() => widenAssignedType(ce, leafType), 'replace');
-        evidence.set(leafDef, leafType);
-      });
-    }
-    return;
-  }
-
-  if (!isSymbol(target)) return;
-  const sym = ce.box(target.symbol);
-  const def = sym.valueDefinition;
-  if (def === undefined) return;
-  // A pass-declared placeholder skeleton (`let a: list` checked earlier in
-  // this same pass) refines exactly as the runtime assignment will (Phase 1
-  // rulings, 2026-08-18) — its definition lives in the pass scope, so the
-  // direct type write dies with it. Skeleton-declared OUTER symbols are
-  // left alone (their runtime refinement needs no help from the pass).
-  if (
-    def._placeholderSkeleton !== undefined &&
-    effectDeclared.has(target.symbol)
-  ) {
-    const refined = refineConstructorPlaceholder(
-      def._placeholderSkeleton,
-      raw.type
-    );
-    if (refined !== def.type.type) def._setElementRefinement(ce.type(refined));
-  } else {
-    sym._infer(() => inferTypeFromValue(ce, rhs).type, 'replace');
-  }
-  // The INFERRED type above stays deliberately widened ("more likely, not
-  // broadest"); only the EVIDENCE carries a literal right-hand side's exact
-  // type (`1.5`), so a later use at a parameter the literal provably cannot
-  // inhabit is refused at boxing and the pre-pass flags it (path 1 of the
-  // ROADMAP entry "Epsil static evidence diagnostics lost to overlap
-  // admission", ruled 2026-08-23).
-  evidence.set(def, rhs._literalType ?? raw.type);
-}
-
-/**
- * The boxing of `x = …` or `let x = …`
- * declares no name, and the evaluation of the statement, which declares `x`,
- * is not run by this pass. The pass declares the name here, inferred and of
- * type `unknown`, in its home scope: the scope that the pass pushed (rule 10
- * of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). Its pop removes
- * the declaration. A destructuring target (`let (a, b) = …`) declares each
- * name of its pattern, as the run time does.
- *
- * The later statements of the program then see the names declared, as they
- * do when the program runs, and the pins of this pass, which are keyed on the
- * value definition (`_staticAssignmentEvidence`, `_staticPinnedCallees`),
- * have a definition to key on: the definition in the home scope is the key
- * (home scope, name) of the free name. The pass calls this before it
- * registers the signature that the statement pins
- * (`registerPinnedSignature()`), so `f := (x: integer) => x` pins its
- * signature on the definition of `f`.
- */
-function declareStatementNames(
-  ce: ComputeEngine,
-  boxed: ReturnType<ComputeEngine['box']>
-): void {
-  if (!isFunction(boxed, 'Assign') && !isFunction(boxed, 'Declare')) return;
-  const target = boxed.ops[0];
-  const names = isFunction(target, 'Tuple')
-    ? tuplePatternNames(target)
-    : isSymbol(target)
-      ? [target.symbol]
-      : [];
-  for (const name of names)
-    if (name !== 'Nothing' && ce.lookupDefinition(name) === undefined)
-      ce._declareSymbolValue(name, { type: 'unknown', inferred: true });
-}
-
 function canonicalizationDiagnostics(
   ce: ComputeEngine,
   ast: MathJsonExpression,
@@ -990,27 +636,34 @@ function canonicalizationDiagnostics(
 ): ParsingDiagnostic[] {
   // The parser wraps a multi-statement program in `Block` (see
   // `executeEpsil()`); a single statement is not wrapped.
-  const statements = operator(ast) === 'Block' ? [...operands(ast)] : [ast];
+  const rawStatements = operator(ast) === 'Program' ? [...operands(ast)] : [ast];
+  const narrowed = rawStatements.map(narrowGuardedReads);
+  let program: ReturnType<ComputeEngine['box']>;
+  let preparationFailure: unknown;
+  let order: readonly number[];
+  const savedFrame = ce._deadlineFrame;
+  try {
+    program = ce.box(['Program', ...narrowed]);
+    order = programSourceOrder(program);
+  } catch (error) {
+    const prefix = programInterruption(error);
+    if (prefix === undefined) throw error;
+    preparationFailure = error;
+    ce._deadlineFrame = undefined;
+    program = ce._fn('Program', prefix.statements);
+    order = prefix.order;
+  }
+  try {
+  const statements = order.map((i) => rawStatements[i]);
+  const boxedStatements = isFunction(program) ? program.ops : [];
+  const flow = diagnosticFlow(ce, program);
 
   // Where this program binds each of its names, for the "defined here" note a
   // signature error carries (see `signatureNotes()`).
   const defSites = definitionSites(ast);
 
-  // The signatures this program's own statements pin (`f := ⟨annotated
-  // literal⟩`, `let f : ⟨arrow type⟩`, `let f = ⟨annotated literal⟩`),
-  // registered onto the definitions as the walk reaches them — see
-  // `registerPinnedSignature`. Kept here as well as on the definition
-  // because boxing a LATER `Assign` to the same name runs the recursion-knot
-  // retype (library/core.ts), which resets the target to the wildcard
-  // `function` type — the pass re-asserts (or, for a `let`/`const` pin,
-  // replaces) the pinned signature from this map afterwards.
-  const pinned = new Map<string, PinnedSignature>();
 
-  // The names that a top-level `const` declaration of this program binds, in
-  // the order of the walk, each with the range of its declaration. The run
-  // time refuses a later `function` statement for such a name, and the
-  // binding stays as it is (see `keepConstantBinding()`); the pass reports
-  // the refusal (see `constantClauseDiagnostic()`).
+
   const constants = new Map<string, [number, number]>();
 
   // The constants of this program, as the scope-aware walk of the program
@@ -1034,7 +687,7 @@ function canonicalizationDiagnostics(
     (declaration) => !topLevel.has(declaration)
   );
   if (localConstants.length > 0) {
-    constantWrites = constantWritesOf(ce, ast, source, statements);
+    constantWrites = constantWritesOf(ce, ast, source, rawStatements);
     for (const declaration of localConstants) {
       const range = statementRange(declaration, source);
       for (const group of declaredGroups(constantWrites.byName, declaration))
@@ -1073,13 +726,9 @@ function canonicalizationDiagnostics(
   // Inside a block the same rule is enforced by `canonicalBlock`
   // (`library/control-structures.ts`), whose error node this pass reports
   // like any other canonicalization error.
-  const variablesInThisUnit = new Map<string, [number, number]>();
 
-  // The names `applyAssignmentTypeEffect` itself declared into the pass
-  // scope (so their definitions die with it) — the only definitions the
-  // effect may REFINE in place (placeholder-skeleton refinement); an outer
-  // definition is never mutated outside the journaled `_infer` channel.
-  const effectDeclared = new Set<string>();
+
+
 
   // The annotations in force for the `match` exhaustiveness lint, threaded
   // through the whole program so a top-level `let t: light = …` types `t`
@@ -1108,13 +757,6 @@ function canonicalizationDiagnostics(
       declaredInThisUnit
     );
     if (redefinition !== undefined) diagnostics.push(redefinition);
-    const variableRedeclaration = variableRedeclarationDiagnostic(
-      statement,
-      source,
-      variablesInThisUnit
-    );
-    if (variableRedeclaration !== undefined)
-      diagnostics.push(variableRedeclaration);
     const constantClause = constantClauseDiagnostic(
       statement,
       source,
@@ -1122,7 +764,7 @@ function canonicalizationDiagnostics(
     );
     if (constantClause !== undefined) diagnostics.push(constantClause);
     if (constantWrites !== undefined)
-      diagnostics.push(...(constantWrites.pending.get(statementIndex) ?? []));
+      diagnostics.push(...(constantWrites.pending.get(order[statementIndex]) ?? []));
 
     // A rule (`name -> value`) passed where the callee expects a function is
     // the `->`-for-`=>` typo. It is read from the RAW statement, the only tree
@@ -1140,69 +782,18 @@ function canonicalizationDiagnostics(
     // canonicalization are source-authored values, not static problems.
     const authored = authoredErrors(statement);
 
+    // The shared sequence has already established every binding and type.
+    checkDeadline(ce._deadlineFrame);
+    narrowedStatement = narrowed[order[statementIndex]] !== statement;
+    const boxed = boxedStatements[statementIndex];
+    if (boxed === undefined) continue;
     let canonical: MathJsonExpression;
-    let boxed: ReturnType<ComputeEngine['box']> | undefined;
-    // Called after the statement is boxed, when the statement is a
-    // `function` statement for a name that a `const` declaration of this
-    // program pinned (`keepConstantBinding()`).
-    let afterBox: (() => void) | undefined = undefined;
-    // REDEFINITION DISCIPLINE — the statement-route marker. Boxing a
-    // declaration statement registers it, and only a registration made on
-    // THIS route may carry the batch stamp; a `ce.box(["DeclareType", …])`
-    // performed re-entrantly by something the boxing triggers must stay
-    // unstamped. Restored (not cleared) so nesting cannot leak.
-    // See `docs/TYPE-SYSTEM.md`.
-    const enclosingRoute = ce._epsilDeclarationRoute;
-    ce._epsilDeclarationRoute = isDeclarationStatement(statement);
-    try {
-      // The pass runs under the host's time budget (`executeEpsil` under a
-      // `withTimeLimit` span). Boxing rarely checks the deadline on its own,
-      // so check it once per statement here; an expired budget propagates
-      // out of the pass — see the catch below.
-      checkDeadline(ce._deadlineFrame);
-      afterBox = installAssignedLiteralBeforeClause(
-        ce,
-        statement,
-        pinned,
-        constants
-      );
-      // For this check only, a read of a symbol that an `isMissing` test
-      // proves present is wrapped in `AssertPresent`, so the engine's
-      // possibly-absent-argument report is not raised on a guarded call
-      // (`presence-narrowing.ts`). The run time evaluates the statement as
-      // written. `narrowGuardedReads` returns the statement itself when it
-      // wrapped nothing; otherwise the messages of this statement must not
-      // show the wrapper (`narrowedStatement`, read by `epsilSnippet`).
-      const narrowed = narrowGuardedReads(statement);
-      narrowedStatement = narrowed !== statement;
-      boxed = boxTopLevelStatement(
-        ce,
-        statements,
-        statementIndex,
-        narrowed,
-        () => ce.box(narrowed)
-      );
-      canonical = boxed.json;
-    } catch (e) {
-      // An expired time budget is the host's cancellation, not a statement
-      // that failed to box: swallowing it here would let the pass — and then
-      // the program — run on past its deadline. It propagates to the caller
-      // (`executeEpsil` turns it into the program's cancelled value).
-      if (isTimeoutCancellation(e)) {
-        narrowedStatement = false;
-        throw e;
-      }
-      // Otherwise canonicalization is best-effort: a statement the engine
-      // cannot box is left to the run phase rather than crashing the check.
-      // The rules of its parallel loops still apply: the run time can
-      // evaluate a statement that the check could not box. The effect rule
-      // boxes a function literal of its own, and refuses with the effect
-      // `any` when it cannot.
-      diagnostics.push(...parallelLoopDiagnostics(ce, statement));
+    try { canonical = boxed.json; }
+    catch (error) {
+      if (error instanceof CancellationError) throw error;
+      // Statement-value traversal has its reporting backstop on execution.
+      // A failing serializer cannot prevent the remaining raw checks.
       continue;
-    } finally {
-      ce._epsilDeclarationRoute = enclosingRoute;
-      afterBox?.();
     }
 
     // The `match` exhaustiveness lint runs on the RAW statement (the patterns
@@ -1271,10 +862,8 @@ function canonicalizationDiagnostics(
 
     // A declaration whose initializer PROVABLY cannot satisfy the annotation
     // is a static problem too, even though `Declare` only enforces it at
-    // evaluation time (see `declaredTypeMismatch`). Computed BEFORE the
-    // signature registration below: when the mismatch is provable, the
-    // runtime `Declare` refuses to install the binding, so registering its
-    // signature would model a binding the program never gets. A possibly
+    // evaluation time (see `declaredTypeMismatch`). A provable mismatch
+    // prevents this declaration from contributing constant-write facts. A possibly
     // absent or possibly `NaN` initializer (`let r: real = zs[i]`) is
     // reported too, but the run time installs the binding in the usual case,
     // so the steps below still model it: a later write to that `const`, or
@@ -1282,23 +871,13 @@ function canonicalizationDiagnostics(
     const declMismatch = declaredTypeMismatch(ce, boxed);
     const provableDeclMismatch = declMismatch?.provable === true;
 
-    // If this statement pins a names-carrying function signature when it
-    // evaluates, make the pinned signature visible to the LATER statements of
-    // this program (never to earlier ones — registration follows the walk's
-    // source order, so a call written before the assignment still has no
-    // names to check, matching the runtime where the callee is unassigned).
-    if (!provableDeclMismatch) {
-      declareStatementNames(ce, boxed);
-      registerPinnedSignature(ce, boxed, pinned);
-    }
-
     // A `const` declaration that the run time installs makes a later
     // `function` statement for the same name, and a later assignment to it,
     // a runtime error. A `const` that re-declares a name of this program is
     // refused at run time (`variable-redeclaration`), so the binding of the
     // name stays the earlier one, which is not a constant when it is a
     // `let`.
-    if (!provableDeclMismatch && variableRedeclaration === undefined) {
+    if (!provableDeclMismatch && isFunction(boxed, 'Declare')) {
       const name = constantDeclarationName(boxed);
       if (name !== undefined)
         constants.set(name, statementRange(statement, source));
@@ -1306,26 +885,15 @@ function canonicalizationDiagnostics(
       // constant too.
       if (isConstantDeclaration(statement)) {
         const range = statementRange(statement, source);
-        constantWrites ??= constantWritesOf(ce, ast, source, statements);
-        // The assignments to the constant in the statements before it and in
-        // this statement are reported now. The assignments in the later
-        // statements are reported when the walk reaches them. A function
-        // defined before a top-level `const` does not write it: an
-        // assignment to the name in the body of that function makes a local
-        // of the function (`registerConstant()` does not read
-        // `writesFromFunctionBodies()` for a top-level `const`).
+        constantWrites ??= constantWritesOf(ce, ast, source, rawStatements);
+        // All statements are prepared already. Report their source sites
+        // now, including bodies hoisted ahead of this declaration.
         for (const group of declaredGroups(constantWrites.byName, statement))
           diagnostics.push(
-            ...registerConstant(constantWrites, group, range, statementIndex)
+            ...registerConstant(constantWrites, group, range, rawStatements.length)
           );
       }
     }
-
-    // The statement's ASSIGNMENT type effect, visible to the LATER statements
-    // of this program (never earlier ones — the walk is in source order,
-    // matching the runtime where the assignment has not yet run).
-    if (!provableDeclMismatch)
-      applyAssignmentTypeEffect(ce, boxed, effectDeclared);
 
     const errors: MathJsonExpression[] = [];
     collectErrors(canonical, errors);
@@ -1369,6 +937,12 @@ function canonicalizationDiagnostics(
       if (twins !== undefined) twins.push(site.boxed);
       else boxedErrorsByJson.set(key, [site.boxed]);
     }
+    for (const site of flow.get(boxed) ?? []) {
+      const json = site.error.json;
+      errors.push(json);
+      pipeStageFrames.set(json, site.frame);
+      boxedErrorsByJson.set(JSON.stringify(json), [site.error]);
+    }
     if (errors.length === 0 && declMismatch === undefined) continue;
 
     const [start, end] = statementRange(statement, source);
@@ -1390,6 +964,8 @@ function canonicalizationDiagnostics(
     // the same line.
     const seen = new Set<string>();
     for (const error of errors) {
+      const twins = boxedErrorsByJson.get(JSON.stringify(error));
+      if (twins !== undefined && twins.length > 0 && twins.every((node) => flow.suppresses(node))) continue;
       const code = errorCode(error);
       if (!isCanonicalizationError(code)) continue;
       // An assignment to an undeclared name is reported at each assignment,
@@ -1422,15 +998,6 @@ function canonicalizationDiagnostics(
         )
           siteRange = [siteRange[0], siteRange[0] + name.length];
       }
-      if (
-        isAssignment &&
-        declaredByEarlierStatement(
-          statements,
-          stringValue(operand(operand(error, 1), 2)) ?? '',
-          statementIndex
-        )
-      )
-        continue;
       const description = describeError(error);
       // Dedup and authored-subtraction key on the SITE-LESS description
       // (`dedupKey`): the site operand the engine now attaches names WHERE,
@@ -1533,12 +1100,17 @@ function canonicalizationDiagnostics(
         range: [from, to, from],
       };
       const notes = signatureNotes(ce, error, {
+        calleeType: flow.calleeType(firstTwin(error)),
         definitionSites: defSites,
         primaryRange: [from, to],
         enclosingFrame: frame,
         call: located.call,
         boxedError: firstTwin(error),
       });
+      const firstDeclaration = code === 'variable-redeclaration'
+        ? declarationRefusalSite(firstTwin(error)) : undefined;
+      if (firstDeclaration !== undefined)
+        notes.push({ message: 'first declared here', range: [...firstDeclaration] });
       if (notes.length > 0) diagnostic.notes = notes;
       // Path-2 refinement (user-ruled 2026-08-23): when the mismatch is
       // only POSSIBLE — the faulted operand is a symbol whose recorded
@@ -1573,7 +1145,7 @@ function canonicalizationDiagnostics(
           const evidence =
             def === undefined
               ? undefined
-              : ce._staticAssignmentEvidence?.get(def);
+              : flow.evidenceAt(boxed, def);
           const expected = parseType(expectedText, ce._typeResolver);
           if (
             evidence !== undefined &&
@@ -1597,7 +1169,10 @@ function canonicalizationDiagnostics(
   }
   narrowedStatement = false;
 
+  effects?.sort((a, b) => a.range[0] - b.range[0]);
+  if (preparationFailure !== undefined) throw preparationFailure;
   return diagnostics;
+  } finally { ce._deadlineFrame = savedFrame; }
 }
 
 /**
@@ -1694,132 +1269,6 @@ export function isDeclarationStatement(statement: MathJsonExpression): boolean {
     head === 'DeclareConformance' ||
     head === 'DefineFunction'
   );
-}
-
-/**
- * Box `statement`, the statement at index `index` of the top level of a
- * program whose statements are `statements`, with `box`. A `let f: (integer)
- * -> integer` without a value is the signature of a function only when a
- * `function f` statement (`DefineFunction`) of the same name is in the same
- * statement list (`withPairedFunctionNames()`, `statement-position.ts`). The
- * top level of a program is boxed one statement at a time, so the names of
- * its function statements are given here.
- *
- * The top level of a program is a block (`enterBody()`): an assignment to a
- * name that no `let`, `const` or earlier program declares is an error, and a
- * statement that uses a name before the `let` or `const` of the name is the
- * error `read-before-declaration` (`useBeforeDeclarationCheck()`).
- */
-export function boxTopLevelStatement(
-  ce: ComputeEngine,
-  statements: ReadonlyArray<MathJsonExpression>,
-  index: number,
-  statement: MathJsonExpression,
-  box: () => BoxedStatement
-): BoxedStatement {
-  enterBody();
-  let boxed: BoxedStatement;
-  try {
-    if (operator(statement) !== 'Declare') boxed = box();
-    else {
-      const names = new Set<string>();
-      for (const s of statements) {
-        if (operator(s) !== 'DefineFunction') continue;
-        const name = symbol(operand(s, 1));
-        if (name) names.add(name);
-      }
-      boxed = withPairedFunctionNames(names, box);
-    }
-  } finally {
-    exitBody();
-  }
-  return topLevelUseCheck(ce, statements)?.(boxed, index) ?? boxed;
-}
-
-/** The check of `useBeforeDeclarationCheck()` for the top level of each
- * program, for each engine: the raw statements are boxed once. */
-const TOP_LEVEL_USE_CHECKS = new WeakMap<
-  ComputeEngine,
-  WeakMap<ReadonlyArray<MathJsonExpression>, TopLevelUseCheck | null>
->();
-type BoxedStatement = ReturnType<ComputeEngine['box']>;
-type TopLevelUseCheck = (
-  statement: BoxedStatement,
-  i: number
-) => BoxedStatement | undefined;
-
-/** The index of the first `let` or `const` of each name at the top level of
- * the program `statements`, without the names of its `function` statements,
- * which have their value from the start of the program (as the block reads
- * them, `withUseBeforeDeclarationErrors()`). */
-function topLevelDeclarationIndexes(
-  statements: ReadonlyArray<MathJsonExpression>
-): Map<string, number> {
-  const declaredAt = new Map<string, number>();
-  const names = (pattern: MathJsonExpression | null): string[] => {
-    if (operator(pattern) === 'Tuple') return operands(pattern).flatMap(names);
-    const name = symbol(pattern);
-    return !name || name === '_' || name === 'Nothing' ? [] : [name];
-  };
-  statements.forEach((s, i) => {
-    const statement = operator(s) === 'Typed' ? operand(s, 1) : s;
-    if (operator(statement) !== 'Declare') return;
-    for (const name of names(operand(statement, 1)))
-      if (!declaredAt.has(name)) declaredAt.set(name, i);
-  });
-  for (const s of statements) {
-    const statement = operator(s) === 'Typed' ? operand(s, 1) : s;
-    if (operator(statement) !== 'DefineFunction') continue;
-    const name = symbol(operand(statement, 1));
-    if (name) declaredAt.delete(name);
-  }
-  return declaredAt;
-}
-
-const TOP_LEVEL_DECLARATIONS = new WeakMap<
-  ReadonlyArray<MathJsonExpression>,
-  Map<string, number>
->();
-
-/**
- * Whether a `let` or `const` before the statement at index `i` of the
- * program `statements` declares `name`. An assignment to such a name that
- * the engine refuses as `assignment-to-undeclared-variable` was made after
- * a declaration that was refused itself (`let g: integer`, which has no
- * value): that declaration is the one problem, and it is reported once, as
- * in a block.
- */
-export function declaredByEarlierStatement(
-  statements: ReadonlyArray<MathJsonExpression>,
-  name: string,
-  i: number
-): boolean {
-  let declaredAt = TOP_LEVEL_DECLARATIONS.get(statements);
-  if (declaredAt === undefined)
-    TOP_LEVEL_DECLARATIONS.set(
-      statements,
-      (declaredAt = topLevelDeclarationIndexes(statements))
-    );
-  const at = declaredAt.get(name);
-  return at !== undefined && at < i;
-}
-
-function topLevelUseCheck(
-  ce: ComputeEngine,
-  statements: ReadonlyArray<MathJsonExpression>
-): TopLevelUseCheck | undefined {
-  let checks = TOP_LEVEL_USE_CHECKS.get(ce);
-  if (checks === undefined)
-    TOP_LEVEL_USE_CHECKS.set(ce, (checks = new WeakMap()));
-  let check = checks.get(statements);
-  if (check === undefined) {
-    const declaredAt = topLevelDeclarationIndexes(statements);
-    TOP_LEVEL_DECLARATIONS.set(statements, declaredAt);
-    check =
-      declaredAt.size === 0 ? null : useBeforeDeclarationCheck(ce, declaredAt);
-    checks.set(statements, check);
-  }
-  return check ?? undefined;
 }
 
 /** The engine error codes that mean a declaration statement DID NOT declare.
@@ -2111,6 +1560,7 @@ function equationBodyDiagnostics(
     const op = operator(node);
     if (op === '') return;
     switch (op) {
+      case 'Program':
       case 'Block': {
         const statements = operands(node);
         statements.forEach((statement, i) =>
@@ -2225,44 +1675,6 @@ function equationBodyDiagnostics(
     });
   }
   return found;
-}
-
-/**
- * SAME-SCOPE RE-DECLARATION, top level: is `statement` a `let`/`const` of a
- * name an earlier `let`/`const` of this unit already declared? `declared` maps
- * each declared name to the range of its first declaration; this function
- * fills it for a statement it accepts and consults it for the rest. A
- * destructuring `let (p, q) = t` declares each pattern leaf (`_` declares
- * nothing). The FIRST colliding name wins and the statement yields one
- * diagnostic. Assignment (`x = …`) is not a declaration and is never reported.
- */
-function variableRedeclarationDiagnostic(
-  statement: MathJsonExpression,
-  source: string,
-  declared: Map<string, [number, number]>
-): ParsingDiagnostic | undefined {
-  const names = declaredVariableNames(statement);
-  if (names.length === 0) return undefined;
-  const range = statementRange(statement, source);
-  // The statement is accepted or refused WHOLE (as `canonicalBlock` does
-  // inside a block): a refused destructuring `let` declares none of its
-  // leaves, so they stay free for a later `let`.
-  const collision = names.find((name) => declared.has(name));
-  if (collision === undefined) {
-    for (const name of names) declared.set(name, range);
-    return undefined;
-  }
-  return {
-    severity: 'error',
-    message: ['variable-redeclaration', collision],
-    range: [range[0], range[1], range[0]],
-    notes: [
-      {
-        message: `\`${collision}\` is first declared here`,
-        range: declared.get(collision)!,
-      },
-    ],
-  };
 }
 
 /**
@@ -2406,7 +1818,7 @@ function clauseRedefinitionDiagnostic(
 
   return {
     severity: 'error',
-    message: ['function-redefinition', name],
+    message: ['function-redefinition', name, clauseRedefinitionMessage(name, first.range)],
     range: [range[0], range[1], range[0]],
     notes: [
       {
@@ -2414,497 +1826,6 @@ function clauseRedefinitionDiagnostic(
         range: first.range,
       },
     ],
-  };
-}
-
-/**
- * Provisionally register the function signature a statement will PIN when it
- * evaluates, so the later statements of the same program check their calls —
- * named calls, and the ARGUMENTS of a call to a function literal — against
- * it. Three spellings pin one:
- *
- * - `f := (x: number, y: string) => …` — assignment of a function literal
- *   whose own (annotated) type is a signature carrying parameter names;
- * - `let/const f : (x: number, y: string) -> number [= …]` — a declaration
- *   whose type annotation is such a signature (with or without an
- *   initializer: the annotation alone pins it);
- * - `let/const f = (x: number, y: string) => …` — a declaration with no
- *   annotation whose initializer is such a function literal.
- *
- * All are evaluation-time effects this pass otherwise cannot see ("prior
- * declarations are mostly not modeled" above), so before this carve-out a
- * named call to such a callee drew one false `argument-names-unavailable`
- * static diagnostic per argument for a program that runs fine. (`function
- * f(…) {…}` definitions never had the problem: `DefineFunction` installs its
- * clause at canonicalization.)
- *
- * A pin made from a function LITERAL (the first and third spellings) also
- * registers the definition in `ce._staticPinnedCallees`, so boxing validates
- * the arguments of a later call against the literal's signature exactly as
- * it validates a call to a declared one. The run time never does: a value
- * definition holding a literal stays INFERRED, and the literal refuses a
- * wrong argument itself, when applied, with an error VALUE. So the linter is
- * deliberately stricter than the engine here — `k(1.5)` after
- * `let k = (n: integer) => n + 1` is reported, as it is after either
- * annotated spelling of the same callee.
- *
- * Deliberately narrow, so every diagnostic the pass still emits stays
- * truthful:
- *
- * - Only a signature that CARRIES at least one parameter name registers. An
- *   UNANNOTATED literal's inferred signature drops its names
- *   (`effects-inference.ts` types a bare parameter `{ type: 'unknown' }`), so
- *   a named call to `h := (x, y) => …` fails at runtime too and the static
- *   diagnostic is a true prediction — it must keep firing.
- * - An `Assign` registers only a function-LITERAL right-hand side. Any other
- *   expression's static type is an upper bound, not the signature the
- *   assignment will pin, and permuting a call against a guessed signature
- *   could silently reorder arguments.
- * - An `Assign` pin is FIRST-wins per name (`PinnedSignature.firstWins`),
- *   mirroring the runtime: reassigning such a binding to an incompatible
- *   signature is a runtime error that leaves the original binding in force,
- *   and a compatible reassignment of an annotated literal leaves the
- *   parameter TYPES of the signature unchanged. It gives the pin its own
- *   parameter names, because the latest literal is the one that runs, and
- *   its own result when it states none (`reassignedPin()`). A literal with
- *   no annotation replaces the pin, as it replaces the signature at run
- *   time. First-wins also keeps
- *   `_infer()`'s `narrow(old, new)` off the incompatible-signatures path,
- *   whose meet is `never`. A `let`/`const` pin is the opposite, again
- *   mirroring the runtime, where an assignment REPLACES such a binding: a
- *   later assignment of a function literal re-pins the name with the new
- *   literal's signature (`_infer` in `replace` mode), and an assignment of
- *   anything else drops the pin. The map is needed on top of the
- *   definition's own state because boxing a later `Assign` to the same name
- *   runs the recursion-knot retype (library/core.ts), resetting the target
- *   to the wildcard `function` type mid-pass — after such a statement the
- *   pinned signature is re-asserted from the map.
- * - Beyond that, registration only fills a BLANK: an inferred `unknown`
- *   or wildcard `function` type (the auto-declaration a forward reference
- *   creates). A pre-existing concrete type — a user declaration, an earlier
- *   cell's binding — wins for the same mirror-the-runtime reason.
- *
- * The write goes through `_infer()` on a bound symbol — the `Assign`/`Declare`
- * operands hold their target structurally, unbound; the pass puts the
- * definition back when it ends (`DefinitionRestorePoint`), so checking
- * still mutates nothing (`test/epsil/static-check-rollback.test.ts`).
- * A name that was not yet declared auto-declares into the pass's own scope,
- * which pops with it.
- */
-function registerPinnedSignature(
-  ce: ComputeEngine,
-  boxed: ReturnType<ComputeEngine['box']>,
-  pinned: Map<string, PinnedSignature>
-): void {
-  let name: string | null = null;
-  let type: Type | undefined = undefined;
-  // Whether a later assignment in this program KEEPS this signature (an
-  // `Assign`, or a `const` declaration) or REPLACES the binding (a `let`
-  // declaration, a variable that holds a function); see `PinnedSignature`.
-  let firstWins = true;
-  // A function LITERAL this statement binds to the name, when it does. Only
-  // such a pin asks boxing to validate the arguments of later calls (the
-  // `_staticPinnedCallees` registration below): an annotation pins a
-  // DECLARED type, whose calls boxing validates on its own.
-  let literalCallee: ReturnType<ComputeEngine['box']> | undefined = undefined;
-  if (isFunction(boxed, 'Assign')) {
-    const target = boxed.ops[0];
-    name = isSymbol(target) ? target.symbol : null;
-    const rhs = boxed.ops[1];
-    const already = name === null ? undefined : pinned.get(name);
-    if (already !== undefined) {
-      // ANY assignment to an already-pinned name may just have run the
-      // recursion-knot retype and blanked the definition. For a first-wins
-      // pin, re-assert the first-registered signature (see the doc comment)
-      // whatever this statement's right-hand side is.
-      if (already.firstWins) {
-        // An assignment of a function literal over a pin that an
-        // assignment made does at run time what `assignFn`
-        // (`engine-declarations.ts`) does, and the pin follows it:
-        // - The pin came from a literal with no annotation (an inferred
-        //   signature), or the new literal has no annotation
-        //   (`functionLiteralHasAnnotation()`): the new literal replaces the
-        //   signature. After `f := (x: number, y: number) => x + 3` and
-        //   `f := (a, b) => a * b`, the signature has no parameter names, and
-        //   `f(x: 2, y: 5)` is `argument-name-unknown`.
-        // - Otherwise the new literal is checked against the pinned
-        //   signature (`reassignedPin()`). When it is accepted, the pin
-        //   takes its parameter names, because the latest literal is the one
-        //   that runs, and its result when it states none. When it is
-        //   refused, the binding keeps its signature.
-        if (already.assigned && rhs?.operator === 'Function') {
-          if (!already.annotated || !functionLiteralHasAnnotation(rhs)) {
-            pinned.delete(name!);
-            const def = ce.box(name!).valueDefinition;
-            if (def !== undefined) ce._staticPinnedCallees?.delete(def);
-            replacePin(ce, name!, rhs, pinned);
-            return;
-          }
-          const next = reassignedPin(already, rhs);
-          if (next !== undefined) {
-            const sym = ce.box(name!);
-            if (sym._infer(() => next, 'replace')) {
-              pinned.set(name!, {
-                ...already,
-                type: next,
-                validation: validationSignatureOf(rhs, next),
-              });
-              const def = sym.valueDefinition;
-              if (def !== undefined) ce._staticPinnedCallees?.set(def, rhs);
-              return;
-            }
-          }
-        }
-        ce.box(name!)._infer(() => already.type, 'narrow');
-        return;
-      }
-      // A variable that holds a function (a `let`) is REPLACED by the
-      // assignment at run time. A function-literal right-hand side re-pins
-      // the name with the literal's own signature (see `replacePin`);
-      // anything else un-pins it, and the assignment's type effect
-      // (`applyAssignmentTypeEffect`) then owns the type. Either way the old
-      // signature must stop validating calls.
-      pinned.delete(name!);
-      const sym = ce.box(name!);
-      const def = sym.valueDefinition;
-      if (def !== undefined) ce._staticPinnedCallees?.delete(def);
-      if (rhs !== undefined && rhs.operator === 'Function')
-        replacePin(ce, name!, rhs, pinned);
-      return;
-    }
-    if (
-      name !== null &&
-      rhs !== undefined &&
-      rhs.operator === 'Function' &&
-      assignOverUserFunction(ce, name, rhs)
-    )
-      return;
-    if (rhs !== undefined && isSymbol(rhs)) {
-      // `g := k`, with `k` pinned from a function literal: see
-      // `pinnedAliasOf`.
-      const alias = pinnedAliasOf(ce, rhs.symbol, pinned);
-      if (alias !== undefined) {
-        type = alias.type;
-        literalCallee = alias.literal;
-      }
-    }
-    if (rhs !== undefined && rhs.operator === 'Function') {
-      type = rhs.type.type;
-      literalCallee = rhs;
-      // The target may be an EARLIER evaluation's `let` binding that holds
-      // a function literal (a previous notebook cell's
-      // `let k = (n: integer) => n + 1`): an inferred value definition with
-      // a `Function` value. The run time REPLACES such a binding, so the pin
-      // replaces its signature too (see `replacePin`) — the fill-a-blank
-      // gate below would keep the old one, and the calls that follow would
-      // be checked against a signature the program just threw away.
-      if (name !== null) {
-        const def = ce.lookupDefinition(name);
-        if (
-          def !== undefined &&
-          isValueDef(def) &&
-          def.value.inferredType &&
-          def.value.value?.operator === 'Function'
-        ) {
-          replacePin(ce, name, rhs, pinned);
-          return;
-        }
-      }
-    }
-  } else if (isFunction(boxed, 'Declare')) {
-    // `["Declare", sym, "'type'", {dict}?]` — the annotation is positional
-    // and optional (same shape `declaredTypeMismatch` reads).
-    const target = boxed.ops[0];
-    name = isSymbol(target) ? target.symbol : null;
-    const typeOp = boxed.ops[1];
-    if (isString(typeOp)) {
-      try {
-        type = ce.type(typeOp.string).type;
-      } catch {
-        // A malformed annotation is already a `type-annotation-error`.
-        return;
-      }
-    } else {
-      // `let/const f = ⟨function literal⟩`, no annotation: the Epsil lowering
-      // carries the initializer in a trailing attributes dictionary under
-      // `value` (the shape `applyAssignmentTypeEffect` reads). The literal's
-      // own signature is what the declaration will pin.
-      const last = boxed.ops[boxed.ops.length - 1];
-      const init = isDictionary(last) ? last.get('value') : undefined;
-      // `let g = k`, with `k` pinned from a function literal: `g` holds the
-      // same literal (`pinnedAliasOf`).
-      const alias =
-        init !== undefined && isSymbol(init)
-          ? pinnedAliasOf(ce, init.symbol, pinned)
-          : undefined;
-      // A `let` binding is a variable that holds the function: a later
-      // assignment replaces it. A `const` binding refuses it (the
-      // assignment is a runtime error that leaves the binding in force), so
-      // its first signature keeps checking the calls that follow.
-      const constant = isDictionary(last) ? last.get('constant') : undefined;
-      const isConstant = constant !== undefined && isSymbol(constant, 'True');
-      if (alias !== undefined) {
-        type = alias.type;
-        firstWins = isConstant;
-        literalCallee = alias.literal;
-      } else if (init !== undefined && init.operator === 'Function') {
-        type = init.type.type;
-        firstWins = isConstant;
-        literalCallee = init;
-      }
-    }
-  }
-  if (name === null || type === undefined) return;
-  if (!isNamedSignature(type) || pinned.has(name)) return;
-
-  const def = ce.lookupDefinition(name);
-  if (def !== undefined) {
-    // An operator definition (a builtin, or a `function` definition earlier
-    // in this program) is not this statement's to re-pin.
-    if (!isValueDef(def)) return;
-    if (def.value.isConstant) return;
-    // Fill-a-blank gate (see the doc comment above).
-    if (!def.value.inferredType && !def.value.type.isUnknown) return;
-    if (
-      !def.value.type.isUnknown &&
-      !isWildcardFunctionType(def.value.type.type)
-    )
-      return;
-  }
-  // Bound to a `const` so the thunk keeps the narrowing the guards above
-  // established (`type` is a reassignable local, which a closure widens back
-  // to `Type | undefined`).
-  const pinnedType = type;
-  const sym = ce.box(name);
-  if (!sym._infer(() => pinnedType, 'narrow')) return;
-  pinned.set(name, {
-    type: pinnedType,
-    firstWins,
-    assigned: isFunction(boxed, 'Assign'),
-    annotated:
-      literalCallee !== undefined &&
-      functionLiteralHasAnnotation(literalCallee),
-    validation:
-      literalCallee === undefined
-        ? undefined
-        : validationSignatureOf(literalCallee, pinnedType),
-  });
-  // The pin came from a function literal: ask boxing to validate the
-  // arguments of the later calls against it, exactly as it validates a call
-  // to a DECLARED signature (the gate in `box.ts`, `staticallyPinnedCallee`).
-  // The run time defers that refusal to the application itself — the pinned
-  // definition stays INFERRED — so without this registration the pass boxed
-  // `k(1.5)` clean for `let k = (n: integer) => n + 1` while both annotated
-  // spellings of the same callee flagged the call.
-  const pinnedDef = sym.valueDefinition;
-  if (literalCallee !== undefined && pinnedDef !== undefined)
-    ce._staticPinnedCallees?.set(pinnedDef, literalCallee);
-}
-
-/**
- * The pin of an ALIAS: a statement `let g = k` or `g := k` where `k` is pinned
- * from a function literal (`let k = (n: integer) => n + 1`). At run time the
- * statement copies the value of `k`, that literal, into `g`, so `g` takes the
- * signature of the pin of `k` and the same literal for the validation of
- * its calls: `g(1.5)` is then reported, as `k(1.5)` is. The result is
- * `undefined` when `k` has no pin, or when its pin did not come from a
- * function literal (an annotation alone pins a declared type, which is not
- * the value that `g` receives).
- *
- * The pin of `k` is the one in force when the statement is reached, which is
- * the value that the statement copies; a later assignment to `k` does not
- * change `g`.
- */
-function pinnedAliasOf(
-  ce: ComputeEngine,
-  source: string,
-  pinned: Map<string, PinnedSignature>
-): { type: Type; literal: ReturnType<ComputeEngine['box']> } | undefined {
-  const pin = pinned.get(source);
-  if (pin === undefined) return undefined;
-  const def = ce.box(source).valueDefinition;
-  const literal =
-    def === undefined ? undefined : ce._staticPinnedCallees?.get(def);
-  if (literal === undefined) return undefined;
-  return { type: pin.type, literal };
-}
-
-/**
- * The definition of `name` in the scope of the pass (the frame that
- * `staticDiagnostics` pushes), or `undefined` when the name has no binding in
- * that scope. A binding of an outer scope (an earlier cell, a host
- * declaration) is never changed by the pass.
- */
-function passScopeDefinition(
-  ce: ComputeEngine,
-  name: string
-): ReturnType<ComputeEngine['lookupDefinition']> {
-  const def = ce.lookupDefinition(name);
-  if (def === undefined) return undefined;
-  return ce.context.lexicalScope.bindings.get(name) === def ? def : undefined;
-}
-
-/**
- * An assignment of the function literal `literal` to `name`, when `name` is
- * a user function that a `function` statement defined, in this program or in
- * an earlier program on the same engine. The pass makes the change that the
- * run time makes, with the same code (`assignFn`, `engine-declarations.ts`),
- * and returns `true`. The rules of
- * the run time, in short:
- * - A definition with several clauses, or one whose signature was inferred
- *   (no annotation), is replaced by the literal.
- * - A definition from an annotated literal is a record of that literal. A
- *   literal with no annotation replaces it. An annotated literal is checked
- *   against its parameters: when it is accepted, the signature takes the
- *   names of the literal, and its result when it states none; when it is
- *   refused, the definition stays (the run time reports the error).
- *
- * Example: after `function h(x: integer) { x }` and `h := (u) => "s"`, the
- * signature has no parameter names, and `h(x: 3)` is `argument-name-unknown`
- * at run time and in this pass.
- *
- * The pass never changes a binding of an outer scope. When the definition
- * comes from an earlier program, the pass first declares, in its own scope,
- * a binding that holds the same operator definition, and the assignment
- * then changes that binding. The assignment replaces the operator
- * definition of the binding with a new one (`updateDef()`), so the operator
- * definition of the earlier program is not changed, and the binding of the
- * pass is removed when the pass ends. When the run time refuses the
- * assignment, the binding of the pass is removed at once: it holds the
- * operator definition of the earlier program itself, not a copy, so a later
- * statement of the pass that changes the definition of the binding in place
- * would change the definition of the earlier program.
- *
- * `false`, and nothing changes, when `name` is not such a definition.
- */
-function assignOverUserFunction(
-  ce: ComputeEngine,
-  name: string,
-  literal: ReturnType<ComputeEngine['box']>
-): boolean {
-  let def = passScopeDefinition(ce, name);
-  let declared = false;
-  if (def === undefined) {
-    const outer = ce.lookupDefinition(name);
-    if (outer === undefined || !isOperatorDef(outer)) return false;
-    if (!outer.operator.isUserFunctionDefinition) return false;
-    def = ce._declareSymbolOperator(name, outer.operator);
-    declared = true;
-  }
-  if (!isOperatorDef(def)) return false;
-  if (!def.operator.isUserFunctionDefinition) return false;
-  try {
-    ce.assign(name, literal);
-  } catch {
-    // The run time refuses the assignment, and the definition stays. The
-    // binding that this function declared holds the operator definition of
-    // the earlier program, so it is removed, and the name again reads the
-    // binding of the earlier program.
-    if (declared) ce.undeclare(name);
-  }
-  return true;
-}
-
-/**
- * Before a `function` statement for `name` is boxed: when an assignment of a
- * function literal (`PinnedSignature.assigned`) or a `let` declaration made
- * the pin of `name`, make the binding in the scope of the pass the
- * definition that the run time has. The pass does not run the assignment or
- * the declaration: it only pins the signature of the literal on a value
- * definition. At run time the binding holds the literal, and the `function`
- * statement then adds a clause to it, or replaces it when the two have the
- * same parameter domain (`defineFunctionClause`, `multi-clause.ts`).
- *
- * Example: after `h := (x: integer) => x` and `function h(u) -> string {
- * "s" }`, `h` has the two clauses `(x: integer) -> integer` and
- * `(u: unknown) -> string`, so `h(x: 3)` is valid and gives `3`. Without the
- * first clause, the pass would read `h` as `(u: unknown) -> string` only and
- * report `argument-name-unknown`.
- *
- * The pin is then removed: the binding is a user function, and a later
- * assignment to it is handled as an assignment over a user function
- * (`assignOverUserFunction()`).
- *
- * When a `const` declaration of this program bound `name` (`constants`),
- * the run time refuses the `function` statement and the binding stays as it
- * is: see {@link keepConstantBinding}. The function to call after the
- * statement is boxed is then returned.
- */
-function installAssignedLiteralBeforeClause(
-  ce: ComputeEngine,
-  statement: MathJsonExpression,
-  pinned: Map<string, PinnedSignature>,
-  constants: Map<string, [number, number]>
-): (() => void) | undefined {
-  if (operator(statement) !== 'DefineFunction') return undefined;
-  const name = declarationName(operand(statement, 1));
-  if (name === undefined) return undefined;
-  if (constants.has(name)) return keepConstantBinding(ce, name, pinned);
-  const pin = pinned.get(name);
-  if (pin === undefined) return undefined;
-  // A pin that an annotation made (`let h : (x: integer) -> integer`) is not
-  // `assigned` and is first-wins. It is left alone.
-  if (!pin.assigned && pin.firstWins) return undefined;
-  const def = passScopeDefinition(ce, name);
-  if (def === undefined || !isValueDef(def)) return undefined;
-  const literal = ce._staticPinnedCallees?.get(def.value);
-  pinned.delete(name);
-  ce._staticPinnedCallees?.delete(def.value);
-  if (literal === undefined) return undefined;
-  try {
-    ce.assign(name, literal);
-  } catch {
-    // The binding stays a value definition: the `function` statement is
-    // then checked as the first definition of the name.
-  }
-  return undefined;
-}
-
-/**
- * Before a `function` statement for `name` is boxed, when a `const`
- * declaration of this program bound `name`: keep the binding that the run
- * time has. At run time the binding is a constant, so the `function`
- * statement does not install its clause (`defineFunctionClause()` refuses it
- * with `invalid-clause-definition`), and the binding keeps its value and its
- * type.
- *
- * The pass does not run the declaration: the binding in the scope of the
- * pass is a value definition with an inferred type (with the signature of
- * the literal when the declaration pinned one, see
- * `registerPinnedSignature()`), or there is no binding yet. Boxing the
- * `function` statement would install the clause on it. To prevent this, the
- * binding gets the mark that the engine gives a binding whose clause it did
- * not install (`noteCanonInstallSkipped()`), which is also what boxing does
- * at run time when it cannot install the clause on the constant. The
- * binding is not marked as a constant: boxing the statement first changes
- * the type of an inferred binding to `function` (`DefineFunction`,
- * `library/core.ts`), and that change throws on a constant, which prints an
- * error to the console.
- *
- * When the declaration pinned a signature, the function that is returned
- * puts it back on the binding after the statement is boxed. Example: after
- * `const h = (x: integer) => x` and `function h(u: string) { u }`, `h(x: 3)`
- * is valid and gives `3`, and `h(u: "a")` is `argument-name-unknown`.
- *
- * Only a binding in the scope of the pass is marked: the mark is not undone
- * when the pass ends, so a binding of an outer scope (an earlier program, a
- * host declaration) must not get it. For such a binding nothing changes.
- */
-function keepConstantBinding(
-  ce: ComputeEngine,
-  name: string,
-  pinned: Map<string, PinnedSignature>
-): (() => void) | undefined {
-  // No binding at all: declare one in the scope of the pass, as boxing the
-  // statement would.
-  if (ce.lookupDefinition(name) === undefined) ce.box(name);
-  const def = passScopeDefinition(ce, name);
-  if (def === undefined || !isValueDef(def)) return undefined;
-  noteCanonInstallSkipped(def);
-  const pin = pinned.get(name);
-  if (pin === undefined) return undefined;
-  return () => {
-    ce.box(name)._infer(() => pin.type, 'narrow');
   };
 }
 
@@ -3067,12 +1988,9 @@ function statementHolding(
  *
  * An assignment in a function body that comes before the `const` is not a
  * `write` of the group: the walk makes it a declaration of a new binding.
- * For a top-level `const`, that is what the run does too: the assignment
- * makes a local of the function body, with a new binding at each call, and
- * the constant is not written. For a `const` in a block, the run binds the
- * name in the block before the function is canonicalized, so the
- * assignment writes the constant when the function is called after the
- * `const`. Such assignments are reported too (`writesFromFunctionBodies()`).
+ * Program and Block bindings are both established before function bodies
+ * canonicalize. Such assignments therefore write the constant and are
+ * reported too (`writesFromFunctionBodies()`).
  *
  * Each diagnostic is a `static-type-error` that carries the engine code
  * `constant-assignment`, at the assignment, with a note on the `const`
@@ -3108,12 +2026,9 @@ function registerConstant(
     );
     return !shadowed;
   });
-  // A local `const` (`current` is `-1`) is hoisted in its block before the
-  // functions of the block are canonicalized, so a function defined before
-  // it in the block writes it. A top-level `const` is not: see
-  // `writesFromFunctionBodies()`.
-  if (current < 0)
-    occurrences.push(...writesFromFunctionBodies(writes, group, named));
+  // Program and Block constants are both in scope while function bodies
+  // canonicalize; the raw occurrence groups retain the source sites.
+  occurrences.push(...writesFromFunctionBodies(writes, group, named));
   occurrences.sort((a, b) => a.start - b.start);
 
   const now: ParsingDiagnostic[] = [];
@@ -3156,9 +2071,7 @@ function registerConstant(
  * that the scope-aware walk does not record as a `write` of `group`: the
  * assignments in a function body (a `function` statement or a function
  * literal) that comes before the `const` in the scope of the constant.
- * `named` holds the binding groups with the name of the constant. Only for
- * a `const` in a block (a function body, a `do` block, a branch, a loop
- * body).
+ * `named` holds the binding groups with the name of the constant.
  *
  * Where the `const` is not yet visible, the walk makes such an assignment
  * the declaration of a new binding (a bare `c = 2` declares), in the
@@ -3178,10 +2091,6 @@ function registerConstant(
  *
  * The report does not depend on the calls: the assignment is reported also
  * when the function is not called.
- *
- * A top-level `const` is not bound before the earlier statements are
- * canonicalized, so for it the assignment makes a local of the function
- * body, as the walk says, and nothing is reported.
  *
  * Such a binding is reported when:
  * - it has the name of the constant, and its scope is in the scope of the
@@ -3414,130 +2323,6 @@ function constantDeclarationName(
   return constant !== undefined && isSymbol(constant, 'True')
     ? target.symbol
     : undefined;
-}
-
-/** A function signature the pass registered for a name (see
- * `registerPinnedSignature`). `firstWins` mirrors what a LATER assignment to
- * the name does at run time: an `Assign`-pinned or `const` binding keeps the
- * types of its first signature (an incompatible reassignment is a runtime
- * error that leaves the original binding in force), while a `let`
- * declaration, a variable that holds a function, is REPLACED by the
- * assignment, so its pin is replaced or dropped along with it — once.
- *
- * `assigned` is true when an assignment of a function literal made the pin,
- * and `annotated` when that literal has an annotation
- * (`functionLiteralHasAnnotation()`). A later assignment of a function
- * literal then changes the pin as it changes the signature at run time (see
- * the `Assign` branch of `registerPinnedSignature`). A `const` pin is not
- * `assigned`: the run time refuses a reassignment of the binding.
- *
- * `validation` records which parameters the literal of the pin annotated:
- * `type` with each bare slot typed `any`, or `undefined` when every slot is
- * annotated (`validationSignatureOf()`, the same record that the run time
- * keeps as `_validationSignature`). The type of a bare slot is inferred from
- * the uses of the parameter, so it is not a contract when a later literal
- * annotates that parameter (`reassignedPin()`). */
-type PinnedSignature = {
-  type: Type;
-  firstWins: boolean;
-  assigned?: boolean;
-  annotated?: boolean;
-  validation?: Type;
-};
-
-/** The signature that the name gets at run time when the annotated function
- * literal `literal` is assigned over the pin `pin`, which an earlier
- * annotated literal gave (`assignFn`, `engine-declarations.ts`).
- * `undefined` when the run time refuses the assignment, and the binding
- * keeps the signature of `pin`.
- *
- * The run time checks the PARAMETERS of the literal against the pinned
- * signature: the same arity, and each pinned parameter type a subtype of the
- * parameter type of the literal. Two parts of the pinned signature are a
- * record of the earlier literal, not a contract, and the same rules as at
- * run time apply to them:
- * - A slot that the earlier literal left bare has a type inferred from the
- *   uses of the parameter. When the new literal annotates that parameter,
- *   the annotation replaces it (`bareSlotsAsPlaceholders()`, then
- *   `reassignmentBaseSignature()`): after `h := (p, n: number) => p[1] + n`,
- *   the literal `(q: string, m: number) => m` is accepted, and the slot is
- *   `string`. When the new literal leaves the parameter bare too, the
- *   inferred type stays.
- * - The result: a literal that states no return type gives its own result
- *   (`(a: integer, b: integer) => (a - b) / 2` over
- *   `(x: integer, y: integer) -> integer`). A stated return type must be a
- *   subtype of the pinned result, which stays.
- *
- * The effects are inferred again from the body, so they are not compared
- * here. The signature that is returned has the parameter types of the
- * refined pinned signature and the parameter names of the literal. */
-function reassignedPin(
-  pin: PinnedSignature,
-  literal: ReturnType<ComputeEngine['box']>
-): Type | undefined {
-  const own = literal.type.type;
-  if (typeof own !== 'object' || own.kind !== 'signature') return undefined;
-  const pinned = reassignmentBaseSignature(pin.type, pin.validation, literal);
-  if (typeof pinned !== 'object' || pinned.kind !== 'signature')
-    return undefined;
-  if (isPolymorphicType(pinned) || isPolymorphicType(own)) return undefined;
-  const parameters = (t: FunctionSignature): FunctionSignature => ({
-    ...t,
-    result: 'unknown',
-    effects: undefined,
-  });
-  if (!isSubtype(parameters(own), parameters(pinned))) return undefined;
-  const stated =
-    functionLiteralReturnType(literal) !== undefined ||
-    functionLiteralDeclaredSignature(literal) !== undefined;
-  if (stated && !isSubtype(own.result, pinned.result)) return undefined;
-  return withParameterNamesOf(
-    stated ? pinned : { ...pinned, result: own.result },
-    own
-  );
-}
-
-/**
- * Re-pin `name` with the signature of the function literal an assignment
- * just gave it, mirroring the run time: assigning a function literal to a
- * `let` binding that holds one converts the binding into an operator
- * definition carrying the NEW literal's signature (`assignFn`,
- * `engine-declarations.ts`), and from then on a further reassignment is
- * checked against that signature and refused when incompatible — so the
- * replacement pin is FIRST-wins. The literal's signature is taken whether or
- * not it carries parameter names (an unannotated `(s) => s` replaces an
- * annotated literal just the same, and its `unknown` parameters admit every
- * argument), and the definition is registered for argument validation like
- * any literal pin.
- */
-function replacePin(
-  ce: ComputeEngine,
-  name: string,
-  literal: ReturnType<ComputeEngine['box']>,
-  pinned: Map<string, PinnedSignature>
-): void {
-  const signature = literal.type.type;
-  const sym = ce.box(name);
-  if (!sym._infer(() => signature, 'replace')) return;
-  pinned.set(name, {
-    type: signature,
-    firstWins: true,
-    assigned: true,
-    annotated: functionLiteralHasAnnotation(literal),
-    validation: validationSignatureOf(literal, signature),
-  });
-  const def = sym.valueDefinition;
-  if (def !== undefined) ce._staticPinnedCallees?.set(def, literal);
-}
-
-/** Is `t` a function signature declaring at least one parameter NAME — the
- * shape a named-argument call can be matched against? A signature without
- * names (every unannotated literal's inferred type) is positional-only. */
-function isNamedSignature(t: Type): boolean {
-  if (typeof t === 'string' || t.kind !== 'signature') return false;
-  return [...(t.args ?? []), ...(t.optArgs ?? [])].some(
-    (a) => a.name !== undefined
-  );
 }
 
 /**
@@ -4614,7 +3399,7 @@ function text(expr: MathJsonExpression): string {
  * quotes the engine's `where` operand (or a value of the boxed statement)
  * must not show the wrapper. While the flag is set, `epsilSnippet` prints
  * `AssertPresent(<symbol>)` as the bare symbol. The flag is per statement:
- * `canonicalizationDiagnostics` sets it right before it boxes each statement,
+ * `canonicalizationDiagnostics` sets it while reporting each canonical statement,
  * builds that statement's messages inside the same loop iteration, and clears
  * it when the loop ends (or before it rethrows a time-budget cancellation).
  */

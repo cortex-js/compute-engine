@@ -957,7 +957,7 @@ describe('Epsil CLI signature error notes', () => {
 describe('Epsil CLI evaluation', () => {
   test('keeps declarations in one session and resets them on request', () => {
     const session = makeEpsilSession(0);
-    expect(session.evaluate('let x = 5').value.toString()).toBe('5');
+    expect(session.evaluate('let x = 5').value.toString()).toBe('"Nothing"');
     expect(session.evaluate('x^2').value.toString()).toBe('25');
 
     session.reset();

@@ -1,3 +1,4 @@
+import { operand } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -72,7 +73,7 @@ function parse(source: string): unknown {
   const [ast, diags] = parseEpsil(source);
   expect(diags).toEqual([]);
   return JSON.parse(
-    JSON.stringify(ast, (k, v) => (k === 'sourceOffsets' ? undefined : v))
+    JSON.stringify(operand(ast, 1), (k, v) => (k === 'sourceOffsets' ? undefined : v))
   );
 }
 
@@ -398,7 +399,7 @@ describe('the qualified call `Shape.area(c)` is unchanged', () => {
     });
     const ce = engine();
     const [ast] = parseEpsil('Shape.area(c)');
-    expect(ce.box(ast!).toString()).toBe('Apply(Field("Shape", "area"), c)');
+    expect(ce.box(ast!).op1.toString()).toBe('Apply(Field("Shape", "area"), c)');
     expect(run('Shape.area(c)').value).toBe('pi');
     expect(run('Shape.scale(c, k: 4)').value).toBe('Circle(4)');
   });

@@ -1,3 +1,4 @@
+import { operand, operands } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { checkSource } from '../../src/cli/check';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
@@ -37,7 +38,7 @@ function parse(source: string): { json: unknown; codes: string[] } {
     return x;
   };
   return {
-    json: strip(ast),
+    json: strip(operands(ast).length === 1 ? operand(ast, 1)! : ast),
     codes: diagnostics.map((d) =>
       Array.isArray(d.message) ? String(d.message[0]) : String(d.message)
     ),
@@ -1189,18 +1190,17 @@ describe('the static rules: calls, local writes, and checks that cannot decide',
 
   test('the rules, also the effect rule, apply when the statement cannot be boxed', () => {
     const ce = new ComputeEngine();
-    const box = ce.box.bind(ce);
+    const makeFunction = ce.function.bind(ce);
     // Make the boxing of the statement fail: the static pass then skips the
     // engine checks of the statement.
     let failures = 0;
-    ce.box = ((expr: unknown, options?: unknown) => {
-      const head = (expr as { fn?: unknown[] } | null)?.fn?.[0];
+    ce.function = ((head: string, ops: unknown[], options?: unknown) => {
       if (head === 'ParallelLoop') {
         failures += 1;
         throw new Error('box');
       }
-      return box(expr as never, options as never);
-    }) as typeof ce.box;
+      return makeFunction(head, ops as never, options as never);
+    }) as typeof ce.function;
     expect(
       messages(
         'let s = 0\nlet L = [0, 0]\nparallel for k in 1..2 { L[k] = s\n s += k\n print(k)\n if k > 1 { break } }',

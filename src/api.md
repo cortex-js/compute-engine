@@ -315,6 +315,16 @@ contextStack: readonly EvalContext[];
 
 <MemberCard>
 
+##### ComputeEngine.\_delegatedEvaluations {#_delegatedevaluations-1}
+
+```ts
+_delegatedEvaluations: number;
+```
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ComputeEngine.macroNames {#macronames-1}
 
 ```ts
@@ -6584,6 +6594,16 @@ True if the type has been inferred. An inferred type can be updated as
 more information becomes available.
 
 A type that is not inferred, but has been set explicitly, cannot be updated.
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedValueDefinition.\_programVariable {#_programvariable}
+
+```ts
+_programVariable: boolean;
+```
 
 </MemberCard>
 
@@ -13103,6 +13123,16 @@ readonly context: EvalContext;
 
 ```ts
 contextStack: readonly EvalContext[];
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.\_delegatedEvaluations {#_delegatedevaluations}
+
+```ts
+_delegatedEvaluations: number;
 ```
 
 </MemberCard>

@@ -210,7 +210,7 @@ describe('Serialization of a list literal with a spread', () => {
   ]) {
     test(source, () => {
       const [json] = parseEpsil(source);
-      const expr = ce.box(json as MathJson);
+      const expr = ce.box(json as MathJson).op1;
       expect(expr.operator).toBe('ListJoin');
       // Epsil writes the canonical form back as the literal.
       expect(serializeEpsil(expr.json as MathJson)).toBe(source);
@@ -582,7 +582,7 @@ describe('A spread of an absent operand', () => {
     expect(source).toBe('[...missing, 0]');
     const [parsed] = parseEpsil(source);
     const back = ce.box(resolveLibraryNames(parsed, source, ce) as never);
-    expect(back.isSame(e)).toBe(true);
+    expect(back.op1.isSame(e)).toBe(true);
     expect(epsil('[...missing, 0]').toString()).toBe('"Missing"');
   });
 });
@@ -648,7 +648,7 @@ describe('Compilation of a consumer of a join over an inferred collection', () =
   // throws "operand is not an indexed collection". Tracked in
   // docs/plans/2026-11-11-bound-once-evidence/step1-state.md.
   for (const [name, source] of PROGRAMS) {
-    const check = name === 'the result of a call' ? test.failing : test;
+    const check = test;
     check(`${name}, in a function body`, () => {
       const ce = new ComputeEngine();
       const [parsed] = parseEpsil(source);

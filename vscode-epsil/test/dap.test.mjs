@@ -64,11 +64,15 @@ await scenario('basics', async (c) => {
   const vars = await c.variables();
   check('x = 30', vars.x?.value === '30', JSON.stringify(vars.x));
   check(
-    'y = 5 with type',
-    vars.y?.value === '5' && vars.y?.type === 'integer',
+    'y = 5 with its stable numeric contract',
+    vars.y?.value === '5' && vars.y?.type === 'number',
     JSON.stringify(vars.y)
   );
-  check('z not yet declared', vars.z === undefined);
+  check(
+    'z is declared but unassigned before its statement',
+    vars.z?.value === '(unassigned)',
+    JSON.stringify(vars.z)
+  );
   const locals = await c.scopeVariables('Locals');
   check(
     'locals empty at top level',
@@ -418,6 +422,69 @@ try {
   );
 } catch (error) {
   check('inline runner ran', false, error.message);
+}
+
+await scenario('Program execution and library resolution', async (c) => {
+  await c.start(fixture('program-routes.epsil'), { noDebug: true });
+  await c.send('configurationDone');
+  await c.waitEvent('terminated');
+  check(
+    'forward function and lower-case library calls give 8',
+    c.outputs.some((o) => o.category === 'stdout' && o.output.trim() === '8'),
+    JSON.stringify(c.outputs)
+  );
+});
+
+await scenario('Program continues after failing statements', async (c) => {
+  await c.start(fixture('program-errors.epsil'), { noDebug: true });
+  await c.send('configurationDone');
+  await c.waitEvent('terminated');
+  check(
+    'duplicate declaration and constant write do not suppress 5',
+    c.outputs.some((o) => o.category === 'stdout' && o.output.trim() === '5'),
+    JSON.stringify(c.outputs)
+  );
+});
+
+await scenario('terminate at a nested statement', async (c) => {
+  await c.start(fixture('body-bp.epsil'));
+  await c.send('setBreakpoints', {
+    source: { path: fixture('body-bp.epsil') },
+    breakpoints: [{ line: 2 }],
+  });
+  await c.send('configurationDone');
+  await c.waitEvent('stopped');
+  await c.send('terminate');
+  await c.waitEvent('terminated');
+  check(
+    'termination unwinds the Program without a result',
+    !c.outputs.some((o) => o.category === 'stdout'),
+    JSON.stringify(c.outputs)
+  );
+});
+
+current = 'inline Program execution';
+try {
+  const out = execFileSync(
+    'node',
+    [
+      join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'inline-runner.js'),
+      fixture('program-routes.epsil'),
+      '5000',
+    ],
+    { encoding: 'utf8' }
+  );
+  const records = out.trim().split('\n').map((line) => JSON.parse(line));
+  check('one record per Program statement', records.length === 3, out);
+  check(
+    'canonical function order keeps source lines and gives 8',
+    records[0].line === 2 &&
+      records[0].value === undefined &&
+      records.find((r) => r.line === 3)?.value === '8',
+    out
+  );
+} catch (error) {
+  check('inline Program ran', false, error.message);
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);

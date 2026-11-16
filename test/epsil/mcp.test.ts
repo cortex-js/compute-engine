@@ -314,7 +314,7 @@ describe('MCP server tools', () => {
     ]);
     const result = payload(response);
     expect(result.ok).toBe(true);
-    expect(result.mathjson).toEqual(['Add', 1, 2]);
+    expect(result.mathjson).toEqual(['Program', ['Add', 1, 2]]);
   });
 
   test('serialize converts MathJSON to Epsil source', async () => {

@@ -1,3 +1,4 @@
+import { operand } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -8,7 +9,7 @@ import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 // MathJSON without the source spans (`:=` is a character longer than `=`).
 const ast = (src: string): unknown =>
   JSON.parse(
-    JSON.stringify(parseEpsil(src)[0], (k, v) =>
+    JSON.stringify(operand(parseEpsil(src)[0], 1), (k, v) =>
       k === 'sourceOffsets' ? undefined : v
     )
   );

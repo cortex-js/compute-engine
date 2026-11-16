@@ -1,3 +1,4 @@
+import { operand } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -230,7 +231,7 @@ describe('EPSIL CONFORMANCE DECLARATIONS', () => {
     expect(
       validEpsil('type Point = tuple<number, number> is Comparable')
     ).toStrictEqual([
-      'Block',
+      'Program',
       ['DeclareType', 'Point', { str: 'tuple<number, number>' }],
       ['DeclareConformance', { str: 'Point' }, ['List', 'Comparable']],
     ]);
@@ -305,14 +306,14 @@ describe('EPSIL CONFORMANCE DECLARATIONS', () => {
       []
     );
     expect(validEpsil('let type = 5\ntype + 1 is integer')).toStrictEqual([
-      'Block',
+      'Program',
       ['Declare', 'type', ['Dictionary', ['KeyValuePair', 'value', 5]]],
       ['MatchesType', ['Add', 'type', 1], ['TypeFrom', { str: 'integer' }]],
     ]);
 
     expect(diagnosticsOf('let type = 5\ntype.x is integer')).toStrictEqual([]);
     expect(validEpsil('let type = 5\ntype.x is integer')).toStrictEqual([
-      'Block',
+      'Program',
       ['Declare', 'type', ['Dictionary', ['KeyValuePair', 'value', 5]]],
       [
         'MatchesType',
@@ -378,7 +379,7 @@ describe('EPSIL CONFORMANCE DECLARATIONS', () => {
     // followed by a linebreak was hijacked; every later token was already
     // correctly checked.
     expect(validEpsil('let type = 5\ntype\nstring is integer')).toStrictEqual([
-      'Block',
+      'Program',
       ['Declare', 'type', ['Dictionary', ['KeyValuePair', 'value', 5]]],
       'type',
       ['MatchesType', 'string', ['TypeFrom', { str: 'integer' }]],
@@ -411,7 +412,7 @@ describe('EPSIL CONFORMANCE DECLARATIONS', () => {
     expect(diagnostics.map((d) => d.message)).toStrictEqual([
       ['protocol-name-expected'],
     ]);
-    expect(JSON.parse(JSON.stringify(ast))).toMatchObject({
+    expect(JSON.parse(JSON.stringify(operand(ast, 1)))).toMatchObject({
       fn: ['Declare', { sym: 'x' }, {}],
     });
   });

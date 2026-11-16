@@ -1,0 +1,232 @@
+--- a/test/epsil/static-check-function-on-const.test.ts
++++ b/test/epsil/static-check-function-on-const.test.ts
+@@ -4,15 +4,14 @@
+ 
+ //
+ // A `function` statement (or a `name(params) = body` definition) for a name
+-// that an earlier top-level `const` declaration bound. The run time refuses
+-// to add a clause to a constant (`invalid-clause-definition`), and the
+-// binding keeps its value. The static check (`epsil check`) reports the
+-// refusal at the `function` statement, as a `static-type-error` that carries
+-// the engine's error code, with a note on the `const` declaration.
++// that an earlier top-level `const` declaration bound. The later declaration
++// is refused as `variable-redeclaration`, and the binding keeps its value.
++// The static check (`epsil check`) reports the refusal at the later statement,
++// as a `static-type-error` with a note on the first declaration.
+ //
+ 
+ const DESCRIPTION = (name: string) =>
+-  `invalid clause definition — "${name}" is a constant; it cannot be redefined`;
++  `variable redeclaration: ${name}`;
+ 
+ function check(source: string) {
+   return checkSource(source).diagnostics.map((d) => ({
+@@ -34,7 +33,7 @@
+           'static-type-error',
+           DESCRIPTION('c'),
+           'function c(x) {x}',
+-          'invalid-clause-definition',
++          'variable-redeclaration',
+         ],
+         at: 'function c(x) { x }',
+         notes: [
+@@ -50,7 +49,7 @@
+     expect(d.length).toBe(1);
+     expect(d[0].message[0]).toBe('static-type-error');
+     expect(d[0].message[1]).toBe(DESCRIPTION('k'));
+-    expect(d[0].message[3]).toBe('invalid-clause-definition');
++    expect(d[0].message[3]).toBe('variable-redeclaration');
+     expect(d[0].at).toBe('k(x) = x * 2');
+     expect(d[0].notes[0].at).toBe('const k = (n) => n');
+   });
+@@ -74,7 +73,7 @@
+     ]);
+     const stat = r.diagnostics[0];
+     expect(stat.message[1]).toBe(DESCRIPTION('c'));
+-    expect(stat.message[3]).toBe('invalid-clause-definition');
++    expect(stat.message[3]).toBe('variable-redeclaration');
+     expect(source.slice(stat.range[0], stat.range[1])).toBe(
+       'function c(x) { x }'
+     );
+--- a/test/epsil/redefinition-discipline.test.ts
++++ b/test/epsil/redefinition-discipline.test.ts
+@@ -65,9 +65,14 @@
+   test('a second top-level `let` of one program is reported, with the first site', () => {
+     const source = 'let a = 1\nlet a = 2\na';
+     const { diagnostics } = checkSource(source);
+-    expect(codes(diagnostics)).toEqual(['variable-redeclaration']);
++    expect(codes(diagnostics)).toEqual(['static-type-error']);
+     const [d] = diagnostics;
+-    expect(d.message).toEqual(['variable-redeclaration', 'a']);
++    expect(d.message).toEqual([
++      'static-type-error',
++      'variable redeclaration: a',
++      'let a = 2',
++      'variable-redeclaration',
++    ]);
+     expect(source.slice(d.range[0], d.range[1])).toBe('let a = 2');
+     expect(d.notes).toHaveLength(1);
+     expect(source.slice(d.notes![0].range[0], d.notes![0].range[1])).toBe(
+@@ -77,15 +82,19 @@
+     // program keeps reading the FIRST binding.
+     const r = run(source);
+     expect(r.value).toBe(1);
+-    expect(r.codes).toEqual([['variable-redeclaration', 'a']]);
++    expect(r.codes).toEqual([d.message]);
+   });
+ 
+   test('a destructuring `let` counts each pattern leaf', () => {
+     expect(
+-      codes(checkSource('let (p, q) = (1, 2)\nlet p = 3').diagnostics)
++      checkSource('let (p, q) = (1, 2)\nlet p = 3').diagnostics.map((d) =>
++        staticCodeOf(d.message)
++      )
+     ).toEqual(['variable-redeclaration']);
+     expect(
+-      codes(checkSource('let p = 3\nlet (p, q) = (1, 2)').diagnostics)
++      checkSource('let p = 3\nlet (p, q) = (1, 2)').diagnostics.map((d) =>
++        staticCodeOf(d.message)
++      )
+     ).toEqual(['variable-redeclaration']);
+     // `_` declares nothing.
+     expect(
+@@ -190,7 +199,12 @@
+     const source = 'let a = 1\nlet (a, b) = (2, 3)\nlet b = 4\nb';
+     const { diagnostics } = checkSource(source);
+     expect(diagnostics.map((d) => d.message)).toEqual([
+-      ['variable-redeclaration', 'a'],
++      [
++        'static-type-error',
++        'variable redeclaration: a',
++        'let (a, b) = (2, 3)',
++        'variable-redeclaration',
++      ],
+     ]);
+     expect(run(source).value).toBe(4);
+     // The same, inside a block.
+@@ -612,14 +626,10 @@
+     expect(typeToString(ce._typeRegistry['B'].def!)).toBe('tuple<a: integer>');
+   });
+ 
+-  test('a RE-ENTRANT box-route declaration mid-batch is unstamped, and the program may still declare that name', () => {
+-    // The hazard: `ce._epsilBatchId` is ambient for the whole `executeEpsil`
+-    // extent, so a `ce.box(["DeclareType", …]).evaluate()` a host operator
+-    // performs re-entrantly goes through the very same `Declare*` handlers
+-    // with a batch live. Stamping on "a batch is set" would make that
+-    // registration a statement of the running program, and the program's own
+-    // declaration of the name would then falsely report `type-redefinition`.
+-    // Stamping keys on the statement ROUTE instead.
++  test('a RE-ENTRANT box-route declaration replaces the canonically earlier type without a stamp', () => {
++    // The host's raw `Declare*` calls are not declarations authored by this
++    // Program, even while its batch is live. They remain unstamped and can
++    // replace a type registered earlier by canonical type-first execution.
+     const ce = new ComputeEngine();
+     let stampSeenInsideHandler: unknown = 'the handler never ran';
+     ce.declare('BoxDeclare', {
+@@ -637,10 +647,11 @@
+     );
+     expect(stampSeenInsideHandler).toBeUndefined();
+     expect(ce._protocolRegistry['BTP']).toBeDefined();
+-    // The outer program's declarations REPLACE the box-route records.
++    // Program type/protocol declarations run before ordinary statements.
++    // The host's later box-route declaration replaces that registered type.
+     expect(codes(diagnostics)).toEqual([]);
+     expect(value.toString()).toBe('1');
+-    expect(typeToString(ce._typeRegistry['BT'].def!)).toBe('tuple<a: integer>');
++    expect(typeToString(ce._typeRegistry['BT'].def!)).toBe('integer');
+   });
+ 
+   test('Epsil statement vs BOX-ROUTE incoming: replaces, and the stamp is cleared', () => {
+@@ -1092,8 +1103,8 @@
+       const source = 'function g(a) {\n  f(y) := y + 1\n  f(x) := x + 3\n  f(a)\n}\n[g(5), g(6)]';
+       expect(staticCodes(source)).toEqual(['variable-redeclaration']);
+       const r = run(source);
+-      expect(r.codes).toContain('static-type-error');
+-      expect(r.codes).toContain('runtime-error');
++      // The canonical refusal is reported once, before execution.
++      expect(r.codes).toEqual(['static-type-error']);
+       // `g` is not defined, so each call stays unevaluated.
+       expect(r.value).toEqual(['List', ['g', 5], ['g', 6]]);
+     });
+--- a/test/compute-engine/constant-function-reassignment.test.ts
++++ b/test/compute-engine/constant-function-reassignment.test.ts
+@@ -69,10 +69,10 @@
+     // The static check reports the refusal before the program runs, and the
+     // run does not report it a second time.
+     expect(diagnostics.map((d) => d.message[0])).toEqual(['static-type-error']);
+-    for (const d of diagnostics)
+-      expect(String(d.message[1])).toContain(
+-        '"k" is a constant; it cannot be redefined'
+-      );
++    for (const d of diagnostics) {
++      expect(d.message[1]).toBe('variable redeclaration: k');
++      expect(d.message[3]).toBe('variable-redeclaration');
++    }
+     expect(value.re).toBe(3);
+   });
+ 
+--- a/test/compute-engine/constructor-functions.test.ts
++++ b/test/compute-engine/constructor-functions.test.ts
+@@ -392,7 +392,7 @@
+     expect(r.value!.toString()).toBe('3');
+   });
+ 
+-  test('function BEFORE the type declaration is the D5 collision', () => {
++  test('a constructor function authored before its type uses canonical type-first order', () => {
+     const ce = new ComputeEngine();
+     const r = executeEpsil(
+       ce,
+@@ -400,11 +400,9 @@
+ type circle = record{x: number, y: number, r: number}
+ circle(1, 2, 3)`
+     );
+-    expect(
+-      (r.diagnostics ?? []).some((d) =>
+-        String(d.message).includes('runtime-error')
+-      )
+-    ).toBe(true);
++    expect(r.diagnostics ?? []).toEqual([]);
++    expect(r.value!.json).toEqual(['circle', { dict: { x: 1, y: 2, r: 3 } }]);
++    expect(r.value!.type.toString()).toBe('circle');
+   });
+ 
+   test('an alias type´s same-name function is an ordinary function (no tagging)', () => {
+--- a/test/compute-engine/block-locals-declaration-rules.test.ts
++++ b/test/compute-engine/block-locals-declaration-rules.test.ts
+@@ -259,12 +259,12 @@
+     ])
+       expect(codes(source)).toEqual(['assignment-to-undeclared-variable']);
+     // A name declared by an earlier top-level statement is written by an
+-    // assignment in a branch. A reassignment at the top level keeps the
+-    // interpreter rules and can change the type.
++    // assignment in a branch. An explicit `any` binding also admits a value
++    // of another kind.
+     for (const [source, value] of [
+       ['let c = true\nlet a = 1\nif c { a = 2 }\na', '2'],
+       ['let c = false\nlet a = 1\nif c { a = 2 }\na', '1'],
+-      ['let a = 1\na = "x"\na', '"x"'],
++      ['let a: any = 1\na = "x"\na', '"x"'],
+     ]) {
+       const r = executeEpsil(new ComputeEngine(), source);
+       expect(r.diagnostics).toEqual([]);
+--- a/test/compute-engine/ce-43-block-local-statement-order.test.ts
++++ b/test/compute-engine/ce-43-block-local-statement-order.test.ts
+@@ -64,7 +64,8 @@
+ describe('CE-43: an assignment in a match case is an assignment of the block local', () => {
+   function run(src: string): { type: string; value: string; sound: boolean } {
+     const ce = new ComputeEngine();
+-    const [ast, diags] = parseEpsil(src);
++    // These cases exercise Block locals rather than caller-namespace bindings.
++    const [ast, diags] = parseEpsil(`do { ${src} }`);
+     expect(diags).toEqual([]);
+     const e = ce.box(ast!);
+     const type = e.type.toString();
+@@ -97,7 +98,7 @@
+   test('the compiled while-let loop reads the block local', () => {
+     const ce = new ComputeEngine();
+     const [ast] = parseEpsil(
+-      'let xs = [1, 2, 3]\nlet s = 0\nwhile let [h, ...] = xs { s = s + h; xs = Rest(xs) }\ns'
++      'do { let xs = [1, 2, 3]\nlet s = 0\nwhile let [h, ...] = xs { s = s + h; xs = Rest(xs) }\ns }'
+     );
+     const result = compile(ce.box(ast!));
+     expect(result.success).toBe(true);

@@ -1,0 +1,87 @@
+[
+  {
+    "name": "lock-final-gate",
+    "command": [
+      "node",
+      "/Users/arno/.claude/scripts/box-lock.mjs",
+      "acquire",
+      "codex-program-accepted:matched-performance",
+      "12",
+      "Program candidate production build + normal/off interleaved CE gate",
+      "--wait=60",
+      "--pid=26655"
+    ],
+    "cwd": "/private/tmp/program-matched-perf-20261115",
+    "exitCode": 0,
+    "durationSeconds": 0.03116583824157715
+  },
+  {
+    "name": "identity-source-start",
+    "command": [
+      "python3",
+      "identity.py",
+      "identity-source-start"
+    ],
+    "cwd": "/private/tmp/program-matched-perf-20261115",
+    "exitCode": 0,
+    "durationSeconds": 0.5122830867767334
+  },
+  {
+    "name": "candidate-production-build",
+    "command": [
+      "timeout",
+      "-k",
+      "30",
+      "600",
+      "node",
+      "scripts/build.mjs"
+    ],
+    "cwd": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+    "exitCode": 0,
+    "durationSeconds": 0.4422881603240967
+  },
+  {
+    "name": "identity-timing-start",
+    "command": [
+      "python3",
+      "identity.py",
+      "identity-timing-start"
+    ],
+    "cwd": "/private/tmp/program-matched-perf-20261115",
+    "exitCode": 0,
+    "durationSeconds": 0.442641019821167
+  },
+  {
+    "name": "ce-gate-chain",
+    "command": [
+      "python3",
+      "ce-gate.py"
+    ],
+    "cwd": "/private/tmp/program-matched-perf-20261115",
+    "exitCode": 0,
+    "durationSeconds": 22.55589509010315
+  },
+  {
+    "name": "identity-timing-end",
+    "command": [
+      "python3",
+      "identity.py",
+      "identity-timing-end"
+    ],
+    "cwd": "/private/tmp/program-matched-perf-20261115",
+    "exitCode": 1,
+    "durationSeconds": 0.5051369667053223
+  },
+  {
+    "name": "release-final-gate",
+    "command": [
+      "node",
+      "/Users/arno/.claude/scripts/box-lock.mjs",
+      "release",
+      "codex-program-accepted:matched-performance"
+    ],
+    "cwd": "/private/tmp/program-matched-perf-20261115",
+    "exitCode": 0,
+    "durationSeconds": 0.025268077850341797
+  }
+]

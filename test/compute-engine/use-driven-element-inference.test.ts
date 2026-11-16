@@ -110,7 +110,8 @@ describe('route parity', () => {
   test('Epsil route: a lambda and a named function', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let f = (v) => v[1] + 1');
-    expect(typeOf(ce, 'f')).toBe('(v: tuple<number>) -> number');
+    expect(typeOf(ce, 'f')).toBe('function');
+    expect(ce.symbol('f').value!.type.toString()).toBe('(v: tuple<number>) -> number');
     executeEpsil(ce, 'function g(a) { First(a) + 1 }');
     expect(typeOf(ce, 'g')).toBe('(a: indexed_collection<number>) -> number');
   });
