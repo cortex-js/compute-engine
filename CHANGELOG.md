@@ -66,6 +66,12 @@
 
 ### Bug Fixes
 
+- **`EulerE(n, z)` of a complex `z` has a value**
+  ([#598](https://github.com/cortex-js/compute-engine/issues/598)). It stayed
+  unevaluated. `EulerE(3, 1+2i)` is now the exact `-25/4 - 8i`, and a complex
+  with float parts gives a float, with the precision of a bignum part. A
+  complex with a radical (`EulerE(2, √2·i)`) gives the polynomial at that
+  point, `-2 - √2·i`.
 - **The derivatives of `EllipticK`, `EllipticE`, `LambertW`, `PolyLog` and
   `LerchPhi` have a value at 0, and their series at 0 is computed**
   ([#591](https://github.com/cortex-js/compute-engine/issues/591)).

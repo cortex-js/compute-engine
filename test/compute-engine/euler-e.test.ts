@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 
 // `EulerE(n)` is the Euler number Eₙ (OEIS A122045), `EulerE(n, x)` the
 // Euler polynomial Eₙ(x) (DLMF 24.2.6, 24.2.8). Mathematica's `EulerE`.
@@ -171,9 +172,65 @@ describe('EulerE(n, x)', () => {
     expect(ce.box(['EulerE', 4, 'x']).type.toString()).toBe('number');
   });
 
-  test('a complex or infinite x stays unevaluated', () => {
-    expect(ev(['EulerE', 3, ['Complex', 1, 1]])).toMatch(/^EulerE\(3/);
+  test('an exact complex x gives an exact value', () => {
+    // E₃(x) = x³ − (3/2)x² + 1/4
+    expect(ev(['EulerE', 3, ['Complex', 1, 2]])).toBe('(-25/4 - 8i)');
+    expect(num(['EulerE', 3, ['Complex', 1, 2]])).toBe('(-6.25 - 8i)');
+    expect(
+      ev(['EulerE', 4, ['Complex', ['Rational', 1, 3], ['Rational', -2, 5]]])
+    ).toBe('(25846/50625 - 794/3375i)');
+    expect(ev(['EulerE', 0, ['Complex', 1, 2]])).toBe('1');
+  });
+
+  test('Eₙ(z+1) + Eₙ(z) = 2zⁿ at a Gaussian rational z', () => {
+    const z = ['Complex', ['Rational', 1, 3], ['Rational', 2, 7]];
+    const z1 = ['Complex', ['Rational', 4, 3], ['Rational', 2, 7]];
+    for (const n of [1, 5, 12])
+      expect(ev(['Add', ['EulerE', n, z1], ['EulerE', n, z]])).toBe(
+        ev(['Multiply', 2, ['Power', z, n]])
+      );
+  });
+
+  test('a float complex x gives a float', () => {
+    const r = ce.box(['EulerE', 3, ['Complex', 0.1, 0.3]]).evaluate();
+    expect(r.isExact).toBe(false);
+    expect(r.re).toBeCloseTo(0.344, 14);
+    expect(r.im).toBeCloseTo(-0.108, 14);
+    // the value agrees with the expanded polynomial at the same point
+    const z = ce.box(['Complex', 0.25, 1.75]);
+    const at = ce.box(['EulerE', 30, 'x']).evaluate().subs({ x: z }).N();
+    const v = ce.box(['EulerE', 30, z]).N();
+    expect(v.re / at.re).toBeCloseTo(1, 12);
+    expect(v.im / at.im).toBeCloseTo(1, 12);
+  });
+
+  test('a bignum imaginary part keeps its digits at precision', () => {
+    const prev = ce.precision;
+    ce.precision = 50;
+    try {
+      // E₁(z) = z − 1/2
+      const z = ce.parse('0.75+1.2345678901234567890123456789\\cdot i');
+      const r = ce.box(['EulerE', 1, z]).N();
+      expect(r.re).toBe(0.25);
+      expect(isNumber(r) && r.bignumIm?.toString()).toBe(
+        '1.2345678901234567890123456789'
+      );
+    } finally {
+      ce.precision = prev;
+    }
+  });
+
+  test('an exact complex x with a radical gives the polynomial at x', () => {
+    // E₂(x) = x² − x
+    expect(
+      ev(['EulerE', 2, ['Multiply', ['Sqrt', 2], 'ImaginaryUnit']])
+    ).toBe('-2 - sqrt(2)i');
+  });
+
+  test('an infinite or NaN x stays unevaluated', () => {
     expect(ev(['EulerE', 3, 'PositiveInfinity'])).toMatch(/^EulerE\(3/);
+    expect(ev(['EulerE', 3, 'ComplexInfinity'])).toMatch(/^EulerE\(3/);
+    expect(ev(['EulerE', 3, 'NaN'])).toMatch(/^EulerE\(3/);
   });
 
   test('threads over lists', () => {

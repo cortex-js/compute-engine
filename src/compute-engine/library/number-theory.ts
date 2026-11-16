@@ -1806,17 +1806,15 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         ([n, x], { engine: ce, numericApproximation }) => {
           const k = toBigint(n);
           if (k === null || k < 0n) return undefined;
-          // A rational or float literal `x` gives a value, an exact real
-          // literal that is not rational (`√2`) and anything but a number a
-          // polynomial in `x`; a complex or infinite literal declines.
-          let point: [bigint, bigint] | undefined;
+          // A real or complex literal `x` whose parts are rational or float
+          // gives a value; an exact literal with a radical (`√2`, `√2·i`)
+          // and anything but a number give a polynomial in `x`; an infinite
+          // or NaN literal declines.
+          let point: GaussianRational | undefined;
           if (x !== undefined && isNumber(x)) {
-            point = realLiteralAsRational(x);
-            if (
-              point === undefined &&
-              !(x.isExact && x.im === 0 && x.isFinite === true)
-            )
-              return undefined;
+            if (x.isFinite !== true) return undefined;
+            point = literalAsGaussianRational(x);
+            if (point === undefined && !x.isExact) return undefined;
           }
           if (x === undefined && k % 2n === 1n) return ce.number(0);
           // O(n²) bigint steps on integers of about log₁₀(n!) digits: past
@@ -1828,8 +1826,11 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           let result: Expression;
           if (x === undefined) result = ce.number(E[N]);
           else if (point !== undefined) {
-            const [num, den] = eulerPolynomialAtRational(E, N, point);
-            result = ce.number([num, den]);
+            const [re, im] = eulerPolynomialAtGaussian(E, N, point);
+            result =
+              im[0] === 0n
+                ? ce.number(re)
+                : ce.number(re).add(ce.number(im).mul(ce.I));
           } else {
             const coeffs = eulerPolynomialCoefficients(E, N, ce._deadline);
             const terms = coeffs.flatMap(([num, den], j) =>
@@ -3606,25 +3607,43 @@ function eulerNumbers(n: number, deadline: number | undefined): bigint[] {
   return E;
 }
 
+/** The Gaussian rational `(a + b·i)/d`, as `[a, b, d]` with `d > 0`. */
+type GaussianRational = [bigint, bigint, bigint];
+
 /**
- * Eₙ(p/q) as a reduced `[num, den]`, from the Euler numbers and
- * `Eₙ(x) = Σ_k C(n,k)·(E_k/2^k)·(x - 1/2)^{n-k}` (DLMF 24.2.8), which over
- * the common denominator `(2q)ⁿ` has the integer numerator
- * `Σ_k C(n,k)·E_k·(2p-q)^{n-k}·q^k`.
+ * Eₙ(z) at the Gaussian rational `z = (a + b·i)/d`, as its reduced real and
+ * imaginary parts, from the Euler numbers and
+ * `Eₙ(z) = Σ_k C(n,k)·(E_k/2^k)·(z - 1/2)^{n-k}` (DLMF 24.2.8). With
+ * `2z - 1 = w/d` and `w = (2a - d) + 2b·i`, the sum over the common
+ * denominator `(2d)ⁿ` has the Gaussian integer numerator
+ * `Σ_k C(n,k)·E_k·w^{n-k}·d^k`.
  */
-function eulerPolynomialAtRational(
+function eulerPolynomialAtGaussian(
   E: readonly bigint[],
   n: number,
-  [p, q]: [bigint, bigint]
-): [bigint, bigint] {
-  const u = 2n * p - q;
-  let sum = 0n;
+  [a, b, d]: GaussianRational
+): [[bigint, bigint], [bigint, bigint]] {
+  // wPow[j] = wʲ as [re, im].
+  const wRe = 2n * a - d;
+  const wIm = 2n * b;
+  const wPow: [bigint, bigint][] = [[1n, 0n]];
+  for (let j = 1; j <= n; j++) {
+    const [r, i] = wPow[j - 1];
+    wPow.push([r * wRe - i * wIm, r * wIm + i * wRe]);
+  }
+  let re = 0n;
+  let im = 0n;
   let c = 1n; // C(n, k)
   for (let k = 0; k <= n; k++) {
-    if (E[k] !== 0n) sum += c * E[k] * u ** BigInt(n - k) * q ** BigInt(k);
+    if (E[k] !== 0n) {
+      const f = c * E[k] * d ** BigInt(k);
+      re += f * wPow[n - k][0];
+      im += f * wPow[n - k][1];
+    }
     c = (c * BigInt(n - k)) / BigInt(k + 1);
   }
-  return reduceRat(sum, (2n * q) ** BigInt(n));
+  const den = (2n * d) ** BigInt(n);
+  return [reduceRat(re, den), reduceRat(im, den)];
 }
 
 /**
@@ -3666,18 +3685,48 @@ function eulerPolynomialCoefficients(
 }
 
 /**
- * A rational or float literal as an exact rational: a rational as it is, a
- * float as the decimal it prints as (`0.1` is 1/10). `undefined` for an exact
- * literal that is not rational (`√2`), and for a complex, infinite or NaN
- * value.
+ * A number literal whose parts are rational or float as a Gaussian rational:
+ * an exact part as it is, a float part as the decimal it prints as (`0.1` is
+ * 1/10), at the full precision of a bignum part. `undefined` for an exact
+ * literal with a radical (`√2`, `√2·i`), and for an infinite or NaN value.
  */
-function realLiteralAsRational(x: Expression): [bigint, bigint] | undefined {
-  const r = asRational(x);
-  if (r !== undefined) return [BigInt(r[0]), BigInt(r[1])];
-  if (!isNumber(x) || x.isExact || x.im !== 0) return undefined;
-  const m = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(
-    String(x.bignumRe ?? x.re)
-  );
+function literalAsGaussianRational(
+  x: Expression
+): GaussianRational | undefined {
+  if (!isNumber(x) || x.isFinite !== true) return undefined;
+  let re: [bigint, bigint] | undefined;
+  let im: [bigint, bigint] | undefined = [0n, 1n];
+  if (!x.isComplex) {
+    const r = asRational(x);
+    if (r !== undefined) re = [BigInt(r[0]), BigInt(r[1])];
+    else if (!x.isExact) re = decimalAsRational(String(x.bignumRe ?? x.re));
+  } else if (x.isExact) {
+    const nv = x.numericValue;
+    if (
+      !(nv instanceof ExactNumericValue) ||
+      nv.radical !== 1 ||
+      nv.imRadical !== 1
+    )
+      return undefined;
+    re = [BigInt(nv.rational[0]), BigInt(nv.rational[1])];
+    im = [BigInt(nv.imRational[0]), BigInt(nv.imRational[1])];
+  } else {
+    re = decimalAsRational(String(x.bignumRe ?? x.re));
+    im = decimalAsRational(String(x.bignumIm ?? x.im));
+  }
+  if (re === undefined || im === undefined) return undefined;
+  // Over the common denominator, with a positive denominator.
+  let [a, b, d] = [re[0] * im[1], im[0] * re[1], re[1] * im[1]];
+  if (d < 0n) [a, b, d] = [-a, -b, -d];
+  return [a, b, d];
+}
+
+/**
+ * A decimal string (`-1.25`, `3e-7`) as a reduced rational; `undefined` for
+ * another string and for an exponent of more than 1000 in magnitude.
+ */
+function decimalAsRational(s: string): [bigint, bigint] | undefined {
+  const m = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(s);
   if (m === null) return undefined;
   const exp = Number(m[4] ?? 0) - (m[3]?.length ?? 0);
   if (Math.abs(exp) > 1000) return undefined;
