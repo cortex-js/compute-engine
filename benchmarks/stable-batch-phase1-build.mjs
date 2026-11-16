@@ -43,6 +43,10 @@ async function main() {
   const esbuild = require('esbuild');
   const pkg = readJson(resolve(root, 'package.json'));
   const options = productionOptions(pkg.version, config.gitVersion ?? '');
+  if (config.sourcemap !== undefined) {
+    assert.equal(config.sourcemap, 'external', 'Diagnostic maps must be external');
+    options.sourcemap = 'external';
+  }
   const entrySource = `export { ComputeEngine } from ${JSON.stringify(resolve(root, 'src/compute-engine.ts'))};\n` +
     (config.experimental ? `export { prepareBatch } from ${JSON.stringify(resolve(root, 'src/compute-engine/experimental/stable-batch.ts'))};\n` : '');
   mkdirSync(output, { recursive: true });
@@ -55,8 +59,8 @@ async function main() {
   } finally { rmSync(temporaryEntry); }
   const after = sourceIdentity(root); const afterBox = boxState(config);
   const valid = JSON.stringify(before) === JSON.stringify(after) && afterBox.valid;
-  const build = { kind: 'production-split', command: 'node benchmarks/stable-batch-phase1-build.mjs CONFIG.json',
-    settings: { ENV: 'production', target: 'es2022', minify: true, drop: ['debugger'], pure: ['console.assert', 'console.log'], splitting: true, sourcemap: false },
+  const build = { kind: options.sourcemap ? 'diagnostic-production-split' : 'production-split', command: 'node benchmarks/stable-batch-phase1-build.mjs CONFIG.json',
+    settings: { ENV: 'production', target: 'es2022', minify: true, drop: ['debugger'], pure: ['console.assert', 'console.log'], splitting: true, sourcemap: options.sourcemap },
     toolchain: { node: process.version, esbuild: esbuild.version, installedPackageLockSha256: hash(readFileSync(resolve(root, 'package-lock.json'))) },
     experimental: config.experimental, entryPoints: splitEntries, additionalEntry: { name: 'stable-batch-phase1', source: entrySource, sha256: hash(entrySource) }, options };
   const arm = { name: config.name ?? (config.experimental ? 'candidate' : 'untouched-current'), root, entry: resolve(output, 'esm-min/stable-batch-phase1.js'), commit: before.commit, build };

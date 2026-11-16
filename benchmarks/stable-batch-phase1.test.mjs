@@ -83,3 +83,15 @@ test('validation reads tagged statuses without serializing revision graphs', () 
   work.validate(work.prepare());
   work.release();
 });
+
+test('direct route resolves during preparation and never invokes name evaluation', () => {
+  const observed = [];
+  const handle = {};
+  const instance = { evaluateHandle(value) { assert.strictEqual(value, handle); observed.push('direct'); return { status: 'ready', value: { isValid: true, isCollection: false, re: 11, im: 0, isExact: true }, diagnostics: [] }; }, evaluate() { throw Error('name route'); } };
+  const unit = { resolve(name) { assert.equal(name, 'result'); observed.push('resolve'); return { status: 'ready', handle }; }, instantiate() { observed.push('instantiate'); return { status: 'ready', instance, diagnostics: [] }; } };
+  const work = setupPhase1Workload(() => ({}), phase1Workloads[0], {}, { adapter: 'prepared', route: 'handle' }, () => ({ status: 'ready', unit, diagnostics: [] }));
+  const prepared = work.prepare();
+  assert.deepEqual(observed, ['resolve']);
+  work.execute(prepared);
+  assert.deepEqual(observed, ['resolve', 'instantiate', 'direct']);
+});

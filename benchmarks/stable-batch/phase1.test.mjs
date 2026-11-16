@@ -5,10 +5,10 @@ import { Phase1Adapter, observable } from './phase1-adapter.mjs';
 import { prepareBatch } from '../../src/compute-engine/experimental/stable-batch.ts';
 
 const fixtures = JSON.parse(readFileSync(new URL('./fixtures.json', import.meta.url))).fixtures;
-export function runFixtures() {
+export function runFixtures(route = 'name') {
   const adapters = [];
   for (const fixture of fixtures.filter(x => x.requiredPhase === 1)) {
-    const adapter = new Phase1Adapter();
+    const adapter = new Phase1Adapter(route);
     for (const step of fixture.steps) {
       const result = observable(adapter.step(step));
       assert.partialDeepStrictEqual(result, step.expect, `${fixture.id}/${step.id}`);
@@ -48,7 +48,8 @@ function checkInvariants(fixture, adapter) {
   if (fixture.id === 'F08') for (const name of ['data', 'text', 'n']) assert.deepEqual(adapter.instance('a').evaluate(name).value.json, adapter.instance('b').evaluate(name).value.json);
 }
 
-test('frozen F01–F09 execute and preserve observed revision invariants', runFixtures);
+test('frozen F01–F09 execute and preserve observed revision invariants', () => runFixtures());
+test('F01–F09 also execute through direct entry handles', () => runFixtures('handle'));
 test('input syntax and external definition bodies are copied before publication', () => {
   const adapter = new Phase1Adapter();
   const entries = [{ kind: 'expression', name: 'answer', body: ['Add', 1, 2] }];
@@ -109,4 +110,22 @@ test('numeric object syntax admits finite typed values at the literal boundary',
   assert.equal(instance.write('data', ['List', { num: '3' }, { num: '4' }]).accepted, true);
   for (const num of ['NaN', '+Infinity', '-Infinity']) assert.equal(instance.write('x', { num }).accepted, false);
   assert.equal(instance.evaluate('x').value.json, 3.5);
+});
+
+test('direct handles retain revision identity and rejected writes preserve values', () => {
+  const adapter = new Phase1Adapter('handle');
+  const old = prepareBatch(adapter.engine, [{ kind: 'slot', name: 'x', type: 'real', initializer: 2 }, { kind: 'expression', name: 'answer', body: ['Add', 'x', 1] }]).unit;
+  const handle = old.resolve('answer').handle;
+  assert(Object.isFrozen(handle));
+  const instance = old.instantiate().instance;
+  assert.equal(instance.evaluateHandle(handle).value.json, 3);
+  assert.equal(instance.write('x', { str: 'bad' }).accepted, false);
+  assert.equal(instance.evaluateHandle(handle).value.json, 3);
+  assert.equal(instance.write('x', 4).accepted, true);
+  assert.equal(instance.evaluateHandle(handle).value.json, 5);
+  const revised = old.revise([{ kind: 'expression', name: 'answer', body: ['Add', 'x', 10] }]).unit;
+  assert.equal(revised.instantiate().instance.evaluateHandle(handle).reasonCode, 'foreign-revision');
+  assert.equal(instance.evaluateHandle(revised.resolve('answer').handle).reasonCode, 'foreign-revision');
+  assert.equal(old.resolve('absent').reasonCode, 'unknown-entry');
+  assert.equal(instance.evaluateHandle(handle).value.json, 5);
 });

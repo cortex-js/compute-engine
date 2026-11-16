@@ -1,5 +1,10 @@
 # Stable batch phase 1 evidence
 
+This is the initial evidence committed in `817f3a87c`. The coordinator-authorized
+[bounded revision](2026-11-15-stable-batch-phase1-revision-report.md) profiles the
+regression before changing implementation and records its own fixed criteria
+and results. Historical numbers below remain unchanged.
+
 Disposition: **revise phase 1; do not start phase 2 or production migration**.
 The bounded semantic experiment works and reduces preparation/allocation cost.
 Unchanged named-function execution regresses against an untouched current base,

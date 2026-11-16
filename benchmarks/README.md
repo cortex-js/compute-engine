@@ -33,6 +33,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Tycho document open** | `tycho-document-open/evaluate.ts`, `rebind.ts` | CE (self; replays the `evaluate` and `rebind` calls Tycho makes when it opens `art/2ki2hjsouf`, from `2ki2hjsouf.fixture.json.gz`; ROADMAP CE-535, CE-536) | stdout |
 | **Scalar arithmetic profile** | `scalar-arithmetic.mjs` | CE source or production bundle; timings, cache counts, inspector profiles | `scalar-arithmetic-2026-11-03.json`; evaluation-cache architecture §11 |
 | **Stable batch baseline** | `stable-batch.mjs`, `stable-batch-tycho.mjs`, `stable-batch-document.mjs` | Pinned pre-binding/current CE; contract specifications, controls, timings and V8 diagnostics | [Phase 0 report](../docs/plans/2026-11-15-stable-batch-phase0-report.md) |
+| **Stable batch revision diagnostics** | `stable-batch-revision-child.mjs`, `stable-batch-revision-attribution.mjs` | Exact 5,000 warmup / 100,000 execution CPU or allocation calls; separate time and compiler-route controls; mapped self/inclusive rows; warmed fixed-live-document retention (private phase-1 subset) | Raw JSON and inspector profiles; diagnostic processes only |
 | **Caches of evaluated values** | `evaluation-caches.ts` | CE (self; each cache on and off with `CE_CACHE_OFF`) | stdout |
 | **Pool in a worker (browsers)** | `workers/nested-pool-browser-probe.mjs` | CE bundle in Chromium · Firefox · WebKit (needs a Playwright, `PLAYWRIGHT=`) | stdout |
 | **Finite groups** | `run-group-theory.mjs finite` (`group-theory-finite.ts`) | CE (self; table validation, subgroup structure, automorphisms) | [Group methodology](group-theory.md); local JSON under `build/group-theory-benchmarks/` |
@@ -972,3 +973,17 @@ the phase-0 full-document workload. Report heap totals, code/metadata and docume
 object families separately. See the [phase-1 report](../docs/plans/2026-11-15-stable-batch-phase1-report.md)
 and [mechanism ledger](../docs/plans/2026-11-15-stable-batch-phase1-ledger.md)
 for results and the exact limits of the throw-probe evidence.
+
+The bounded revision uses `stable-batch-revision-child.mjs` for isolated CPU,
+allocation, runtime and warmed replacement-window experiments. Its
+[fixed criteria](../docs/plans/2026-11-15-stable-batch-revision-criteria.md),
+[revision report](../docs/plans/2026-11-15-stable-batch-phase1-revision-report.md)
+and `stable-batch-revision-2026-11-15.json` contain the protocol and disposition.
+The local raw archive named in the report preserves every request, bundle,
+profile, certification, analysis script and exact command. To reproduce, extract
+it, recreate the recorded roots (or update absolute paths in the configurations
+and temporary scripts), build the recorded source variants, and run
+`node run.mjs <config.json> <fresh-output-directory>` under the box lock.
+`configure-profiles.mjs`, `configure-final.mjs` and `final-commands.json` record
+the matched arms and ordering. Do not reuse existing result directories or
+substitute the short historical timing protocol for the revision protocol.

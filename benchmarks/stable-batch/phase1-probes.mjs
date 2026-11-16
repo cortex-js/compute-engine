@@ -58,7 +58,7 @@ try {
   const failures = [];
   const staticSweeps = { units: 0, bindings: 0 };
   for (const fixture of fixtures) {
-    const adapter = new Phase1Adapter();
+    const adapter = new Phase1Adapter('handle');
     for (const step of fixture.steps) {
       armed = !['prepare', 'revise', 'hostDeclare', 'hostOperator'].includes(step.op);
       try {
@@ -73,8 +73,30 @@ try {
       armed = false;
     }
   }
+  // Exercise misses, hits, mode changes and an accepted slot write while every
+  // contextual entry point is armed, separately from fixture observations.
+  const cacheAdapter = new Phase1Adapter('handle');
+  const prepared = cacheAdapter.step({ op: 'prepare', id: 'cache', entries: [
+    { kind: 'slot', name: 'x', type: 'real', initializer: 1001 },
+    { kind: 'expression', name: 'answer', body: ['Add', ['Multiply', 'x', 1003], 7] },
+  ] });
+  const cacheUnit = prepared.unit;
+  const cacheHandle = cacheUnit.resolve('answer').handle;
+  const cacheInstance = cacheUnit.instantiate().instance;
+  const cacheSweep = { misses: 0, hits: 0, writes: 0 };
+  armed = true;
+  try {
+    for (const numericApproximation of [false, true]) {
+      const first = cacheInstance.evaluateHandle(cacheHandle, { numericApproximation }); cacheSweep.misses++;
+      const second = cacheInstance.evaluateHandle(cacheHandle, { numericApproximation }); cacheSweep.hits++;
+      assert.strictEqual(second.value, first.value);
+    }
+    assert.equal(cacheInstance.write('x', 1002).accepted, true); cacheSweep.writes++;
+    assert.equal(cacheInstance.evaluateHandle(cacheHandle).value.re, 1002 * 1003 + 7); cacheSweep.misses++;
+  } catch (error) { failures.push({ fixture: 'cache-route', error: error.message }); }
+  armed = false;
   // Positive controls use production boxing/evaluation, not the prototype.
-  const adapter = new Phase1Adapter();
+  const adapter = new Phase1Adapter('handle');
   const before = { ...hits };
   adapter.engine.declare('probe', 'real');
   const expression = adapter.engine.box(['Add', 'probe', 1]);
@@ -83,7 +105,7 @@ try {
   void expression.type;
   unitControls();
   const positive = Object.fromEntries(probes.map(([, , label]) => [label, (hits[label] ?? 0) - (before[label] ?? 0)]));
-  console.log(JSON.stringify({ probes: probes.map(([file, fn, label]) => ({ file, function: fn, label })), failures, staticSweeps, positiveControls: positive }, null, 2));
+  console.log(JSON.stringify({ probes: probes.map(([file, fn, label]) => ({ file, function: fn, label })), failures, staticSweeps, cacheSweep, positiveControls: positive }, null, 2));
   process.exitCode = failures.length || !staticSweeps.units || !staticSweeps.bindings || Object.values(positive).some(count => count === 0) ? 1 : 0;
 } finally {
   delete globalThis.__stableBatchProbe;

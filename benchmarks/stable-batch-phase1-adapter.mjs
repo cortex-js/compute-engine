@@ -52,6 +52,8 @@ export function setupPhase1Workload(makeEngine, workload, settings, arm, prepare
   if (!['scalar', 'function', 'document'].includes(workload.kind))
     return unsupported('Outside phase1 equivalent-work scope', workload.id);
   const candidate = arm.adapter === 'prepared';
+  const route = arm.route ?? 'name';
+  assert(['name', 'handle'].includes(route), 'Explicit name or handle route required');
   assert(candidate || arm.adapter === 'native', 'Each arm must explicitly select prepared or native adapter');
   if (candidate && typeof prepareBatch !== 'function')
     return unsupported('Bundle does not export prepareBatch; no source/fallback substitution', workload.id);
@@ -79,6 +81,12 @@ export function setupPhase1Workload(makeEngine, workload, settings, arm, prepare
       const prepared = prepareBatch(ce, entries);
       lastPrepare = prepared;
       value = { unit: prepared.unit, instance: null, revision: rev };
+      if (route === 'handle') {
+        assert.equal(typeof prepared.unit.resolve, 'function', 'Direct handles unavailable; no name fallback');
+        const resolved = prepared.unit.resolve(isDocument ? `cell${settings.documentSize - 1}` : 'result');
+        assert.equal(resolved.status, 'ready');
+        value.handle = resolved.handle;
+      }
     } else {
       // Independent native documents require independent engines, because their
       // boxed handles otherwise adopt later definition edits. Engine setup is
@@ -105,7 +113,8 @@ export function setupPhase1Workload(makeEngine, workload, settings, arm, prepare
   const execute = (value = expression) => {
     if (candidate) {
       const name = isDocument ? `cell${settings.documentSize - 1}` : 'result';
-      lastEvaluate = instantiate(value).evaluate(name, { numericApproximation: workload.method === 'N' });
+      lastEvaluate = route === 'handle' ? instantiate(value).evaluateHandle(value.handle, { numericApproximation: workload.method === 'N' })
+        : instantiate(value).evaluate(name, { numericApproximation: workload.method === 'N' });
       return lastEvaluate.value;
     }
     return value.expressions.at(-1)[workload.method ?? 'evaluate']();
@@ -137,7 +146,8 @@ export function setupPhase1Workload(makeEngine, workload, settings, arm, prepare
     initialize: () => { expression = prepare(); },
     release: () => { current = null; expression = null; lastPrepare = null; lastInstantiate = null; lastEvaluate = null; lastWrite = null; },
     includesWrite: false,
-    api: candidate ? 'prepareBatch / unit.instantiate / instance.evaluate' : 'ce.box / assign / evaluate or N',
+    route,
+    api: candidate ? `prepareBatch / unit.instantiate / instance.${route === 'handle' ? 'evaluateHandle' : 'evaluate'}` : 'ce.box / assign / evaluate or N',
     staticAnalysis: candidate ? 'Unit preparation inside prepare timer; instantiate included in first execution; warm uses one instance'
       : 'Native canonical boxing and lazy evaluation; initial external input declarations outside timer',
     documentStrategy: isDocument ? 'Four named-function prelude definitions plus all scalar cells; no closures; native independent revisions use fresh engine; prepared revisions share captured library engine' : null,

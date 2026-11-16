@@ -5,6 +5,10 @@ This document describes the bounded F01–F09 implementation, not a migration
 approval. The coordinator owns matched timing, allocation, retention and the
 final proceed/revise/stop recommendation.
 
+The sections through the original verification evidence describe commit
+`817f3a87c`. The current bounded revision is recorded at the end of this ledger
+and in the [revision report](2026-11-15-stable-batch-phase1-revision-report.md).
+
 ## Implemented boundary
 
 `src/compute-engine/experimental/stable-batch.ts` is an internal, unexported
@@ -22,7 +26,8 @@ to CE value. Writes perform literal admission against the fixed slot type;
 they do not box source syntax or invoke the builder. Revisions do not share
 that value map. Host precision and effect handlers are runtime configuration
 on the explicitly supplied engine; they are not static type inputs or captured
-value-cache keys. This implementation adds no persistent value cache.
+value-cache keys. That initial implementation adds no persistent value cache;
+the bounded revision below introduces one explicit instance-owned result.
 
 Arithmetic executes the captured **existing CE library evaluate handlers** for
 Add and Multiply on CE numeric values. This retains CE exact/arbitrary
@@ -132,3 +137,49 @@ update, staging or commit. The coordinator owns independent review, combined
 integration checks and performance/memory results. Broad tests were omitted
 because existing production behavior is unchanged and the task expressly
 limits delegated validation to the experimental path.
+
+## One bounded revision after coordinator review
+
+The [fixed criteria](2026-11-15-stable-batch-revision-criteria.md) preceded every
+revised candidate measurement. CPU/allocation profiles preceded source changes.
+The direct-only trial preceded the cache trial. Final source SHA-256:
+`b68404d15fb255c929aa9f9f04cbe09de43a657bcd5deb5858ca09365089c896`.
+
+| Classification | Concrete mechanism | Evidence and cost |
+| --- | --- | --- |
+| Actually removed | No production method or tracking mechanism | Zero deletion credit; the existing production consumers remain unchanged. |
+| Still bypassed | The original ten unit/dependency/external-resolution entry points above | Final armed fixtures, static sweep of 20 units/48 bindings, and cache sweep of three misses/two hits/one write pass; every positive control fires. |
+| Newly added | `PreparedBatch.resolve`, immutable `{unit,binding}` handle, `BatchInstance.evaluateHandle` | One-time lookup/creation is included in preparation. O(1) unit identity check prevents foreign-revision use; the name route remains separately measured. Direct-only adds 17 source lines and does not close the runtime gap. |
+| Newly added | Readonly prepared `Binding.cacheable` | Derived once from settled number/string type and conservative scope-only effects; no runtime inference or dependency collection. Construction cost and allocation increase versus the frozen prototype. |
+| Newly added | `BatchInstance.cached`, at most one `CachedResult` | One result for one binding/mode/context, not a per-entry Map. Key covers engine/global working/requested precision, tolerance, rounding, angular unit, strictness and immutable effects identity. |
+| Newly added | Explicit cache transitions in `initialize`, `write`, `evaluateBinding` | Accepted writes, including unrelated writes, and initialization clear it. Refused writes preserve it. Other binding/mode/context misses replace it; transient configuration bypasses/clears; unsuccessful or aggregate computations are not stored. |
+| Still required | The binding-keyed value Map and existing CE arithmetic/numeric handlers | No indexed slots, new arithmetic handler, callback snapshot mechanism or general evaluator extension. Misses continue through the existing experimental walker and audited CE handlers. |
+| Newly added | Matched mapped-profile attribution, warmed numerical/snapshot/harness retention, fixed criteria | Function-entry attribution limits are explicit. Finite total-heap bounds include code/harness bytes; RSS/capacity are separately reported. All scaffolding and raw instruments count as additions. |
+
+The one record adds a runtime context check, not contextual static types. In
+this subset the scope effect means instance-owned slot reads; every write to
+those values crosses the explicit invalidation boundary. Immutable definition
+bodies and audited pure handlers cannot read mutable host bindings or invoke
+host capabilities. F06 declarative-source and F08 opaque-refusal limits remain.
+No hidden invalidation graph or ambient assumption key is introduced.
+
+The final tracked source/instrument/test total is **1,823 lines**, net **+525**
+against the initial 1,298. Engine source is 415 lines (+60/-2, net +58); the
+direct-only step was +17 and the cache increment net +41. Tests grow net +209,
+instruments net +258. A seven-line site-hypothesis JSON, documentation, evidence
+and temporary orchestration/analysis are separate. The two deleted experimental
+source lines are not a production-method deletion. Tycho modifications and
+actual/projection deletion credits remain zero.
+
+Ten semantic, six cache, ten revision-instrument, seven prior instrument and one
+recursive-attribution tests pass; scoped native TypeScript/Oxlint, ast-grep,
+combined typecheck/dependency check and the 18-suite core set pass. Independent
+Sol reviews of instruments, direct access and cache deltas leave no actionable
+finding. Byte-identical files reuse those checks.
+
+Disposition: **stop for coordinator review**. Runtime/allocation and the new
+finite warmed-heap gates pass. Scalar preparation is 9.210 µs against the fixed
+8.862-µs historical cap in all six processes. No construction cap is waived and
+no further optimization or phase-2 implementation follows automatically. The
+parallel phase-2a costing identifies only a conditional 274-line Tycho deletion
+ceiling, with no actual deletion and substantial retained host policy.

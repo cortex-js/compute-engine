@@ -3,7 +3,8 @@ import { prepareBatch, transferBatchData, transferLiteral, mixPreparedEntries } 
 
 /** Executes the frozen semantic protocol; assertions live in phase1.test.mjs. */
 export class Phase1Adapter {
-  constructor() {
+  constructor(route = 'name') {
+    this.route = route;
     this.engine = new ComputeEngine();
     this.engine.jit = 'off';
     this.records = new Map();
@@ -15,6 +16,11 @@ export class Phase1Adapter {
     if (this.records.get(id)?.instance) return this.records.get(id).instance;
     if (!this.instances.has(id)) this.instances.set(id, this.unit(id).instantiate());
     return this.instances.get(id).instance;
+  }
+  evaluate(instance, name) {
+    if (this.route === 'name') return instance.evaluate(name);
+    const resolved = instance.unit.resolve(name);
+    return resolved.status === 'ready' ? instance.evaluateHandle(resolved.handle) : resolved;
   }
   reference(path) {
     const [id, name] = path.split('.');
@@ -30,13 +36,13 @@ export class Phase1Adapter {
       case 'writeMany':
         for (const value of step.values) result = this.instance(step.instance).write(step.name, value);
         break;
-      case 'evaluate': result = this.instance(step.instance ?? step.unit).evaluate(step.entry); break;
+      case 'evaluate': result = this.evaluate(this.instance(step.instance ?? step.unit), step.entry); break;
       case 'execute': {
         const initialized = this.unit(step.unit).instantiate();
         const values = {};
         for (const binding of this.unit(step.unit).entries) {
           if (binding.kind !== 'expression') continue;
-          const evaluated = initialized.instance.evaluate(binding.name);
+          const evaluated = this.evaluate(initialized.instance, binding.name);
           if (evaluated.status === 'ready') values[binding.name] = evaluated.value.json;
         }
         result = { status: 'ready', diagnostics: initialized.diagnostics, values };

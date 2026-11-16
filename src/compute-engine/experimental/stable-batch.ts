@@ -2,6 +2,7 @@ import type { ComputeEngine } from '../index.js';
 import type { Expression } from '../types.js';
 import type { EffectHandlers } from '../types-effects.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
+import { BigDecimal } from '../../big-decimal/index.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import { isFunction, isNumber, isString } from '../boxed-expression/type-guards.js';
@@ -47,6 +48,7 @@ export interface Binding {
   readonly node?: Node;
   readonly invalid?: boolean;
   readonly effects: readonly string[];
+  readonly cacheable?: boolean;
 }
 interface Operator {
   readonly kind: 'operator';
@@ -110,7 +112,10 @@ class Builder {
     for (let pass = 0; pass < this.bindings.size; pass++)
       for (const binding of this.bindings.values())
         if (binding.kind === 'expression' && binding.node) Object.assign(binding, { type: binding.node.type });
-    for (const binding of this.bindings.values()) { Object.freeze(binding.parameters); Object.freeze(binding); }
+    for (const binding of this.bindings.values()) {
+      Object.assign(binding, { cacheable: new BoxedType(binding.type).matches('number | string') && binding.effects.every(effect => effect === 'scope') });
+      Object.freeze(binding.parameters); Object.freeze(binding);
+    }
     const unit = new PreparedBatch(this.engine, this.source, this.external, Object.freeze(this.entries), Object.freeze([...this.bindings.values()]), immutableSource(this.diagnostics));
     return { status: 'ready' as const, unit, diagnostics: unit.diagnostics, entryCount: this.source.length };
   }
@@ -198,6 +203,11 @@ class Builder {
   }
 }
 
+export interface PreparedEntryHandle {
+  readonly unit: PreparedBatch;
+  readonly binding: Binding;
+}
+
 export class PreparedBatch {
   constructor(readonly engine: ComputeEngine, readonly source: readonly BatchEntry[], readonly externalDefinitions: readonly BatchEntry[], readonly entries: readonly Binding[], readonly bindings: readonly Binding[], readonly diagnostics: readonly Diagnostic[]) { Object.freeze(this); }
   instantiate() {
@@ -207,13 +217,33 @@ export class PreparedBatch {
   revise(replace: readonly BatchEntry[]) {
     return prepareBatch(this.engine, [...this.source.map(entry => replace.find(x => x.name === entry.name) ?? entry), ...replace.filter(entry => !this.source.some(x => x.name === entry.name))], this.externalDefinitions);
   }
+  resolve(name: string): { status: 'ready'; handle: PreparedEntryHandle } | Unsupported {
+    const binding = this.binding(name);
+    return binding ? { status: 'ready', handle: Object.freeze({ unit: this, binding }) } : unsupported('unknown-entry', name);
+  }
   binding(name: string): Binding | undefined { return this.bindings.find(x => x.name === name); }
+}
+
+interface CachedResult {
+  binding: Binding;
+  numericApproximation: boolean;
+  precision: number;
+  workingPrecision: number;
+  requestedPrecision: number | undefined;
+  tolerance: number;
+  roundingTies: ComputeEngine['roundingTies'];
+  angularUnit: ComputeEngine['angularUnit'];
+  strict: boolean;
+  effects: EffectHandlers;
+  value: Expression;
 }
 
 export class BatchInstance {
   private readonly values = new Map<Binding, Expression>();
+  private cached: CachedResult | undefined;
   constructor(readonly unit: PreparedBatch) {}
   initialize(): readonly Diagnostic[] {
+    this.cached = undefined;
     const diagnostics: Diagnostic[] = [];
     for (const binding of this.unit.entries) {
       if (binding.kind !== 'slot' || !binding.node || binding.invalid) continue;
@@ -236,14 +266,42 @@ export class BatchInstance {
     const value = boxLiteral(this.unit.engine, source);
     if (!value) return { status: 'ready' as const, accepted: false, diagnostics: ['incompatible-type'] };
     this.values.set(binding, value);
+    this.cached = undefined;
     return { status: 'ready' as const, accepted: true, diagnostics: [] };
   }
   evaluate(name: string, options: { numericApproximation?: boolean } = {}) {
     const binding = this.unit.binding(name);
     if (!binding) return unsupported('unknown-entry', name);
+    return this.evaluateBinding(binding, options);
+  }
+  evaluateHandle(handle: PreparedEntryHandle, options: { numericApproximation?: boolean } = {}) {
+    if (handle.unit !== this.unit) return unsupported('foreign-revision', handle.binding.name);
+    return this.evaluateBinding(handle.binding, options);
+  }
+  private evaluateBinding(binding: Binding, options: { numericApproximation?: boolean }) {
+    const name = binding.name;
+    const engine = this.unit.engine;
+    const numericApproximation = options.numericApproximation ?? false;
+    const cacheable = binding.cacheable && !engine._atTransientConfiguration;
+    const cached = this.cached;
+    if (cacheable && cached && cached.binding === binding && cached.numericApproximation === numericApproximation &&
+      cached.precision === engine.precision && cached.workingPrecision === BigDecimal.precision &&
+      cached.requestedPrecision === engine._requestedPrecision && cached.tolerance === engine.tolerance &&
+      cached.roundingTies === engine.roundingTies && cached.angularUnit === engine.angularUnit &&
+      cached.strict === engine.strict && cached.effects === engine.effects)
+      return { status: 'ready' as const, value: cached.value, diagnostics: [] };
+    this.cached = undefined;
     try {
-      const value = binding.kind === 'slot' ? this.read(binding) : binding.node ? this.run(binding.node, [], options.numericApproximation ?? false) : undefined;
+      const value = binding.kind === 'slot' ? this.read(binding) : binding.node ? this.run(binding.node, [], numericApproximation) : undefined;
       if (!value) return unsupported('non-value-entry', name);
+      // Scope effects here are reads of this instance's slots. Every accepted
+      // write clears the one record; captured definitions and audited handlers
+      // are immutable and cannot read host bindings or invoke host effects.
+      if (cacheable && value.isValid && (isNumber(value) || isString(value))) this.cached = {
+        binding, numericApproximation, precision: engine.precision, workingPrecision: BigDecimal.precision,
+        requestedPrecision: engine._requestedPrecision, tolerance: engine.tolerance, roundingTies: engine.roundingTies,
+        angularUnit: engine.angularUnit, strict: engine.strict, effects: engine.effects, value,
+      };
       return { status: 'ready' as const, value, diagnostics: [] };
     } catch (error) {
       if (error instanceof Refusal) return unsupported(error.message, name);

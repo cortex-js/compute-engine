@@ -29230,5 +29230,13 @@
     "readBack": "tar -tzf exited0; gzip stream and archive entries read successfully",
     "manifest": "stable-batch-phase1-results/SHA256SUMS.json",
     "manifestFiles": 5085
+  },
+  "followUp": {
+    "commitBase": "817f3a87ce4cb10aac942ca465604d1d9d6bf0ad",
+    "report": "docs/plans/2026-11-15-stable-batch-phase1-revision-report.md",
+    "evidence": "benchmarks/stable-batch-revision-2026-11-15.json",
+    "criteria": "docs/plans/2026-11-15-stable-batch-revision-criteria.md",
+    "phase2a": "docs/plans/2026-11-15-stable-batch-phase2a-selection.md",
+    "disposition": "stop for coordinator review; historical scalar preparation cap unmet"
   }
 }

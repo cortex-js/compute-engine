@@ -1,0 +1,7 @@
+[
+  { "category": "binding-name lookup", "source": "compute-engine/experimental/stable-batch.ts", "firstLine": 210, "lastLine": 211 },
+  { "category": "candidate argument-array callback function entry", "source": "compute-engine/experimental/stable-batch.ts", "firstLine": 268, "lastLine": 268 },
+  { "category": "whole-run execution; internal dispatch/argument allocation/approximation unresolved", "source": "compute-engine/experimental/stable-batch.ts", "firstLine": 259, "lastLine": 276 },
+  { "category": "literal approximation site; unsupported without distinct callee", "source": "compute-engine/experimental/stable-batch.ts", "firstLine": 260, "lastLine": 260 },
+  { "category": "arithmetic handler call site; inspect distinct callee frames", "source": "compute-engine/experimental/stable-batch.ts", "firstLine": 273, "lastLine": 273 }
+]
