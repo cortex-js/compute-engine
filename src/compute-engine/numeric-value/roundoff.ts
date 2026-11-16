@@ -2,14 +2,15 @@ import { BigDecimal } from '../../big-decimal/index.js';
 
 /**
  * The relative size of the rounding noise of a big-decimal complex kernel:
- * `10^(2−precision)`, where `precision` is the working precision
- * (`BigDecimal.precision`). A kernel that computes at the working precision
+ * `10^(2−precision)`, where `precision` is the working precision (default
+ * `BigDecimal.precision`). A kernel that computes at the working precision
  * has a rounding error of about `10^{−precision}` times the modulus of its
  * result; the factor 100 is a margin for the error of the inputs and of the
  * few operations of the kernel.
  */
-export function complexNoiseRatio(): BigDecimal {
-  const precision = BigDecimal.precision;
+export function complexNoiseRatio(
+  precision: number = BigDecimal.precision
+): BigDecimal {
   if (noiseRatioPrecision !== precision) {
     noiseRatio = new BigDecimal(`1e${2 - precision}`);
     noiseRatioPrecision = precision;
@@ -36,10 +37,11 @@ let noiseRatioPrecision = NaN;
  */
 export function isComplexDust(
   part: BigDecimal | number,
-  magnitude: BigDecimal
+  magnitude: BigDecimal,
+  precision: number = BigDecimal.precision
 ): boolean {
   if (!magnitude.isFinite()) return false;
   const p = typeof part === 'number' ? new BigDecimal(part) : part;
   if (!p.isFinite()) return false;
-  return p.abs().lte(magnitude.abs().mul(complexNoiseRatio()));
+  return p.abs().lte(magnitude.abs().mul(complexNoiseRatio(precision)));
 }

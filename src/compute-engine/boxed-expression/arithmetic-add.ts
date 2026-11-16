@@ -1627,7 +1627,7 @@ function nvSum(
   numericValues: NumericValue[]
 ): NumericValue[] {
   const factory = ce._inexactNumericValue;
-  return ExactNumericValue.sum(numericValues, factory);
+  return ExactNumericValue.sum(numericValues, factory, ce.precision);
 }
 
 function nvSumN(
@@ -1637,12 +1637,13 @@ function nvSumN(
   const makeExact = (x: ConstructorParameters<typeof ExactNumericValue>[0]) =>
     new ExactNumericValue(x, factory);
   const factory = ce._inexactNumericValue;
-  const result = ExactNumericValue.sum(numericValues, factory);
+  const prec = ce.precision;
+  const result = ExactNumericValue.sum(numericValues, factory, prec);
 
   if (result.length === 0) return makeExact(0);
-  if (result.length === 1) return result[0].N();
+  if (result.length === 1) return result[0].N(prec);
 
-  return result.reduce((acc, x) => acc.add(x).N());
+  return result.reduce((acc, x) => acc.add(x, prec).N(prec));
 }
 
 /**

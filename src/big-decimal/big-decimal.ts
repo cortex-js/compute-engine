@@ -108,10 +108,17 @@ export class BigDecimal {
   private static _eulerGammaCache: BigDecimal | null = null;
   private static _eulerGammaCachePrecision: number = 0;
 
-  /** PI to current working precision. */
+  /** π to the working precision: `pi(BigDecimal.precision)`. */
   static get PI(): BigDecimal {
+    return BigDecimal.pi(BigDecimal.precision);
+  }
+
+  /**
+   * π to `prec` significant digits (default `BigDecimal.precision`), plus 4
+   * guard digits for intermediate computations.
+   */
+  static pi(prec: number = BigDecimal.precision): BigDecimal {
     // Return PI with guard digits for intermediate computation accuracy.
-    const prec = BigDecimal.precision;
     if (BigDecimal._piCache !== null && BigDecimal._piCachePrecision === prec)
       return BigDecimal._piCache;
 
@@ -149,17 +156,22 @@ export class BigDecimal {
     return pi;
   }
 
+  /** γ to the working precision: `eulerGamma(BigDecimal.precision)`. */
+  static get EULER_GAMMA(): BigDecimal {
+    return BigDecimal.eulerGamma(BigDecimal.precision);
+  }
+
   /**
-   * The Euler–Mascheroni constant γ to current working precision.
+   * The Euler–Mascheroni constant γ to `prec` significant digits (default
+   * `BigDecimal.precision`).
    *
    * Computed on demand via the Brent–McMillan algorithm (see
    * `computeEulerGamma`) and cached at the highest precision requested; lower
    * requests round the cached value down. Unlike a hardcoded digit literal,
-   * this honors any `BigDecimal.precision` (the prior 858-digit literal capped
+   * this honors any precision (the prior 858-digit literal capped
    * γ-dependent results — see ROADMAP B12).
    */
-  static get EULER_GAMMA(): BigDecimal {
-    const prec = BigDecimal.precision;
+  static eulerGamma(prec: number = BigDecimal.precision): BigDecimal {
     if (
       BigDecimal._eulerGammaCache !== null &&
       BigDecimal._eulerGammaCachePrecision >= prec
@@ -426,9 +438,10 @@ export class BigDecimal {
    * `addBounded()` (at least 10,000 digits and 4 times the working
    * precision). For a value that is an approximation at the working
    * precision, `addBounded()` avoids building a significand of the size of
-   * the exponent gap.
+   * the exponent gap. The working precision of these limits is `prec`
+   * (default `BigDecimal.precision`).
    */
-  add(other: BigDecimal | number): BigDecimal {
+  add(other: BigDecimal | number, prec?: number): BigDecimal {
     if (typeof other === 'number') other = new BigDecimal(other);
 
     const thisExp = this.exponent;
@@ -442,7 +455,8 @@ export class BigDecimal {
       if (this.significand === 0n) return other;
       if (thisExp === otherExp)
         return fromRaw(this.significand + other.significand, thisExp);
-      return alignedSum(this, other, maxAlignedGap(), maxExactGap());
+      prec ??= BigDecimal.precision;
+      return alignedSum(this, other, maxAlignedGap(prec), maxExactGap(prec));
     }
 
     // Slow path: handle NaN, Infinity
@@ -468,9 +482,10 @@ export class BigDecimal {
   /**
    * Subtract other from this.
    * Aligns exponents, subtracts significands. The result is exact up to the
-   * exponent gap of `add()`, and bounded as in `add()` past it.
+   * exponent gap of `add()`, and bounded as in `add()` past it (`prec` as in
+   * `add()`).
    */
-  sub(other: BigDecimal | number): BigDecimal {
+  sub(other: BigDecimal | number, prec?: number): BigDecimal {
     if (typeof other === 'number') other = new BigDecimal(other);
 
     const thisExp = this.exponent;
@@ -481,7 +496,13 @@ export class BigDecimal {
       if (this.significand === 0n) return other.neg();
       if (thisExp === otherExp)
         return fromRaw(this.significand - other.significand, thisExp);
-      return alignedSum(this, other.neg(), maxAlignedGap(), maxExactGap());
+      prec ??= BigDecimal.precision;
+      return alignedSum(
+        this,
+        other.neg(),
+        maxAlignedGap(prec),
+        maxExactGap(prec)
+      );
     }
 
     // Slow path: handle NaN, Infinity
@@ -515,7 +536,10 @@ export class BigDecimal {
    * of a sum: `(10^20000 + 1) − 10^20000` with `addBounded`/`subBounded` is
    * not `1`.
    */
-  addBounded(other: BigDecimal | number): BigDecimal {
+  addBounded(
+    other: BigDecimal | number,
+    prec: number = BigDecimal.precision
+  ): BigDecimal {
     if (typeof other === 'number') other = new BigDecimal(other);
     if (
       !Number.isFinite(this.exponent) ||
@@ -524,14 +548,17 @@ export class BigDecimal {
       other.significand === 0n ||
       this.exponent === other.exponent
     )
-      return this.add(other);
-    return alignedSum(this, other, maxExactGap());
+      return this.add(other, prec);
+    return alignedSum(this, other, maxExactGap(prec));
   }
 
   /** `this − other`, with the bound of `addBounded()`. */
-  subBounded(other: BigDecimal | number): BigDecimal {
+  subBounded(
+    other: BigDecimal | number,
+    prec: number = BigDecimal.precision
+  ): BigDecimal {
     if (typeof other === 'number') other = new BigDecimal(other);
-    return this.addBounded(other.neg());
+    return this.addBounded(other.neg(), prec);
   }
 
   /**
@@ -646,8 +673,11 @@ export class BigDecimal {
    * digits after 15 steps. Not for a caller that needs the exact digits of
    * a product: use `mul()`.
    */
-  mulBounded(other: BigDecimal | number): BigDecimal {
-    return this._mulToPrecision(other, maxProductDigits());
+  mulBounded(
+    other: BigDecimal | number,
+    prec: number = BigDecimal.precision
+  ): BigDecimal {
+    return this._mulToPrecision(other, maxProductDigits(prec));
   }
 
   /**
@@ -658,8 +688,8 @@ export class BigDecimal {
    * cancels down to (`(10⁴⁰ + 1)(10⁴⁰ − 1) − 10⁸⁰` is `−1`, and is `0` when
    * the first product is rounded to 62 digits).
    */
-  roundToProductBound(): BigDecimal {
-    return this.toPrecision(maxProductDigits());
+  roundToProductBound(prec: number = BigDecimal.precision): BigDecimal {
+    return this.toPrecision(maxProductDigits(prec));
   }
 
   /**
@@ -761,8 +791,8 @@ export class BigDecimal {
   }
 
   /**
-   * Divide this value by another.
-   * Uses `BigDecimal.precision` to determine significant digits for inexact results.
+   * Divide this value by another, rounded to `prec` significant digits
+   * (default `BigDecimal.precision`).
    *
    * Special cases:
    *  - NaN / x → NaN, x / NaN → NaN
@@ -772,7 +802,10 @@ export class BigDecimal {
    *  - finite / Inf → 0
    *  - Inf / Inf → NaN
    */
-  div(other: BigDecimal | number): BigDecimal {
+  div(
+    other: BigDecimal | number,
+    prec: number = BigDecimal.precision
+  ): BigDecimal {
     if (typeof other === 'number') other = new BigDecimal(other);
 
     const thisExp = this.exponent;
@@ -793,7 +826,6 @@ export class BigDecimal {
       if (thisSig === 0n) return fromRaw(0n, 0);
 
       // General case
-      const prec = BigDecimal.precision;
       const guard = 10;
       const dividendDigits = this._digitCount();
       const divisorDigits = other._digitCount();
@@ -845,21 +877,26 @@ export class BigDecimal {
   }
 
   /**
-   * Multiplicative inverse: 1 / this.
-   * Uses `BigDecimal.precision` for the division.
+   * Multiplicative inverse: 1 / this, rounded to `prec` significant digits
+   * (default `BigDecimal.precision`).
    */
-  inv(): BigDecimal {
-    return fromRaw(1n, 0).div(this);
+  inv(prec: number = BigDecimal.precision): BigDecimal {
+    return fromRaw(1n, 0).div(this, prec);
   }
 
   /**
-   * Division with **directed rounding** to `BigDecimal.precision` significant
-   * digits: `'floor'` rounds toward −∞, `'ceiling'` toward +∞. This is the
-   * rigorous primitive for interval arithmetic — `[a.divToward(b,'floor'),
-   * a.divToward(b,'ceiling')]` brackets the true quotient. (`+`, `−`, `×` are
+   * Division with **directed rounding** to `prec` significant digits (default
+   * `BigDecimal.precision`): `'floor'` rounds toward −∞, `'ceiling'` toward
+   * +∞. This is the rigorous primitive for interval arithmetic —
+   * `[a.divToward(b,'floor'), a.divToward(b,'ceiling')]` brackets the true
+   * quotient. (`+`, `−`, `×` are
    * exact in BigDecimal, so they need no directed variant.)
    */
-  divToward(other: BigDecimal | number, direction: RoundDir): BigDecimal {
+  divToward(
+    other: BigDecimal | number,
+    direction: RoundDir,
+    prec: number = BigDecimal.precision
+  ): BigDecimal {
     if (typeof other === 'number') other = new BigDecimal(other);
     const thisExp = this.exponent;
     const otherExp = other.exponent;
@@ -873,12 +910,11 @@ export class BigDecimal {
       otherSig === 0n ||
       thisSig === 0n
     )
-      return this.div(other);
+      return this.div(other, prec);
 
     const negative = thisSig < 0n !== otherSig < 0n;
     const absDividend = thisSig < 0n ? -thisSig : thisSig;
     const absDivisor = otherSig < 0n ? -otherSig : otherSig;
-    const prec = BigDecimal.precision;
     const guard = 10;
     const totalScale =
       prec + guard + Math.max(0, other._digitCount() - this._digitCount());
@@ -910,11 +946,15 @@ export class BigDecimal {
   }
 
   /**
-   * Square root with **directed rounding** to `BigDecimal.precision` significant
-   * digits (`'floor'` ≤ true ≤ `'ceiling'`). Computed from an exact integer
-   * `bigintSqrt`, so the bracket is rigorous. Returns NaN for negatives.
+   * Square root with **directed rounding** to `prec` significant digits
+   * (default `BigDecimal.precision`; `'floor'` ≤ true ≤ `'ceiling'`).
+   * Computed from an exact integer `bigintSqrt`, so the bracket is rigorous.
+   * Returns NaN for negatives.
    */
-  sqrtToward(direction: RoundDir): BigDecimal {
+  sqrtToward(
+    direction: RoundDir,
+    prec: number = BigDecimal.precision
+  ): BigDecimal {
     if (this.significand === 0n)
       return this.exponent !== this.exponent ? this : BigDecimal.ZERO; // NaN | 0
     if (!Number.isFinite(this.exponent))
@@ -923,7 +963,6 @@ export class BigDecimal {
         : BigDecimal.NAN;
     if (this.significand < 0n) return BigDecimal.NAN;
 
-    const prec = BigDecimal.precision;
     const guard = 4;
     const sig = this.significand;
     const exp = this.exponent;
@@ -988,7 +1027,8 @@ export class BigDecimal {
   }
 
   /**
-   * Raise to a power.
+   * Raise to a power. A result that is not exact is rounded to `prec`
+   * significant digits (default `BigDecimal.precision`).
    *
    * - Integer exponent: exact result via repeated squaring
    * - Zero exponent: 1 (for any non-NaN base)
@@ -1003,7 +1043,7 @@ export class BigDecimal {
    *  - 0^positive → 0
    *  - 0^negative → Infinity
    */
-  pow(n: BigDecimal | number): BigDecimal {
+  pow(n: BigDecimal | number, prec: number = BigDecimal.precision): BigDecimal {
     if (typeof n === 'number') n = new BigDecimal(n);
     // NaN propagation
     if (this.isNaN() || n.isNaN()) return BigDecimal.NAN;
@@ -1039,7 +1079,7 @@ export class BigDecimal {
 
       // Negative exponent: compute positive power then invert
       if (expValue < 0n) {
-        return this.pow(n.neg()).inv();
+        return this.pow(n.neg(), prec).inv(prec);
       }
 
       // Check if the result would overflow (exponent magnitude > 9e15)
@@ -1076,7 +1116,6 @@ export class BigDecimal {
       // therefore accumulated ~n/2 ulp of error (e.g. 0.999999999999^1e6 at
       // precision 34 was wrong from digit ~28). Carry ~2·log2(n) guard digits
       // through the ladder and round once at the end. (NU-P1-4)
-      const prec = BigDecimal.precision;
       const ladderSteps = expValue.toString(2).length; // ≈ log2(n) + 1
       const guard = Math.min(2 * ladderSteps + 5, 100);
       const workPrec = prec + guard;
@@ -1133,16 +1172,13 @@ export class BigDecimal {
     const argMag = decExpN + Math.log10(Math.abs(decExpBase) * 2.303 + 3) + 1;
     const extra = Math.min(20, Math.max(2, Math.ceil(argMag) + 2));
 
-    const savedPrec = BigDecimal.precision;
-    BigDecimal.precision = savedPrec + extra;
-    try {
-      // ln(base) is memoized: kˣ with a repeated base (e.g. 2ˣ, 10ˣ in a loop)
-      // would otherwise recompute a full high-precision logarithm every call.
-      const lnBase = cachedBaseLn(this, savedPrec + extra);
-      return n.mul(lnBase).exp().toPrecision(savedPrec);
-    } finally {
-      BigDecimal.precision = savedPrec;
-    }
+    // ln(base) is memoized: kˣ with a repeated base (e.g. 2ˣ, 10ˣ in a loop)
+    // would otherwise recompute a full high-precision logarithm every call.
+    const lnBase = cachedBaseLn(this, prec + extra);
+    return n
+      .mul(lnBase)
+      .exp(prec + extra)
+      .toPrecision(prec);
   }
 
   // ---------- Conversion methods ----------
@@ -1444,7 +1480,7 @@ function cachedBaseLn(base: BigDecimal, prec: number): BigDecimal {
     const e = _powLnCache[i];
     if (e.prec === prec && e.exp === exp && e.sig === sig) return e.ln;
   }
-  const ln = base.ln();
+  const ln = base.ln(prec);
   _powLnCache.push({ sig, exp, prec, ln });
   if (_powLnCache.length > POW_LN_CACHE_SIZE) _powLnCache.shift();
   return ln;
@@ -1469,39 +1505,33 @@ function cachedBaseLn(base: BigDecimal, prec: number): BigDecimal {
  */
 function computeEulerGamma(digits: number): BigDecimal {
   const work = digits + 20 + Math.ceil(Math.log10(digits + 10));
-  const savedPrec = BigDecimal.precision;
-  BigDecimal.precision = work;
-  try {
-    // Truncation bound π·e^{−4n} < 10^{−work} ⇒ n ≥ (work·ln10 + lnπ)/4, plus a
-    // small margin.
-    const n = Math.ceil((work * Math.LN10) / 4) + 5;
-    const nBig = new BigDecimal(n);
-    const n2 = nBig.mul(nBig); // n² (exact small integer)
+  // Truncation bound π·e^{−4n} < 10^{−work} ⇒ n ≥ (work·ln10 + lnπ)/4, plus a
+  // small margin.
+  const n = Math.ceil((work * Math.LN10) / 4) + 5;
+  const nBig = new BigDecimal(n);
+  const n2 = nBig.mul(nBig); // n² (exact small integer)
 
-    let term = BigDecimal.ONE; // (nᵏ/k!)² at k = 0
-    let B = BigDecimal.ONE; // Σ term
-    let A = BigDecimal.ZERO; // Σ term·Hₖ  (k = 0 contributes 0 since H₀ = 0)
-    let H = BigDecimal.ZERO; // Hₖ
+  let term = BigDecimal.ONE; // (nᵏ/k!)² at k = 0
+  let B = BigDecimal.ONE; // Σ term
+  let A = BigDecimal.ZERO; // Σ term·Hₖ  (k = 0 contributes 0 since H₀ = 0)
+  let H = BigDecimal.ZERO; // Hₖ
 
-    // A term no longer affects the work-digit A/B once it is ~10^{−work} below
-    // B. The term grows until k ≈ n then decreases monotonically, so this
-    // terminates (near k ≈ 4n in practice); maxK is only a safety backstop.
-    const relTol = BigDecimal.ONE.div(new BigDecimal(10).pow(work));
-    const maxK = 6 * n + 100;
+  // A term no longer affects the work-digit A/B once it is ~10^{−work} below
+  // B. The term grows until k ≈ n then decreases monotonically, so this
+  // terminates (near k ≈ 4n in practice); maxK is only a safety backstop.
+  const relTol = BigDecimal.ONE.div(new BigDecimal(10).pow(work, work), work);
+  const maxK = 6 * n + 100;
 
-    for (let k = 1; k <= maxK; k++) {
-      const k2 = new BigDecimal(k).mul(k);
-      term = term.mul(n2).div(k2).toPrecision(work); // ·(n/k)²  (.div rounds)
-      H = H.add(BigDecimal.ONE.div(k)).toPrecision(work);
-      B = B.add(term).toPrecision(work);
-      A = A.add(term.mul(H)).toPrecision(work);
-      if (k > n && term.lt(B.mul(relTol))) break;
-    }
-
-    return A.div(B).sub(nBig.ln()).toPrecision(digits);
-  } finally {
-    BigDecimal.precision = savedPrec;
+  for (let k = 1; k <= maxK; k++) {
+    const k2 = new BigDecimal(k).mul(k);
+    term = term.mul(n2).div(k2, work).toPrecision(work); // ·(n/k)²  (.div rounds)
+    H = H.add(BigDecimal.ONE.div(k, work), work).toPrecision(work);
+    B = B.add(term, work).toPrecision(work);
+    A = A.add(term.mul(H), work).toPrecision(work);
+    if (k > n && term.lt(B.mul(relTol))) break;
   }
+
+  return A.div(B, work).sub(nBig.ln(work), work).toPrecision(digits);
 }
 
 /**
@@ -1523,18 +1553,18 @@ export function fromRaw(sig: bigint, exp: number): BigDecimal {
  * exactly. At least 10,000 digits, and 4 times the working precision plus
  * 100 above that.
  */
-function maxExactGap(): number {
-  return Math.max(10_000, 4 * BigDecimal.precision + 100);
+function maxExactGap(prec: number): number {
+  return Math.max(10_000, 4 * prec + 100);
 }
 
 /**
  * The largest number of significant digits of a product of `mulBounded`:
- * twice the working precision plus 20. A product of two values of at most
+ * twice the precision `prec` plus 20. A product of two values of at most
  * this many digits has at most twice as many, so a loop that multiplies a
  * value by itself keeps a bounded size instead of doubling it at each step.
  */
-function maxProductDigits(): number {
-  return 2 * BigDecimal.precision + 20;
+function maxProductDigits(prec: number): number {
+  return 2 * prec + 20;
 }
 
 /**
@@ -1545,8 +1575,8 @@ function maxProductDigits(): number {
  * `addBounded`, since its exact significand could have more digits than a
  * bigint can hold.
  */
-function maxAlignedGap(): number {
-  return Math.max(1_000_000, maxExactGap());
+function maxAlignedGap(prec: number): number {
+  return Math.max(1_000_000, maxExactGap(prec));
 }
 
 /**

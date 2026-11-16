@@ -188,19 +188,19 @@ export class BigNumericValue extends NumericValue {
   /**
    * Return a human-readable string representation.
    *
-   * Each part, the real part and the imaginary part, is rounded to
-   * `BigDecimal.precision` significant digits, so that noise digits from
-   * precision-bounded operations (division, transcendentals) are not
-   * displayed. A value made by `N(x, n)` is rounded to `n` digits when `n`
+   * Each part, the real part and the imaginary part, is rounded to `prec`
+   * significant digits (default `BigDecimal.precision`), so that noise
+   * digits from precision-bounded operations (division, transcendentals) are
+   * not displayed. A value made by `N(x, n)` is rounded to `n` digits when `n`
    * is more (`displayDigits()`).
    *
    * For the full unrounded value, use `toJSON()`.
    */
-  toString(): string {
+  toString(prec: number = BigDecimal.precision): string {
     if (this.isZero) return '0';
     if (this.isOne) return '1';
     if (this.isNegativeOne) return '-1';
-    const digits = Math.max(BigDecimal.precision, displayDigits(this) ?? 0);
+    const digits = Math.max(prec, displayDigits(this) ?? 0);
     const rounded = (x: BigDecimal) => decimalToString(x.toPrecision(digits));
     if (!this.isComplex) return rounded(this.decimal);
     if (this.isNaN) return 'NaN';
@@ -323,7 +323,7 @@ export class BigNumericValue extends NumericValue {
     return undefined;
   }
 
-  N(): NumericValue {
+  N(_prec?: number): NumericValue {
     return this;
   }
 
@@ -344,10 +344,10 @@ export class BigNumericValue extends NumericValue {
     return this.clone({ re: this.decimal.neg(), im: this.imDecimal.neg() });
   }
 
-  inv(): BigNumericValue {
+  inv(prec: number = BigDecimal.precision): BigNumericValue {
     if (this.isOne) return this;
     if (this.isNegativeOne) return this;
-    if (!this.isComplex) return this.clone(this.decimal.inv());
+    if (!this.isComplex) return this.clone(this.decimal.inv(prec));
 
     // 1/z = conj(z) / |z|²  (not / |z|).
     // For finite parts, both parts are formed as big decimals, which do not
@@ -355,22 +355,27 @@ export class BigNumericValue extends NumericValue {
     // `0`, and `1/(1e-200 + 1e-200i)` is `5e199 − 5e199i`, not `~oo`.
     const b = this.imDecimal;
     if (this.decimal.isFinite() && b.isFinite()) {
-      const bigD = this.decimal.mul(this.decimal).addBounded(b.mul(b));
+      const bigD = this.decimal.mul(this.decimal).addBounded(b.mul(b), prec);
       return this.clone({
-        re: this.decimal.div(bigD),
-        im: b.neg().div(bigD),
+        re: this.decimal.div(bigD, prec),
+        im: b.neg().div(bigD, prec),
       });
     }
     const d = this.re * this.re + this.im * this.im;
-    const bigD = this.decimal.mul(this.decimal).addBounded(this.im * this.im);
-    return this.clone({ re: this.decimal.div(bigD), im: -this.im / d });
+    const bigD = this.decimal
+      .mul(this.decimal)
+      .addBounded(this.im * this.im, prec);
+    return this.clone({ re: this.decimal.div(bigD, prec), im: -this.im / d });
   }
 
-  add(other: number | NumericValue): NumericValue {
+  add(
+    other: number | NumericValue,
+    prec: number = BigDecimal.precision
+  ): NumericValue {
     if (typeof other === 'number') {
       if (other === 0) return this;
       return this.clone({
-        re: this.decimal.addBounded(other),
+        re: this.decimal.addBounded(other, prec),
         im: this.imDecimal,
       });
     }
@@ -384,26 +389,29 @@ export class BigNumericValue extends NumericValue {
     // values), which would otherwise cap the sum at ~16 digits.
     if (this.isZero)
       return this.clone({
-        re: other.bignumRe ?? other.re,
-        im: other.bignumIm ?? other.im,
+        re: other.bignumReAt(prec) ?? other.re,
+        im: other.bignumImAt(prec) ?? other.im,
       });
 
     // The imaginary parts are added as big decimals: an imaginary part can be
     // too small or too large for a double.
     return this.clone({
-      re: this.decimal.addBounded(other.bignumRe ?? other.re),
+      re: this.decimal.addBounded(other.bignumReAt(prec) ?? other.re, prec),
       im:
         this.isComplex || other.isComplex
-          ? this.imDecimal.addBounded(bigImaginaryPart(other))
+          ? this.imDecimal.addBounded(bigImaginaryPart(other, prec), prec)
           : 0,
     });
   }
 
-  sub(other: NumericValue): NumericValue {
-    return this.add(other.neg());
+  sub(other: NumericValue, prec: number = BigDecimal.precision): NumericValue {
+    return this.add(other.neg(), prec);
   }
 
-  mul(other: number | BigDecimal | NumericValue): NumericValue {
+  mul(
+    other: number | BigDecimal | NumericValue,
+    prec: number = BigDecimal.precision
+  ): NumericValue {
     if (this.isZero) {
       if (
         other instanceof NumericValue &&
@@ -432,8 +440,8 @@ export class BigNumericValue extends NumericValue {
       if (typeof other === 'number' || other instanceof BigDecimal)
         return this.clone(other);
       return this.clone({
-        re: other.bignumRe ?? other.re,
-        im: other.bignumIm ?? other.im,
+        re: other.bignumReAt(prec) ?? other.re,
+        im: other.bignumImAt(prec) ?? other.im,
       });
     }
     if (typeof other === 'number') {
@@ -450,11 +458,12 @@ export class BigNumericValue extends NumericValue {
       )
         return this.clone({ re: Infinity, im: Infinity });
 
-      if (!this.isComplex) return this.clone(this.decimal.mulBounded(other));
+      if (!this.isComplex)
+        return this.clone(this.decimal.mulBounded(other, prec));
 
       return this.clone({
-        re: this.decimal.mulBounded(other),
-        im: this.imDecimal.mulBounded(other),
+        re: this.decimal.mulBounded(other, prec),
+        im: this.imDecimal.mulBounded(other, prec),
       });
     }
     if (other instanceof BigDecimal) {
@@ -468,17 +477,21 @@ export class BigNumericValue extends NumericValue {
       if (!this.isNaN && this.isComplex && !other.isFinite() && !other.isNaN())
         return this.clone({ re: Infinity, im: Infinity });
 
-      if (!this.isComplex) return this.clone(this.decimal.mulBounded(other));
+      if (!this.isComplex)
+        return this.clone(this.decimal.mulBounded(other, prec));
 
       return this.clone({
-        re: this.decimal.mulBounded(other),
-        im: this.imDecimal.mulBounded(other),
+        re: this.decimal.mulBounded(other, prec),
+        im: this.imDecimal.mulBounded(other, prec),
       });
     }
 
     if (this.isNegativeOne) {
       const n = other.neg();
-      return this.clone({ re: n.bignumRe ?? n.re, im: n.bignumIm ?? n.im });
+      return this.clone({
+        re: n.bignumReAt(prec) ?? n.re,
+        im: n.bignumImAt(prec) ?? n.im,
+      });
     }
     if (other.isOne) return this;
     if (other.isNegativeOne) return this.neg();
@@ -539,17 +552,13 @@ export class BigNumericValue extends NumericValue {
         other.rational[1] != 1
       ) {
         const [p, q] = other.rational;
-        const saved = BigDecimal.precision;
-        BigDecimal.precision = saved + 5;
-        try {
-          return this.clone(
-            this.decimal.mul(new BigDecimal(p)).div(new BigDecimal(q))
-          );
-        } finally {
-          BigDecimal.precision = saved;
-        }
+        return this.clone(
+          this.decimal.mul(new BigDecimal(p)).div(new BigDecimal(q), prec + 5)
+        );
       }
-      return this.clone(this.decimal.mulBounded(other.bignumRe ?? other.re));
+      return this.clone(
+        this.decimal.mulBounded(other.bignumReAt(prec) ?? other.re, prec)
+      );
     }
 
     // (a + bi)(c + di) = (ac − bd) + (ad + bc)i, with every part a big
@@ -566,24 +575,33 @@ export class BigNumericValue extends NumericValue {
     // (`roundToProductBound`); the printed value is rounded to the working
     // precision.
     const b = this.imDecimal;
-    const c = other.bignumRe ?? new BigDecimal(other.re);
-    const d = bigImaginaryPart(other);
+    const c = other.bignumReAt(prec) ?? new BigDecimal(other.re);
+    const d = bigImaginaryPart(other, prec);
     return this.clone({
-      re: this.decimal.mul(c).subBounded(b.mul(d)).roundToProductBound(),
-      im: this.decimal.mul(d).addBounded(b.mul(c)).roundToProductBound(),
+      re: this.decimal
+        .mul(c)
+        .subBounded(b.mul(d), prec)
+        .roundToProductBound(prec),
+      im: this.decimal
+        .mul(d)
+        .addBounded(b.mul(c), prec)
+        .roundToProductBound(prec),
     });
   }
 
-  div(other: SmallInteger | NumericValue): NumericValue {
+  div(
+    other: SmallInteger | NumericValue,
+    prec: number = BigDecimal.precision
+  ): NumericValue {
     if (typeof other === 'number') {
       if (other === 1) return this;
       if (other === -1) return this.neg();
       // The same answer as for a numeric value 0 below
-      if (other === 0) return this.div(this.clone(0));
-      if (!this.isComplex) return this.clone(this.decimal.div(other));
+      if (other === 0) return this.div(this.clone(0), prec);
+      if (!this.isComplex) return this.clone(this.decimal.div(other, prec));
       return this.clone({
-        re: this.decimal.div(other),
-        im: this.imDecimal.div(other),
+        re: this.decimal.div(other, prec),
+        im: this.imDecimal.div(other, prec),
       });
     }
 
@@ -599,13 +617,15 @@ export class BigNumericValue extends NumericValue {
     }
 
     if (!this.isComplex && !other.isComplex)
-      return this.clone(this.decimal.div(other.bignumRe ?? other.re));
+      return this.clone(
+        this.decimal.div(other.bignumReAt(prec) ?? other.re, prec)
+      );
 
     const [a, b] = [this.re, this.im];
     const [c, d] = [other.re, other.im];
     const bigB = this.imDecimal;
-    const bigC = other.bignumRe ?? new BigDecimal(other.re);
-    const bigD = bigImaginaryPart(other);
+    const bigC = other.bignumReAt(prec) ?? new BigDecimal(other.re);
+    const bigD = bigImaginaryPart(other, prec);
     // For finite parts, (a + bi)/(c + di) = ((ac + bd) + (bc − ad)i)/(c² + d²)
     // is formed with every part a big decimal, which does not overflow or
     // underflow: `(1e308 + 1e308i) / (1 + i)` is `1e308`, and
@@ -618,25 +638,32 @@ export class BigNumericValue extends NumericValue {
       bigB.isFinite() &&
       bigD.isFinite()
     ) {
-      const denominator = bigC.mul(bigC).addBounded(bigD.mul(bigD));
+      const denominator = bigC.mul(bigC).addBounded(bigD.mul(bigD), prec);
       return this.clone({
-        re: this.decimal.mul(bigC).addBounded(bigB.mul(bigD)).div(denominator),
-        im: bigB.mul(bigC).subBounded(this.decimal.mul(bigD)).div(denominator),
+        re: this.decimal
+          .mul(bigC)
+          .addBounded(bigB.mul(bigD), prec)
+          .div(denominator, prec),
+        im: bigB
+          .mul(bigC)
+          .subBounded(this.decimal.mul(bigD), prec)
+          .div(denominator, prec),
       });
     }
     const denominator = c * c + d * d;
-    const bigDenominator = bigC.mul(bigC).addBounded(d * d);
+    const bigDenominator = bigC.mul(bigC).addBounded(d * d, prec);
     return this.clone({
       re: this.decimal
         .mul(bigC)
-        .addBounded(b * d)
-        .div(bigDenominator),
+        .addBounded(b * d, prec)
+        .div(bigDenominator, prec),
       im: (b * c - a * d) / denominator,
     });
   }
 
   pow(
-    exponent: number | NumericValue | { re: number; im: number }
+    exponent: number | NumericValue | { re: number; im: number },
+    prec: number = BigDecimal.precision
   ): NumericValue {
     console.assert(!Array.isArray(exponent));
     // if (Array.isArray(exponent)) exponent = exponent[0] / exponent[1];
@@ -656,12 +683,12 @@ export class BigNumericValue extends NumericValue {
       if (exponent.isOne) return this;
       if (exponent.isComplex) {
         bigExponent = [
-          exponent.bignumRe ?? new BigDecimal(exponent.re),
-          bigImaginaryPart(exponent),
+          exponent.bignumReAt(prec) ?? new BigDecimal(exponent.re),
+          bigImaginaryPart(exponent, prec),
         ];
         exponent = { re: exponent.re, im: exponent.im };
       } else {
-        bigN = bigRealPart(exponent);
+        bigN = bigRealPart(exponent, prec);
         exponent = exponent.re;
       }
     }
@@ -712,11 +739,12 @@ export class BigNumericValue extends NumericValue {
         // is only rounding noise is removed (see `polarResult()`).
         return polarResult(
           this,
-          guardDigits(bigRe.abs().addBounded(bigIm.abs())),
-          () => {
-            const lnMod = modulus(a, b).ln();
-            const arg = BigDecimal.atan2(b, a);
-            const realExp = lnMod.mul(bigRe).subBounded(arg.mul(bigIm));
+          prec,
+          guardDigits(bigRe.abs().addBounded(bigIm.abs(), prec), prec),
+          (p) => {
+            const lnMod = modulus(a, b, p).ln(p);
+            const arg = BigDecimal.atan2(b, a, p);
+            const realExp = lnMod.mul(bigRe).subBounded(arg.mul(bigIm), p);
             const angle1 = arg.mul(bigRe);
             const angle2 = lnMod.mul(bigIm);
             // When both terms of the angle are small, the angle is not the
@@ -724,9 +752,9 @@ export class BigNumericValue extends NumericValue {
             // `e^{i·10^{-800}}`, computed as `e.pow(i·10^{-800})`, is
             // `1 + 10^{-800}i`.
             const small = (t: BigDecimal) =>
-              t.isZero() || isSmallBeside(t, BigDecimal.ONE);
+              t.isZero() || isSmallBeside(t, BigDecimal.ONE, p);
             const smallAngle = small(angle1) && small(angle2);
-            return [realExp.exp(), angle1.addBounded(angle2), smallAngle];
+            return [realExp.exp(p), angle1.addBounded(angle2, p), smallAngle];
           }
         );
       }
@@ -745,7 +773,7 @@ export class BigNumericValue extends NumericValue {
       return this.clone(NaN);
 
     if (n.eq(1)) return this;
-    if (n.eq(-1)) return this.inv();
+    if (n.eq(-1)) return this.inv(prec);
 
     if (n.isZero()) return this.clone(1);
 
@@ -754,10 +782,10 @@ export class BigNumericValue extends NumericValue {
       if (n.isNegative()) return this.clone({ im: Infinity }); // Complex/unsigned infinity
     }
 
-    if (n.isNegative()) return this.pow(this.clone(n.neg())).inv();
+    if (n.isNegative()) return this.pow(this.clone(n.neg()), prec).inv(prec);
 
     if (!this.isComplex) {
-      return this.clone(this.decimal.pow(n));
+      return this.clone(this.decimal.pow(n, prec));
     }
 
     const a = this.decimal;
@@ -773,10 +801,10 @@ export class BigNumericValue extends NumericValue {
     // precision. This holds for a positive `a`, and for a negative `a` when
     // `n` is an integer (then `a^n` is real). The polar form would lose the
     // imaginary part: the angle `b/a` is below the rounding error of `arg`.
-    if ((a.isPositive() || isInteger) && isSmallBeside(b, a, weight)) {
-      return guarded(this, () => {
-        const an = a.pow(n);
-        return [an, an.mul(b).mul(n).div(a)];
+    if ((a.isPositive() || isInteger) && isSmallBeside(b, a, prec, weight)) {
+      return guarded(this, prec, (p) => {
+        const an = a.pow(n, p);
+        return [an, an.mul(b).mul(n).div(a, p)];
       });
     }
 
@@ -795,42 +823,38 @@ export class BigNumericValue extends NumericValue {
     // `10^{2−precision}` is removed. The rest of the product makes no such
     // noise and is not cleaned.
     if (a.isNegative() && !isInteger && b.abs().lt(a.abs())) {
-      const saved = BigDecimal.precision;
-      const noise = complexNoiseRatio();
-      let re: BigDecimal;
-      let im: BigDecimal;
-      BigDecimal.precision = saved + guardDigits(n);
-      try {
-        const unitAngle = BigDecimal.PI.mul(n);
-        let c = unitAngle.cos();
-        let s = unitAngle.sin();
-        if (b.isNegative()) s = s.neg();
-        if (c.abs().lte(noise)) c = BigDecimal.ZERO;
-        if (s.abs().lte(noise)) s = BigDecimal.ZERO;
-        const ratio = b.div(a);
-        // When `b/a` is small, `atan(b/a)` is `b/a` to the working precision.
-        const smallAngle = n.mul(isSmallBeside(b, a) ? ratio : ratio.atan());
-        const mag = modulus(a, b).pow(n);
-        const cosSmall = smallAngle.cos();
-        const sinSmall = isSmallBeside(b, a, weight)
-          ? smallAngle
-          : smallAngle.sin();
-        re = mag.mul(c.mul(cosSmall).subBounded(s.mul(sinSmall)));
-        im = mag.mul(s.mul(cosSmall).addBounded(c.mul(sinSmall)));
-      } finally {
-        BigDecimal.precision = saved;
-      }
-      return this.clone({ re: roundToPrecision(re), im: roundToPrecision(im) });
+      const noise = complexNoiseRatio(prec);
+      const p = prec + guardDigits(n, prec);
+      const unitAngle = BigDecimal.pi(p).mul(n);
+      let c = unitAngle.cos(p);
+      let s = unitAngle.sin(p);
+      if (b.isNegative()) s = s.neg();
+      if (c.abs().lte(noise)) c = BigDecimal.ZERO;
+      if (s.abs().lte(noise)) s = BigDecimal.ZERO;
+      const ratio = b.div(a, p);
+      // When `b/a` is small, `atan(b/a)` is `b/a` to the working precision.
+      const smallAngle = n.mul(isSmallBeside(b, a, p) ? ratio : ratio.atan(p));
+      const mag = modulus(a, b, p).pow(n, p);
+      const cosSmall = smallAngle.cos(p);
+      const sinSmall = isSmallBeside(b, a, p, weight)
+        ? smallAngle
+        : smallAngle.sin(p);
+      const re = mag.mul(c.mul(cosSmall).subBounded(s.mul(sinSmall), p));
+      const im = mag.mul(s.mul(cosSmall).addBounded(c.mul(sinSmall), p));
+      return this.clone({
+        re: roundToPrecision(re, prec),
+        im: roundToPrecision(im, prec),
+      });
     }
 
     // Small-component regime, a small real part, for an integer `n`:
     //   (a + ib)^n = (ib)^n·(1 − i·n·a/b)
     // `(ib)^n` is `b^n` turned by `i^n`, and the correction is turned by one
     // more quarter turn.
-    if (isInteger && isSmallBeside(a, b, weight)) {
-      return guarded(this, () => {
-        const main = b.pow(n);
-        const correction = main.mul(a).mul(n.neg()).div(b);
+    if (isInteger && isSmallBeside(a, b, prec, weight)) {
+      return guarded(this, prec, (p) => {
+        const main = b.pow(n, p);
+        const correction = main.mul(a).mul(n.neg()).div(b, p);
         switch (Number(n.toBigInt() % BigInt(4))) {
           case 0:
             return [main, correction];
@@ -861,19 +885,19 @@ export class BigNumericValue extends NumericValue {
       const magnitude = n.toNumber() * log10Modulus(a, b);
       if (magnitude > 9e15) return this.clone({ re: Infinity, im: Infinity });
       if (magnitude < -9e15) return this.clone(0);
-      return integerPower(this, a, b, n.toBigInt());
+      return integerPower(this, a, b, n.toBigInt(), prec);
     }
 
     // Normal regime: the polar form, with guard digits because the angle is
     // multiplied by `n`, which multiplies its rounding error. A part that is
     // only rounding noise is removed (see `polarResult()`).
-    return polarResult(this, guardDigits(n), () => [
-      modulus(a, b).pow(n),
-      BigDecimal.atan2(b, a).mul(n),
+    return polarResult(this, prec, guardDigits(n, prec), (p) => [
+      modulus(a, b, p).pow(n, p),
+      BigDecimal.atan2(b, a, p).mul(n),
     ]);
   }
 
-  root(exp: number): NumericValue {
+  root(exp: number, prec: number = BigDecimal.precision): NumericValue {
     if (!Number.isInteger(exp)) return this._makeExact(NaN);
     if (exp === 0) return this._makeExact(NaN);
     if (exp === 1) return this;
@@ -887,7 +911,7 @@ export class BigNumericValue extends NumericValue {
     // The square root of a negative real is imaginary (`sqrt()` handles it),
     // as in `MachineNumericValue.root`. Only the higher even roots of a
     // negative real are NaN in the float lanes.
-    if (exp === 2) return this.sqrt();
+    if (exp === 2) return this.sqrt(prec);
 
     if (!this.isComplex) {
       if (this.decimal.isNegative()) {
@@ -895,15 +919,17 @@ export class BigNumericValue extends NumericValue {
         // MachineNumericValue.root (e.g. (-8)^(1/3) = -2). Even roots of
         // negative reals are not real: NaN, also matching the machine path.
         if (exp % 2 === 0) return this._makeExact(NaN);
-        if (exp === 3) return this.clone(this.decimal.cbrt());
-        return this.clone(this.decimal.neg().ln().div(exp).exp().neg());
+        if (exp === 3) return this.clone(this.decimal.cbrt(prec));
+        return this.clone(
+          this.decimal.neg().ln(prec).div(exp, prec).exp(prec).neg()
+        );
       }
-      if (exp === 3) return this.clone(this.decimal.cbrt());
+      if (exp === 3) return this.clone(this.decimal.cbrt(prec));
       // x^(1/n) via `nthRoot`, which computes it at full working precision and
       // snaps a perfect power to its exact integer root. (The earlier
       // `ln(x)/n |> exp` neither snapped — `Root(64,3)` printed 3.999…9 — nor,
       // before that, `pow(1/exp)` kept full precision.) (NU-P1-7)
-      return this.clone(this.decimal.nthRoot(exp));
+      return this.clone(this.decimal.nthRoot(exp, prec));
     }
 
     // Complex root:
@@ -921,10 +947,10 @@ export class BigNumericValue extends NumericValue {
     // the rounding error of `arg`. (Near the negative real axis, and for a
     // small real part, the parts of the root are not small, and the polar
     // form keeps them.)
-    if (exp > 0 && a.isPositive() && isSmallBeside(b, a)) {
-      return guarded(this, () => {
-        const r = a.nthRoot(exp);
-        return [r, r.mul(b).div(a.mul(exp))];
+    if (exp > 0 && a.isPositive() && isSmallBeside(b, a, prec)) {
+      return guarded(this, prec, (p) => {
+        const r = a.nthRoot(exp, p);
+        return [r, r.mul(b).div(a.mul(exp), p)];
       });
     }
 
@@ -932,13 +958,13 @@ export class BigNumericValue extends NumericValue {
     // is removed (see `polarResult()`). The modulus of the root is
     // exp(ln(modulus)/exp) at full precision; `pow(1/exp)` rounded the
     // reciprocal to machine precision first. This is the principal root.
-    return polarResult(this, guardDigits(BigDecimal.ONE), () => [
-      modulus(a, b).ln().div(exp).exp(),
-      BigDecimal.atan2(b, a).div(exp),
+    return polarResult(this, prec, guardDigits(BigDecimal.ONE, prec), (p) => [
+      modulus(a, b, p).ln(p).div(exp, p).exp(p),
+      BigDecimal.atan2(b, a, p).div(exp, p),
     ]);
   }
 
-  sqrt(): NumericValue {
+  sqrt(prec: number = BigDecimal.precision): NumericValue {
     if (this.isZero || this.isOne) return this;
 
     if (this.isComplex) {
@@ -958,22 +984,22 @@ export class BigNumericValue extends NumericValue {
       const b = this.imDecimal;
       // An infinite imaginary part: both parts of the root are infinite.
       if (!b.isFinite()) return this.clone({ re: Infinity, im: b });
-      return guarded(this, () => {
-        const m = modulus(a, b);
+      return guarded(this, prec, (p) => {
+        const m = modulus(a, b, p);
         if (!a.isNegative()) {
-          const realPart = a.addBounded(m).div(2).sqrt();
-          return [realPart, b.div(realPart.mul(2))];
+          const realPart = a.addBounded(m, p).div(2, p).sqrt(p);
+          return [realPart, b.div(realPart.mul(2), p)];
         }
-        const imMagnitude = m.subBounded(a).div(2).sqrt();
+        const imMagnitude = m.subBounded(a, p).div(2, p).sqrt(p);
         return [
-          b.abs().div(imMagnitude.mul(2)),
+          b.abs().div(imMagnitude.mul(2), p),
           b.isNegative() ? imMagnitude.neg() : imMagnitude,
         ];
       });
     }
 
-    if (this.decimal.isPositive()) return this.clone(this.decimal.sqrt());
-    return this.clone({ im: this.decimal.neg().sqrt() });
+    if (this.decimal.isPositive()) return this.clone(this.decimal.sqrt(prec));
+    return this.clone({ im: this.decimal.neg().sqrt(prec) });
   }
 
   gcd(other: NumericValue): NumericValue {
@@ -996,14 +1022,14 @@ export class BigNumericValue extends NumericValue {
     return this.clone(a.abs());
   }
 
-  abs(): NumericValue {
+  abs(prec: number = BigDecimal.precision): NumericValue {
     if (!this.isComplex)
       return this.decimal.isPositive() ? this : this.clone(this.decimal.neg());
 
-    return this.clone(modulus(this.decimal, this.imDecimal));
+    return this.clone(modulus(this.decimal, this.imDecimal, prec));
   }
 
-  ln(base?: number): NumericValue {
+  ln(base?: number, prec: number = BigDecimal.precision): NumericValue {
     if (this.isZero) return this._makeExact(NaN);
     if (this.isNegativeInfinity) return this._makeExact(NaN);
     if (this.isPositiveInfinity) return this._makeExact(Infinity);
@@ -1017,16 +1043,16 @@ export class BigNumericValue extends NumericValue {
       // used on the .N() path and with the exact ln(-1) = iπ.
       if (this.decimal.isNegative()) {
         const neg = this.decimal.neg();
-        const pi = roundToPrecision(BigDecimal.PI);
-        if (base === undefined) return this.clone({ re: neg.ln(), im: pi });
+        const pi = roundToPrecision(BigDecimal.pi(prec), prec);
+        if (base === undefined) return this.clone({ re: neg.ln(prec), im: pi });
         return this.clone({
-          re: neg.log(base),
-          im: pi.div(new BigDecimal(base).ln()),
+          re: neg.log(base, prec),
+          im: pi.div(new BigDecimal(base).ln(prec), prec),
         });
       }
 
-      if (base === undefined) return this.clone(this.decimal.ln());
-      return this.clone(this.decimal.log(base));
+      if (base === undefined) return this.clone(this.decimal.ln(prec));
+      return this.clone(this.decimal.log(base, prec));
     }
 
     // ln(a + bi) = ln(|a + bi|) + i * arg(a + bi)
@@ -1034,26 +1060,26 @@ export class BigNumericValue extends NumericValue {
     // imaginary parts are divided by ln(b).
     const a = this.decimal;
     const b = this.imDecimal;
-    return guarded(this, () => {
+    return guarded(this, prec, (p) => {
       let re: BigDecimal;
       let im: BigDecimal;
-      if (a.isPositive() && isSmallBeside(b, a)) {
+      if (a.isPositive() && isSmallBeside(b, a, p)) {
         // Small-component regime: ln(a + ib) = ln a + i·b/a. The next terms
         // are of relative size (b/a)², below the working precision, and
         // `atan2` loses the angle `b/a` when it is below its rounding error.
-        re = a.ln();
-        im = b.div(a);
+        re = a.ln(p);
+        im = b.div(a, p);
       } else {
-        re = modulus(a, b).ln();
-        im = BigDecimal.atan2(b, a);
+        re = modulus(a, b, p).ln(p);
+        im = BigDecimal.atan2(b, a, p);
       }
       if (base === undefined) return [re, im];
-      const lnBase = new BigDecimal(base).ln();
-      return [re.div(lnBase), im.div(lnBase)];
+      const lnBase = new BigDecimal(base).ln(p);
+      return [re.div(lnBase, p), im.div(lnBase, p)];
     });
   }
 
-  exp(): NumericValue {
+  exp(prec: number = BigDecimal.precision): NumericValue {
     if (this.isNaN) return this._makeExact(NaN);
     // A float argument gives a float result: `exp(0.0)` is the float `1`.
     if (this.isZero) return this.clone(1);
@@ -1069,9 +1095,9 @@ export class BigNumericValue extends NumericValue {
       // Small-component regime: for a small `b`, exp(a + ib) = e^a·(1 + ib).
       // The next terms are of relative size b², below the working precision.
       // `e^{i·10^{-800}}` is `1 + 10^{-800}i`, and no part is removed.
-      if (isSmallBeside(b, BigDecimal.ONE)) {
-        return guarded(this, () => {
-          const e = this.decimal.exp();
+      if (isSmallBeside(b, BigDecimal.ONE, prec)) {
+        return guarded(this, prec, (p) => {
+          const e = this.decimal.exp(p);
           return [e, e.mul(b)];
         });
       }
@@ -1081,12 +1107,12 @@ export class BigNumericValue extends NumericValue {
       // cosine factor is noise compared with 1: `e^{iπ}` is `-1`, and
       // `e^{iπ/2}` is `i`. The test is relative, so the imaginary part of
       // `e^{-40 + i}` (3.6e-18) is kept.
-      return polarResult(this, guardDigits(BigDecimal.ONE), () => [
-        this.decimal.exp(),
+      return polarResult(this, prec, guardDigits(BigDecimal.ONE, prec), (p) => [
+        this.decimal.exp(p),
         b,
       ]);
     }
-    return this.clone(this.decimal.exp());
+    return this.clone(this.decimal.exp(prec));
   }
 
   floor(): NumericValue {
@@ -1123,7 +1149,7 @@ export class BigNumericValue extends NumericValue {
       return this.isComplexInfinity && other.isComplexInfinity;
     return (
       this.decimal.eq(other.bignumRe ?? other.re) &&
-      this.imDecimal.eq(bigImaginaryPart(other))
+      this.imDecimal.eq(other.bignumIm ?? new BigDecimal(other.im))
     );
   }
 
@@ -1179,37 +1205,31 @@ function decimalToString(num: BigDecimal): string {
 /** The number of guard digits of the complex kernels. */
 const GUARD_DIGITS = 5;
 
-/** The complex value whose two parts `compute()` returns. The parts are
- * computed with `GUARD_DIGITS` more digits, then each is rounded once to
- * the working precision: without the guard digits, a part formed from other
- * rounded parts (`b/(2·√((|z| + a)/2))`) can be one unit in the last place
- * away from the correctly rounded value. */
+/** The complex value whose two parts `compute(p)` returns. The parts are
+ * computed at `p`, the working precision `prec` plus `GUARD_DIGITS`, then
+ * each is rounded once to `prec`: without the guard digits, a part formed
+ * from other rounded parts (`b/(2·√((|z| + a)/2))`) can be one unit in the
+ * last place away from the correctly rounded value. */
 function guarded(
   v: BigNumericValue,
-  compute: () => [BigDecimal, BigDecimal]
+  prec: number,
+  compute: (p: number) => [BigDecimal, BigDecimal]
 ): BigNumericValue {
-  const saved = BigDecimal.precision;
-  let parts: [BigDecimal, BigDecimal];
-  BigDecimal.precision = saved + GUARD_DIGITS;
-  try {
-    parts = compute();
-  } finally {
-    BigDecimal.precision = saved;
-  }
+  const parts = compute(prec + GUARD_DIGITS);
   return v.clone({
-    re: roundToPrecision(parts[0]),
-    im: roundToPrecision(parts[1]),
+    re: roundToPrecision(parts[0], prec),
+    im: roundToPrecision(parts[1], prec),
   });
 }
 
-/** Round `x` to the working precision, `BigDecimal.precision`. */
-function roundToPrecision(x: BigDecimal): BigDecimal {
-  return x.toPrecision(BigDecimal.precision);
+/** Round `x` to the working precision `prec`. */
+function roundToPrecision(x: BigDecimal, prec: number): BigDecimal {
+  return x.toPrecision(prec);
 }
 
 /**
  * Whether `x` is small beside `y`: `weight·|x|` is less than
- * `10^(2−precision)·|y|`, where `precision` is the working precision.
+ * `10^(2−prec)·|y|`, where `prec` is the working precision.
  *
  * When this is true, the first-order expansion of a complex kernel in the
  * small part (`e^{ib} = 1 + ib`, `ln(a + ib) = ln a + i·b/a`) is exact to
@@ -1217,60 +1237,60 @@ function roundToPrecision(x: BigDecimal): BigDecimal {
  * `(weight·x/y)²`. The complex kernels then use the expansion instead of the
  * polar form, which loses the small part (see `polarResult()`).
  */
-function isSmallBeside(x: BigDecimal, y: BigDecimal, weight = 1): boolean {
+function isSmallBeside(
+  x: BigDecimal,
+  y: BigDecimal,
+  prec: number,
+  weight = 1
+): boolean {
   if (x.isZero() || y.isZero() || !x.isFinite() || !y.isFinite()) return false;
-  return x.abs().mul(weight).lt(y.abs().mul(complexNoiseRatio()));
+  return x
+    .abs()
+    .mul(weight)
+    .lt(y.abs().mul(complexNoiseRatio(prec)));
 }
 
 /** The modulus `√(a² + b²)`. When a part is small beside the other (see
  * `isSmallBeside()`), the modulus is the larger part: the correction is of
  * relative size `(b/a)²/2`, below the working precision, and the exact
- * squares of such parts can have thousands of digits. */
-function modulus(a: BigDecimal, b: BigDecimal): BigDecimal {
-  if (b.isZero() || isSmallBeside(b, a)) return a.abs();
-  if (a.isZero() || isSmallBeside(a, b)) return b.abs();
-  return a.mul(a).addBounded(b.mul(b)).sqrt();
+ * squares of such parts can have thousands of digits. The working precision
+ * is `prec`. */
+function modulus(a: BigDecimal, b: BigDecimal, prec: number): BigDecimal {
+  if (b.isZero() || isSmallBeside(b, a, prec)) return a.abs();
+  if (a.isZero() || isSmallBeside(a, b, prec)) return b.abs();
+  return a.mul(a).addBounded(b.mul(b), prec).sqrt(prec);
 }
 
 /** The number of guard digits of a polar computation whose angle is
  * multiplied by `n`: the rounding error of the angle is multiplied by `|n|`,
- * which costs about `log10(|n|)` digits. */
-function guardDigits(n: BigDecimal): number {
-  const magnitude = n.isZero() ? 0 : Math.max(0, n.abs().log(10).toNumber());
+ * which costs about `log10(|n|)` digits. The logarithm is computed at the
+ * working precision `prec`. */
+function guardDigits(n: BigDecimal, prec: number): number {
+  const magnitude = n.isZero()
+    ? 0
+    : Math.max(0, n.abs().log(10, prec).toNumber());
   return GUARD_DIGITS + Math.ceil(Number.isFinite(magnitude) ? magnitude : 0);
 }
 
 /** An estimate of `log10(√(a² + b²))`, computed at 17 digits: it decides
  * only whether a power overflows or underflows. */
 function log10Modulus(a: BigDecimal, b: BigDecimal): number {
-  const saved = BigDecimal.precision;
-  BigDecimal.precision = 17;
-  try {
-    return modulus(a, b).log(10).toNumber();
-  } finally {
-    BigDecimal.precision = saved;
-  }
+  return modulus(a, b, 17).log(10, 17).toNumber();
 }
 
 /** The real part of `v` as a big decimal. The real part of an exact value
  * (a rational such as `2/3`) is computed with `GUARD_DIGITS` more digits than
- * the working precision, because it is an exponent: its rounding error is
- * multiplied by the logarithm of the base. */
-function bigRealPart(v: NumericValue): BigDecimal {
+ * the working precision `prec`, because it is an exponent: its rounding error
+ * is multiplied by the logarithm of the base. */
+function bigRealPart(v: NumericValue, prec: number): BigDecimal {
   if (!v.isExact) return v.bignumRe ?? new BigDecimal(v.re);
-  const saved = BigDecimal.precision;
-  BigDecimal.precision = saved + GUARD_DIGITS;
-  try {
-    return v.bignumRe ?? new BigDecimal(v.re);
-  } finally {
-    BigDecimal.precision = saved;
-  }
+  return v.bignumReAt(prec + GUARD_DIGITS) ?? new BigDecimal(v.re);
 }
 
 /**
  * `(a + ib)^n` for a positive integer `n`, by binary exponentiation. Each
- * product is computed at the working precision plus the guard digits of
- * `guardDigits(n)`, then each part is rounded to the working precision.
+ * product is computed at the working precision `prec` plus the guard digits
+ * of `guardDigits(n)`, then each part is rounded to `prec`.
  *
  * No small part is removed. The products of big decimals introduce no noise
  * of the kind a polar computation makes at a multiple of π/2, so a small
@@ -1283,46 +1303,43 @@ function integerPower(
   v: BigNumericValue,
   a: BigDecimal,
   b: BigDecimal,
-  n: bigint
+  n: bigint,
+  prec: number
 ): BigNumericValue {
-  const saved = BigDecimal.precision;
-  let re: BigDecimal;
-  let im: BigDecimal;
-  BigDecimal.precision = saved + guardDigits(new BigDecimal(n));
-  try {
-    const mul = (
-      [x0, x1]: [BigDecimal, BigDecimal],
-      [y0, y1]: [BigDecimal, BigDecimal]
-    ): [BigDecimal, BigDecimal] => [
-      roundToPrecision(x0.mul(y0).subBounded(x1.mul(y1))),
-      roundToPrecision(x0.mul(y1).addBounded(x1.mul(y0))),
-    ];
-    let result: [BigDecimal, BigDecimal] | undefined;
-    let base: [BigDecimal, BigDecimal] = [a, b];
-    let k = n;
-    while (true) {
-      if (k % BigInt(2) === BigInt(1))
-        result = result ? mul(result, base) : base;
-      k = k / BigInt(2);
-      if (k === BigInt(0)) break;
-      base = mul(base, base);
-    }
-    [re, im] = result!;
-  } finally {
-    BigDecimal.precision = saved;
+  const p = prec + guardDigits(new BigDecimal(n), prec);
+  const mul = (
+    [x0, x1]: [BigDecimal, BigDecimal],
+    [y0, y1]: [BigDecimal, BigDecimal]
+  ): [BigDecimal, BigDecimal] => [
+    roundToPrecision(x0.mul(y0).subBounded(x1.mul(y1), p), p),
+    roundToPrecision(x0.mul(y1).addBounded(x1.mul(y0), p), p),
+  ];
+  let result: [BigDecimal, BigDecimal] | undefined;
+  let base: [BigDecimal, BigDecimal] = [a, b];
+  let k = n;
+  while (true) {
+    if (k % BigInt(2) === BigInt(1)) result = result ? mul(result, base) : base;
+    k = k / BigInt(2);
+    if (k === BigInt(0)) break;
+    base = mul(base, base);
   }
-  return v.clone({ re: roundToPrecision(re), im: roundToPrecision(im) });
+  const [re, im] = result!;
+  return v.clone({
+    re: roundToPrecision(re, prec),
+    im: roundToPrecision(im, prec),
+  });
 }
 
 /**
  * The complex value `mag·(cos θ + i·sin θ)` of a kernel in polar form (a
  * complex power, root or exponential), with the rounding noise removed.
  *
- * `compute()` returns `[mag, θ]`. It runs with `extra` guard digits, and so
- * do the cosine and the sine. Then each part is rounded to the working
- * precision, and a part that is at most `10^(2−precision)` times the modulus
- * `mag` is removed (`isComplexDust()`): a polar computation at a multiple of
- * π/2 leaves such a part, and it is only rounding (`e^{iπ}` computes
+ * `compute(p)` returns `[mag, θ]`. It runs at `p`, the working precision
+ * `prec` plus `extra` guard digits, and so do the cosine and the sine. Then
+ * each part is rounded to `prec`, and a part that is at most `10^(2−prec)`
+ * times the modulus `mag` is removed (`isComplexDust()`): a polar
+ * computation at a multiple of π/2 leaves such a part, and it is only
+ * rounding (`e^{iπ}` computes
  * `-1 + 1.2e-21i` at 21 digits, because π has 21 digits). A legitimate part
  * of that size does not reach this function for a real exponent: when a
  * part is that small, the kernels use a first-order expansion instead (see
@@ -1335,32 +1352,23 @@ function integerPower(
  */
 function polarResult(
   v: BigNumericValue,
+  prec: number,
   extra: number,
-  compute: () => [BigDecimal, BigDecimal, boolean?]
+  compute: (p: number) => [BigDecimal, BigDecimal, boolean?]
 ): BigNumericValue {
-  const saved = BigDecimal.precision;
-  let mag: BigDecimal;
-  let re: BigDecimal;
-  let im: BigDecimal;
-  let smallAngle: boolean | undefined;
-  BigDecimal.precision = saved + extra;
-  try {
-    const [m, theta, small] = compute();
-    mag = m;
-    smallAngle = small;
-    // A small angle that is not the result of a cancellation (the caller
-    // says so) is the small-component regime: `mag·(1 + iθ)`, not chopped.
-    re = smallAngle ? m : m.mul(theta.cos());
-    im = smallAngle ? m.mul(theta) : m.mul(theta.sin());
-  } finally {
-    BigDecimal.precision = saved;
-  }
-  re = roundToPrecision(re);
-  im = roundToPrecision(im);
+  const p = prec + extra;
+  const [mag, theta, smallAngle] = compute(p);
+  // A small angle that is not the result of a cancellation (the caller
+  // says so) is the small-component regime: `mag·(1 + iθ)`, not chopped.
+  const re = roundToPrecision(smallAngle ? mag : mag.mul(theta.cos(p)), prec);
+  const im = roundToPrecision(
+    smallAngle ? mag.mul(theta) : mag.mul(theta.sin(p)),
+    prec
+  );
   if (smallAngle) return v.clone({ re, im });
   return v.clone({
-    re: isComplexDust(re, mag) ? BigDecimal.ZERO : re,
-    im: isComplexDust(im, mag) ? BigDecimal.ZERO : im,
+    re: isComplexDust(re, mag, prec) ? BigDecimal.ZERO : re,
+    im: isComplexDust(im, mag, prec) ? BigDecimal.ZERO : im,
   });
 }
 
@@ -1368,7 +1376,8 @@ function polarResult(
  * one (an `ExactNumericValue`, whose imaginary part can be too small or too
  * large for a double), otherwise the double `im` converted to a big decimal.
  * A big-decimal complex product or quotient must read this, not `im`: the
- * double is `0` or `±Infinity` for such a part. */
-function bigImaginaryPart(v: NumericValue): BigDecimal {
-  return v.bignumIm ?? new BigDecimal(v.im);
+ * double is `0` or `±Infinity` for such a part. An exact imaginary part is
+ * computed at the working precision `prec`. */
+function bigImaginaryPart(v: NumericValue, prec: number): BigDecimal {
+  return v.bignumImAt(prec) ?? new BigDecimal(v.im);
 }

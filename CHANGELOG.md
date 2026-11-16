@@ -94,6 +94,18 @@
 
 ### Bug Fixes
 
+- **A second engine with another precision no longer changes the digits of
+  numbers computed by the first**
+  ([#556](https://github.com/cortex-js/compute-engine/issues/556)). With an
+  engine `a` at precision 30, creating an engine `b` at
+  `precision = 'machine'` made `a.expr(['Sqrt', 2]).N().toString()` give
+  `1.4142135623731` instead of `1.41421356237309504880168872421`. `.N()` of a
+  number, the arithmetic methods of an expression (`add`, `mul`, `div`,
+  `pow`, `root`, `sqrt`, `inv`), the numeric values of `Sqrt`, `Root`, `Ln`
+  and `Power`, and the display of a number now use the precision of their own
+  engine. Trigonometric and special functions still use the precision of the
+  engine that was created or configured last: for them, keep using one engine
+  per program.
 - **A numeric constant tested against a `Set` of numbers is decided by
   value** ([#593](https://github.com/cortex-js/compute-engine/issues/593)).
   `Contains(Set(1, 2, 3), ExponentialE)`, `Element(ExponentialE, Set(1, 2))`
@@ -255,6 +267,15 @@
 
 ### Improvements
 
+- **`BigDecimal` operations take an optional precision argument.** Each
+  operation that rounds (`div`, `inv`, `pow`, `sqrt`, `cbrt`, `nthRoot`,
+  `exp`, `ln`, `log`, and the trigonometric and hyperbolic functions) or
+  bounds its result (`add`, `sub`, `addBounded`, `subBounded`, `mulBounded`)
+  takes a last argument `prec`, the number of significant digits. It defaults
+  to `BigDecimal.precision`. `BigDecimal.pi(prec)` and
+  `BigDecimal.eulerGamma(prec)` return the constants at a given precision.
+  For example, `new BigDecimal(2).sqrt(40)` is rounded to 40 significant
+  digits whatever the value of `BigDecimal.precision`.
 - **`Hypergeometric2F1` has a derivative in `z`, and `Series` of it
   expands.** `D(₂F₁(a, b; c; z), z)` is `(ab/c)·₂F₁(a + 1, b + 1; c + 1; z)`
   (DLMF 15.5.1; the parameters keep the inert partial), so the chain rule

@@ -325,18 +325,40 @@ export class ExactNumericValue extends NumericValue {
   // a memo has no repeat accesses to serve and would only retain extra
   // memory. This is a cold path; it stays uncached.
   get bignumRe(): BigDecimal {
-    return this._bignumComponent(this.rational, this.radical);
+    return this._re(BigDecimal.precision);
   }
 
   /** bignum version of `.im` — exact even when the imaginary component
    * overflows the machine-float projection (e.g. `(2+3i)^1000`). */
   get bignumIm(): BigDecimal {
-    return this._bignumComponent(this.imRational, this.imRadical);
+    return this._im(BigDecimal.precision);
   }
 
-  private _bignumComponent(r: Rational, radical: number): BigDecimal {
+  bignumReAt(prec: number): BigDecimal {
+    return this._re(prec);
+  }
+
+  bignumImAt(prec: number): BigDecimal {
+    return this._im(prec);
+  }
+
+  /** The real part as a big decimal at the working precision `prec`. */
+  private _re(prec: number): BigDecimal {
+    return this._bignumComponent(this.rational, this.radical, prec);
+  }
+
+  /** The imaginary part as a big decimal at the working precision `prec`. */
+  private _im(prec: number): BigDecimal {
+    return this._bignumComponent(this.imRational, this.imRadical, prec);
+  }
+
+  private _bignumComponent(
+    r: Rational,
+    radical: number,
+    prec: number
+  ): BigDecimal {
     if (radical === 1) {
-      // A machine-precision engine sets the global `BigDecimal.precision` to
+      // A machine-precision engine has the working precision
       // `MACHINE_PRECISION` (15), fewer than the 17 significant digits a
       // double carries, so a quotient rounded at that precision and then
       // converted with `.toNumber()` (the machine lane's `N()`, and every
@@ -347,18 +369,10 @@ export class ExactNumericValue extends NumericValue {
       // precision is kept: a big-decimal engine prints exactly its digits,
       // and an engine below machine precision (`precision: 3`) numericizes
       // to that coarse precision by design (`6000001/2000000` is `3`).
-      const quotient = () =>
-        isMachineRational(r)
-          ? new BigDecimal(r[0]).div(r[1])
-          : new BigDecimal(r[0]).div(new BigDecimal(r[1]));
-      const saved = BigDecimal.precision;
-      if (saved !== MACHINE_PRECISION) return quotient();
-      BigDecimal.precision = 25;
-      try {
-        return quotient();
-      } finally {
-        BigDecimal.precision = saved;
-      }
+      const p = doubleDigits(prec);
+      return isMachineRational(r)
+        ? new BigDecimal(r[0]).div(r[1], p)
+        : new BigDecimal(r[0]).div(new BigDecimal(r[1]), p);
     }
     // rational × √radical: compute the two rounded factors with guard
     // digits, then round the (exact, ~2P-digit) product back to the working
@@ -368,27 +382,25 @@ export class ExactNumericValue extends NumericValue {
     // P-digit factors is off by up to ~2.5 ulp (Power(2, -1/2) at 2.35 ulp).
     //
     // The output precision is floored at 25 digits: a machine-precision
-    // engine sets the global BigDecimal.precision to 15, and rounding the
+    // engine has the working precision 15, and rounding the
     // product to 15 digits before its `.toNumber()` conversion corrupted
     // the double (√175 came out 265 ulp off). 25 digits keep the double
     // exact (17 needed) with margin, while still cutting the garbage tail.
     // (CORRECTNESS P2 #17/#21)
-    const saved = BigDecimal.precision;
-    const outPrec = Math.max(saved, 25);
-    BigDecimal.precision = outPrec + 10;
-    try {
-      const quotient = isMachineRational(r)
-        ? new BigDecimal(r[0]).div(r[1])
-        : new BigDecimal(r[0]).div(new BigDecimal(r[1]));
-      // Fused multiply-and-round: rounds the raw product ONCE to outPrec
-      // instead of mul() rounding at the ambient guard precision (outPrec+10)
-      // and toPrecision() rounding again. Single rounding is at least as
-      // accurate as the previous double rounding (battery-verified vs
-      // mpmath), and skips a full-width normalize + digit re-scan.
-      return quotient._mulToPrecision(new BigDecimal(radical).sqrt(), outPrec);
-    } finally {
-      BigDecimal.precision = saved;
-    }
+    const outPrec = Math.max(prec, 25);
+    const guarded = outPrec + 10;
+    const quotient = isMachineRational(r)
+      ? new BigDecimal(r[0]).div(r[1], guarded)
+      : new BigDecimal(r[0]).div(new BigDecimal(r[1]), guarded);
+    // Fused multiply-and-round: rounds the raw product ONCE to outPrec
+    // instead of mul() rounding at the guard precision (outPrec+10)
+    // and toPrecision() rounding again. Single rounding is at least as
+    // accurate as the previous double rounding (battery-verified vs
+    // mpmath), and skips a full-width normalize + digit re-scan.
+    return quotient._mulToPrecision(
+      new BigDecimal(radical).sqrt(guarded),
+      outPrec
+    );
   }
 
   get numerator(): ExactNumericValue {
@@ -411,12 +423,12 @@ export class ExactNumericValue extends NumericValue {
 
   /** The float-lane representation of this value (used when an operation
    * result leaves the exact representable set). */
-  private _toFloat(): NumericValue {
-    if (!this.isComplex) return this.factory(this.bignumRe);
+  private _toFloat(prec: number): NumericValue {
+    if (!this.isComplex) return this.factory(this._re(prec));
     // The imaginary part is passed as a big decimal: its double `im` is `0`
     // for `10^{-800}` and `Infinity` for `10^{800}`, and it has only 16
     // digits.
-    return this.factory({ re: this.bignumRe, im: this.bignumIm });
+    return this.factory({ re: this._re(prec), im: this._im(prec) });
   }
 
   private normalize(): void {
@@ -613,7 +625,7 @@ export class ExactNumericValue extends NumericValue {
     return isPositive(this.rational) ? 1 : -1;
   }
 
-  N(): NumericValue {
+  N(prec: number = BigDecimal.precision): NumericValue {
     if (this.isZero || this.isOne || this.isNegativeOne) return this;
     if (!this.isComplex) {
       if (this.rational[1] == 1 && this.radical === 1) {
@@ -624,18 +636,18 @@ export class ExactNumericValue extends NumericValue {
         // does. An integer that has a finite double stays exact. In the
         // big-decimal lane, the value is kept.
         if (!Number.isFinite(Number(this.rational[0]))) {
-          const approx = this.factory(this.bignumRe);
+          const approx = this.factory(this._re(prec));
           if (approx.bignumRe === undefined) return approx;
         }
         return this;
       }
-      return this.factory(this.bignumRe);
+      return this.factory(this._re(prec));
     }
     // Every complex value goes to the float lane, a Gaussian integer
     // (`1 + i`) too: under `.N()` a complex value is always inexact. A float
     // complex value stays inexact when it meets an exact value in `add`,
     // `mul` or `div`, also when its parts are integers.
-    return this._toFloat();
+    return this._toFloat(prec);
   }
 
   neg(): ExactNumericValue {
@@ -654,7 +666,7 @@ export class ExactNumericValue extends NumericValue {
     });
   }
 
-  inv(): NumericValue {
+  inv(prec: number = BigDecimal.precision): NumericValue {
     // Guard non-finite values before the bigint conversions below — otherwise
     // `BigInt(NaN)` / `BigInt(Infinity)` throw a RangeError.
     if (this.isNaN) return this;
@@ -706,7 +718,10 @@ export class ExactNumericValue extends NumericValue {
     });
   }
 
-  add(other: number | NumericValue): NumericValue {
+  add(
+    other: number | NumericValue,
+    prec: number = BigDecimal.precision
+  ): NumericValue {
     if (typeof other === 'number') {
       if (other === 0) return this;
       if (!this.isComplex) {
@@ -714,7 +729,7 @@ export class ExactNumericValue extends NumericValue {
           return this.clone({
             rational: add(this.rational, [other, 1]),
           });
-        return this.factory(this.bignumRe).add(other);
+        return this.factory(this._re(prec)).add(other, prec);
       }
       // Complex + machine number: exact only for an integer added to a
       // Gaussian rational (an integer next to a pure-imaginary radical would
@@ -726,7 +741,7 @@ export class ExactNumericValue extends NumericValue {
           imRational: this.imRational,
           imRadical: 1,
         });
-      return this._toFloat().add(other);
+      return this._toFloat(prec).add(other, prec);
     }
     // Only an exact 0 is an identity: a float 0 makes the sum a float
     // (`-2 + 0.0` is the float `-2`), which the float lane below computes.
@@ -735,7 +750,7 @@ export class ExactNumericValue extends NumericValue {
 
     // An inexact operand makes the sum inexact, also a float complex value
     // whose parts are integers (`1/2 + 1.0i` is a float)
-    if (!(other instanceof ExactNumericValue)) return other.add(this);
+    if (!(other instanceof ExactNumericValue)) return other.add(this, prec);
 
     if (!this.isComplex && !other.isComplex) {
       // Can we keep a rational result?
@@ -748,7 +763,7 @@ export class ExactNumericValue extends NumericValue {
         });
       }
 
-      return this.factory(this.bignumRe).add(other);
+      return this.factory(this._re(prec)).add(other, prec);
     }
 
     // At least one operand is complex: combine per-component; fall back to
@@ -771,14 +786,17 @@ export class ExactNumericValue extends NumericValue {
           imRadical: im.rad,
         });
     }
-    return this._toFloat().add(other);
+    return this._toFloat(prec).add(other, prec);
   }
 
-  sub(other: NumericValue): NumericValue {
-    return this.add(other.neg());
+  sub(other: NumericValue, prec: number = BigDecimal.precision): NumericValue {
+    return this.add(other.neg(), prec);
   }
 
-  mul(other: number | BigDecimal | NumericValue): NumericValue {
+  mul(
+    other: number | BigDecimal | NumericValue,
+    prec: number = BigDecimal.precision
+  ): NumericValue {
     if (other === 0) {
       if (this.isPositiveInfinity || this.isNegativeInfinity || this.isNaN)
         return this.clone(NaN);
@@ -802,7 +820,7 @@ export class ExactNumericValue extends NumericValue {
         });
       }
       if (!this.isComplex) {
-        const approx = this.factory(this.bignumRe);
+        const approx = this.factory(this._re(prec));
         // In the machine lane (a factory value with no big-decimal part),
         // a value whose double underflows to 0, overflows to ±∞ or is
         // subnormal loses its value or its digits before the product.
@@ -813,17 +831,17 @@ export class ExactNumericValue extends NumericValue {
           isOutsideNormalDoubleRange(approx.re) &&
           Number.isFinite(other)
         )
-          return this.factory(this.bignumRe.mul(other));
-        return approx.mul(other);
+          return this.factory(this._re(prec).mul(other));
+        return approx.mul(other, prec);
       }
-      return this._toFloat().mul(other);
+      return this._toFloat(prec).mul(other, prec);
     }
-    if (other instanceof BigDecimal) return this.factory(other).mul(this);
+    if (other instanceof BigDecimal) return this.factory(other).mul(this, prec);
     // An inexact complex value makes the product inexact, also when its
     // parts are integers (`3·1.0i` is a float). It knows how to multiply by
     // `this`; an exact complex `other` is handled by the exact section below.
     if (other.isComplex && !(other instanceof ExactNumericValue))
-      return other.mul(this);
+      return other.mul(this, prec);
 
     if (other.isZero) {
       if (this.isPositiveInfinity || this.isNegativeInfinity || this.isNaN)
@@ -848,7 +866,7 @@ export class ExactNumericValue extends NumericValue {
     if (this.isOne) return other;
     if (this.isNegativeOne) return other.neg();
 
-    if (!(other instanceof ExactNumericValue)) return other.mul(this);
+    if (!(other instanceof ExactNumericValue)) return other.mul(this, prec);
 
     if (!this.isComplex && !other.isComplex) {
       const radical = BigInt(this.radical) * BigInt(other.radical);
@@ -857,7 +875,8 @@ export class ExactNumericValue extends NumericValue {
         // first: `√17·√323323 = √5496491 = 17√19019` stays exact. The value
         // becomes a float only when the square-free part is still above 10⁶.
         const parts = exactSqrtParts(radical, 1n);
-        if (parts === null) return this.factory(this.bignumRe).mul(other);
+        if (parts === null)
+          return this.factory(this._re(prec)).mul(other, prec);
         return this.clone({
           rational: mul(mul(this.rational, other.rational), parts.rational),
           radical: parts.radical,
@@ -895,10 +914,13 @@ export class ExactNumericValue extends NumericValue {
           imRadical: im.rad,
         });
     }
-    return this._toFloat().mul(other);
+    return this._toFloat(prec).mul(other, prec);
   }
 
-  div(other: SmallInteger | NumericValue): NumericValue {
+  div(
+    other: SmallInteger | NumericValue,
+    prec: number = BigDecimal.precision
+  ): NumericValue {
     if (typeof other === 'number') {
       if (other === 1) return this;
       if (other === -1) return this.neg();
@@ -944,7 +966,7 @@ export class ExactNumericValue extends NumericValue {
     else {
       // An inexact divisor makes the quotient inexact, also a float complex
       // value whose parts are integers (`3/1.0i` is a float)
-      const approx = this._toFloat();
+      const approx = this._toFloat(prec);
       // In the machine lane (a factory value with no big-decimal part),
       // a real value whose double underflows to 0, overflows to ±∞ or is
       // subnormal loses its value or its digits before the quotient.
@@ -958,7 +980,7 @@ export class ExactNumericValue extends NumericValue {
         Number.isFinite(other.re)
       ) {
         const divisor = other.re;
-        return this.factory(withDoubleDigits(() => this.bignumRe.div(divisor)));
+        return this.factory(this._re(prec).div(divisor, doubleDigits(prec)));
       }
       // The same with a complex value: `10^{309} / 10.0i` is `-1e308i`, not
       // the `~oo` of `∞ / 10i`.
@@ -971,13 +993,14 @@ export class ExactNumericValue extends NumericValue {
       )
         return this.factory(
           bigComplexQuotient(
-            this.bignumRe,
-            this.isComplex ? this.bignumIm : new BigDecimal(0),
+            this._re(prec),
+            this.isComplex ? this._im(prec) : new BigDecimal(0),
             new BigDecimal(other.re),
-            new BigDecimal(other.im)
+            new BigDecimal(other.im),
+            prec
           )
         );
-      return approx.div(other);
+      return approx.div(other, prec);
     }
 
     if (this.isComplex || exactOther.isComplex) {
@@ -985,9 +1008,9 @@ export class ExactNumericValue extends NumericValue {
       // set is itself exactly representable (conjugate/norm for a Gaussian
       // rational; a pure-imaginary radical inverts to one), and `mul` handles
       // the (possible) fallback to the float lane.
-      const oi = exactOther.inv();
-      if (oi instanceof ExactNumericValue) return this.mul(oi);
-      return this._toFloat().div(exactOther);
+      const oi = exactOther.inv(prec);
+      if (oi instanceof ExactNumericValue) return this.mul(oi, prec);
+      return this._toFloat(prec).div(exactOther, prec);
     }
 
     // A finite value over ±∞ is 0, and ±∞/±∞ has no value. The code below
@@ -1009,7 +1032,8 @@ export class ExactNumericValue extends NumericValue {
       // As in `mul`: take the square factors out of the radicand before the
       // value becomes a float.
       const parts = exactSqrtParts(radical, 1n);
-      if (parts === null) return this.factory(this.bignumRe).div(exactOther);
+      if (parts === null)
+        return this.factory(this._re(prec)).div(exactOther, prec);
       return this.clone({
         rational: mul(rational, parts.rational),
         radical: parts.radical,
@@ -1020,7 +1044,8 @@ export class ExactNumericValue extends NumericValue {
   }
 
   pow(
-    exponent: number | NumericValue | { re: number; im: number }
+    exponent: number | NumericValue | { re: number; im: number },
+    prec: number = BigDecimal.precision
   ): NumericValue {
     console.assert(!Array.isArray(exponent));
     // if (Array.isArray(exponent)) exponent = exponent[0] / exponent[1];
@@ -1054,7 +1079,7 @@ export class ExactNumericValue extends NumericValue {
           // Exponent 1/n (numerator rational[0] === 1) ⇒ n-th root, where n is
           // the denominator rational[1] (not the numerator).
           if (exponent.radical === 1 && exponent.rational[0] == 1)
-            return this.root(Number(exponent.rational[1]));
+            return this.root(Number(exponent.rational[1]), prec);
           // Exponent p/q with p ≠ 1 ⇒ the q-th root, then the integer power
           // p (a negative p inverts). The result is exact when the root is
           // exact: 8^(2/3) = 4, (1/8)^(−2/3) = 4, (−8)^(2/3) = 4 (the real
@@ -1064,9 +1089,9 @@ export class ExactNumericValue extends NumericValue {
             const p = Number(exponent.rational[0]);
             const q = Number(exponent.rational[1]);
             if (Number.isSafeInteger(p) && Number.isSafeInteger(q)) {
-              const root = this.root(q);
+              const root = this.root(q, prec);
               if (root.isExact) {
-                const result = root.pow(p);
+                const result = root.pow(p, prec);
                 if (result.isExact) return result;
               }
             }
@@ -1077,7 +1102,7 @@ export class ExactNumericValue extends NumericValue {
     }
 
     // Special case square root, where we try to preserve the rational part
-    if (exponent === 0.5) return this.sqrt();
+    if (exponent === 0.5) return this.sqrt(prec);
 
     //
     // For the special cases we implement the same (somewhat arbitrary) results
@@ -1090,7 +1115,7 @@ export class ExactNumericValue extends NumericValue {
 
     // Complex Exponent -> float result, use factory
     if (typeof exponent === 'object' && ('re' in exponent || 'im' in exponent))
-      return this._toFloat().pow(exponent);
+      return this._toFloat(prec).pow(exponent, prec);
 
     if (this.isPositiveInfinity) {
       if (exponent === -1) return this.clone(0);
@@ -1106,7 +1131,7 @@ export class ExactNumericValue extends NumericValue {
       return this.clone(NaN);
 
     if (exponent === 1) return this;
-    if (exponent === -1) return this.inv();
+    if (exponent === -1) return this.inv(prec);
 
     if (exponent === 0) return this.clone(1);
 
@@ -1115,7 +1140,7 @@ export class ExactNumericValue extends NumericValue {
       if (exponent < 0) return this.factory({ im: Infinity }); // Complex/unsigned infinity
     }
 
-    if (exponent < 0) return this.pow(-exponent).inv();
+    if (exponent < 0) return this.pow(-exponent, prec).inv(prec);
 
     // Complex base: an integer power stays exact (binary exponentiation via
     // the exact `mul`, which falls back to the float lane if an intermediate
@@ -1130,19 +1155,19 @@ export class ExactNumericValue extends NumericValue {
         let base: NumericValue = this;
         let k = exponent;
         while (k > 0) {
-          if (k % 2 === 1) result = result.mul(base);
+          if (k % 2 === 1) result = result.mul(base, prec);
           k = Math.floor(k / 2);
-          if (k > 0) base = base.mul(base);
+          if (k > 0) base = base.mul(base, prec);
         }
         return result;
       }
-      return this._toFloat().pow(exponent);
+      return this._toFloat(prec).pow(exponent, prec);
     }
 
     // Is it a multiple of square root?
     // Decompose to try to preserve the rational part
     if (exponent % 1 === 0.5)
-      return this.pow(Math.floor(exponent)).mul(this.sqrt());
+      return this.pow(Math.floor(exponent), prec).mul(this.sqrt(prec), prec);
 
     // If the parts (rational or radical) are too large, we convert to float
     if (
@@ -1151,7 +1176,7 @@ export class ExactNumericValue extends NumericValue {
       this.rational[0] < -SMALL_INTEGER ||
       this.rational[1] > SMALL_INTEGER
     )
-      return this.factory(this.bignumRe).pow(exponent);
+      return this.factory(this._re(prec)).pow(exponent, prec);
 
     if (this.sign < 0) {
       if (Number.isInteger(exponent)) {
@@ -1184,33 +1209,33 @@ export class ExactNumericValue extends NumericValue {
         });
       }
     }
-    return this.factory(this.bignumRe).pow(exponent);
+    return this.factory(this._re(prec)).pow(exponent, prec);
   }
 
-  root(exponent: number): NumericValue {
+  root(exponent: number, prec: number = BigDecimal.precision): NumericValue {
     if (exponent === 0) return this.clone(NaN);
 
     if (this.isNaN) return this;
     if (this.isZero) return this;
     if (exponent === 1) return this;
-    if (exponent === -1) return this.inv();
+    if (exponent === -1) return this.inv(prec);
 
     // Complex base: roots leave the representable set — float lane
-    if (this.isComplex) return this._toFloat().root(exponent);
+    if (this.isComplex) return this._toFloat(prec).root(exponent, prec);
 
-    if (exponent < 0) return this.root(-exponent).inv();
+    if (exponent < 0) return this.root(-exponent, prec).inv(prec);
 
     // Half-integer exponent n + 1/2: x^(1/(n+1/2)) = x^(2/(2n+1)) =
     // (x²)^(1/(2n+1)), and x² is exact for an ExactNumericValue.
     // (The previous decomposition, `root(⌊exponent⌋).sqrt()`, computed
     // x^(1/(2n)) — mathematically wrong: root(x, 2.5) returned x^(1/4)
     // instead of x^(2/5).) (CORRECTNESS P2 #20)
-    if (exponent % 1 === 0.5) return this.pow(2).root(2 * exponent);
+    if (exponent % 1 === 0.5) return this.pow(2, prec).root(2 * exponent, prec);
 
     // Odd root of a negative value: real-root convention,
     // (-x)^(1/n) = -(x^(1/n)), preserving exactness (e.g. (-8)^(1/3) = -2)
     if (this.sign < 0 && Number.isInteger(exponent) && exponent % 2 === 1)
-      return this.neg().root(exponent).neg();
+      return this.neg().root(exponent, prec).neg();
 
     // Even root of a negative value: the value is the principal root, which
     // is not real. The index 2 is the exact square root (√(−4) = 2i). For
@@ -1222,12 +1247,12 @@ export class ExactNumericValue extends NumericValue {
     // value 2^(1/4)·(√2/2)(1 + i) has no exact form here) the float lane
     // answers, and it answers NaN for an even root of a negative real.
     if (this.sign < 0 && Number.isInteger(exponent) && exponent % 2 === 0) {
-      if (exponent === 2) return this.sqrt();
+      if (exponent === 2) return this.sqrt(prec);
       if (exponent === 4) {
-        const r = this.sqrt().sqrt();
+        const r = this.sqrt(prec).sqrt(prec);
         if (r instanceof ExactNumericValue) return r;
       }
-      return this.factory(this.bignumRe).root(exponent);
+      return this.factory(this._re(prec)).root(exponent, prec);
     }
 
     if (this.radical === 1) {
@@ -1251,7 +1276,7 @@ export class ExactNumericValue extends NumericValue {
           }
         }
       }
-      return this.factory(this.bignumRe).root(exponent);
+      return this.factory(this._re(prec)).root(exponent, prec);
     }
 
     if (this.sign < 0)
@@ -1263,10 +1288,10 @@ export class ExactNumericValue extends NumericValue {
     // a perfect power and, on a hit, dropped the radical entirely:
     // (8√3)^(1/3) returned 2 instead of 2·3^(1/6) ≈ 2.4019.)
     // (CORRECTNESS P2 #20)
-    return this.factory(this.bignumRe).root(exponent);
+    return this.factory(this._re(prec)).root(exponent, prec);
   }
 
-  sqrt(): NumericValue {
+  sqrt(prec: number = BigDecimal.precision): NumericValue {
     if (this.isZero || this.isOne) return this;
 
     // Complex operand: √(a+bi) = x + y·i with x = √((|z|+a)/2) and
@@ -1286,7 +1311,7 @@ export class ExactNumericValue extends NumericValue {
         const b = this.imRational;
         const modulus = this.clone({
           rational: add(mul(a, a), mul(b, b)),
-        }).sqrt();
+        }).sqrt(prec);
         if (
           modulus instanceof ExactNumericValue &&
           !modulus.isComplex &&
@@ -1295,10 +1320,10 @@ export class ExactNumericValue extends NumericValue {
           const half: Rational = [1, 2];
           const x = this.clone({
             rational: mul(add(a, modulus.rational), half),
-          }).sqrt();
+          }).sqrt(prec);
           const y = this.clone({
             rational: mul(add(modulus.rational, neg(a)), half),
-          }).sqrt();
+          }).sqrt(prec);
           // `y` is not zero (`b ≠ 0`, so |z| > a). `x` is zero when `a = −|z|`,
           // which cannot happen for `b ≠ 0` either, but a zero `x` would
           // carry no radical and is accepted with any radical of `y`.
@@ -1317,7 +1342,7 @@ export class ExactNumericValue extends NumericValue {
             });
         }
       }
-      return this._toFloat().sqrt();
+      return this._toFloat(prec).sqrt(prec);
     }
 
     // Can we preserve the rational?
@@ -1334,7 +1359,7 @@ export class ExactNumericValue extends NumericValue {
           // when it is rational (√(10^12/9) = 10^6/3).
           const exact = exactRationalSqrt(BigInt(Math.abs(n)), BigInt(d));
           if (exact) return this._fromExactSqrt(exact, n < 0);
-          return this.factory(this.bignumRe).sqrt();
+          return this.factory(this._re(prec)).sqrt(prec);
         }
         if (n > 0) return this.clone({ radical: n * d, rational: [1, d] });
 
@@ -1365,10 +1390,10 @@ export class ExactNumericValue extends NumericValue {
         // no approximation of anything. Fall back to the bignum lane, where
         // the radicand is still finite and non-zero, only in those cases.
         // (`n > 0n` here, so the value itself is neither zero nor negative.)
-        const approx = this.factory(this.bignumRe);
+        const approx = this.factory(this._re(prec));
         if (n > 0n && (approx.isPositiveInfinity || approx.isZero))
-          return this.factory(this.bignumRe.sqrt());
-        return approx.sqrt();
+          return this.factory(this._re(prec).sqrt(prec));
+        return approx.sqrt(prec);
       }
     }
 
@@ -1377,7 +1402,7 @@ export class ExactNumericValue extends NumericValue {
     // has no exact form. (A test for an integer machine root was here, but
     // it could only be true by rounding: every double above 2^53 is an
     // integer, so `√(10^40·√2)` answered an exact integer.)
-    return this.factory(this.bignumRe).sqrt();
+    return this.factory(this._re(prec)).sqrt(prec);
   }
 
   /**
@@ -1401,7 +1426,7 @@ export class ExactNumericValue extends NumericValue {
     return this.clone({ rational, radical });
   }
 
-  abs(): NumericValue {
+  abs(prec: number = BigDecimal.precision): NumericValue {
     if (this.isComplex) {
       // Pure imaginary: |q√r·i| = |q|√r
       if (isZero(this.rational)) {
@@ -1428,31 +1453,31 @@ export class ExactNumericValue extends NumericValue {
       );
       const parts = exactSqrtParts(BigInt(norm[0]), BigInt(norm[1]));
       if (parts) return this.clone(parts);
-      return this.factory(this.clone({ rational: norm }).bignumRe).sqrt();
+      return this.factory(this.clone({ rational: norm })._re(prec)).sqrt(prec);
     }
     return this.sign === -1 ? this.neg() : this;
   }
 
-  ln(base?: number): NumericValue {
+  ln(base?: number, prec: number = BigDecimal.precision): NumericValue {
     if (this.isZero) return this.clone(NaN);
     if (this.isPositiveInfinity) return this.clone(Infinity);
 
-    if (this.isComplex) return this._toFloat().ln(base);
+    if (this.isComplex) return this._toFloat(prec).ln(base, prec);
 
     if (this.sign < 0) return this.clone(NaN);
     if (this.isOne) return this.clone(0);
     if (this.isNegativeOne) return this.factory({ im: Math.PI });
 
-    return this.factory(this.bignumRe).ln(base);
+    return this.factory(this._re(prec)).ln(base, prec);
   }
 
-  exp(): NumericValue {
+  exp(prec: number = BigDecimal.precision): NumericValue {
     if (this.isNaN) return this.clone(NaN);
     if (this.isZero) return this.clone(1);
-    if (this.isComplex) return this._toFloat().exp();
+    if (this.isComplex) return this._toFloat(prec).exp(prec);
     if (this.isNegativeInfinity) return this.clone(0);
     if (this.isPositiveInfinity) return this.clone(Infinity);
-    return this.factory(this.bignumRe).exp();
+    return this.factory(this._re(prec)).exp(prec);
   }
 
   /**
@@ -1668,7 +1693,8 @@ export class ExactNumericValue extends NumericValue {
   // '1.2 + 1/4 + √5 + √5' -> '3/4 + 2√5'
   static sum(
     values: NumericValue[],
-    factory: NumericValueFactory
+    factory: NumericValueFactory,
+    prec: number = BigDecimal.precision
   ): NumericValue[] {
     if (values.length === 1) return values;
 
@@ -1676,9 +1702,9 @@ export class ExactNumericValue extends NumericValue {
     // value is inexact also when its parts are integers (`1/2 + 1.0i` is a
     // float); the exact imaginary unit `i` is an `ExactNumericValue`.
     if (values.some((x) => !x.isExact)) {
-      if (values.length === 2) return [values[0].add(values[1])];
+      if (values.length === 2) return [values[0].add(values[1], prec)];
       let sum = factory(0);
-      for (const value of values) sum = sum.add(value);
+      for (const value of values) sum = sum.add(value, prec);
       return [sum];
     }
 
@@ -2310,56 +2336,59 @@ export function hasExactPartOutsideDoubleRange(v: NumericValue): boolean {
 
 /**
  * The product (p + q·i)·(c + d·i) of two complex values given by their parts
- * as big decimals, at the digits of a double (`withDoubleDigits()`).
+ * as big decimals, at the digits of a double (`doubleDigits()`) for the
+ * working precision `prec`.
  */
 export function bigComplexProduct(
   p: BigDecimal,
   q: BigDecimal,
   c: BigDecimal,
-  d: BigDecimal
+  d: BigDecimal,
+  prec: number = BigDecimal.precision
 ): { re: BigDecimal; im: BigDecimal } {
+  const digits = doubleDigits(prec);
   return {
-    re: withDoubleDigits(() => p.mul(c).sub(q.mul(d))),
-    im: withDoubleDigits(() => p.mul(d).add(q.mul(c))),
+    re: p.mul(c).sub(q.mul(d), digits),
+    im: p.mul(d).add(q.mul(c), digits),
   };
 }
 
 /**
  * The quotient (p + q·i)/(c + d·i) of two complex values given by their
- * parts as big decimals, at the digits of a double (`withDoubleDigits()`).
- * The divisor is not zero.
+ * parts as big decimals, at the digits of a double (`doubleDigits()`) for
+ * the working precision `prec`. The divisor is not zero.
  */
 export function bigComplexQuotient(
   p: BigDecimal,
   q: BigDecimal,
   c: BigDecimal,
-  d: BigDecimal
+  d: BigDecimal,
+  prec: number = BigDecimal.precision
 ): { re: BigDecimal; im: BigDecimal } {
+  const digits = doubleDigits(prec);
+  const denominator = () => c.mul(c).add(d.mul(d), digits);
   return {
-    re: withDoubleDigits(() =>
-      p
-        .mul(c)
-        .add(q.mul(d))
-        .div(c.mul(c).add(d.mul(d)))
-    ),
-    im: withDoubleDigits(() =>
-      q
-        .mul(c)
-        .sub(p.mul(d))
-        .div(c.mul(c).add(d.mul(d)))
-    ),
+    re: p.mul(c).add(q.mul(d), digits).div(denominator(), digits),
+    im: q.mul(c).sub(p.mul(d), digits).div(denominator(), digits),
   };
 }
 
 /**
- * Evaluate `f` with 25 significant digits when the global
- * `BigDecimal.precision` is the machine precision. A machine-precision engine
- * sets it to 15 digits, which is fewer than the 17 digits a double needs, so
- * a quotient rounded at that precision and then converted to a double can
- * give a wrong double. At any other precision the working precision is kept:
- * an engine below the machine precision (`precision: 3`) computes to that
- * coarse precision by design, as `_bignumComponent()` does.
+ * The digits of a computation whose result is converted to a double, at the
+ * working precision `prec`: 25 when `prec` is the machine precision. A
+ * machine-precision engine has the working precision 15, which is fewer than
+ * the 17 digits a double needs, so a quotient rounded at that precision and
+ * then converted to a double can give a wrong double. At any other precision
+ * the working precision is kept: an engine below the machine precision
+ * (`precision: 3`) computes to that coarse precision by design, as
+ * `_bignumComponent()` does.
  */
+export function doubleDigits(prec: number): number {
+  return prec === MACHINE_PRECISION ? 25 : prec;
+}
+
+/** Evaluate `f` with the digits of `doubleDigits(BigDecimal.precision)`
+ * (see `doubleDigits()`). */
 export function withDoubleDigits(f: () => BigDecimal): BigDecimal {
   const saved = BigDecimal.precision;
   if (saved !== MACHINE_PRECISION) return f();

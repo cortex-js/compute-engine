@@ -475,8 +475,12 @@ export class Product {
         if (isLiteral(term, -1)) {
           if (isOne(exp)) this.coefficient = this.coefficient.neg();
           else {
+            const prec = this.engine.precision;
             this.coefficient = this.coefficient.mul(
-              this.engine._numericValue(-1).pow(this.engine._numericValue(exp))
+              this.engine
+                ._numericValue(-1)
+                .pow(this.engine._numericValue(exp), prec),
+              prec
             );
           }
           return;
@@ -540,7 +544,10 @@ export class Product {
           // Otherwise it stays a symbolic `Power` term: `2^(2/3)` computed
           // as a float would make the product of exact operands a float.
           const base = this.engine._numericValue(num);
-          const power = base.pow(this.engine._numericValue(exp));
+          const power = base.pow(
+            this.engine._numericValue(exp),
+            this.engine.precision
+          );
           if (base.isExact && !power.isExact && !isIntegerRational(exp))
             this.tallyNumericPower(term, exp);
           else if (!this.foldIntoCoefficient(power, !isNeg(exp)))
@@ -574,7 +581,10 @@ export class Product {
           this.tally(term, exp);
           return;
         }
-        const factor = root.pow(this.engine._numericValue(exp));
+        const factor = root.pow(
+          this.engine._numericValue(exp),
+          this.engine.precision
+        );
         if (!this.foldIntoCoefficient(factor, !isNeg(exp)))
           this.tally(term, exp);
         return;
@@ -606,7 +616,10 @@ export class Product {
             radical: Number(radicand[0]),
           });
           if (root.isExact) {
-            const factor = root.pow(this.engine._numericValue(exp));
+            const factor = root.pow(
+              this.engine._numericValue(exp),
+              this.engine.precision
+            );
             if (factor.isExact && this.foldIntoCoefficient(factor)) return;
           }
           this.tally(term, exp);
@@ -638,7 +651,7 @@ export class Product {
             coef.sgn() === -1;
           const power =
             exp && !isOne(exp)
-              ? coef.pow(this.engine._numericValue(exp))
+              ? coef.pow(this.engine._numericValue(exp), this.engine.precision)
               : coef;
           if (
             !evenRootOfNegative &&
@@ -968,7 +981,8 @@ export class Product {
     factor: number | NumericValue,
     splitRadical = false
   ): boolean {
-    const product = this.coefficient.mul(factor);
+    const prec = this.engine.precision;
+    const product = this.coefficient.mul(factor, prec);
     if (
       typeof factor !== 'number' &&
       !product.isExact &&
@@ -982,7 +996,7 @@ export class Product {
           t.term.isExact &&
           t.term.isFinite === true &&
           (isOne(t.exponent) || isOne(neg(t.exponent))) &&
-          this.termValue(t).mul(factor).isExact
+          this.termValue(t).mul(factor, prec).isExact
       );
       if (i < 0) {
         // With `splitRadical`, only the radical of a real factor is kept
@@ -994,14 +1008,14 @@ export class Product {
         // canonical `Divide` keeps, as `√1009·√1013/1013`.
         const split = splitRadical ? splitRationalRadical(factor) : undefined;
         if (split === undefined) return false;
-        const scaled = this.coefficient.mul(split[0]);
+        const scaled = this.coefficient.mul(split[0], prec);
         if (!scaled.isExact) return false;
         this.coefficient = scaled;
         if (!this.foldIntoCoefficient(split[1]))
           this.tally(this.engine.number(split[1]), [1, 1]);
         return true;
       }
-      const paired = this.termValue(this.terms[i]).mul(factor);
+      const paired = this.termValue(this.terms[i]).mul(factor, prec);
       this.removeTermAt(i);
       if (!this.foldIntoCoefficient(paired))
         this.tally(this.engine.number(paired), [1, 1]);
@@ -1014,7 +1028,7 @@ export class Product {
   /** The value of a number term with the exponent `1` or `-1`. */
   private termValue(t: { term: Expression; exponent: Rational }): NumericValue {
     const v = this.engine._numericValue(numericValue(t.term)!);
-    return isOne(t.exponent) ? v : v.inv();
+    return isOne(t.exponent) ? v : v.inv(this.engine.precision);
   }
 
   /**
@@ -1081,7 +1095,7 @@ export class Product {
   /** Divide the product by a term of coefficient */
   div(term: NumericValue | Expression) {
     if (term instanceof NumericValue)
-      this.coefficient = this.coefficient.div(term);
+      this.coefficient = this.coefficient.div(term, this.engine.precision);
     else this.mul(term, [-1, 1]);
   }
 
@@ -1123,7 +1137,7 @@ export class Product {
     // If we have no terms (i.e. it's a literal), just return the coeff
     if (this.terms.length === 0) {
       if (mode === 'numeric') {
-        const c = this.coefficient.N();
+        const c = this.coefficient.N(this.engine.precision);
         return [{ exponent: [1, 1], terms: [ce.number(c)] }];
       } else {
         return [{ exponent: [1, 1], terms: [ce.number(this.coefficient)] }];
@@ -1151,7 +1165,7 @@ export class Product {
         if (!denom.isOne)
           xs.push({ exponent: [-1, 1], terms: [ce.number(denom)] });
       } else if (mode === 'numeric') {
-        const c = this.coefficient.N();
+        const c = this.coefficient.N(this.engine.precision);
         xs.push({ exponent: [1, 1], terms: [ce.number(c)] });
       } else {
         xs.push({ exponent: [1, 1], terms: [ce.number(this.coefficient)] });
@@ -2321,7 +2335,7 @@ export function div(num: Expression, denom: number | Expression): Expression {
         if (Number.isInteger(n) && Number.isInteger(denom))
           return ce.number(ce._numericValue({ rational: [n, denom] }));
       } else if (n.isExact && Number.isInteger(denom)) {
-        return ce.number(n.asExact!.div(denom));
+        return ce.number(n.asExact!.div(denom, ce.precision));
       }
     }
   } else {
@@ -2412,7 +2426,9 @@ export function div(num: Expression, denom: number | Expression): Expression {
         typeof denomV !== 'number'
       ) {
         if (denomV.isExact) {
-          return ce.number(ce._numericValue(numV).div(denomV.asExact!));
+          return ce.number(
+            ce._numericValue(numV).div(denomV.asExact!, ce.precision)
+          );
         }
       } else if (
         typeof denomV === 'number' &&
@@ -2420,14 +2436,14 @@ export function div(num: Expression, denom: number | Expression): Expression {
         typeof numV !== 'number'
       ) {
         if (numV.isExact) {
-          return ce.number(numV.asExact!.div(denomV));
+          return ce.number(numV.asExact!.div(denomV, ce.precision));
         }
       } else if (typeof numV !== 'number' && typeof denomV !== 'number') {
         // The quotient of two exact values is not exact when its radicand
         // is too large to store (`√1009/√1013 = √1022117/1013`). The
         // `Product` below then keeps the two factors, as in a product.
         if (numV.isExact && denomV.isExact) {
-          const q = numV.asExact!.div(denomV.asExact!);
+          const q = numV.asExact!.div(denomV.asExact!, ce.precision);
           if (q.isExact) return ce.number(q);
         }
       }
@@ -2444,7 +2460,7 @@ export function div(num: Expression, denom: number | Expression): Expression {
         const a = typeof numV === 'number' ? ce._numericValue(numV) : numV;
         const b =
           typeof denomV === 'number' ? ce._numericValue(denomV) : denomV;
-        return ce.number(a.div(b));
+        return ce.number(a.div(b, ce.precision));
       }
     }
   }
@@ -3592,7 +3608,9 @@ function foldOutOfDoubleRange(
     // `bignumRe` of an exact rational has at least 25 digits (see
     // `ExactNumericValue`); a double converts to a big decimal exactly.
     product = product.mul(
-      typeof nv === 'number' ? new BigDecimal(nv) : (nv.bignumRe ?? nv.re)
+      typeof nv === 'number'
+        ? new BigDecimal(nv)
+        : (nv.bignumReAt(ce.precision) ?? nv.re)
     );
   }
   if (!rescued) return undefined;

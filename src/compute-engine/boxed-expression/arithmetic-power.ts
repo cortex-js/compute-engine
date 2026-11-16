@@ -1595,9 +1595,11 @@ export function pow(
       }
       if (x.re > 2.718 && x.re < 2.719 && x === ce.E.N()) {
         if (typeof exp === 'number')
-          return ce.number(ce._numericValue(exp).exp());
+          return ce.number(ce._numericValue(exp).exp(ce.precision));
         if (isNumber(exp) && !exp.isComplex)
-          return ce.number(ce._numericValue(exp.numericValue).exp());
+          return ce.number(
+            ce._numericValue(exp.numericValue).exp(ce.precision)
+          );
       }
 
       // Negative real base with a non-integer real exponent. `Math.pow` (and
@@ -1667,9 +1669,9 @@ export function pow(
           // machine double by representation, so machine sin is enough.
           const angle = eVal * Math.PI;
           const reBig = new BigDecimal(eVal)
-            .mul(BigDecimal.PI)
-            .cos()
-            .toPrecision(BigDecimal.precision);
+            .mul(BigDecimal.pi(ce.precision))
+            .cos(ce.precision)
+            .toPrecision(ce.precision);
           let re: BigDecimal | number = reBig;
           let im = Math.sin(angle);
           // Snap the phase's exact zeros (e.g. half-integer e ⇒ ±i) so the
@@ -1682,20 +1684,17 @@ export function pow(
           // two P-digit values carries 2P digits — the tail beyond P is
           // noise and must not be asserted.
           const magNV = numericValue(absPow);
-          if (
+          const magBig =
             magNV !== null &&
             magNV !== undefined &&
             typeof magNV !== 'number' &&
-            !magNV.isComplex &&
-            magNV.bignumRe !== undefined
-          ) {
-            const magBig = magNV.bignumRe;
+            !magNV.isComplex
+              ? magNV.bignumReAt(ce.precision)
+              : undefined;
+          if (magNV && typeof magNV !== 'number' && magBig !== undefined) {
             return ce.number(
               ce._numericValue({
-                re:
-                  re === 0
-                    ? 0
-                    : magBig._mulToPrecision(reBig, BigDecimal.precision),
+                re: re === 0 ? 0 : magBig._mulToPrecision(reBig, ce.precision),
                 im: im === 0 ? 0 : magNV.re * im,
               })
             );
@@ -1724,7 +1723,7 @@ export function pow(
           apply(
             x,
             (x) => Math.pow(x, exp as number),
-            (x) => x.pow(exp as number),
+            (x) => x.pow(exp as number, ce.precision),
             (x) => x.pow(exp as number)
           ) ?? pow(x, exp, { numericApproximation: false })
         );
@@ -1734,7 +1733,7 @@ export function pow(
             x,
             exp,
             (x, exp) => Math.pow(x, exp),
-            (x, exp) => x.pow(exp),
+            (x, exp) => x.pow(exp, ce.precision),
             (x, exp) => x.pow(exp)
           ) ?? pow(x, exp, { numericApproximation: false })
         );
@@ -2286,6 +2285,7 @@ export function root(
 
       if (isNegative) a = a.neg();
 
+      const prec = a.engine.precision;
       return (
         apply2(
           a,
@@ -2307,8 +2307,8 @@ export function root(
           (a, b) => {
             const n = b.toNumber();
             const result = Number.isInteger(n)
-              ? a.nthRoot(n)
-              : a.pow(b.pow(-1));
+              ? a.nthRoot(n, prec)
+              : a.pow(b.pow(-1, prec), prec);
             if (isNegative && !isEven) return result.neg();
             return result;
           },
@@ -2322,8 +2322,8 @@ export function root(
           (a, b) => {
             const result =
               !b.isComplex && Number.isInteger(b.re)
-                ? a.root(b.re)
-                : a.pow(b.inv());
+                ? a.root(b.re, prec)
+                : a.pow(b.inv(prec), prec);
             if (isNegative && !isEven) return result.neg();
             return result;
           }
@@ -2362,8 +2362,8 @@ export function root(
       // answered as the exact integer `1`.
       const v =
         typeof a.numericValue === 'number'
-          ? a.engine._numericValue(a.numericValue).root(e)
-          : a.numericValue.asExact?.root(e);
+          ? a.engine._numericValue(a.numericValue).root(e, a.engine.precision)
+          : a.numericValue.asExact?.root(e, a.engine.precision);
       if (v instanceof ExactNumericValue && !v.isNaN) return a.engine.number(v);
     }
 

@@ -1207,7 +1207,8 @@ export function toAsciiMath(
           options.digits
         );
     }
-    return num.toString();
+    if (typeof num === 'number') return num.toString();
+    return num.toString(expr.engine.precision);
   }
 
   //

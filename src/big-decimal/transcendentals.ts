@@ -22,74 +22,83 @@ import {
 
 // ---------- Declaration merging ----------
 
+// Each operation rounds its result to `prec` significant digits, by default
+// `BigDecimal.precision`. With `prec` given, an operation does not read
+// `BigDecimal.precision`: it passes its own precision, or the precision plus
+// its guard digits, to every operation that it calls.
+
 declare module './big-decimal.js' {
   interface BigDecimal {
     /** Square root. Returns NaN for negative values. */
-    sqrt(): BigDecimal;
+    sqrt(prec?: number): BigDecimal;
     /** Cube root. Supports negative values. */
-    cbrt(): BigDecimal;
+    cbrt(prec?: number): BigDecimal;
     /** Exponential: e^this. */
-    exp(): BigDecimal;
+    exp(prec?: number): BigDecimal;
     /** Natural logarithm. Returns NaN for negative values, -Infinity for zero. */
-    ln(): BigDecimal;
+    ln(prec?: number): BigDecimal;
     /** Logarithm with specified base. */
-    log(base: BigDecimal | number): BigDecimal;
+    log(base: BigDecimal | number, prec?: number): BigDecimal;
     /** Sine. Returns NaN for NaN/Infinity inputs. */
-    sin(): BigDecimal;
+    sin(prec?: number): BigDecimal;
     /** Cosine. Returns NaN for NaN/Infinity inputs. */
-    cos(): BigDecimal;
+    cos(prec?: number): BigDecimal;
     /** Tangent. Returns NaN for NaN/Infinity inputs. */
-    tan(): BigDecimal;
+    tan(prec?: number): BigDecimal;
     /** Inverse sine (arcsine). Returns NaN for |x| > 1. */
-    asin(): BigDecimal;
+    asin(prec?: number): BigDecimal;
     /** Inverse cosine (arccosine). Returns NaN for |x| > 1. */
-    acos(): BigDecimal;
+    acos(prec?: number): BigDecimal;
     /** Inverse tangent (arctangent). */
-    atan(): BigDecimal;
+    atan(prec?: number): BigDecimal;
     /** Hyperbolic sine. */
-    sinh(): BigDecimal;
+    sinh(prec?: number): BigDecimal;
     /** Hyperbolic cosine. */
-    cosh(): BigDecimal;
+    cosh(prec?: number): BigDecimal;
     /** Hyperbolic tangent. */
-    tanh(): BigDecimal;
+    tanh(prec?: number): BigDecimal;
     /** Inverse hyperbolic sine. */
-    asinh(): BigDecimal;
+    asinh(prec?: number): BigDecimal;
     /** Inverse hyperbolic cosine. Returns NaN for values < 1. */
-    acosh(): BigDecimal;
+    acosh(prec?: number): BigDecimal;
     /** Inverse hyperbolic tangent. Returns NaN for |x| > 1, ±Infinity at ±1. */
-    atanh(): BigDecimal;
+    atanh(prec?: number): BigDecimal;
     /** exp(this) − 1, accurate for small arguments. */
-    expm1(): BigDecimal;
+    expm1(prec?: number): BigDecimal;
     /** ln(1 + this), accurate for small arguments. */
-    log1p(): BigDecimal;
+    log1p(prec?: number): BigDecimal;
     /** nth root. Supports negative values for odd n. */
-    nthRoot(n: number): BigDecimal;
+    nthRoot(n: number, prec?: number): BigDecimal;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace BigDecimal {
-    function sqrt(x: BigDecimal): BigDecimal;
-    function cbrt(x: BigDecimal): BigDecimal;
-    function exp(x: BigDecimal): BigDecimal;
-    function ln(x: BigDecimal): BigDecimal;
-    function log10(x: BigDecimal): BigDecimal;
-    function log2(x: BigDecimal): BigDecimal;
-    function sin(x: BigDecimal): BigDecimal;
-    function cos(x: BigDecimal): BigDecimal;
-    function tan(x: BigDecimal): BigDecimal;
-    function asin(x: BigDecimal): BigDecimal;
-    function acos(x: BigDecimal): BigDecimal;
-    function atan(x: BigDecimal): BigDecimal;
-    function atan2(y: BigDecimal | number, x: BigDecimal): BigDecimal;
-    function sinh(x: BigDecimal): BigDecimal;
-    function cosh(x: BigDecimal): BigDecimal;
-    function tanh(x: BigDecimal): BigDecimal;
-    function asinh(x: BigDecimal): BigDecimal;
-    function acosh(x: BigDecimal): BigDecimal;
-    function atanh(x: BigDecimal): BigDecimal;
-    function expm1(x: BigDecimal): BigDecimal;
-    function log1p(x: BigDecimal): BigDecimal;
-    function nthRoot(x: BigDecimal, n: number): BigDecimal;
+    function sqrt(x: BigDecimal, prec?: number): BigDecimal;
+    function cbrt(x: BigDecimal, prec?: number): BigDecimal;
+    function exp(x: BigDecimal, prec?: number): BigDecimal;
+    function ln(x: BigDecimal, prec?: number): BigDecimal;
+    function log10(x: BigDecimal, prec?: number): BigDecimal;
+    function log2(x: BigDecimal, prec?: number): BigDecimal;
+    function sin(x: BigDecimal, prec?: number): BigDecimal;
+    function cos(x: BigDecimal, prec?: number): BigDecimal;
+    function tan(x: BigDecimal, prec?: number): BigDecimal;
+    function asin(x: BigDecimal, prec?: number): BigDecimal;
+    function acos(x: BigDecimal, prec?: number): BigDecimal;
+    function atan(x: BigDecimal, prec?: number): BigDecimal;
+    function atan2(
+      y: BigDecimal | number,
+      x: BigDecimal,
+      prec?: number
+    ): BigDecimal;
+    function sinh(x: BigDecimal, prec?: number): BigDecimal;
+    function cosh(x: BigDecimal, prec?: number): BigDecimal;
+    function tanh(x: BigDecimal, prec?: number): BigDecimal;
+    function asinh(x: BigDecimal, prec?: number): BigDecimal;
+    function acosh(x: BigDecimal, prec?: number): BigDecimal;
+    function atanh(x: BigDecimal, prec?: number): BigDecimal;
+    function expm1(x: BigDecimal, prec?: number): BigDecimal;
+    function log1p(x: BigDecimal, prec?: number): BigDecimal;
+    function nthRoot(x: BigDecimal, n: number, prec?: number): BigDecimal;
   }
 }
 
@@ -273,7 +282,9 @@ function ln10Fixed(bits: number): bigint {
 
 // ---------- sqrt ----------
 
-BigDecimal.prototype.sqrt = function (): BigDecimal {
+BigDecimal.prototype.sqrt = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // Special cases
   if (this.isNaN()) return BigDecimal.NAN;
   if (this.isZero()) return BigDecimal.ZERO;
@@ -288,7 +299,6 @@ BigDecimal.prototype.sqrt = function (): BigDecimal {
   if (this.significand < 0n) return BigDecimal.NAN;
 
   // Working precision with guard digits
-  const targetPrec = BigDecimal.precision;
   const workingPrec = targetPrec + 10;
 
   // Range reduction: write x = m·10^(2k) with m ∈ [1, 100), so
@@ -312,7 +322,9 @@ BigDecimal.prototype.sqrt = function (): BigDecimal {
 
 // ---------- cbrt ----------
 
-BigDecimal.prototype.cbrt = function (): BigDecimal {
+BigDecimal.prototype.cbrt = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // Special cases
   if (this.isNaN()) return BigDecimal.NAN;
   if (this.isZero()) return BigDecimal.ZERO;
@@ -325,11 +337,10 @@ BigDecimal.prototype.cbrt = function (): BigDecimal {
 
   // cbrt of negative: negate, compute cbrt, negate result
   if (this.significand < 0n) {
-    return this.neg().cbrt().neg();
+    return this.neg().cbrt(targetPrec).neg();
   }
 
   // Working precision with guard digits
-  const targetPrec = BigDecimal.precision;
   const workingPrec = targetPrec + 10;
 
   // Range reduction: write x = m·10^(3k) with m ∈ [1, 1000), so
@@ -406,19 +417,27 @@ BigDecimal.prototype.cbrt = function (): BigDecimal {
 
 // ---------- Static methods ----------
 
-(BigDecimal as unknown as { sqrt: (x: BigDecimal) => BigDecimal }).sqrt =
-  function (x: BigDecimal): BigDecimal {
-    return x.sqrt();
-  };
+(
+  BigDecimal as unknown as {
+    sqrt: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).sqrt = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.sqrt(prec);
+};
 
-(BigDecimal as unknown as { cbrt: (x: BigDecimal) => BigDecimal }).cbrt =
-  function (x: BigDecimal): BigDecimal {
-    return x.cbrt();
-  };
+(
+  BigDecimal as unknown as {
+    cbrt: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).cbrt = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.cbrt(prec);
+};
 
 // ---------- exp ----------
 
-BigDecimal.prototype.exp = function (): BigDecimal {
+BigDecimal.prototype.exp = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // Special cases
   if (this.isNaN()) return BigDecimal.NAN;
 
@@ -439,8 +458,6 @@ BigDecimal.prototype.exp = function (): BigDecimal {
     return this.significand > 0n
       ? BigDecimal.POSITIVE_INFINITY
       : BigDecimal.ZERO;
-
-  const targetPrec = BigDecimal.precision;
 
   // Range reduction: exp(x) = exp(r) · 10^k with x = k·ln(10) + r and
   // r ∈ [0, ln(10)). This keeps the value handed to the fixed-point kernel
@@ -484,7 +501,9 @@ BigDecimal.prototype.exp = function (): BigDecimal {
 
 // ---------- ln ----------
 
-BigDecimal.prototype.ln = function (): BigDecimal {
+BigDecimal.prototype.ln = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // Special cases
   if (this.isNaN()) return BigDecimal.NAN;
 
@@ -502,8 +521,6 @@ BigDecimal.prototype.ln = function (): BigDecimal {
 
   // ln(1) = 0
   if (this.eq(1)) return BigDecimal.ZERO;
-
-  const targetPrec = BigDecimal.precision;
 
   // Range reduction: write x = m · 10^e with m ∈ [1, 10) and
   // ln(x) = ln(m) + e·ln(10). The fixed-point kernel only ever sees m, an
@@ -527,7 +544,7 @@ BigDecimal.prototype.ln = function (): BigDecimal {
   // can be near 1, so the extra subtraction is skipped for every other x.
   let nearOneGuard = 0;
   if (e === 0 || e === -1) {
-    const xm1 = this.sub(BigDecimal.ONE);
+    const xm1 = this.sub(BigDecimal.ONE, targetPrec);
     if (!xm1.isZero()) {
       const de = decimalExponent(xm1); // ≈ floor(log10|x − 1|)
       if (de < 0) nearOneGuard = -de;
@@ -545,7 +562,10 @@ BigDecimal.prototype.ln = function (): BigDecimal {
 
 // ---------- log(base) ----------
 
-BigDecimal.prototype.log = function (base: BigDecimal | number): BigDecimal {
+BigDecimal.prototype.log = function (
+  base: BigDecimal | number,
+  prec: number = BigDecimal.precision
+): BigDecimal {
   // log_b(x) = ln(x) / ln(b)
   //
   // Computed with guard digits: each ln() rounds to the working precision,
@@ -555,47 +575,54 @@ BigDecimal.prototype.log = function (base: BigDecimal | number): BigDecimal {
   // With the guard, an exact result at 10^-(P+8) relative error rounds to
   // the exact value. (CORRECTNESS P2 #17)
   const b = base instanceof BigDecimal ? base : new BigDecimal(base);
-  const saved = BigDecimal.precision;
-  BigDecimal.precision = saved + 10;
-  try {
-    return this.ln().div(b.ln()).toPrecision(saved);
-  } finally {
-    BigDecimal.precision = saved;
-  }
+  const work = prec + 10;
+  return this.ln(work).div(b.ln(work), work).toPrecision(prec);
 };
 
 // ---------- Static methods: exp, ln, log10 ----------
 
-(BigDecimal as unknown as { exp: (x: BigDecimal) => BigDecimal }).exp =
-  function (x: BigDecimal): BigDecimal {
-    return x.exp();
-  };
-
-(BigDecimal as unknown as { ln: (x: BigDecimal) => BigDecimal }).ln = function (
-  x: BigDecimal
-): BigDecimal {
-  return x.ln();
+(
+  BigDecimal as unknown as {
+    exp: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).exp = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.exp(prec);
 };
 
-(BigDecimal as unknown as { log10: (x: BigDecimal) => BigDecimal }).log10 =
-  function (x: BigDecimal): BigDecimal {
-    return x.log(10);
-  };
+(
+  BigDecimal as unknown as {
+    ln: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).ln = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.ln(prec);
+};
 
-(BigDecimal as unknown as { log2: (x: BigDecimal) => BigDecimal }).log2 =
-  function (x: BigDecimal): BigDecimal {
-    return x.log(2);
-  };
+(
+  BigDecimal as unknown as {
+    log10: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).log10 = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.log(10, prec);
+};
+
+(
+  BigDecimal as unknown as {
+    log2: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).log2 = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.log(2, prec);
+};
 
 // ---------- sin ----------
 
-BigDecimal.prototype.sin = function (): BigDecimal {
+BigDecimal.prototype.sin = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // Special cases
   if (this.isNaN()) return BigDecimal.NAN;
   if (!this.isFinite()) return BigDecimal.NAN; // sin(±Inf) = NaN
   if (this.isZero()) return BigDecimal.ZERO;
 
-  const targetPrec = BigDecimal.precision;
   const e = decimalExponent(this);
 
   // sin(x) = x·(1 − x²/6 + …): for tiny x the relative correction
@@ -620,13 +647,13 @@ BigDecimal.prototype.sin = function (): BigDecimal {
 
 // ---------- cos ----------
 
-BigDecimal.prototype.cos = function (): BigDecimal {
+BigDecimal.prototype.cos = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // Special cases
   if (this.isNaN()) return BigDecimal.NAN;
   if (!this.isFinite()) return BigDecimal.NAN; // cos(±Inf) = NaN
   if (this.isZero()) return BigDecimal.ONE;
-
-  const targetPrec = BigDecimal.precision;
 
   // π-digit budget for the mod-2π reduction of huge arguments (see sin).
   // (Tiny arguments are fine here: the result is O(1), and a fixed-point
@@ -661,13 +688,14 @@ BigDecimal.prototype.cos = function (): BigDecimal {
 
 // ---------- tan ----------
 
-BigDecimal.prototype.tan = function (): BigDecimal {
+BigDecimal.prototype.tan = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // Special cases
   if (this.isNaN()) return BigDecimal.NAN;
   if (!this.isFinite()) return BigDecimal.NAN; // tan(±Inf) = NaN
   if (this.isZero()) return BigDecimal.ZERO;
 
-  const targetPrec = BigDecimal.precision;
   const e = decimalExponent(this);
 
   // tan(x) = x·(1 + x²/3 + …): tiny x rounds to x (see sin).
@@ -716,19 +744,20 @@ BigDecimal.prototype.tan = function (): BigDecimal {
 
 // ---------- atan ----------
 
-BigDecimal.prototype.atan = function (): BigDecimal {
+BigDecimal.prototype.atan = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // Special cases
   if (this.isNaN()) return BigDecimal.NAN;
   if (this.isZero()) return BigDecimal.ZERO;
 
   if (!this.isFinite()) {
     // atan(+Inf) = π/2, atan(-Inf) = -π/2
-    const piHalf = BigDecimal.PI.div(BigDecimal.TWO);
+    const piHalf = BigDecimal.pi(targetPrec).div(BigDecimal.TWO, targetPrec);
     if (this.significand > 0n) return piHalf;
     return piHalf.neg();
   }
 
-  const targetPrec = BigDecimal.precision;
   const e = decimalExponent(this);
 
   // atan(x) = x·(1 − x²/3 + …): tiny x rounds to x (see sin).
@@ -745,7 +774,9 @@ BigDecimal.prototype.atan = function (): BigDecimal {
 
 // ---------- asin ----------
 
-BigDecimal.prototype.asin = function (): BigDecimal {
+BigDecimal.prototype.asin = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // Special cases
   if (this.isNaN()) return BigDecimal.NAN;
   if (!this.isFinite()) return BigDecimal.NAN; // asin(±Inf) = NaN
@@ -758,11 +789,10 @@ BigDecimal.prototype.asin = function (): BigDecimal {
 
   // asin(1) = π/2, asin(-1) = -π/2
   if (absThis.eq(one)) {
-    const piHalf = BigDecimal.PI.div(BigDecimal.TWO);
+    const piHalf = BigDecimal.pi(targetPrec).div(BigDecimal.TWO, targetPrec);
     return this.significand > 0n ? piHalf : piHalf.neg();
   }
 
-  const targetPrec = BigDecimal.precision;
   const e = decimalExponent(this);
 
   // asin(x) = x·(1 + x²/6 + …): tiny x rounds to x (see sin).
@@ -797,7 +827,9 @@ BigDecimal.prototype.asin = function (): BigDecimal {
 
 // ---------- acos ----------
 
-BigDecimal.prototype.acos = function (): BigDecimal {
+BigDecimal.prototype.acos = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // Special cases
   if (this.isNaN()) return BigDecimal.NAN;
   if (!this.isFinite()) return BigDecimal.NAN; // acos(±Inf) = NaN
@@ -810,7 +842,7 @@ BigDecimal.prototype.acos = function (): BigDecimal {
   if (this.eq(1)) return BigDecimal.ZERO;
 
   // acos(-1) = π
-  if (this.eq(-1)) return BigDecimal.PI;
+  if (this.eq(-1)) return BigDecimal.pi(targetPrec);
 
   // The naive `acos(x) = π/2 − asin(x)` cancels catastrophically as x → ±1:
   // both terms are ≈ π/2 while the result → 0, losing −log10(result) digits
@@ -821,73 +853,91 @@ BigDecimal.prototype.acos = function (): BigDecimal {
   // singularity — and computes the small result directly (no cancellation).
   // `1∓x` is an *exact* BigDecimal subtraction, so it loses nothing even when
   // x matches 1 to the full working precision. (NU-P1-5)
-  const targetPrec = BigDecimal.precision;
-  const saved = BigDecimal.precision;
-  BigDecimal.precision = targetPrec + 10;
-  try {
-    const two = BigDecimal.TWO;
-    if (this.significand >= 0n) {
-      const t = BigDecimal.ONE.sub(this)
-        ._mulToPrecision(BigDecimal.HALF, targetPrec + 10)
-        .sqrt();
-      // Fused multiply-and-round (single rounding at targetPrec; the previous
-      // mul-then-toPrecision double-rounded through the +10 guard — battery-
-      // verified identical).
-      return two._mulToPrecision(t.asin(), targetPrec);
-    }
-    const t = BigDecimal.ONE.add(this)
-      ._mulToPrecision(BigDecimal.HALF, targetPrec + 10)
-      .sqrt();
-    return BigDecimal.PI.sub(two.mul(t.asin())).toPrecision(targetPrec);
-  } finally {
-    BigDecimal.precision = saved;
+  const work = targetPrec + 10;
+  const two = BigDecimal.TWO;
+  if (this.significand >= 0n) {
+    const t = BigDecimal.ONE.sub(this, work)
+      ._mulToPrecision(BigDecimal.HALF, work)
+      .sqrt(work);
+    // Fused multiply-and-round (single rounding at targetPrec; the previous
+    // mul-then-toPrecision double-rounded through the +10 guard — battery-
+    // verified identical).
+    return two._mulToPrecision(t.asin(work), targetPrec);
   }
+  const t = BigDecimal.ONE.add(this, work)
+    ._mulToPrecision(BigDecimal.HALF, work)
+    .sqrt(work);
+  return BigDecimal.pi(work)
+    .sub(two.mul(t.asin(work)), work)
+    .toPrecision(targetPrec);
 };
 
 // ---------- Static methods: sin, cos, tan, asin, acos, atan, atan2 ----------
 
-(BigDecimal as unknown as { sin: (x: BigDecimal) => BigDecimal }).sin =
-  function (x: BigDecimal): BigDecimal {
-    return x.sin();
-  };
-
-(BigDecimal as unknown as { cos: (x: BigDecimal) => BigDecimal }).cos =
-  function (x: BigDecimal): BigDecimal {
-    return x.cos();
-  };
-
-(BigDecimal as unknown as { tan: (x: BigDecimal) => BigDecimal }).tan =
-  function (x: BigDecimal): BigDecimal {
-    return x.tan();
-  };
-
-(BigDecimal as unknown as { asin: (x: BigDecimal) => BigDecimal }).asin =
-  function (x: BigDecimal): BigDecimal {
-    return x.asin();
-  };
-
-(BigDecimal as unknown as { acos: (x: BigDecimal) => BigDecimal }).acos =
-  function (x: BigDecimal): BigDecimal {
-    return x.acos();
-  };
-
-(BigDecimal as unknown as { atan: (x: BigDecimal) => BigDecimal }).atan =
-  function (x: BigDecimal): BigDecimal {
-    return x.atan();
-  };
+(
+  BigDecimal as unknown as {
+    sin: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).sin = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.sin(prec);
+};
 
 (
   BigDecimal as unknown as {
-    atan2: (y: BigDecimal | number, x: BigDecimal) => BigDecimal;
+    cos: (x: BigDecimal, prec?: number) => BigDecimal;
   }
-).atan2 = function (y: BigDecimal | number, x: BigDecimal): BigDecimal {
+).cos = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.cos(prec);
+};
+
+(
+  BigDecimal as unknown as {
+    tan: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).tan = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.tan(prec);
+};
+
+(
+  BigDecimal as unknown as {
+    asin: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).asin = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.asin(prec);
+};
+
+(
+  BigDecimal as unknown as {
+    acos: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).acos = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.acos(prec);
+};
+
+(
+  BigDecimal as unknown as {
+    atan: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).atan = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.atan(prec);
+};
+
+(
+  BigDecimal as unknown as {
+    atan2: (y: BigDecimal | number, x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).atan2 = function (
+  y: BigDecimal | number,
+  x: BigDecimal,
+  prec: number = BigDecimal.precision
+): BigDecimal {
   const yBd = y instanceof BigDecimal ? y : new BigDecimal(y);
 
   // NaN propagation
   if (yBd.isNaN() || x.isNaN()) return BigDecimal.NAN;
 
-  const pi = BigDecimal.PI;
-  const piHalf = pi.div(BigDecimal.TWO);
+  const pi = BigDecimal.pi(prec);
+  const piHalf = pi.div(BigDecimal.TWO, prec);
 
   // x = 0 cases
   if (x.isZero()) {
@@ -896,26 +946,28 @@ BigDecimal.prototype.acos = function (): BigDecimal {
     return piHalf.neg(); // atan2(-, 0) = -π/2
   }
 
-  const ratio = yBd.div(x);
+  const ratio = yBd.div(x, prec);
 
   if (x.significand > 0n) {
     // x > 0 (including +Infinity): atan(y/x)
-    return ratio.atan();
+    return ratio.atan(prec);
   }
 
   // x < 0
   if (yBd.significand >= 0n) {
     // y >= 0: atan(y/x) + π
-    return ratio.atan().add(pi);
+    return ratio.atan(prec).add(pi, prec);
   }
 
   // y < 0: atan(y/x) - π
-  return ratio.atan().sub(pi);
+  return ratio.atan(prec).sub(pi, prec);
 };
 
 // ---------- sinh ----------
 
-BigDecimal.prototype.sinh = function (): BigDecimal {
+BigDecimal.prototype.sinh = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // Special cases
   if (this.isNaN()) return BigDecimal.NAN;
   if (this.isZero()) return BigDecimal.ZERO;
@@ -926,7 +978,6 @@ BigDecimal.prototype.sinh = function (): BigDecimal {
     return BigDecimal.NEGATIVE_INFINITY;
   }
 
-  const targetPrec = BigDecimal.precision;
   const e = decimalExponent(this);
 
   if (e < 0) {
@@ -934,18 +985,15 @@ BigDecimal.prototype.sinh = function (): BigDecimal {
     if (-2 * e >= targetPrec + 4) return this.toPrecision(targetPrec);
 
     // Small x: exp(x) − exp(−x) cancels the leading 1, losing ~−e digits.
-    // Temporarily raise the precision to compensate, then round back.
-    const saved = BigDecimal.precision;
-    BigDecimal.precision = targetPrec - e + 5;
-    try {
-      const expX = this.exp();
-      // ×HALF is exact in decimal (0.5 = 5·10⁻¹), so this is value-identical
-      // to ÷2 while replacing the division machinery with a trivial ×5n; the
-      // fused round also skips the intermediate normalize.
-      return expX.sub(expX.inv())._mulToPrecision(BigDecimal.HALF, targetPrec);
-    } finally {
-      BigDecimal.precision = saved;
-    }
+    // Raise the precision to compensate, then round back.
+    const work = targetPrec - e + 5;
+    const expX = this.exp(work);
+    // ×HALF is exact in decimal (0.5 = 5·10⁻¹), so this is value-identical
+    // to ÷2 while replacing the division machinery with a trivial ×5n; the
+    // fused round also skips the intermediate normalize.
+    return expX
+      .sub(expX.inv(work), work)
+      ._mulToPrecision(BigDecimal.HALF, targetPrec);
   }
 
   // Large |x|: exp(−x) is below the rounding grid once 2|x| > (p+3)·ln 10,
@@ -954,20 +1002,22 @@ BigDecimal.prototype.sinh = function (): BigDecimal {
   // astronomically large significands (sinh(1e9) would attempt a
   // ~10⁹-digit bigint subtraction).
   if (Math.abs(this.toNumber()) > 1.16 * (targetPrec + 3)) {
-    const h = this.abs().exp().div(BigDecimal.TWO);
+    const h = this.abs().exp(targetPrec).div(BigDecimal.TWO, targetPrec);
     return this.significand > 0n ? h : h.neg();
   }
 
   // sinh(x) = (exp(x) - 1/exp(x)) / 2
   // Use inv() instead of exp(-x) — a single division vs a full Taylor+squaring
-  const expX = this.exp();
-  const expNegX = expX.inv();
-  return expX.sub(expNegX).div(BigDecimal.TWO);
+  const expX = this.exp(targetPrec);
+  const expNegX = expX.inv(targetPrec);
+  return expX.sub(expNegX, targetPrec).div(BigDecimal.TWO, targetPrec);
 };
 
 // ---------- cosh ----------
 
-BigDecimal.prototype.cosh = function (): BigDecimal {
+BigDecimal.prototype.cosh = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // Special cases
   if (this.isNaN()) return BigDecimal.NAN;
   if (this.isZero()) return BigDecimal.ONE;
@@ -979,20 +1029,21 @@ BigDecimal.prototype.cosh = function (): BigDecimal {
 
   // Large |x|: cosh(x) = exp(|x|)/2 correctly rounded (see sinh — avoids
   // aligning exponents ~2|x|/ln 10 apart in the addition below).
-  const targetPrec = BigDecimal.precision;
   if (Math.abs(this.toNumber()) > 1.16 * (targetPrec + 3))
-    return this.abs().exp().div(BigDecimal.TWO);
+    return this.abs().exp(targetPrec).div(BigDecimal.TWO, targetPrec);
 
   // cosh(x) = (exp(x) + 1/exp(x)) / 2
   // Use inv() instead of exp(-x) — a single division vs a full Taylor+squaring
-  const expX = this.exp();
-  const expNegX = expX.inv();
-  return expX.add(expNegX).div(BigDecimal.TWO);
+  const expX = this.exp(targetPrec);
+  const expNegX = expX.inv(targetPrec);
+  return expX.add(expNegX, targetPrec).div(BigDecimal.TWO, targetPrec);
 };
 
 // ---------- tanh ----------
 
-BigDecimal.prototype.tanh = function (): BigDecimal {
+BigDecimal.prototype.tanh = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // Special cases
   if (this.isNaN()) return BigDecimal.NAN;
   if (this.isZero()) return BigDecimal.ZERO;
@@ -1003,7 +1054,6 @@ BigDecimal.prototype.tanh = function (): BigDecimal {
     return BigDecimal.NEGATIVE_ONE;
   }
 
-  const targetPrec = BigDecimal.precision;
   const e = decimalExponent(this);
 
   if (e < 0) {
@@ -1011,18 +1061,13 @@ BigDecimal.prototype.tanh = function (): BigDecimal {
     if (-2 * e >= targetPrec + 4) return this.toPrecision(targetPrec);
 
     // Small x: exp(2x) − 1 cancels the leading 1, losing ~−e digits.
-    // Temporarily raise the precision to compensate, then round back.
-    const saved = BigDecimal.precision;
-    BigDecimal.precision = targetPrec - e + 5;
-    try {
-      const exp2x = this.mul(BigDecimal.TWO).exp();
-      return exp2x
-        .sub(BigDecimal.ONE)
-        .div(exp2x.add(BigDecimal.ONE))
-        .toPrecision(targetPrec);
-    } finally {
-      BigDecimal.precision = saved;
-    }
+    // Raise the precision to compensate, then round back.
+    const work = targetPrec - e + 5;
+    const exp2x = this.mul(BigDecimal.TWO).exp(work);
+    return exp2x
+      .sub(BigDecimal.ONE, work)
+      .div(exp2x.add(BigDecimal.ONE, work), work)
+      .toPrecision(targetPrec);
   }
 
   // Large |x|: 1 − |tanh(x)| = 2e^(−2|x|)(1 + …) is below the rounding grid
@@ -1034,30 +1079,43 @@ BigDecimal.prototype.tanh = function (): BigDecimal {
     return this.significand > 0n ? BigDecimal.ONE : BigDecimal.NEGATIVE_ONE;
 
   // Use (exp(2x) - 1) / (exp(2x) + 1) for better numerical stability with large x
-  const exp2x = this.mul(BigDecimal.TWO).exp();
-  return exp2x.sub(BigDecimal.ONE).div(exp2x.add(BigDecimal.ONE));
+  const exp2x = this.mul(BigDecimal.TWO).exp(targetPrec);
+  return exp2x
+    .sub(BigDecimal.ONE, targetPrec)
+    .div(exp2x.add(BigDecimal.ONE, targetPrec), targetPrec);
 };
 
 // ---------- Static methods: sinh, cosh, tanh ----------
 
-(BigDecimal as unknown as { sinh: (x: BigDecimal) => BigDecimal }).sinh =
-  function (x: BigDecimal): BigDecimal {
-    return x.sinh();
-  };
+(
+  BigDecimal as unknown as {
+    sinh: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).sinh = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.sinh(prec);
+};
 
-(BigDecimal as unknown as { cosh: (x: BigDecimal) => BigDecimal }).cosh =
-  function (x: BigDecimal): BigDecimal {
-    return x.cosh();
-  };
+(
+  BigDecimal as unknown as {
+    cosh: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).cosh = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.cosh(prec);
+};
 
-(BigDecimal as unknown as { tanh: (x: BigDecimal) => BigDecimal }).tanh =
-  function (x: BigDecimal): BigDecimal {
-    return x.tanh();
-  };
+(
+  BigDecimal as unknown as {
+    tanh: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).tanh = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.tanh(prec);
+};
 
 // ---------- expm1 ----------
 
-BigDecimal.prototype.expm1 = function (): BigDecimal {
+BigDecimal.prototype.expm1 = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // exp(this) − 1, accurate for small arguments (where exp(x) − 1 would lose
   // the leading digits to cancellation with 1).
   if (this.isNaN()) return BigDecimal.NAN;
@@ -1067,7 +1125,6 @@ BigDecimal.prototype.expm1 = function (): BigDecimal {
       : BigDecimal.NEGATIVE_ONE; // expm1(−∞) = −1
   if (this.isZero()) return BigDecimal.ZERO;
 
-  const targetPrec = BigDecimal.precision;
   const e = decimalExponent(this);
 
   // expm1(x) = x + x²/2 + …: tiny x rounds to x (relative error ~x/2 ~ 10^e).
@@ -1076,22 +1133,19 @@ BigDecimal.prototype.expm1 = function (): BigDecimal {
   if (e < 0) {
     // Small x: exp(x) ≈ 1 + x, so exp(x) − 1 cancels ~−e leading digits.
     // Raise the precision to compensate, then round back.
-    const saved = BigDecimal.precision;
-    BigDecimal.precision = targetPrec - e + 5;
-    try {
-      return this.exp().sub(BigDecimal.ONE).toPrecision(targetPrec);
-    } finally {
-      BigDecimal.precision = saved;
-    }
+    const work = targetPrec - e + 5;
+    return this.exp(work).sub(BigDecimal.ONE, work).toPrecision(targetPrec);
   }
 
   // |x| ≳ 1: the result is O(1) or larger, no cancellation.
-  return this.exp().sub(BigDecimal.ONE);
+  return this.exp(targetPrec).sub(BigDecimal.ONE, targetPrec);
 };
 
 // ---------- log1p ----------
 
-BigDecimal.prototype.log1p = function (): BigDecimal {
+BigDecimal.prototype.log1p = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // ln(1 + this), accurate for small arguments (where 1 + x ≈ 1).
   if (this.isNaN()) return BigDecimal.NAN;
   if (!this.isFinite())
@@ -1101,11 +1155,10 @@ BigDecimal.prototype.log1p = function (): BigDecimal {
   if (this.isZero()) return BigDecimal.ZERO;
 
   // 1 + x ≤ 0 → outside the domain.
-  const onePlus = BigDecimal.ONE.add(this);
+  const onePlus = BigDecimal.ONE.add(this, targetPrec);
   if (onePlus.isZero()) return BigDecimal.NEGATIVE_INFINITY; // x = −1
   if (onePlus.significand < 0n) return BigDecimal.NAN; // x < −1
 
-  const targetPrec = BigDecimal.precision;
   const e = decimalExponent(this);
 
   // log1p(x) = x − x²/2 + …: tiny x rounds to x.
@@ -1114,21 +1167,18 @@ BigDecimal.prototype.log1p = function (): BigDecimal {
   if (e < 0) {
     // Small x: ln(1 + x) ≈ x but 1 + x ≈ 1, so ln loses ~−e leading digits.
     // (Forming 1 + x is exact; the loss is in resolving ln near 1.) Compensate.
-    const saved = BigDecimal.precision;
-    BigDecimal.precision = targetPrec - e + 5;
-    try {
-      return BigDecimal.ONE.add(this).ln().toPrecision(targetPrec);
-    } finally {
-      BigDecimal.precision = saved;
-    }
+    const work = targetPrec - e + 5;
+    return BigDecimal.ONE.add(this, work).ln(work).toPrecision(targetPrec);
   }
 
-  return BigDecimal.ONE.add(this).ln();
+  return BigDecimal.ONE.add(this, targetPrec).ln(targetPrec);
 };
 
 // ---------- asinh ----------
 
-BigDecimal.prototype.asinh = function (): BigDecimal {
+BigDecimal.prototype.asinh = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // asinh(x) = sign(x) · ln(|x| + sqrt(x² + 1)). Odd function; |x| keeps the
   // logarithm's argument ≥ 1 so the sum never cancels.
   if (this.isNaN()) return BigDecimal.NAN;
@@ -1140,34 +1190,29 @@ BigDecimal.prototype.asinh = function (): BigDecimal {
 
   const negative = this.significand < 0n;
   const t = this.abs();
-  const targetPrec = BigDecimal.precision;
   const e = decimalExponent(this);
 
   // asinh(x) = x − x³/6 + …: tiny x rounds to x.
   if (e < 0 && -2 * e >= targetPrec + 4) return this.toPrecision(targetPrec);
 
-  const compute = (): BigDecimal =>
-    t.add(t.mul(t).add(BigDecimal.ONE).sqrt()).ln();
+  const compute = (p: number): BigDecimal =>
+    t.add(t.mul(t).add(BigDecimal.ONE, p).sqrt(p), p).ln(p);
 
   let result: BigDecimal;
   if (e < 0) {
     // Small x: ln(|x| + sqrt(x²+1)) = ln(1 + x + …) ≈ x near 1 — compensate.
-    const saved = BigDecimal.precision;
-    BigDecimal.precision = targetPrec - e + 5;
-    try {
-      result = compute().toPrecision(targetPrec);
-    } finally {
-      BigDecimal.precision = saved;
-    }
+    result = compute(targetPrec - e + 5).toPrecision(targetPrec);
   } else {
-    result = compute();
+    result = compute(targetPrec);
   }
   return negative ? result.neg() : result;
 };
 
 // ---------- acosh ----------
 
-BigDecimal.prototype.acosh = function (): BigDecimal {
+BigDecimal.prototype.acosh = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // acosh(x) = 2·asinh(sqrt((x−1)/2)) for x ≥ 1. This form is stable near x = 1
   // (the naive ln(x + sqrt(x²−1)) loses precision there); asinh supplies its
   // own small/large-argument handling.
@@ -1181,13 +1226,17 @@ BigDecimal.prototype.acosh = function (): BigDecimal {
   if (this.lt(BigDecimal.ONE)) return BigDecimal.NAN;
   if (this.eq(1)) return BigDecimal.ZERO;
 
-  const t = this.sub(BigDecimal.ONE).div(BigDecimal.TWO).sqrt();
-  return BigDecimal.TWO.mul(t.asinh());
+  const t = this.sub(BigDecimal.ONE, targetPrec)
+    .div(BigDecimal.TWO, targetPrec)
+    .sqrt(targetPrec);
+  return BigDecimal.TWO.mul(t.asinh(targetPrec));
 };
 
 // ---------- atanh ----------
 
-BigDecimal.prototype.atanh = function (): BigDecimal {
+BigDecimal.prototype.atanh = function (
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // atanh(x) = ½·ln((1+x)/(1−x)) for |x| < 1.
   if (this.isNaN()) return BigDecimal.NAN;
   if (!this.isFinite()) return BigDecimal.NAN; // |±∞| > 1
@@ -1200,33 +1249,33 @@ BigDecimal.prototype.atanh = function (): BigDecimal {
       : BigDecimal.NEGATIVE_INFINITY;
   if (abs.gt(BigDecimal.ONE)) return BigDecimal.NAN;
 
-  const targetPrec = BigDecimal.precision;
   const e = decimalExponent(this); // < 0 since |x| < 1
 
   // atanh(x) = x + x³/3 + …: tiny x rounds to x.
   if (-2 * e >= targetPrec + 4) return this.toPrecision(targetPrec);
 
   // ln((1+x)/(1−x)) ≈ 2x near 1 for small x — compensate the cancellation.
-  const saved = BigDecimal.precision;
-  BigDecimal.precision = targetPrec - e + 5;
-  try {
-    const ratio = BigDecimal.ONE.add(this).div(BigDecimal.ONE.sub(this));
-    // ×HALF (exact in decimal) replaces ÷2; fused single round to targetPrec.
-    return ratio.ln()._mulToPrecision(BigDecimal.HALF, targetPrec);
-  } finally {
-    BigDecimal.precision = saved;
-  }
+  const work = targetPrec - e + 5;
+  const ratio = BigDecimal.ONE.add(this, work).div(
+    BigDecimal.ONE.sub(this, work),
+    work
+  );
+  // ×HALF (exact in decimal) replaces ÷2; fused single round to targetPrec.
+  return ratio.ln(work)._mulToPrecision(BigDecimal.HALF, targetPrec);
 };
 
 // ---------- nthRoot ----------
 
-BigDecimal.prototype.nthRoot = function (n: number): BigDecimal {
+BigDecimal.prototype.nthRoot = function (
+  n: number,
+  targetPrec: number = BigDecimal.precision
+): BigDecimal {
   // x^(1/n) for integer n. Negative x is allowed when n is odd.
   if (this.isNaN() || !Number.isInteger(n) || n === 0) return BigDecimal.NAN;
   if (n === 1) return this;
-  if (n === 2) return this.sqrt();
-  if (n === 3) return this.cbrt();
-  if (n < 0) return this.nthRoot(-n).inv();
+  if (n === 2) return this.sqrt(targetPrec);
+  if (n === 3) return this.cbrt(targetPrec);
+  if (n < 0) return this.nthRoot(-n, targetPrec).inv(targetPrec);
 
   // n ≥ 4 (positive integer)
   if (this.isZero()) return BigDecimal.ZERO;
@@ -1236,54 +1285,63 @@ BigDecimal.prototype.nthRoot = function (n: number): BigDecimal {
   }
   if (this.significand < 0n) {
     if (n % 2 === 0) return BigDecimal.NAN; // even root of a negative
-    return this.neg().nthRoot(n).neg();
+    return this.neg().nthRoot(n, targetPrec).neg();
   }
 
   // Positive base: x^(1/n) = exp(ln(x)/n), with a few guard digits.
-  const targetPrec = BigDecimal.precision;
-  const saved = BigDecimal.precision;
-  BigDecimal.precision = targetPrec + 8;
-  try {
-    const r = BigDecimal.exp(this.ln().div(new BigDecimal(n)));
-    return r.toPrecision(targetPrec);
-  } finally {
-    BigDecimal.precision = saved;
-  }
+  const work = targetPrec + 8;
+  const r = this.ln(work).div(new BigDecimal(n), work).exp(work);
+  return r.toPrecision(targetPrec);
 };
 
 // ---------- Static methods: asinh, acosh, atanh, expm1, log1p, nthRoot ----------
 
-(BigDecimal as unknown as { asinh: (x: BigDecimal) => BigDecimal }).asinh =
-  function (x: BigDecimal): BigDecimal {
-    return x.asinh();
-  };
-
-(BigDecimal as unknown as { acosh: (x: BigDecimal) => BigDecimal }).acosh =
-  function (x: BigDecimal): BigDecimal {
-    return x.acosh();
-  };
-
-(BigDecimal as unknown as { atanh: (x: BigDecimal) => BigDecimal }).atanh =
-  function (x: BigDecimal): BigDecimal {
-    return x.atanh();
-  };
-
-(BigDecimal as unknown as { expm1: (x: BigDecimal) => BigDecimal }).expm1 =
-  function (x: BigDecimal): BigDecimal {
-    return x.expm1();
-  };
-
-(BigDecimal as unknown as { log1p: (x: BigDecimal) => BigDecimal }).log1p =
-  function (x: BigDecimal): BigDecimal {
-    return x.log1p();
-  };
+(
+  BigDecimal as unknown as {
+    asinh: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).asinh = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.asinh(prec);
+};
 
 (
   BigDecimal as unknown as {
-    nthRoot: (x: BigDecimal, n: number) => BigDecimal;
+    acosh: (x: BigDecimal, prec?: number) => BigDecimal;
   }
-).nthRoot = function (x: BigDecimal, n: number): BigDecimal {
-  return x.nthRoot(n);
+).acosh = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.acosh(prec);
+};
+
+(
+  BigDecimal as unknown as {
+    atanh: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).atanh = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.atanh(prec);
+};
+
+(
+  BigDecimal as unknown as {
+    expm1: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).expm1 = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.expm1(prec);
+};
+
+(
+  BigDecimal as unknown as {
+    log1p: (x: BigDecimal, prec?: number) => BigDecimal;
+  }
+).log1p = function (x: BigDecimal, prec?: number): BigDecimal {
+  return x.log1p(prec);
+};
+
+(
+  BigDecimal as unknown as {
+    nthRoot: (x: BigDecimal, n: number, prec?: number) => BigDecimal;
+  }
+).nthRoot = function (x: BigDecimal, n: number, prec?: number): BigDecimal {
+  return x.nthRoot(n, prec);
 };
 
 // ---------- Internal helpers ----------

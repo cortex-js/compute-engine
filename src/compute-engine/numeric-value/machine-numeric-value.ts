@@ -14,7 +14,7 @@ import {
   bigComplexProduct,
   bigComplexQuotient,
   hasExactPartOutsideDoubleRange,
-  withDoubleDigits,
+  doubleDigits,
 } from './exact-numeric-value.js';
 import {
   isOutsideNormalDoubleRange,
@@ -267,7 +267,10 @@ export class MachineNumericValue extends NumericValue {
     return this.clone({ re: this.decimal / d, im: -this.im / d });
   }
 
-  add(other: number | NumericValue): NumericValue {
+  add(
+    other: number | NumericValue,
+    prec: number = BigDecimal.precision
+  ): NumericValue {
     if (this.isNaN) return this._makeExact(NaN);
     if (typeof other === 'number') {
       if (other === 0) return this;
@@ -275,7 +278,10 @@ export class MachineNumericValue extends NumericValue {
     }
     if (other.isZero) return this;
     if (this.isZero)
-      return this.clone({ re: other.bignumRe ?? other.re, im: other.im });
+      return this.clone({
+        re: other.bignumReAt(prec) ?? other.re,
+        im: other.im,
+      });
 
     return this.clone({
       re: this.decimal + other.re,
@@ -283,11 +289,14 @@ export class MachineNumericValue extends NumericValue {
     });
   }
 
-  sub(other: NumericValue): NumericValue {
-    return this.add(other.neg());
+  sub(other: NumericValue, prec: number = BigDecimal.precision): NumericValue {
+    return this.add(other.neg(), prec);
   }
 
-  mul(other: number | BigDecimal | NumericValue): NumericValue {
+  mul(
+    other: number | BigDecimal | NumericValue,
+    prec: number = BigDecimal.precision
+  ): NumericValue {
     if (this.isNaN) return this._makeExact(NaN);
     if (this.isZero) {
       if (
@@ -319,7 +328,10 @@ export class MachineNumericValue extends NumericValue {
     if (this.isOne) {
       if (typeof other === 'number' || other instanceof BigDecimal)
         return this.clone(other);
-      return this.clone({ re: other.bignumRe ?? other.re, im: other.im });
+      return this.clone({
+        re: other.bignumReAt(prec) ?? other.re,
+        im: other.im,
+      });
     }
     if (typeof other === 'number') {
       // A non-real value scaled by a ±∞ SCALAR is `~oo`, for the same reason the
@@ -345,7 +357,7 @@ export class MachineNumericValue extends NumericValue {
 
     if (this.isNegativeOne) {
       const n = other.neg();
-      return this.clone({ re: n.bignumRe ?? n.re, im: n.im });
+      return this.clone({ re: n.bignumReAt(prec) ?? n.re, im: n.im });
     }
     if (other.isOne) return this;
     if (other.isNegativeOne) return this.neg();
@@ -409,7 +421,7 @@ export class MachineNumericValue extends NumericValue {
       // In that case the product is computed from the big-decimal value of
       // the exact factor.
       if (outOfDoubleRange(other, x) && Number.isFinite(this.decimal))
-        return this.clone(other.bignumRe!.mul(this.decimal));
+        return this.clone(other.bignumReAt(prec)!.mul(this.decimal));
       return this.clone(this.decimal * x);
     }
 
@@ -424,8 +436,9 @@ export class MachineNumericValue extends NumericValue {
         bigComplexProduct(
           new BigDecimal(this.decimal),
           new BigDecimal(this.im),
-          other.bignumRe!,
-          other.isComplex ? other.bignumIm! : new BigDecimal(0)
+          other.bignumReAt(prec)!,
+          other.isComplex ? other.bignumImAt(prec)! : new BigDecimal(0),
+          prec
         )
       );
 
@@ -435,7 +448,10 @@ export class MachineNumericValue extends NumericValue {
     });
   }
 
-  div(other: SmallInteger | NumericValue): NumericValue {
+  div(
+    other: SmallInteger | NumericValue,
+    prec: number = BigDecimal.precision
+  ): NumericValue {
     if (this.isNaN) return this._makeExact(NaN);
     // A division by 0, a JavaScript `0` or a numeric value 0, has the same
     // answer as in `ExactNumericValue.div()`: `0/0` is NaN, a complex value
@@ -467,8 +483,9 @@ export class MachineNumericValue extends NumericValue {
       // subnormal can still give a quotient in the double range.
       if (outOfDoubleRange(other, x) && Number.isFinite(this.decimal))
         return this.clone(
-          withDoubleDigits(() =>
-            new BigDecimal(this.decimal).div(other.bignumRe!)
+          new BigDecimal(this.decimal).div(
+            other.bignumReAt(prec)!,
+            doubleDigits(prec)
           )
         );
       return this.clone(this.decimal / x);
@@ -488,8 +505,9 @@ export class MachineNumericValue extends NumericValue {
         bigComplexQuotient(
           new BigDecimal(a),
           new BigDecimal(b),
-          other.bignumRe!,
-          other.isComplex ? other.bignumIm! : new BigDecimal(0)
+          other.bignumReAt(prec)!,
+          other.isComplex ? other.bignumImAt(prec)! : new BigDecimal(0),
+          prec
         )
       );
     const [c, d] = [other.re, other.im];

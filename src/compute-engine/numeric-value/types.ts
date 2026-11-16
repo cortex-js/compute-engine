@@ -90,6 +90,13 @@ export abstract class NumericValue {
     return undefined;
   }
 
+  /** `bignumRe` computed at `prec` significant digits instead of
+   * `BigDecimal.precision`. Only an exact value computes its big decimal
+   * (a quotient or a radical); the other values hold it. */
+  bignumReAt(_prec: number): BigDecimal | undefined {
+    return this.bignumRe;
+  }
+
   /** The imaginary part of this numeric value, as the double nearest to it.
    *
    * Can be negative, zero or positive.
@@ -119,6 +126,11 @@ export abstract class NumericValue {
     return undefined;
   }
 
+  /** `bignumIm` computed at `prec` significant digits (see `bignumReAt`). */
+  bignumImAt(_prec: number): BigDecimal | undefined {
+    return this.bignumIm;
+  }
+
   abstract get numerator(): NumericValue;
   abstract get denominator(): NumericValue;
 
@@ -137,8 +149,15 @@ export abstract class NumericValue {
   /** The sign of complex numbers is undefined */
   abstract sgn(): -1 | 0 | 1 | undefined;
 
-  /** Return a non-exact representation of the numeric value */
-  abstract N(): NumericValue;
+  /** Return a non-exact representation of the numeric value.
+   *
+   * The methods that round or bound a result (`N`, `inv`, `add`, `sub`,
+   * `mul`, `div`, `pow`, `root`, `sqrt`, `abs`, `ln`, `exp`) take an
+   * optional last argument `prec`, the number of significant digits of the
+   * working precision. An engine passes its own precision; the default is
+   * `BigDecimal.precision`, which the last engine made or configured wrote.
+   */
+  abstract N(prec?: number): NumericValue;
 
   /**
    * This value with each part rounded to `digits` significant digits. A
@@ -155,22 +174,26 @@ export abstract class NumericValue {
   }
 
   abstract neg(): NumericValue;
-  abstract inv(): NumericValue;
-  abstract add(other: number | NumericValue): NumericValue;
-  abstract sub(other: NumericValue): NumericValue;
-  abstract mul(other: number | BigDecimal | NumericValue): NumericValue;
-  abstract div(other: SmallInteger | NumericValue): NumericValue;
-  abstract pow(
-    n: number | NumericValue | { re: number; im: number }
+  abstract inv(prec?: number): NumericValue;
+  abstract add(other: number | NumericValue, prec?: number): NumericValue;
+  abstract sub(other: NumericValue, prec?: number): NumericValue;
+  abstract mul(
+    other: number | BigDecimal | NumericValue,
+    prec?: number
   ): NumericValue;
-  abstract root(n: number): NumericValue;
-  abstract sqrt(): NumericValue;
+  abstract div(other: SmallInteger | NumericValue, prec?: number): NumericValue;
+  abstract pow(
+    n: number | NumericValue | { re: number; im: number },
+    prec?: number
+  ): NumericValue;
+  abstract root(n: number, prec?: number): NumericValue;
+  abstract sqrt(prec?: number): NumericValue;
 
   abstract gcd(other: NumericValue): NumericValue;
-  abstract abs(): NumericValue;
+  abstract abs(prec?: number): NumericValue;
 
-  abstract ln(base?: number): NumericValue;
-  abstract exp(): NumericValue;
+  abstract ln(base?: number, prec?: number): NumericValue;
+  abstract exp(prec?: number): NumericValue;
 
   abstract floor(): NumericValue;
   abstract ceil(): NumericValue;
@@ -187,12 +210,15 @@ export abstract class NumericValue {
   //
 
   /** Object.valueOf(): returns a primitive value, preferably a JavaScript
-   *  number over a string, even if at the expense of precision */
-  valueOf(): number | string {
-    if (!this.isComplex)
-      return this.bignumRe ? this.bignumRe.toNumber() : this.re;
+   *  number over a string, even if at the expense of precision. A complex
+   *  value is a string with `prec` significant digits in each part. */
+  valueOf(prec?: number): number | string {
+    if (!this.isComplex) {
+      const big = prec === undefined ? this.bignumRe : this.bignumReAt(prec);
+      return big ? big.toNumber() : this.re;
+    }
 
-    return this.toString();
+    return this.toString(prec);
   }
 
   /** Object.toPrimitive() */
@@ -211,6 +237,10 @@ export abstract class NumericValue {
     }
     return this.N().toString();
   }
+
+  /** A string of the value. A big decimal value is rounded to `prec`
+   * significant digits (default `BigDecimal.precision`). */
+  abstract toString(prec?: number): string;
 
   print(): void {
     // Make sure the console.log is not removed by minification

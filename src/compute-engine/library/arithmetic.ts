@@ -482,6 +482,7 @@ import type {
 import type { NumericValue } from '../numeric-value/types.js';
 import {
   ExactNumericValue,
+  doubleDigits,
   withDoubleDigits,
 } from '../numeric-value/exact-numeric-value.js';
 import {
@@ -10589,7 +10590,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             if (big !== undefined) {
               const ln = boxBignumResult(
                 engine,
-                withDoubleDigits(() => big.abs().ln())
+                big.abs().ln(doubleDigits(engine.precision))
               );
               if (!big.isNegative()) return ln;
               return engine.number(engine.complex(ln.re, Math.PI));
@@ -10614,7 +10615,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           ) {
             const bigRe = z.bignumRe ?? engine.bignum(z.re);
             if (bigRe.isFinite())
-              return engine.number(engine._numericValue(bigRe).ln());
+              return engine.number(
+                engine._numericValue(bigRe).ln(undefined, engine.precision)
+              );
           }
 
           return apply(
@@ -10629,10 +10632,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               x.isZero()
                 ? -Infinity
                 : !x.isNegative()
-                  ? x.ln()
+                  ? x.ln(engine.precision)
                   : engine.complex(x.toNumber()).log(),
             (z) => (z.isZero() ? NaN : z.log()),
-            (z) => z.ln()
+            (z) => z.ln(undefined, engine.precision)
           );
         }
       ),
@@ -13046,7 +13049,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             !n.isComplex &&
             n.isFinite === true
           )
-            return engine.number(engine._numericValue(n.numericValue).exp());
+            return engine.number(
+              engine._numericValue(n.numericValue).exp(engine.precision)
+            );
           return pow(x, n, {
             numericApproximation: shouldNumericize(numericApproximation, x, n),
             // The node's own exponent, BEFORE numericization: `n` above may be a
@@ -13412,7 +13417,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               k !== 0 &&
               (!big.isNegative() || (Number.isInteger(k) && k % 2 !== 0))
             ) {
-              const r = withDoubleDigits(() => big.abs().ln().div(k).exp());
+              const digits = doubleDigits(engine.precision);
+              const r = big.abs().ln(digits).div(k, digits).exp(digits);
               return boxBignumResult(engine, big.isNegative() ? r.neg() : r);
             }
           }
@@ -13980,7 +13986,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               exactValueOutOfDoubleRange(engine, operandOf(expression, 0), x)
             );
             if (big !== undefined) {
-              const r = withDoubleDigits(() => big.abs().sqrt());
+              const r = big.abs().sqrt(doubleDigits(engine.precision));
               if (!big.isNegative()) return boxBignumResult(engine, r);
               // The root is a float, even when it is an integer
               return engine.number(
@@ -13995,7 +14001,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (isNumber(x) && x.isInfinity === true) return x.sqrt();
 
           const [c, rest] = x.toNumericValue();
-          const cSqrt = engine.number(c.sqrt().N());
+          const cSqrt = engine.number(
+            c.sqrt(engine.precision).N(engine.precision)
+          );
           if (rest.isSame(1)) return cSqrt;
           // √(c·rest) = √c · √rest. The square root must be applied to the
           // symbolic part too — returning `rest` un-rooted dropped the radical

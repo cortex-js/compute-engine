@@ -478,7 +478,8 @@ export class BoxedNumber
 
   valueOf(): number | string {
     if (typeof this._value === 'number') return this._value;
-    return this._value.N().valueOf();
+    const prec = this.engine.precision;
+    return this._value.N(prec).valueOf(prec);
   }
 
   get numericValue(): number | NumericValue {
@@ -515,14 +516,17 @@ export class BoxedNumber
 
   get bignumRe(): BigDecimal | undefined {
     if (typeof this._value === 'number') return undefined;
-    return this._value.bignumRe;
+    return this._value.bignumReAt(this.engine.precision);
   }
 
   get bignumIm(): BigDecimal | undefined {
     if (typeof this._value === 'number') return BigDecimal.ZERO;
     // Prefer the numeric value's own bignum imaginary part (exact lane):
     // the machine-float projection `.im` overflows for huge components.
-    return this._value.bignumIm ?? this.engine.bignum(this._value.im);
+    return (
+      this._value.bignumImAt(this.engine.precision) ??
+      this.engine.bignum(this._value.im)
+    );
   }
 
   neg(): Expression {
@@ -544,7 +548,7 @@ export class BoxedNumber
       );
     }
     if (Math.abs(this.re) === 1 && !this.isComplex) return this;
-    return this.engine.number(this._value.inv());
+    return this.engine.number(this._value.inv(this.engine.precision));
   }
 
   abs(): Expression {
@@ -552,7 +556,7 @@ export class BoxedNumber
     if (typeof this._value === 'number')
       return this.engine.number(-this._value);
 
-    return this.engine.number(this._value.abs());
+    return this.engine.number(this._value.abs(this.engine.precision));
   }
 
   add(rhs: number | Expression): Expression {
@@ -614,17 +618,17 @@ export class BoxedNumber
       if (rhs === 0) return this;
       if (typeof this._value === 'number') return ce.number(this._value + rhs);
 
-      return ce.number(this._value.add(rhs));
+      return ce.number(this._value.add(rhs, ce.precision));
     }
     if (isNumber(rhs)) {
       // @fastpath
       if (typeof this._value === 'number') {
         if (typeof rhs.numericValue === 'number')
           return ce.number(this._value + rhs.numericValue);
-        return ce.number(rhs.numericValue.add(this._value));
+        return ce.number(rhs.numericValue.add(this._value, ce.precision));
       }
 
-      return ce.number(this._value.add(rhs.numericValue));
+      return ce.number(this._value.add(rhs.numericValue, ce.precision));
     }
     return add(this, rhs.canonical);
   }
@@ -670,7 +674,7 @@ export class BoxedNumber
       return ce.number(
         typeof this._value === 'number'
           ? this._value * rhs
-          : this._value.mul(rhs)
+          : this._value.mul(rhs, ce.precision)
       );
     }
 
@@ -691,7 +695,7 @@ export class BoxedNumber
         )
           return ce.NaN;
       } else if (rhs.isZero && this.isFinite === false) return ce.NaN;
-      return ce.number(rhs.mul(this._value));
+      return ce.number(rhs.mul(this._value, ce.precision));
     }
 
     if (isNumber(rhs)) {
@@ -706,7 +710,9 @@ export class BoxedNumber
       // `0.0`).
       if ((this.isExact && this.isSame(0)) || (rhs.isExact && rhs.isSame(0)))
         return ce.Zero;
-      return ce.number(ce._numericValue(this._value).mul(rhs.numericValue));
+      return ce.number(
+        ce._numericValue(this._value).mul(rhs.numericValue, ce.precision)
+      );
     }
 
     return mul(this, rhs);
@@ -773,7 +779,7 @@ export class BoxedNumber
         const r = this._value ** (1 / n);
         if (Number.isInteger(r)) return this.engine.number(r);
       } else {
-        const r = this._value.root(n);
+        const r = this._value.root(n, this.engine.precision);
         if (isSubtype(r.type, 'integer')) return this.engine.number(r);
       }
     }
@@ -830,7 +836,7 @@ export class BoxedNumber
       }
 
       // Inexact machine float: numericize (inexact in → inexact out).
-      return ce.number(ce._numericValue(v).sqrt());
+      return ce.number(ce._numericValue(v).sqrt(ce.precision));
     }
     if (this.isSame(0) || this.isSame(1)) return this;
 
@@ -842,7 +848,7 @@ export class BoxedNumber
     // approximation. Boxing an approximation with an integer value makes an
     // exact integer literal, so a test on the boxed result let a rounded
     // root pass as exact (`√(10^30 + 1)` answered `10^15`).
-    const root = this._value.sqrt();
+    const root = this._value.sqrt(ce.precision);
     if (this.isExact && !(root instanceof ExactNumericValue))
       return ce._fn('Sqrt', [this]);
     return ce.number(root);
@@ -1015,7 +1021,9 @@ export class BoxedNumber
       return ce.number(base !== undefined ? l / lnBase : l);
     }
     return ce.number(
-      base !== undefined ? this._value.ln(base.re) : this._value.ln()
+      base !== undefined
+        ? this._value.ln(base.re, ce.precision)
+        : this._value.ln(undefined, ce.precision)
     );
   }
 
@@ -1705,7 +1713,7 @@ export class BoxedNumber
     const v = this._value;
     if (typeof v === 'number') return this;
     // NumericValue
-    const n = v.N();
+    const n = v.N(this.engine.precision);
     // Often, 'evaluating' a numeric-value yields the same result, but sometimes may result in a
     // different representation: e.g. some cases of Exact -> Big
     if (v === n) return this;
