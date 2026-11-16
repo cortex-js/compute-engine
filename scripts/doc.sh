@@ -80,3 +80,7 @@ echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building library.md"
 printf $BASENAME$DOT$RESET" Building reference/"
 npx tsx scripts/build-library-reference.ts > /dev/null
 echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building reference/"
+
+printf $BASENAME$DOT$RESET" Building search-symbols.json"
+npx tsx scripts/build-search-symbols.ts > /dev/null
+echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building search-symbols.json"
