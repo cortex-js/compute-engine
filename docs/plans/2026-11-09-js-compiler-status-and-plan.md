@@ -2412,6 +2412,67 @@ integral fixes on top of G20, the constant length of a function's result);
 whether to ask Tycho for one run or only announce the build is the user's
 choice.
 
+Tycho's run of the joint build `1a9368648` (2026-11-16, session
+`tycho-desk`, Tycho `d64960d7a`; the user approved one run of a local
+tarball; results in
+`~/dev/compute-engine-recovery/interval-dump/t13-results.json`, with the
+interval dump `t13-interval-js-document-definitions.json` and
+`t13-hook-report.json`). The hook: the profile with `fallback: false` in a
+`try`, the default compile on a throw.
+
+- Render audit of 32 states (24 CORE, the 8 of row MK), two arms: 0 changed
+  pixels, the same series, no blank. No run-time throw in the corpus or the
+  audit. With the interval seam alone, no new test failure.
+- Compile calls over the 755 documents, admitted by the profile against fell
+  back: JavaScript 9,999 / 1,606; GLSL 3,977 / 391; interval 5,957 / 517.
+- **2,218 of those 2,514 fallbacks are one cause that the local replay cannot
+  see:** "the definition of Which|At has its own lowering (compile or
+  compileHelpers), which the profile does not call" (JavaScript 1,386, GLSL
+  355, interval 477). For documents imported from Desmos, Tycho attaches its
+  own evaluate and compile handlers to the library's `At` and `Which`
+  (`~/dev/tycho/src/graph-paper/graph/at-index-semantics.ts`, 1,981 lines: a
+  non-integer index reads the element at its floor; a negative index is
+  undefined; a boolean mask of another length keeps the positions where it
+  holds; two lists compare by position up to the shorter). The replay runs
+  the dump's programs with the library's own `At` and `Which`, so its 97%
+  holds only without those handlers. The CE-1354 instrument reports NOT
+  READY in this run for the same cause (24 targets).
+- The next causes: `Hsv` of a list (55 calls: landed since, `e81e5d8fa`), "a
+  body of V that is not a scalar or a point of numbers", a list or tuple
+  argument of `Apply`, `Multiply` of a list of points and another shape.
+- Tycho's suite with the hook on the three seams: 16 new failing tests in 6
+  files, none a wrong value: they assert on the default compiler's emitted
+  text (one has a cost at run time: the profile keeps `|k|` where the default
+  compiler drops it under a declared range of non-negative values), count
+  compile calls (the hook compiles twice on a fallback), and two expect a
+  `freeSymbolTypes` entry for a name whose value is captured (a contract item
+  for the default). An out-of-memory first reported for the profile was the
+  hook's own recording of `expr.json` on a shared tree, and was retracted.
+- `freeSymbols` order: Tycho reads it by membership.
+
+Open with the user since that run (reported 2026-11-16, no decision yet):
+how Tycho's `At` and `Which` reach the profile. Options given: (1) Tycho
+rewrites the rules into plain MathJSON at canonicalization (its row MK,
+restarted by `tycho-3f`); (2) native operators in CE for the Desmos rules
+(deferred by the user that morning, and CE declined the mask and the list
+comparison on 2026-10-04); (3) a definition states its lowering as ONE
+MathJSON function, which the lowering treats as a call of that function,
+while the host keeps its evaluate handler for the interpreter. Recommended:
+(3), tried first on the floored index, which compiles on the three targets
+as a host function today; the mask and the comparison need `Map` of several
+lists and `ListFrom` in the slice. Nothing is built.
+
+Landed after the run: `e81e5d8fa` (G24: a constant colour is computed once;
+a colour constructor of a list on JavaScript: 59 programs back under 1.1
+times, 64 newly compiled) and `3783bedeb` (G25: a closed constant `Range` in
+a value position is a literal list; an element-wise operation of constants
+is bound once on JavaScript). Replay on that tree: JavaScript 9,198 of 9,474
+(97.1%), GLSL 3,776 of 3,837 (98.4%), no value defect, 77 programs above 1.5
+times the existing compiler (185 before), 9 above 3. `ir/` is 10,419 lines.
+`ce-interval`'s short lists written out in its mode (one field,
+`unrollBuilds`, 16 in the mode, 0 on JavaScript) is review-clean and lands
+after a rebase; the JavaScript number is then measured with the replay.
+
 Queue from here (the items of this paragraph that the table above lists are
 done). Speed: colour constants computed once (59 programs), the two
 `vwbagbcerj` programs, the written-out sums on JavaScript (`unrollSums`,
