@@ -1,0 +1,18 @@
+{
+  "ce": {
+    "package.json": "0eeda116da423b61bae9bf82da64363a6ce8022ecc958a514ed0dd03e7c53352",
+    "package-lock.json": "e2af01be11b2287013fc3f3aa6a3378edf04d3bff2019acd69e73fe8088147b3",
+    "tsconfig.json": "f89122e6213996f2646fa2d49e08c12286bceb8e375a5c3bcc2f9ef2ee6ce642",
+    "packageVersion": "0.192.0",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15"
+  },
+  "tycho": {
+    "package.json": "6f9f777cdde6a9a2d831e9b7a8c8bf885e43cc13ddfd3cb3a33f82fc9e2dc988",
+    "package-lock.json": "705388b2314127eb345f922fa5fa9808920c1703f3a031bec299cf6691a0e3e5",
+    "tsconfig.json": "ce6eec5ca03ab7efc77b5d1ad990c84ec08eef05d11aaa2947303ba12ad3748a",
+    "packageVersion": "1.0.0",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15"
+  }
+}

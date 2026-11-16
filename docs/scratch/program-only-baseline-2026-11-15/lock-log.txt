@@ -1,0 +1,4 @@
+box-lock: waiting, number 1 in the queue — HELD by codex-mg-evidence — MG integration gate after test typing correction — ~32 min left
+box-lock: box free for codex-program-only:baseline after 15 s
+box-lock: ACQUIRED by codex-program-only:baseline for 35 min — Program-only matched baseline production build and timings
+box-lock: load 9.6 / 7.9 / 6.8 on 18 cores at acquire — record this with your results

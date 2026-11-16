@@ -1,0 +1,32 @@
+[
+  {
+    "cwd": "/Users/arno/dev/compute-engine",
+    "command": "node ~/.claude/scripts/box-lock.mjs acquire codex-program-only:baseline 35 'Program-only matched baseline production build and timings' --wait=45 > /private/tmp/program-only-baseline-20261115/lock.log 2>&1",
+    "exit": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-baseline-20261115/ce",
+    "command": "node ~/.claude/scripts/box-lock.mjs check codex-program-only:baseline && BUILD=production node scripts/build.mjs > /private/tmp/program-only-baseline-20261115/build.log 2>&1",
+    "exit": 0
+  },
+  {
+    "cwd": "/Users/arno/dev/compute-engine",
+    "command": "node ~/.claude/scripts/box-lock.mjs check codex-program-only:baseline && node --expose-gc /private/tmp/program-only-baseline-20261115/ce-bench.mjs /private/tmp/program-only-baseline-20261115/ce-normal-1.json auto > /private/tmp/program-only-baseline-20261115/ce-normal-1.log 2>&1",
+    "exit": 0
+  },
+  {
+    "cwd": "/private/tmp/program-only-baseline-20261115",
+    "command": "node ~/.claude/scripts/box-lock.mjs check codex-program-only:baseline && CE_ALT_PKG=/private/tmp/program-only-baseline-20261115/ce node --import tsx --import ./tycho/scripts/repros/ce-alt-hook.mjs ./tycho-bench.mts ./tycho-normal-1.json auto > ./tycho-normal-1.log 2>&1",
+    "exit": 0
+  },
+  {
+    "cwd": "/Users/arno/dev/compute-engine",
+    "command": "node ~/.claude/scripts/box-lock.mjs release codex-program-only:baseline",
+    "exit": 0,
+    "load": [
+      4.0,
+      6.1,
+      6.3
+    ]
+  }
+]

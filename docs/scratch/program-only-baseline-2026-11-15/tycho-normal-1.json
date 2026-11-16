@@ -1,0 +1,3216 @@
+{
+  "node": "v26.13.0",
+  "v8": "14.6.202.34-node.40",
+  "execArgv": [
+    "--import",
+    "tsx",
+    "--import",
+    "./tycho/scripts/repros/ce-alt-hook.mjs"
+  ],
+  "jit": "auto",
+  "rounds": 3,
+  "load": [
+    5.0166015625,
+    6.60791015625,
+    6.4921875
+  ],
+  "records": [
+    {
+      "id": "traffic-jam",
+      "source": "// Positions (metres), then speeds (metres/second), on a 240 m ring.\n// Each step reads the OLD state for every driver: updates are simultaneous.\nconst L = 240\nconst N = 24\nconst W = 80\nfunction roadseed(p: real) -> list<real> {\n  [if k <= N { (k - 1)*L/N + if k == 1 { p } else { 0 } } else { 5 } for k in 1..2*N]\n}\nconst S_0 = roadseed(1)\nfunction roadstart(S: list<real>) -> list<real> {\n  [S[1 + Mod(k - 1, N)] for k in 1..N*W]\n}\nconst H_0 = roadstart(S_0)\nfunction roadstep(S: list<real>, a: real, v: real) -> list<real> {\n  let R = [0.0 for k in 1..2*N]\n  let j = 0\n  let gap = 0.0\n  let target = 0.0\n  let speed = 0.0\n  for k in 1..N {\n    j = 1 + Mod(k, N)\n    gap = max(0, Mod(S[j] - S[k], L) - 4)\n    target = v*(tanh((gap - 8)/3) + tanh(8/3))/(1 + tanh(8/3))\n    speed = min(gap/0.1, max(0, S[N+k] + 0.1*a*(target - S[N+k])))\n    R = replaceAt(R, k, Mod(S[k] + 0.1*speed, L))\n    R = replaceAt(R, N+k, speed)\n  }\n  R\n}\n// Oldest positions first. The last row receives the new state.\nfunction roadtrail(H: list<real>, S: list<real>) -> list<real> {\n  [if k <= N*(W-1) { H[k+N] } else { S[k-N*(W-1)] } for k in 1..N*W]\n}\n",
+      "samples": [
+        {
+          "totalMs": 159.12775,
+          "timings": {
+            "parseMs": 7.012083000000018,
+            "checkMs": 41.851332999999954,
+            "compileMs": 15.643251000000134,
+            "runMs": 17.019874000000073,
+            "totalMs": 158.61120800000003
+          },
+          "functions": [
+            "roadseed",
+            "roadstart",
+            "roadstep",
+            "roadtrail"
+          ],
+          "values": [
+            {
+              "name": "L",
+              "type": "240"
+            },
+            {
+              "name": "N",
+              "type": "24"
+            },
+            {
+              "name": "W",
+              "type": "80"
+            },
+            {
+              "name": "S_0",
+              "type": "list<rational>"
+            },
+            {
+              "name": "H_0",
+              "type": "list<rational>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "L"
+              ],
+              "route": "compiled",
+              "compileMs": 11.889333000000022,
+              "runMs": 0.7200410000000375
+            },
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 1.21629200000001,
+              "runMs": 0.11516700000004221
+            },
+            {
+              "names": [
+                "W"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8425420000000372,
+              "runMs": 0.09966700000001083
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "interpreted",
+              "compileMs": 1.085834000000034,
+              "runMs": 3.752124999999978
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "interpreted",
+              "compileMs": 0.6092500000000314,
+              "runMs": 1.0192080000000487
+            }
+          ]
+        },
+        {
+          "totalMs": 78.47449999999998,
+          "timings": {
+            "parseMs": 1.151666999999975,
+            "checkMs": 13.827207999999985,
+            "compileMs": 3.2292920000001004,
+            "runMs": 8.806250999999975,
+            "totalMs": 78.45541700000007
+          },
+          "functions": [
+            "roadseed",
+            "roadstart",
+            "roadstep",
+            "roadtrail"
+          ],
+          "values": [
+            {
+              "name": "L",
+              "type": "240"
+            },
+            {
+              "name": "N",
+              "type": "24"
+            },
+            {
+              "name": "W",
+              "type": "80"
+            },
+            {
+              "name": "S_0",
+              "type": "list<rational>"
+            },
+            {
+              "name": "H_0",
+              "type": "list<rational>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "L"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9992920000000822,
+              "runMs": 0.12449999999989814
+            },
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7112910000000738,
+              "runMs": 0.08837500000004184
+            },
+            {
+              "names": [
+                "W"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6146249999999327,
+              "runMs": 0.07170899999994162
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "interpreted",
+              "compileMs": 0.550583999999958,
+              "runMs": 0.7692090000000462
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "interpreted",
+              "compileMs": 0.35350000000005366,
+              "runMs": 0.577666000000022
+            }
+          ]
+        },
+        {
+          "totalMs": 65.31720799999994,
+          "timings": {
+            "parseMs": 0.9129580000000033,
+            "checkMs": 10.029042000000004,
+            "compileMs": 2.7618340000000217,
+            "runMs": 7.145709000000238,
+            "totalMs": 65.29833299999996
+          },
+          "functions": [
+            "roadseed",
+            "roadstart",
+            "roadstep",
+            "roadtrail"
+          ],
+          "values": [
+            {
+              "name": "L",
+              "type": "240"
+            },
+            {
+              "name": "N",
+              "type": "24"
+            },
+            {
+              "name": "W",
+              "type": "80"
+            },
+            {
+              "name": "S_0",
+              "type": "list<rational>"
+            },
+            {
+              "name": "H_0",
+              "type": "list<rational>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "L"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8736250000000609,
+              "runMs": 0.09304200000008223
+            },
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5300419999999804,
+              "runMs": 0.054250000000024556
+            },
+            {
+              "names": [
+                "W"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6069579999999632,
+              "runMs": 0.0951670000000604
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "interpreted",
+              "compileMs": 0.43524999999999636,
+              "runMs": 0.5712919999999713
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "interpreted",
+              "compileMs": 0.31595900000002075,
+              "runMs": 0.4944160000000011
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "othello",
+      "source": "\nconst O_0 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 1, 0, 0, 0, 0, 0, 0, 1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]\n// Count bracketed opponent discs along one direction.\nfunction ray(B: list<integer>, k: integer, p: integer, dx: integer, dy: integer) -> integer {\n  let col = k - 1 - 8 * floor((k - 1) / 8) + dx\n  let row = floor((k - 1) / 8) + dy\n  let n = 0\n  let found = 0\n  for j in 1..7 {\n    if col < 0 || col > 7 || row < 0 || row > 7 { break }\n    let v = B[1 + col + 8 * row]\n    if v == -p {\n      n = n + 1\n    } else {\n      if v == p { found = n }\n      break\n    }\n    col = col + dx\n    row = row + dy\n  }\n  found\n}\nfunction flips(B: list<integer>, k: integer, p: integer) -> integer {\n  let n = 0\n  if k >= 1 && k <= 64 && p != 0 {\n    if B[k] == 0 {\n      for dx in -1..1 {\n        for dy in -1..1 {\n          if dx != 0 || dy != 0 { n = n + ray(B, k, p, dx, dy) }\n        }\n      }\n    }\n  }\n  n\n}\nfunction legal(B: list<integer>, p: integer) -> list<integer> {\n  [k for k in 1..64 if flips(B, k, p) > 0]\n}\n// Stop at the first legal move; pass detection does not need the whole list.\nfunction hasmove(B: list<integer>, p: integer) -> boolean {\n  let found = false\n  for k in 1..64 {\n    let count: integer = flips(B, k, p)\n    if count > 0 { found = true; break }\n  }\n  found\n}\n// A move returns a new state; invalid clicks leave the board unchanged.\nfunction play(B: list<integer>, k: integer) -> list<integer> {\n  let p = B[65]\n  let R = B\n  let count: integer = flips(B, k, p)\n  if count > 0 {\n    R = replaceAt(R, k, p)\n    for dx in -1..1 {\n      for dy in -1..1 {\n        if dx != 0 || dy != 0 {\n          let n = ray(B, k, p, dx, dy)\n          if n > 0 {\n            for j in 1..n { R = replaceAt(R, k + j * (dx + 8 * dy), p) }\n          }\n        }\n      }\n    }\n    let next = -p\n    let available: boolean = hasmove(R, next)\n    if !available {\n      next = p\n      available = hasmove(R, next)\n      if !available { next = 0 }\n    }\n    R = replaceAt(R, 65, next)\n  }\n  R\n}\nfunction score(B: list<integer>, p: integer) -> integer {\n  length(stones(B, p))\n}\nfunction stones(B: list<integer>, p: integer) -> list<integer> {\n  [k for k in 1..64 if B[k] == p]\n}\n",
+      "samples": [
+        {
+          "totalMs": 41.922166999999945,
+          "timings": {
+            "parseMs": 1.9534590000000662,
+            "checkMs": 25.820375000000013,
+            "compileMs": 2.2905000000000655,
+            "runMs": 11.666042999999945,
+            "totalMs": 41.903459
+          },
+          "functions": [
+            "ray",
+            "flips",
+            "legal",
+            "hasmove",
+            "play",
+            "score",
+            "stones"
+          ],
+          "values": [
+            {
+              "name": "O_0",
+              "type": "vector<integer^65>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "O_0"
+              ],
+              "route": "compiled",
+              "compileMs": 2.2905000000000655,
+              "runMs": 0.31445899999994253
+            }
+          ]
+        },
+        {
+          "totalMs": 27.84016699999995,
+          "timings": {
+            "parseMs": 2.207875000000058,
+            "checkMs": 13.937416999999982,
+            "compileMs": 1.3557499999999436,
+            "runMs": 10.18324999999993,
+            "totalMs": 27.815000000000055
+          },
+          "functions": [
+            "ray",
+            "flips",
+            "legal",
+            "hasmove",
+            "play",
+            "score",
+            "stones"
+          ],
+          "values": [
+            {
+              "name": "O_0",
+              "type": "vector<integer^65>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "O_0"
+              ],
+              "route": "compiled",
+              "compileMs": 1.3557499999999436,
+              "runMs": 0.16533299999991868
+            }
+          ]
+        },
+        {
+          "totalMs": 24.920374999999922,
+          "timings": {
+            "parseMs": 1.220833999999968,
+            "checkMs": 12.178499999999985,
+            "compileMs": 1.1165419999999813,
+            "runMs": 10.25087499999995,
+            "totalMs": 24.899374999999964
+          },
+          "functions": [
+            "ray",
+            "flips",
+            "legal",
+            "hasmove",
+            "play",
+            "score",
+            "stones"
+          ],
+          "values": [
+            {
+              "name": "O_0",
+              "type": "vector<integer^65>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "O_0"
+              ],
+              "route": "compiled",
+              "compileMs": 1.1165419999999813,
+              "runMs": 0.1529170000000022
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "heat-spread",
+      "source": "\nconst N = 32\n// The coefficient a is diffusivity times timestep divided by cell width\n// squared. Clamping to [0, 1/4] keeps each update a convex average.\nfunction heatwall(c: integer, r: integer, obstacle: real) -> boolean {\n  obstacle > 0.5 && c == 16 && (r < 13 || r > 18)\n}\nfunction heatseed() -> list<real> {\n  [exp(-((((k - 1) % N) - 9)^2 + (floor((k - 1)/N) - 15.5)^2)/32) for k in 1..N^2]\n}\nconst H_0 = heatseed()\n// A missing neighbour reflects the cell temperature for an insulated edge,\n// or reads a zero-temperature reservoir for a cooled edge. A wall blocks flux.\nfunction heatneighbor(H: list<real>, c: integer, r: integer, center: real, boundary: real, obstacle: real) -> real {\n  if c < 0 || c >= N || r < 0 || r >= N {\n    if boundary > 0.5 { 0 } else { center }\n  } else if heatwall(c, r, obstacle) { center } else { H[1 + c + N*r] }\n}\nfunction heatstep(H: list<real>, diffusivity: real, boundary: real, obstacle: real) -> list<real> {\n  let a = min(0.25, max(0, diffusivity))\n  let L = [0 for j in 1..N^2]\n  for k in 1..N^2 {\n    let c = ((k - 1) % N)\n    let r = floor((k - 1)/N)\n    let v = H[k]\n    if heatwall(c, r, obstacle) {\n      L = replaceAt(L, k, v)\n    } else {\n      let neighbors = heatneighbor(H, c-1, r, v, boundary, obstacle) + heatneighbor(H, c+1, r, v, boundary, obstacle) + heatneighbor(H, c, r-1, v, boundary, obstacle) + heatneighbor(H, c, r+1, v, boundary, obstacle)\n      L = replaceAt(L, k, v + a*(neighbors - 4*v))\n    }\n  }\n  L\n}\n// Drag the brush point and press the heat action to add a warm patch.\nfunction heatpaint(H: list<real>, p: real, q: real, obstacle: real) -> list<real> {\n  [if !heatwall(((k-1) % N), floor((k-1)/N), obstacle) && (((k-1) % N)+0.5-p)^2 + (floor((k-1)/N)+0.5-q)^2 <= 9 { 1 } else { H[k] } for k in 1..N^2]\n}\n",
+      "samples": [
+        {
+          "totalMs": 40.256875000000036,
+          "timings": {
+            "parseMs": 1.0814589999999953,
+            "checkMs": 14.22995800000001,
+            "compileMs": 13.563457999999969,
+            "runMs": 10.661625000000072,
+            "totalMs": 40.24195800000007
+          },
+          "functions": [
+            "heatwall",
+            "heatseed",
+            "heatneighbor",
+            "heatstep",
+            "heatpaint"
+          ],
+          "values": [
+            {
+              "name": "N",
+              "type": "32"
+            },
+            {
+              "name": "H_0",
+              "type": "vector<real^1024>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7288330000000087,
+              "runMs": 0.10266700000011042
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "compiled",
+              "compileMs": 12.83462499999996,
+              "runMs": 1.7135419999999613
+            }
+          ]
+        },
+        {
+          "totalMs": 26.645667000000003,
+          "timings": {
+            "parseMs": 0.9988329999999905,
+            "checkMs": 12.98849999999993,
+            "compileMs": 4.231834000000049,
+            "runMs": 7.792458999999894,
+            "totalMs": 26.62987499999997
+          },
+          "functions": [
+            "heatwall",
+            "heatseed",
+            "heatneighbor",
+            "heatstep",
+            "heatpaint"
+          ],
+          "values": [
+            {
+              "name": "N",
+              "type": "32"
+            },
+            {
+              "name": "H_0",
+              "type": "vector<real^1024>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6363750000000437,
+              "runMs": 0.08404199999995399
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "compiled",
+              "compileMs": 3.5954590000000053,
+              "runMs": 1.0796669999998585
+            }
+          ]
+        },
+        {
+          "totalMs": 25.397249999999985,
+          "timings": {
+            "parseMs": 0.9690829999999551,
+            "checkMs": 11.717916999999943,
+            "compileMs": 4.490791000000058,
+            "runMs": 7.7167910000000575,
+            "totalMs": 25.382542000000058
+          },
+          "functions": [
+            "heatwall",
+            "heatseed",
+            "heatneighbor",
+            "heatstep",
+            "heatpaint"
+          ],
+          "values": [
+            {
+              "name": "N",
+              "type": "32"
+            },
+            {
+              "name": "H_0",
+              "type": "vector<real^1024>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7087910000000193,
+              "runMs": 0.0969159999999647
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "compiled",
+              "compileMs": 3.782000000000039,
+              "runMs": 1.0485830000000078
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "burning-ship",
+      "source": "// One value for each pixel: the smooth escape count of the Burning Ship\n// map divided by 128, and 1 for a point that does not escape.\nfunction B(p: real, q: real) -> real {\n  let a = 0.0\n  let b = 0.0\n  let n = 0\n  let s = 0.0\n  let t = 0.0\n  for k in 1..128 {\n    s = a^2 + b^2\n    if s > 65536 { break }\n    n = n + 1\n    t = a^2 - b^2 + p\n    b = abs(2*a*b) + q\n    a = t\n  }\n  s = a^2 + b^2\n  if s <= 65536 { 1 } else { min(1, (n + 1 - ln(ln(s) / ln(65536)) / ln(2)) / 128) }\n}\n",
+      "samples": [
+        {
+          "totalMs": 6.614291999999978,
+          "timings": {
+            "parseMs": 0.5374590000000126,
+            "checkMs": 3.926917000000003,
+            "compileMs": 0,
+            "runMs": 2.1179169999999203,
+            "totalMs": 6.600791999999956
+          },
+          "functions": [
+            "B"
+          ],
+          "values": [],
+          "statements": []
+        },
+        {
+          "totalMs": 5.329541000000063,
+          "timings": {
+            "parseMs": 0.3917500000000018,
+            "checkMs": 2.9823330000000396,
+            "compileMs": 0,
+            "runMs": 1.9258330000000115,
+            "totalMs": 5.315625000000068
+          },
+          "functions": [
+            "B"
+          ],
+          "values": [],
+          "statements": []
+        },
+        {
+          "totalMs": 9.068624999999997,
+          "timings": {
+            "parseMs": 0.6345830000000205,
+            "checkMs": 5.341792000000055,
+            "compileMs": 0,
+            "runMs": 3.028874999999971,
+            "totalMs": 9.033792000000062
+          },
+          "functions": [
+            "B"
+          ],
+          "values": [],
+          "statements": []
+        }
+      ]
+    },
+    {
+      "id": "multibrot",
+      "source": "// One value for each pixel: the smooth escape count of the map\n// z -> z^d + c divided by 128, and 1 for a point that does not escape.\nfunction M(p: real, q: real, d: real) -> real {\n  let a = p\n  let b = q\n  let n = 1\n  let s = 0.0\n  let t = 0.0\n  let w = 0.0\n  let r = 0.0\n  for k in 1..128 {\n    s = a^2 + b^2\n    if s > 4096 { break }\n    n = n + 1\n    w = if s > 0 { d * arctan2(b, a) } else { 0.0 }\n    r = s^(d/2)\n    t = r * cos(w) + p\n    b = r * sin(w) + q\n    a = t\n  }\n  s = a^2 + b^2\n  if s <= 4096 { 1 } else { min(1, (n + 1 - ln(ln(s) / ln(4096)) / ln(d)) / 128) }\n}\n",
+      "samples": [
+        {
+          "totalMs": 6.96550000000002,
+          "timings": {
+            "parseMs": 0.6197500000000673,
+            "checkMs": 3.836791999999946,
+            "compileMs": 0,
+            "runMs": 2.470833999999968,
+            "totalMs": 6.947832999999946
+          },
+          "functions": [
+            "M"
+          ],
+          "values": [],
+          "statements": []
+        },
+        {
+          "totalMs": 6.648458000000005,
+          "timings": {
+            "parseMs": 0.4069999999999254,
+            "checkMs": 3.5341659999999138,
+            "compileMs": 0,
+            "runMs": 2.67674999999997,
+            "totalMs": 6.6352920000000495
+          },
+          "functions": [
+            "M"
+          ],
+          "values": [],
+          "statements": []
+        },
+        {
+          "totalMs": 6.600084000000038,
+          "timings": {
+            "parseMs": 0.4151249999999891,
+            "checkMs": 3.6178749999999127,
+            "compileMs": 0,
+            "runMs": 2.5369160000000193,
+            "totalMs": 6.585959000000003
+          },
+          "functions": [
+            "M"
+          ],
+          "values": [],
+          "statements": []
+        }
+      ]
+    },
+    {
+      "id": "buddhabrot",
+      "source": "// The grid of counts: three planes of 150 × 200 cells, each in row order,\n// then one element for the number of samples so far. Plane 1 counts the\n// orbits that escape in at most 5000 passes, plane 2 in at most 500, plane 3\n// in at most 50. A column is a value of the imaginary part b, and a row a\n// value of the real part a, with a = -2 at the top.\nconst N = 90001\nconst H_0 = [0 for k in 1..N]\n// One step: the next n samples c = p + qi of a fixed low-discrepancy sequence.\n// A sample whose orbit escapes at pass e adds 1 to each cell that its orbit\n// crosses, and 1 to the mirror cell (the orbit of the conjugate of c is the\n// mirror image of the orbit of c), in each plane whose ceiling is at least e.\nfunction step(H: list<integer>, n: integer) -> list<integer> {\n  let L = H\n  const r = H[90001]\n  parallel for k in 1..n {\n    const p = 3 * fract(0.7548776662 * (r + k)) - 2\n    const q = 3 * fract(0.5698402910 * (r + k)) - 1.5\n    // A sample in the main cardioid or in the disc of radius 1/4 around -1\n    // never escapes, so the step skips it.\n    const x = p - 0.25\n    const t = x^2 + q^2\n    if t * (t + x) > q^2 / 4 && (p + 1)^2 + q^2 > 1/16 {\n      let a = 0.0\n      let b = 0.0\n      let e = 0\n      // An orbit that comes back to the point saved at pass 2, 4, 8, … is\n      // periodic: it never escapes, so the loop stops early.\n      let sa = 0.0\n      let sb = 0.0\n      let s = 2\n      for m in 1..5000 {\n        (a, b) := (a^2 - b^2 + p, 2*a*b + q)\n        if a^2 + b^2 > 4 { e = m; break }\n        if abs(a - sa) < 1e-12 && abs(b - sb) < 1e-12 { break }\n        if m == s { sa = a; sb = b; s = 2*s }\n      }\n      if e > 0 {\n        a = 0.0\n        b = 0.0\n        for m in 1..e {\n          (a, b) := (a^2 - b^2 + p, 2*a*b + q)\n          if a^2 + b^2 > 4 { break }\n          const i = floor((b + 1.125) / 2.25 * 150)\n          const j = floor((1 - a) / 3 * 200)\n          if i >= 0 && i < 150 && j >= 0 && j < 200 {\n            const c = 1 + i + 150*j\n            const d = 150 - i + 150*j\n            L[c] += 1\n            L[d] += 1\n            if e <= 500 {\n              L[c + 30000] += 1\n              L[d + 30000] += 1\n            }\n            if e <= 50 {\n              L[c + 60000] += 1\n              L[d + 60000] += 1\n            }\n          }\n        }\n      }\n    }\n  }\n  L = replaceAt(L, 90001, r + n)\n  L\n}\n// The picture: the first 1,200,000 samples of the sequence, counted when the\n// document opens. More samples change nothing that the eye sees on this grid.\nconst H_1 = step(H_0, 1200000)\n// One channel of the colour: a ratio of counts to the power 1.5, between lo\n// and 1. The base is max(0, v): see the comment of the entry.\nfunction tone(v: real, lo: real) -> real { min(1, max(lo, max(0, v)^1.5)) }\n// The colour of the cell (x, y) whose row value is z (plane 1, scaled by\n// 1000): the three planes in red, green and blue inside the grid, with the\n// floors 0.1, 0.16 and 0.33, and the colour of the haze outside it. The\n// indices of planes 2 and 3 are clamped to their plane, as the index of the\n// row is, so that a drawing that evaluates both branches never reads outside.\nfunction c(H: list<integer>, x: real, y: real, z: real) -> color {\n  if 0 <= x && x < 150 && 0 <= y && y < 200 {\n    const i = floor(x) + 150 * floor(y)\n    const n = 1 + H[90001]\n    rgb(tone(z, 0.1),\n        tone(1700 * H[max(30001, min(60000, 30001 + i))] / n, 0.16),\n        tone(3600 * H[max(60001, min(90000, 60001 + i))] / n, 0.33))\n  } else {\n    rgb(0.1, 0.16, 0.33)\n  }\n}\n",
+      "samples": [
+        {
+          "totalMs": 582.196041,
+          "timings": {
+            "parseMs": 1.7032080000000178,
+            "checkMs": 35.28337499999998,
+            "compileMs": 40.73849900000016,
+            "runMs": 457.7175430000001,
+            "totalMs": 582.1760409999999
+          },
+          "functions": [
+            "step",
+            "tone",
+            "c"
+          ],
+          "values": [
+            {
+              "name": "N",
+              "type": "90001"
+            },
+            {
+              "name": "H_0",
+              "type": "vector<integer^90001>"
+            },
+            {
+              "name": "H_1",
+              "type": "vector<integer^90001>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8485420000000659,
+              "runMs": 0.12054200000000037
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "compiled",
+              "compileMs": 1.673041000000012,
+              "runMs": 32.92312500000003
+            },
+            {
+              "names": [
+                "H_1"
+              ],
+              "route": "compiled",
+              "compileMs": 38.21691600000008,
+              "runMs": 407.0736260000001
+            }
+          ]
+        },
+        {
+          "totalMs": 550.340083,
+          "timings": {
+            "parseMs": 1.3445420000000468,
+            "checkMs": 26.68941699999982,
+            "compileMs": 28.203457999999955,
+            "runMs": 447.80054300000006,
+            "totalMs": 550.3182080000001
+          },
+          "functions": [
+            "step",
+            "tone",
+            "c"
+          ],
+          "values": [
+            {
+              "name": "N",
+              "type": "90001"
+            },
+            {
+              "name": "H_0",
+              "type": "vector<integer^90001>"
+            },
+            {
+              "name": "H_1",
+              "type": "vector<integer^90001>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9937079999999696,
+              "runMs": 0.17700099999979102
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "compiled",
+              "compileMs": 1.8716670000001159,
+              "runMs": 32.28783300000009
+            },
+            {
+              "names": [
+                "H_1"
+              ],
+              "route": "compiled",
+              "compileMs": 25.33808299999987,
+              "runMs": 400.4285
+            }
+          ]
+        },
+        {
+          "totalMs": 505.39629200000036,
+          "timings": {
+            "parseMs": 1.2668340000000171,
+            "checkMs": 18.052415999999994,
+            "compileMs": 18.31125099999963,
+            "runMs": 426.4823330000004,
+            "totalMs": 505.37258299999985
+          },
+          "functions": [
+            "step",
+            "tone",
+            "c"
+          ],
+          "values": [
+            {
+              "name": "N",
+              "type": "90001"
+            },
+            {
+              "name": "H_0",
+              "type": "vector<integer^90001>"
+            },
+            {
+              "name": "H_1",
+              "type": "vector<integer^90001>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6803329999997914,
+              "runMs": 0.10779100000036124
+            },
+            {
+              "names": [
+                "H_0"
+              ],
+              "route": "compiled",
+              "compileMs": 1.168666999999914,
+              "runMs": 23.618291999999656
+            },
+            {
+              "names": [
+                "H_1"
+              ],
+              "route": "compiled",
+              "compileMs": 16.462250999999924,
+              "runMs": 391.39762500000006
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "julia-set",
+      "source": "// One value for each pixel of the Julia set of z -> z^2 + c, with\n// c = 0.7885 (u + v i). Outside the set: the phase of the outside gradient,\n// from the smooth escape count (0 or more). Inside the set: -2 + g, with g\n// the smallest distance from the orbit to the axes, on a log scale in [0, 1].\nfunction J(p: real, q: real, u: real, v: real) -> real {\n  const cr = 0.7885 * u\n  const ci = 0.7885 * v\n  let a = p\n  let b = q\n  let n = 0\n  let s = 0.0\n  let t = 0.0\n  let d = 1.0\n  for k in 1..256 {\n    s = a^2 + b^2\n    if s > 65536 { break }\n    n = n + 1\n    t = a^2 - b^2 + cr\n    b = 2*a*b + ci\n    a = t\n    d = min(d, abs(a), abs(b))\n  }\n  s = a^2 + b^2\n  if s <= 65536 {\n    -2 + min(1, ln(max(d, 0.0001) / 0.0001) / ln(300))\n  } else {\n    0.18 * ln(max(n + 1 - ln(ln(s) / ln(65536)) / ln(2), 3.7) / 3.7)^1.6\n  }\n}\n// Channel ch (1 red, 2 green, 3 blue) of the colour (r, g, b).\nfunction pick(ch: integer, r: real, g: real, b: real) -> real {\n  if ch == 1 { r } else { if ch == 2 { g } else { b } }\n}\n// The part of a gradient from the stop a (colour c0) to the stop b (colour\n// c1), with a smooth blend; 0 when w is not in [a, b).\nfunction seg(w: real, a: real, b: real, c0: real, c1: real) -> real {\n  const u = (w - a) / (b - a)\n  if w < a { 0 } else { if w >= b { 0 } else { c0 + (c1 - c0) * u * u * (3 - 2*u) } }\n}\n// Channel ch of the colour of the value z of J. Inside the set (z < 0): a\n// ramp from dark brown (far from the axes) to pale gold (on an axis).\n// Outside: the cyclic gradient navy, blue, near-white, gold, black, navy.\nfunction channel(z: real, ch: integer) -> real {\n  const w = z - floor(z)\n  const f = -1 - z\n  if z < 0 {\n    (seg(f, 0, 0.25, pick(ch, 48, 18, 3), pick(ch, 120, 56, 12))\n      + seg(f, 0.25, 0.6, pick(ch, 120, 56, 12), pick(ch, 235, 165, 62))\n      + seg(f, 0.6, 0.95, pick(ch, 235, 165, 62), pick(ch, 255, 238, 196))\n      + seg(f, 0.95, 2, pick(ch, 255, 238, 196), pick(ch, 255, 238, 196))) / 255\n  } else {\n    (seg(w, 0, 0.16, pick(ch, 0, 7, 100), pick(ch, 32, 107, 203))\n      + seg(w, 0.16, 0.42, pick(ch, 32, 107, 203), pick(ch, 237, 255, 255))\n      + seg(w, 0.42, 0.6425, pick(ch, 237, 255, 255), pick(ch, 255, 170, 0))\n      + seg(w, 0.6425, 0.8575, pick(ch, 255, 170, 0), pick(ch, 0, 2, 0))\n      + seg(w, 0.8575, 1, pick(ch, 0, 2, 0), pick(ch, 0, 7, 100))) / 255\n  }\n}\n// The colour of the value z of J.\nfunction shade(z: real) -> color {\n  rgb(channel(z, 1), channel(z, 2), channel(z, 3))\n}\n",
+      "samples": [
+        {
+          "totalMs": 18.989792000000307,
+          "timings": {
+            "parseMs": 1.0571669999999358,
+            "checkMs": 10.249917000000096,
+            "compileMs": 0,
+            "runMs": 7.633666000000176,
+            "totalMs": 18.97320800000034
+          },
+          "functions": [
+            "J",
+            "pick",
+            "seg",
+            "channel",
+            "shade"
+          ],
+          "values": [],
+          "statements": []
+        },
+        {
+          "totalMs": 15.768999999999778,
+          "timings": {
+            "parseMs": 0.9492089999998825,
+            "checkMs": 8.520542000000205,
+            "compileMs": 0,
+            "runMs": 6.252790999999888,
+            "totalMs": 15.752915999999914
+          },
+          "functions": [
+            "J",
+            "pick",
+            "seg",
+            "channel",
+            "shade"
+          ],
+          "values": [],
+          "statements": []
+        },
+        {
+          "totalMs": 17.78941599999962,
+          "timings": {
+            "parseMs": 0.9275840000000244,
+            "checkMs": 9.178292000000056,
+            "compileMs": 0,
+            "runMs": 7.635750000000371,
+            "totalMs": 17.77279099999987
+          },
+          "functions": [
+            "J",
+            "pick",
+            "seg",
+            "channel",
+            "shade"
+          ],
+          "values": [],
+          "statements": []
+        }
+      ]
+    },
+    {
+      "id": "game-of-life",
+      "source": "// The side of the board, in cells. The board has N^2 cells, stored as one\n// list, row by row: the cell at (x, y) is S[1 + x + N*y]. Keep live cells\n// away from the outer ring: the neighbour count at the edges wraps through\n// the list, not around a true torus.\nconst N = 150\n// The live cells of the opening board, as indices into the board: a Gosper\n// glider gun and an eater, at generation 120. Edit this list to plant your\n// own pattern.\nconst P = [9543, 9544, 9693, 9841, 9843, 9991, 9992, 10138, 10288, 10289, 10437, 10439, 11330, 11331, 11481, 11482, 11630, 11769, 11770, 11918, 11922, 12067, 12073, 12081, 12207, 12208, 12217, 12221, 12223, 12224, 12229, 12231, 12357, 12358, 12367, 12373, 12377, 12378, 12518, 12522, 12527, 12528, 12541, 12542, 12669, 12670, 12677, 12678, 12691, 12692, 12829, 12831, 12981]\n// The opening board: 1 for a live cell, 0 for a dead cell.\nlet S_0 = [0 for k in 1..N^2]\nfor p in P {\n  S_0 = replaceAt(S_0, p, 1)\n}\n// One generation. n holds the number of live neighbours of every cell: each\n// rotation of S aligns every cell with one of its eight neighbours.\nfunction life(S: list<integer>) -> list<integer> {\n  let n = rotateLeft(S, N - 1) + rotateLeft(S, N) + rotateLeft(S, N + 1) + rotateLeft(S, -1) + rotateLeft(S, 1) + rotateLeft(S, -N - 1) + rotateLeft(S, -N) + rotateLeft(S, -N + 1)\n  [if n[k] == 3 { 1 } else if n[k] == 2 { S[k] } else { 0 } for k in 1..N^2]\n}\n",
+      "samples": [
+        {
+          "totalMs": 35.9718340000004,
+          "timings": {
+            "parseMs": 0.7945830000003298,
+            "checkMs": 6.559083000000101,
+            "compileMs": 6.3343330000002425,
+            "runMs": 16.16658200000029,
+            "totalMs": 35.95595900000035
+          },
+          "functions": [
+            "life"
+          ],
+          "values": [
+            {
+              "name": "N",
+              "type": "150"
+            },
+            {
+              "name": "P",
+              "type": "vector<integer^53>"
+            },
+            {
+              "name": "S_0",
+              "type": "vector<integer^22500>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6862089999999625,
+              "runMs": 0.08395799999971132
+            },
+            {
+              "names": [
+                "P"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8333330000000387,
+              "runMs": 0.11062500000025466
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 1.0461660000000848,
+              "runMs": 7.593707999999879
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 3.7686250000001564,
+              "runMs": 5.789874000000509
+            }
+          ]
+        },
+        {
+          "totalMs": 30.7390419999997,
+          "timings": {
+            "parseMs": 0.5922080000000278,
+            "checkMs": 4.975584000000254,
+            "compileMs": 5.83704200000011,
+            "runMs": 14.67183199999954,
+            "totalMs": 30.723667000000205
+          },
+          "functions": [
+            "life"
+          ],
+          "values": [
+            {
+              "name": "N",
+              "type": "150"
+            },
+            {
+              "name": "P",
+              "type": "vector<integer^53>"
+            },
+            {
+              "name": "S_0",
+              "type": "vector<integer^22500>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6551249999997708,
+              "runMs": 0.08012600000029124
+            },
+            {
+              "names": [
+                "P"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8038330000003953,
+              "runMs": 0.10520799999994779
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 1.072291999999834,
+              "runMs": 7.278331999999864
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 3.3057920000001104,
+              "runMs": 4.614374999999654
+            }
+          ]
+        },
+        {
+          "totalMs": 28.399124999999913,
+          "timings": {
+            "parseMs": 0.5236249999998108,
+            "checkMs": 4.758583000000272,
+            "compileMs": 4.422875999999633,
+            "runMs": 14.14270899999974,
+            "totalMs": 28.38254199999983
+          },
+          "functions": [
+            "life"
+          ],
+          "values": [
+            {
+              "name": "N",
+              "type": "150"
+            },
+            {
+              "name": "P",
+              "type": "vector<integer^53>"
+            },
+            {
+              "name": "S_0",
+              "type": "vector<integer^22500>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5904590000000098,
+              "runMs": 0.07658300000002782
+            },
+            {
+              "names": [
+                "P"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7579999999998108,
+              "runMs": 0.11275100000011662
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 1.025749999999789,
+              "runMs": 7.180624999999509
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 2.048667000000023,
+              "runMs": 4.471833000000061
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "apollonian-gasket",
+      "source": "// An Apollonian gasket from Descartes' circle theorem. A circle is the\n// tuple (k, x, y): its curvature and its centre; in the list circles it\n// has a fourth element, its generation.\n// The six rows of the document draw a fixed number of circles from each\n// generation group (4, 6, 18, 54, 86 and 56): a new value of minR needs new\n// counts in the rows.\nconst minR = 0.008\n// The complex square root of (re, im), principal branch.\nfunction csqrt(re, im) {\n  let m = sqrt(re^2 + im^2)\n  let a = sqrt(max(0, (m + re) / 2))\n  let b = sqrt(max(0, (m - re) / 2))\n  (a, b) if im >= 0 else (a, -b)\n}\n// The four candidates for a circle tangent to a, b and c.\nfunction fourth(a, b, c) {\n  let ka = a[1]; let kb = b[1]; let kc = c[1]\n  let disc = 2 * sqrt(max(0, ka * kb + kb * kc + kc * ka))\n  let ax = ka * a[2]; let ay = ka * a[3]\n  let bx = kb * b[2]; let by = kb * b[3]\n  let cx = kc * c[2]; let cy = kc * c[3]\n  let sx = ax + bx + cx; let sy = ay + by + cy\n  let px = (ax * bx - ay * by) + (bx * cx - by * cy) + (cx * ax - cy * ay)\n  let py = (ax * by + ay * bx) + (bx * cy + by * cx) + (cx * ay + cy * ax)\n  let (rx, ry) = csqrt(px, py)\n  rx = 2 * rx; ry = 2 * ry\n  let out: list<tuple<number, number, number>> = []\n  for k in [ka + kb + kc + disc, ka + kb + kc - disc] {\n    for (zx, zy) in [(sx + rx, sy + ry), (sx - rx, sy - ry)] {\n      out = [...out, (k, zx / k, zy / k)]\n    }\n  }\n  out\n}\nfunction tangent(p, q) {\n  let d = sqrt((p[2] - q[2])^2 + (p[3] - q[3])^2)\n  let rp = 1 / p[1]; let rq = 1 / q[1]\n  abs(d - abs(rp + rq)) < 1e-6 || abs(d - abs(rp - rq)) < 1e-6\n}\nfunction seen(acc, c) {\n  count(acc, e => abs(e[1] - c[1]) < 1e-6 && sqrt((e[2] - c[2])^2 + (e[3] - c[3])^2) < 1e-6) > 0\n}\nfunction admitted(p, q, r, c) {\n  c[1] > 0 && 1 / c[1] >= minR && tangent(c, p) && tangent(c, q) && tangent(c, r)\n}\n// Fill the gap between p, q and r: each admitted candidate is added at\n// depth, and the three gaps that it makes are filled in turn. `acc` is\n// typed: the body only copies it into a local, and a copy is not a use, so\n// an untyped `acc` would be mapped over the list instead of taken whole.\nfunction fill(p, q, r, depth, acc: list<tuple<number, number, number, integer>>) {\n  let out = acc\n  for c in fourth(p, q, r) {\n    if admitted(p, q, r, c) && !seen(out, c) {\n      out = [...out, (c[1], c[2], c[3], depth)]\n      out = fill(p, q, c, depth + 1, out)\n      out = fill(p, r, c, depth + 1, out)\n      out = fill(q, r, c, depth + 1, out)\n    }\n  }\n  out\n}\nconst outer = (-1, 0, 0)\nconst right = (2, 0.5, 0)\nconst left = (2, -0.5, 0)\n// The circles of curvature 3 above and below the two halves: they touch\n// the outer circle and both halves (the two roots of fourth(outer, right,\n// left) with a positive curvature).\nconst top = (3, 0.0, 0.6666666666666666)\nconst bottom = (3, 0.0, -0.6666666666666666)\nlet circles = [(right[1], right[2], right[3], 1), (left[1], left[2], left[3], 1), (top[1], top[2], top[3], 1), (bottom[1], bottom[2], bottom[3], 1)]\nfor gap in [(outer, right, top), (outer, left, top), (right, left, top), (outer, right, bottom), (outer, left, bottom), (right, left, bottom)] {\n  circles = fill(gap[1], gap[2], gap[3], 2, circles)\n}\n// The circles of generations lo to hi, ordered by generation and, within a\n// generation, largest first; two circles with the same generation and\n// curvature keep the order in which fill found them. Each circle goes\n// after every circle already placed that comes before it or ties with it.\nfunction generations(all: list<tuple<number, number, number, integer>>, lo: integer, hi: integer) {\n  let out: list<tuple<number, number, number, integer>> = []\n  for c in all {\n    if c[4] >= lo && c[4] <= hi {\n      let i = count(out, e => e[4] < c[4] || (e[4] == c[4] && e[1] <= c[1]))\n      out = [...take(out, i), c, ...drop(out, i)]\n    }\n  }\n  out\n}\nconst G_1 = generations(circles, 1, 1)\nconst G_2 = generations(circles, 2, 2)\nconst G_3 = generations(circles, 3, 3)\nconst G_4 = generations(circles, 4, 4)\nconst G_5 = generations(circles, 5, 5)\nconst G_6 = generations(circles, 6, 1000)\nconst X_1 = [c[2] for c in G_1]\nconst Y_1 = [c[3] for c in G_1]\nconst K_1 = [c[1] for c in G_1]\nconst X_2 = [c[2] for c in G_2]\nconst Y_2 = [c[3] for c in G_2]\nconst K_2 = [c[1] for c in G_2]\nconst X_3 = [c[2] for c in G_3]\nconst Y_3 = [c[3] for c in G_3]\nconst K_3 = [c[1] for c in G_3]\nconst X_4 = [c[2] for c in G_4]\nconst Y_4 = [c[3] for c in G_4]\nconst K_4 = [c[1] for c in G_4]\nconst X_5 = [c[2] for c in G_5]\nconst Y_5 = [c[3] for c in G_5]\nconst K_5 = [c[1] for c in G_5]\nconst X_6 = [c[2] for c in G_6]\nconst Y_6 = [c[3] for c in G_6]\nconst K_6 = [c[1] for c in G_6]\n",
+      "samples": [
+        {
+          "totalMs": 187.42170899999974,
+          "timings": {
+            "parseMs": 2.582166000000143,
+            "checkMs": 45.60579200000029,
+            "compileMs": 92.7027090000015,
+            "runMs": 43.38503499999979,
+            "totalMs": 187.40620799999988
+          },
+          "functions": [
+            "csqrt",
+            "fourth",
+            "tangent",
+            "seen",
+            "admitted",
+            "fill",
+            "generations"
+          ],
+          "values": [
+            {
+              "name": "minR",
+              "type": "0.008"
+            },
+            {
+              "name": "outer",
+              "type": "tuple<integer, integer, integer>"
+            },
+            {
+              "name": "right",
+              "type": "tuple<integer, real, integer>"
+            },
+            {
+              "name": "left",
+              "type": "tuple<integer, real, integer>"
+            },
+            {
+              "name": "top",
+              "type": "tuple<integer, integer, real>"
+            },
+            {
+              "name": "bottom",
+              "type": "tuple<integer, integer, real>"
+            },
+            {
+              "name": "circles",
+              "type": "list<tuple<integer, real, real, integer>^224>"
+            },
+            {
+              "name": "G_1",
+              "type": "list<(tuple<integer, integer, real, integer> | tuple<integer, real, integer, integer>)^4>"
+            },
+            {
+              "name": "G_2",
+              "type": "list<tuple<integer, real, real, integer>^6>"
+            },
+            {
+              "name": "G_3",
+              "type": "list<tuple<integer, real, real, integer>^18>"
+            },
+            {
+              "name": "G_4",
+              "type": "list<tuple<integer, real, real, integer>^54>"
+            },
+            {
+              "name": "G_5",
+              "type": "list<tuple<integer, real, real, integer>^86>"
+            },
+            {
+              "name": "G_6",
+              "type": "list<tuple<integer, real, real, integer>^56>"
+            },
+            {
+              "name": "X_1",
+              "type": "vector<real^4>"
+            },
+            {
+              "name": "Y_1",
+              "type": "vector<real^4>"
+            },
+            {
+              "name": "K_1",
+              "type": "vector<integer^4>"
+            },
+            {
+              "name": "X_2",
+              "type": "vector<real^6>"
+            },
+            {
+              "name": "Y_2",
+              "type": "vector<real^6>"
+            },
+            {
+              "name": "K_2",
+              "type": "vector<integer^6>"
+            },
+            {
+              "name": "X_3",
+              "type": "vector<real^18>"
+            },
+            {
+              "name": "Y_3",
+              "type": "vector<real^18>"
+            },
+            {
+              "name": "K_3",
+              "type": "vector<integer^18>"
+            },
+            {
+              "name": "X_4",
+              "type": "vector<real^54>"
+            },
+            {
+              "name": "Y_4",
+              "type": "vector<real^54>"
+            },
+            {
+              "name": "K_4",
+              "type": "vector<integer^54>"
+            },
+            {
+              "name": "X_5",
+              "type": "vector<real^86>"
+            },
+            {
+              "name": "Y_5",
+              "type": "vector<real^86>"
+            },
+            {
+              "name": "K_5",
+              "type": "vector<integer^86>"
+            },
+            {
+              "name": "X_6",
+              "type": "vector<real^56>"
+            },
+            {
+              "name": "Y_6",
+              "type": "vector<real^56>"
+            },
+            {
+              "name": "K_6",
+              "type": "vector<integer^56>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "minR"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7115420000000086,
+              "runMs": 0.09954100000049948
+            },
+            {
+              "names": [
+                "outer"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8612499999999272,
+              "runMs": 0.12129099999992832
+            },
+            {
+              "names": [
+                "right"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5715409999997974,
+              "runMs": 0.07029099999999744
+            },
+            {
+              "names": [
+                "left"
+              ],
+              "route": "compiled",
+              "compileMs": 0.4297080000001188,
+              "runMs": 0.059416000000055647
+            },
+            {
+              "names": [
+                "top"
+              ],
+              "route": "compiled",
+              "compileMs": 0.3947499999999309,
+              "runMs": 0.05562499999996362
+            },
+            {
+              "names": [
+                "bottom"
+              ],
+              "route": "compiled",
+              "compileMs": 0.3640420000001541,
+              "runMs": 0.053707999999915046
+            },
+            {
+              "names": [
+                "circles"
+              ],
+              "route": "compiled",
+              "compileMs": 2.2904170000001614,
+              "runMs": 0.1285000000002583
+            },
+            {
+              "names": [
+                "circles"
+              ],
+              "route": "compiled",
+              "compileMs": 40.92012499999964,
+              "runMs": 6.062916999999743
+            },
+            {
+              "names": [
+                "G_1"
+              ],
+              "route": "compiled",
+              "compileMs": 6.076498999999785,
+              "runMs": 0.501166000000012
+            },
+            {
+              "names": [
+                "G_2"
+              ],
+              "route": "compiled",
+              "compileMs": 4.942250000000058,
+              "runMs": 0.3350000000000364
+            },
+            {
+              "names": [
+                "G_3"
+              ],
+              "route": "compiled",
+              "compileMs": 4.317417000000205,
+              "runMs": 0.5207919999998012
+            },
+            {
+              "names": [
+                "G_4"
+              ],
+              "route": "compiled",
+              "compileMs": 4.471876000000066,
+              "runMs": 1.1752510000001166
+            },
+            {
+              "names": [
+                "G_5"
+              ],
+              "route": "compiled",
+              "compileMs": 5.254207999999835,
+              "runMs": 1.7065830000005917
+            },
+            {
+              "names": [
+                "G_6"
+              ],
+              "route": "compiled",
+              "compileMs": 4.13025000000016,
+              "runMs": 1.069666999999754
+            },
+            {
+              "names": [
+                "X_1"
+              ],
+              "route": "compiled",
+              "compileMs": 1.1380010000002585,
+              "runMs": 0.11379100000021936
+            },
+            {
+              "names": [
+                "Y_1"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7777080000000751,
+              "runMs": 0.08750000000009095
+            },
+            {
+              "names": [
+                "K_1"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7555409999999938,
+              "runMs": 0.10816599999952814
+            },
+            {
+              "names": [
+                "X_2"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7120420000001104,
+              "runMs": 0.08062499999959982
+            },
+            {
+              "names": [
+                "Y_2"
+              ],
+              "route": "compiled",
+              "compileMs": 0.639208000000508,
+              "runMs": 0.07974999999987631
+            },
+            {
+              "names": [
+                "K_2"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7743749999999636,
+              "runMs": 0.11320799999975861
+            },
+            {
+              "names": [
+                "X_3"
+              ],
+              "route": "compiled",
+              "compileMs": 1.6191260000000511,
+              "runMs": 0.2569159999998192
+            },
+            {
+              "names": [
+                "Y_3"
+              ],
+              "route": "compiled",
+              "compileMs": 1.414625000000342,
+              "runMs": 0.17799999999988358
+            },
+            {
+              "names": [
+                "K_3"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8705830000003516,
+              "runMs": 0.12520800000038435
+            },
+            {
+              "names": [
+                "X_4"
+              ],
+              "route": "compiled",
+              "compileMs": 0.967000000000553,
+              "runMs": 0.14750000000003638
+            },
+            {
+              "names": [
+                "Y_4"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8188329999998132,
+              "runMs": 0.14041699999961565
+            },
+            {
+              "names": [
+                "K_4"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7889579999996386,
+              "runMs": 0.11945800000012241
+            },
+            {
+              "names": [
+                "X_5"
+              ],
+              "route": "compiled",
+              "compileMs": 1.5053750000001855,
+              "runMs": 0.16979099999934988
+            },
+            {
+              "names": [
+                "Y_5"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8697919999999613,
+              "runMs": 0.17145799999980227
+            },
+            {
+              "names": [
+                "K_5"
+              ],
+              "route": "compiled",
+              "compileMs": 0.839542000000165,
+              "runMs": 0.1369580000005044
+            },
+            {
+              "names": [
+                "X_6"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8677920000000086,
+              "runMs": 0.141208000000006
+            },
+            {
+              "names": [
+                "Y_6"
+              ],
+              "route": "compiled",
+              "compileMs": 0.823207999999795,
+              "runMs": 0.14229199999999764
+            },
+            {
+              "names": [
+                "K_6"
+              ],
+              "route": "compiled",
+              "compileMs": 0.78512499999988,
+              "runMs": 0.1162080000003698
+            }
+          ]
+        },
+        {
+          "totalMs": 152.81379199999992,
+          "timings": {
+            "parseMs": 1.8795000000000073,
+            "checkMs": 36.060709000000315,
+            "compileMs": 75.12387500000023,
+            "runMs": 37.061790000000656,
+            "totalMs": 152.80129099999976
+          },
+          "functions": [
+            "csqrt",
+            "fourth",
+            "tangent",
+            "seen",
+            "admitted",
+            "fill",
+            "generations"
+          ],
+          "values": [
+            {
+              "name": "minR",
+              "type": "0.008"
+            },
+            {
+              "name": "outer",
+              "type": "tuple<integer, integer, integer>"
+            },
+            {
+              "name": "right",
+              "type": "tuple<integer, real, integer>"
+            },
+            {
+              "name": "left",
+              "type": "tuple<integer, real, integer>"
+            },
+            {
+              "name": "top",
+              "type": "tuple<integer, integer, real>"
+            },
+            {
+              "name": "bottom",
+              "type": "tuple<integer, integer, real>"
+            },
+            {
+              "name": "circles",
+              "type": "list<tuple<integer, real, real, integer>^224>"
+            },
+            {
+              "name": "G_1",
+              "type": "list<(tuple<integer, integer, real, integer> | tuple<integer, real, integer, integer>)^4>"
+            },
+            {
+              "name": "G_2",
+              "type": "list<tuple<integer, real, real, integer>^6>"
+            },
+            {
+              "name": "G_3",
+              "type": "list<tuple<integer, real, real, integer>^18>"
+            },
+            {
+              "name": "G_4",
+              "type": "list<tuple<integer, real, real, integer>^54>"
+            },
+            {
+              "name": "G_5",
+              "type": "list<tuple<integer, real, real, integer>^86>"
+            },
+            {
+              "name": "G_6",
+              "type": "list<tuple<integer, real, real, integer>^56>"
+            },
+            {
+              "name": "X_1",
+              "type": "vector<real^4>"
+            },
+            {
+              "name": "Y_1",
+              "type": "vector<real^4>"
+            },
+            {
+              "name": "K_1",
+              "type": "vector<integer^4>"
+            },
+            {
+              "name": "X_2",
+              "type": "vector<real^6>"
+            },
+            {
+              "name": "Y_2",
+              "type": "vector<real^6>"
+            },
+            {
+              "name": "K_2",
+              "type": "vector<integer^6>"
+            },
+            {
+              "name": "X_3",
+              "type": "vector<real^18>"
+            },
+            {
+              "name": "Y_3",
+              "type": "vector<real^18>"
+            },
+            {
+              "name": "K_3",
+              "type": "vector<integer^18>"
+            },
+            {
+              "name": "X_4",
+              "type": "vector<real^54>"
+            },
+            {
+              "name": "Y_4",
+              "type": "vector<real^54>"
+            },
+            {
+              "name": "K_4",
+              "type": "vector<integer^54>"
+            },
+            {
+              "name": "X_5",
+              "type": "vector<real^86>"
+            },
+            {
+              "name": "Y_5",
+              "type": "vector<real^86>"
+            },
+            {
+              "name": "K_5",
+              "type": "vector<integer^86>"
+            },
+            {
+              "name": "X_6",
+              "type": "vector<real^56>"
+            },
+            {
+              "name": "Y_6",
+              "type": "vector<real^56>"
+            },
+            {
+              "name": "K_6",
+              "type": "vector<integer^56>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "minR"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7053750000000036,
+              "runMs": 0.09208300000000236
+            },
+            {
+              "names": [
+                "outer"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7106250000001637,
+              "runMs": 0.09320899999966059
+            },
+            {
+              "names": [
+                "right"
+              ],
+              "route": "compiled",
+              "compileMs": 0.470459000000119,
+              "runMs": 0.07054100000004837
+            },
+            {
+              "names": [
+                "left"
+              ],
+              "route": "compiled",
+              "compileMs": 0.42316600000003746,
+              "runMs": 0.05870799999956944
+            },
+            {
+              "names": [
+                "top"
+              ],
+              "route": "compiled",
+              "compileMs": 0.37595799999962765,
+              "runMs": 0.05625000000009095
+            },
+            {
+              "names": [
+                "bottom"
+              ],
+              "route": "compiled",
+              "compileMs": 0.4047920000002705,
+              "runMs": 0.05300000000033833
+            },
+            {
+              "names": [
+                "circles"
+              ],
+              "route": "compiled",
+              "compileMs": 2.1944580000003953,
+              "runMs": 0.16604099999995015
+            },
+            {
+              "names": [
+                "circles"
+              ],
+              "route": "compiled",
+              "compileMs": 31.105916999999863,
+              "runMs": 4.209999000000607
+            },
+            {
+              "names": [
+                "G_1"
+              ],
+              "route": "compiled",
+              "compileMs": 4.531416999999692,
+              "runMs": 0.30854100000033213
+            },
+            {
+              "names": [
+                "G_2"
+              ],
+              "route": "compiled",
+              "compileMs": 3.926042000000052,
+              "runMs": 0.2416260000004513
+            },
+            {
+              "names": [
+                "G_3"
+              ],
+              "route": "compiled",
+              "compileMs": 3.631667000000107,
+              "runMs": 0.37658400000054826
+            },
+            {
+              "names": [
+                "G_4"
+              ],
+              "route": "compiled",
+              "compileMs": 3.9543330000001333,
+              "runMs": 0.9112089999998716
+            },
+            {
+              "names": [
+                "G_5"
+              ],
+              "route": "compiled",
+              "compileMs": 5.885832999999366,
+              "runMs": 1.4122919999999795
+            },
+            {
+              "names": [
+                "G_6"
+              ],
+              "route": "compiled",
+              "compileMs": 4.162792000000081,
+              "runMs": 0.8058750000004693
+            },
+            {
+              "names": [
+                "X_1"
+              ],
+              "route": "compiled",
+              "compileMs": 0.9092080000000351,
+              "runMs": 0.09554199999956836
+            },
+            {
+              "names": [
+                "Y_1"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6955420000003869,
+              "runMs": 0.0848759999998947
+            },
+            {
+              "names": [
+                "K_1"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6572499999992942,
+              "runMs": 0.08391700000038327
+            },
+            {
+              "names": [
+                "X_2"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7840830000000096,
+              "runMs": 0.12508299999990413
+            },
+            {
+              "names": [
+                "Y_2"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7690840000004755,
+              "runMs": 0.097791999999572
+            },
+            {
+              "names": [
+                "K_2"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6712499999998727,
+              "runMs": 0.08020799999985684
+            },
+            {
+              "names": [
+                "X_3"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6359159999997246,
+              "runMs": 0.09512500000028012
+            },
+            {
+              "names": [
+                "Y_3"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5718329999999696,
+              "runMs": 0.08233299999983501
+            },
+            {
+              "names": [
+                "K_3"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5708740000004582,
+              "runMs": 0.07945800000015879
+            },
+            {
+              "names": [
+                "X_4"
+              ],
+              "route": "compiled",
+              "compileMs": 0.655956999999944,
+              "runMs": 0.10658299999977316
+            },
+            {
+              "names": [
+                "Y_4"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6326669999998558,
+              "runMs": 0.10474999999996726
+            },
+            {
+              "names": [
+                "K_4"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6854169999996884,
+              "runMs": 0.10783399999991161
+            },
+            {
+              "names": [
+                "X_5"
+              ],
+              "route": "compiled",
+              "compileMs": 0.777625000000171,
+              "runMs": 0.13245799999958763
+            },
+            {
+              "names": [
+                "Y_5"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7066260000001421,
+              "runMs": 0.12237499999991996
+            },
+            {
+              "names": [
+                "K_5"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6860409999994772,
+              "runMs": 0.5897490000002108
+            },
+            {
+              "names": [
+                "X_6"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7927509999999529,
+              "runMs": 0.13058300000011513
+            },
+            {
+              "names": [
+                "Y_6"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7528340000003482,
+              "runMs": 0.13620699999955832
+            },
+            {
+              "names": [
+                "K_6"
+              ],
+              "route": "compiled",
+              "compileMs": 0.686083000000508,
+              "runMs": 0.10591699999986304
+            }
+          ]
+        },
+        {
+          "totalMs": 134.51274999999987,
+          "timings": {
+            "parseMs": 1.8567909999997028,
+            "checkMs": 29.8112500000002,
+            "compileMs": 66.81204200000047,
+            "runMs": 33.52903899999865,
+            "totalMs": 134.4994999999999
+          },
+          "functions": [
+            "csqrt",
+            "fourth",
+            "tangent",
+            "seen",
+            "admitted",
+            "fill",
+            "generations"
+          ],
+          "values": [
+            {
+              "name": "minR",
+              "type": "0.008"
+            },
+            {
+              "name": "outer",
+              "type": "tuple<integer, integer, integer>"
+            },
+            {
+              "name": "right",
+              "type": "tuple<integer, real, integer>"
+            },
+            {
+              "name": "left",
+              "type": "tuple<integer, real, integer>"
+            },
+            {
+              "name": "top",
+              "type": "tuple<integer, integer, real>"
+            },
+            {
+              "name": "bottom",
+              "type": "tuple<integer, integer, real>"
+            },
+            {
+              "name": "circles",
+              "type": "list<tuple<integer, real, real, integer>^224>"
+            },
+            {
+              "name": "G_1",
+              "type": "list<(tuple<integer, integer, real, integer> | tuple<integer, real, integer, integer>)^4>"
+            },
+            {
+              "name": "G_2",
+              "type": "list<tuple<integer, real, real, integer>^6>"
+            },
+            {
+              "name": "G_3",
+              "type": "list<tuple<integer, real, real, integer>^18>"
+            },
+            {
+              "name": "G_4",
+              "type": "list<tuple<integer, real, real, integer>^54>"
+            },
+            {
+              "name": "G_5",
+              "type": "list<tuple<integer, real, real, integer>^86>"
+            },
+            {
+              "name": "G_6",
+              "type": "list<tuple<integer, real, real, integer>^56>"
+            },
+            {
+              "name": "X_1",
+              "type": "vector<real^4>"
+            },
+            {
+              "name": "Y_1",
+              "type": "vector<real^4>"
+            },
+            {
+              "name": "K_1",
+              "type": "vector<integer^4>"
+            },
+            {
+              "name": "X_2",
+              "type": "vector<real^6>"
+            },
+            {
+              "name": "Y_2",
+              "type": "vector<real^6>"
+            },
+            {
+              "name": "K_2",
+              "type": "vector<integer^6>"
+            },
+            {
+              "name": "X_3",
+              "type": "vector<real^18>"
+            },
+            {
+              "name": "Y_3",
+              "type": "vector<real^18>"
+            },
+            {
+              "name": "K_3",
+              "type": "vector<integer^18>"
+            },
+            {
+              "name": "X_4",
+              "type": "vector<real^54>"
+            },
+            {
+              "name": "Y_4",
+              "type": "vector<real^54>"
+            },
+            {
+              "name": "K_4",
+              "type": "vector<integer^54>"
+            },
+            {
+              "name": "X_5",
+              "type": "vector<real^86>"
+            },
+            {
+              "name": "Y_5",
+              "type": "vector<real^86>"
+            },
+            {
+              "name": "K_5",
+              "type": "vector<integer^86>"
+            },
+            {
+              "name": "X_6",
+              "type": "vector<real^56>"
+            },
+            {
+              "name": "Y_6",
+              "type": "vector<real^56>"
+            },
+            {
+              "name": "K_6",
+              "type": "vector<integer^56>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "minR"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6630000000000109,
+              "runMs": 0.09529100000008839
+            },
+            {
+              "names": [
+                "outer"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6884159999999611,
+              "runMs": 0.08987600000000384
+            },
+            {
+              "names": [
+                "right"
+              ],
+              "route": "compiled",
+              "compileMs": 0.4329579999998714,
+              "runMs": 0.06354099999953178
+            },
+            {
+              "names": [
+                "left"
+              ],
+              "route": "compiled",
+              "compileMs": 0.3859170000000631,
+              "runMs": 0.05329100000017206
+            },
+            {
+              "names": [
+                "top"
+              ],
+              "route": "compiled",
+              "compileMs": 0.33637499999986176,
+              "runMs": 0.05133399999931498
+            },
+            {
+              "names": [
+                "bottom"
+              ],
+              "route": "compiled",
+              "compileMs": 0.3344999999999345,
+              "runMs": 0.0469159999997828
+            },
+            {
+              "names": [
+                "circles"
+              ],
+              "route": "compiled",
+              "compileMs": 1.505167000000256,
+              "runMs": 0.10429199999998673
+            },
+            {
+              "names": [
+                "circles"
+              ],
+              "route": "compiled",
+              "compileMs": 28.18762499999957,
+              "runMs": 3.4048320000001695
+            },
+            {
+              "names": [
+                "G_1"
+              ],
+              "route": "compiled",
+              "compileMs": 3.541917000000467,
+              "runMs": 0.24754100000018298
+            },
+            {
+              "names": [
+                "G_2"
+              ],
+              "route": "compiled",
+              "compileMs": 4.456084000000374,
+              "runMs": 0.26033400000005713
+            },
+            {
+              "names": [
+                "G_3"
+              ],
+              "route": "compiled",
+              "compileMs": 3.653874999999971,
+              "runMs": 0.3285409999998592
+            },
+            {
+              "names": [
+                "G_4"
+              ],
+              "route": "compiled",
+              "compileMs": 3.3234159999997246,
+              "runMs": 0.734208000000308
+            },
+            {
+              "names": [
+                "G_5"
+              ],
+              "route": "compiled",
+              "compileMs": 3.178790999999819,
+              "runMs": 1.1710840000005192
+            },
+            {
+              "names": [
+                "G_6"
+              ],
+              "route": "compiled",
+              "compileMs": 4.314417000000049,
+              "runMs": 0.7651259999997819
+            },
+            {
+              "names": [
+                "X_1"
+              ],
+              "route": "compiled",
+              "compileMs": 0.8209589999996751,
+              "runMs": 0.09604200000012497
+            },
+            {
+              "names": [
+                "Y_1"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6619590000000244,
+              "runMs": 0.07708299999967494
+            },
+            {
+              "names": [
+                "K_1"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6099159999998847,
+              "runMs": 0.07012500000018917
+            },
+            {
+              "names": [
+                "X_2"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5564159999998992,
+              "runMs": 0.07283300000017334
+            },
+            {
+              "names": [
+                "Y_2"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5350840000000971,
+              "runMs": 0.07962499999985084
+            },
+            {
+              "names": [
+                "K_2"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5316240000006474,
+              "runMs": 0.06320800000003146
+            },
+            {
+              "names": [
+                "X_3"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5298760000005132,
+              "runMs": 0.08129099999950995
+            },
+            {
+              "names": [
+                "Y_3"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5533760000002985,
+              "runMs": 0.08970799999997325
+            },
+            {
+              "names": [
+                "K_3"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5066670000001068,
+              "runMs": 0.07166599999982282
+            },
+            {
+              "names": [
+                "X_4"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5984180000000379,
+              "runMs": 0.10320799999999508
+            },
+            {
+              "names": [
+                "Y_4"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5523749999997563,
+              "runMs": 0.09387500000002547
+            },
+            {
+              "names": [
+                "K_4"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5550829999997404,
+              "runMs": 0.09183399999983521
+            },
+            {
+              "names": [
+                "X_5"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7002079999997477,
+              "runMs": 0.13337499999988722
+            },
+            {
+              "names": [
+                "Y_5"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7163750000004256,
+              "runMs": 0.13916699999981574
+            },
+            {
+              "names": [
+                "K_5"
+              ],
+              "route": "compiled",
+              "compileMs": 1.2709990000003017,
+              "runMs": 0.16850099999965096
+            },
+            {
+              "names": [
+                "X_6"
+              ],
+              "route": "compiled",
+              "compileMs": 0.7967079999998532,
+              "runMs": 0.14029100000016115
+            },
+            {
+              "names": [
+                "Y_6"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6717079999993985,
+              "runMs": 0.11295799999970768
+            },
+            {
+              "names": [
+                "K_6"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6418330000001333,
+              "runMs": 0.11016700000027413
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "barnsley-fern",
+      "source": "\n// The chaos game: n steps from (0, 0), each with one of four affine maps\n// chosen by the Park-Miller generator. The result is x1, y1, x2, y2, ...\nfunction fern(n: integer) -> list<real> {\n  let P = [0.0 for j in 1..2*n]\n  let x = 0.0\n  let y = 0.0\n  let s = 1\n  for k in 1..n {\n    s = (16807 * s) % 2147483647\n    let u = s / 2147483647\n    let a = x\n    if u < 0.01 {\n      x = 0\n      y = 0.16*y\n    } else if u < 0.86 {\n      x = 0.85*a + 0.04*y\n      y = -0.04*a + 0.85*y + 1.6\n    } else if u < 0.93 {\n      x = 0.2*a - 0.26*y\n      y = 0.23*a + 0.22*y + 1.6\n    } else {\n      x = -0.15*a + 0.28*y\n      y = 0.26*a + 0.24*y + 0.44\n    }\n    P[2*k - 1] = x\n    P[2*k] = y\n  }\n  P\n}\nconst P = fern(10000)\n",
+      "samples": [
+        {
+          "totalMs": 46.227208000000246,
+          "timings": {
+            "parseMs": 0.5155410000002121,
+            "checkMs": 4.429791999999907,
+            "compileMs": 11.611667000000125,
+            "runMs": 21.78020800000013,
+            "totalMs": 46.2117089999997
+          },
+          "functions": [
+            "fern"
+          ],
+          "values": [
+            {
+              "name": "P",
+              "type": "vector<real^20000>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "P"
+              ],
+              "route": "compiled",
+              "compileMs": 11.611667000000125,
+              "runMs": 19.241999999999734
+            }
+          ]
+        },
+        {
+          "totalMs": 41.675792,
+          "timings": {
+            "parseMs": 0.46433299999989686,
+            "checkMs": 4.152166999999736,
+            "compileMs": 11.855958999999984,
+            "runMs": 19.51191599999993,
+            "totalMs": 41.65970800000014
+          },
+          "functions": [
+            "fern"
+          ],
+          "values": [
+            {
+              "name": "P",
+              "type": "vector<real^20000>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "P"
+              ],
+              "route": "compiled",
+              "compileMs": 11.855958999999984,
+              "runMs": 17.007500000000164
+            }
+          ]
+        },
+        {
+          "totalMs": 40.71529199999986,
+          "timings": {
+            "parseMs": 0.45658400000002075,
+            "checkMs": 6.297125000000051,
+            "compileMs": 9.346333999999842,
+            "runMs": 19.547875000000204,
+            "totalMs": 40.6996250000002
+          },
+          "functions": [
+            "fern"
+          ],
+          "values": [
+            {
+              "name": "P",
+              "type": "vector<real^20000>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "P"
+              ],
+              "route": "compiled",
+              "compileMs": 9.346333999999842,
+              "runMs": 17.017500000000382
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "koch-snowflake",
+      "source": "\n// The vertices of steps 0 to n of the snowflake, one step after the other.\n// Step l is x1, y1, x2, y2, ... from the top vertex (0, 1), clockwise. Side k\n// of step l is side floor(k/4^l) of the triangle, turned by +60 degrees for\n// each base-4 digit 1 of k mod 4^l and by -60 degrees for each digit 2.\nfunction koch(n: integer) -> list<real> {\n  let L = [0.0 for j in 1..2*(4^(n + 1) - 1) + 2*(n + 1)]\n  let o = 0\n  for l in 0..n {\n    let q = 4^l\n    let h = sqrt(3) / 3^l\n    let x = 0.0\n    let y = 1.0\n    L[o + 1] = x\n    L[o + 2] = y\n    for k in 1..3*q {\n      let s = k - 1\n      let r = s % q\n      let a = -Pi/3 - 2*Pi/3 * floor(s / q)\n      for i in 1..l {\n        let d = r % 4\n        if d == 1 { a = a + Pi/3 } else if d == 2 { a = a - Pi/3 }\n        r = floor(r / 4)\n      }\n      x = x + h*cos(a)\n      y = y + h*sin(a)\n      L[o + 2*k + 1] = x\n      L[o + 2*k + 2] = y\n    }\n    o = o + 2*(3*q + 1)\n  }\n  L\n}\nconst Q = koch(5)\n",
+      "samples": [
+        {
+          "totalMs": 36.507542000000285,
+          "timings": {
+            "parseMs": 0.7019999999997708,
+            "checkMs": 7.649582999999893,
+            "compileMs": 14.285292000000027,
+            "runMs": 11.721585000000232,
+            "totalMs": 36.49112500000001
+          },
+          "functions": [
+            "koch"
+          ],
+          "values": [
+            {
+              "name": "Q",
+              "type": "vector<real^8202>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "Q"
+              ],
+              "route": "compiled",
+              "compileMs": 14.285292000000027,
+              "runMs": 6.822501000000102
+            }
+          ]
+        },
+        {
+          "totalMs": 34.02925000000005,
+          "timings": {
+            "parseMs": 0.6081669999998667,
+            "checkMs": 8.484500000000025,
+            "compileMs": 12.413375000000087,
+            "runMs": 10.44791799999939,
+            "totalMs": 34.013082999999824
+          },
+          "functions": [
+            "koch"
+          ],
+          "values": [
+            {
+              "name": "Q",
+              "type": "vector<real^8202>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "Q"
+              ],
+              "route": "compiled",
+              "compileMs": 12.413375000000087,
+              "runMs": 5.994667999999365
+            }
+          ]
+        },
+        {
+          "totalMs": 34.61512500000026,
+          "timings": {
+            "parseMs": 0.6624580000002425,
+            "checkMs": 8.356166999999914,
+            "compileMs": 11.180624999999964,
+            "runMs": 12.355542000000241,
+            "totalMs": 34.60050000000001
+          },
+          "functions": [
+            "koch"
+          ],
+          "values": [
+            {
+              "name": "Q",
+              "type": "vector<real^8202>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "Q"
+              ],
+              "route": "compiled",
+              "compileMs": 11.180624999999964,
+              "runMs": 6.755542000000332
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "turing-patterns",
+      "source": "\nconst N = 64\n// Whether cell (c, r) is in one of the twelve seed squares.\nfunction coatspot(c: integer, r: integer) -> boolean {\n  let hit = false\n  for s in 1..12 {\n    let cx = floor(N*fract(0.7548777*s))\n    let cy = floor(N*fract(0.5698403*s))\n    if abs(c - cx) <= 2 && abs(r - cy) <= 2 { hit = true }\n  }\n  hit\n}\n// The seed: u = 1, v = 0, with u = 0.5, v = 0.25 in the seed squares.\nfunction coatseed() -> list<real> {\n  let M = N^2\n  [if k <= M {\n     if coatspot((k - 1) % N, floor((k - 1)/N)) { 0.5 } else { 1.0 }\n   } else {\n     if coatspot((k - M - 1) % N, floor((k - M - 1)/N)) { 0.25 } else { 0.0 }\n   } for k in 1..2*M]\n}\n// n steps of the Gray-Scott model on the torus. S holds u, then v.\nfunction grayscott(S: list<real>, F: real, k: real, n: integer) -> list<real> {\n  let M = N^2\n  let A = [S[j] for j in 1..2*M]\n  let B = [0.0 for j in 1..2*M]\n  for t in 1..n {\n    for i in 1..M {\n      let c = (i - 1) % N\n      let r = floor((i - 1)/N)\n      let w = 1 + (c + N - 1) % N + N*r\n      let e = 1 + (c + 1) % N + N*r\n      let s = 1 + c + N*((r + N - 1) % N)\n      let o = 1 + c + N*((r + 1) % N)\n      let u = A[i]\n      let v = A[M + i]\n      let uvv = u*v*v\n      B[i] = u + 0.2*(A[w] + A[e] + A[s] + A[o] - 4*u) - uvv + F*(1 - u)\n      B[M + i] = v + 0.1*(A[M + w] + A[M + e] + A[M + s] + A[M + o] - 4*v) + uvv - (F + k)*v\n    }\n    for j in 1..2*M { A[j] = B[j] }\n  }\n  A\n}\nconst R_0 = coatseed()\nconst S_0 = grayscott(R_0, 0.035, 0.063, 4000)\n",
+      "samples": [
+        {
+          "totalMs": 1574.301458,
+          "timings": {
+            "parseMs": 0.9884999999999309,
+            "checkMs": 12.927666999999929,
+            "compileMs": 11.914749999999458,
+            "runMs": 1544.9015000000009,
+            "totalMs": 1574.2860410000003
+          },
+          "functions": [
+            "coatspot",
+            "coatseed",
+            "grayscott"
+          ],
+          "values": [
+            {
+              "name": "N",
+              "type": "64"
+            },
+            {
+              "name": "R_0",
+              "type": "vector<real^8192>"
+            },
+            {
+              "name": "S_0",
+              "type": "vector<real^8192>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6954579999996895,
+              "runMs": 0.08724999999958527
+            },
+            {
+              "names": [
+                "R_0"
+              ],
+              "route": "compiled",
+              "compileMs": 5.136166999999659,
+              "runMs": 5.5060419999999795
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 6.083125000000109,
+              "runMs": 1532.7785830000012
+            }
+          ]
+        },
+        {
+          "totalMs": 1576.1795409999995,
+          "timings": {
+            "parseMs": 0.9478749999998399,
+            "checkMs": 13.76824999999917,
+            "compileMs": 12.866499999999178,
+            "runMs": 1544.8019560000012,
+            "totalMs": 1576.1641250000002
+          },
+          "functions": [
+            "coatspot",
+            "coatseed",
+            "grayscott"
+          ],
+          "values": [
+            {
+              "name": "N",
+              "type": "64"
+            },
+            {
+              "name": "R_0",
+              "type": "vector<real^8192>"
+            },
+            {
+              "name": "S_0",
+              "type": "vector<real^8192>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6901249999991705,
+              "runMs": 0.09524899999996705
+            },
+            {
+              "names": [
+                "R_0"
+              ],
+              "route": "compiled",
+              "compileMs": 5.36712499999976,
+              "runMs": 4.3715409999995245
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 6.809250000000247,
+              "runMs": 1532.4251250000016
+            }
+          ]
+        },
+        {
+          "totalMs": 1461.8605420000004,
+          "timings": {
+            "parseMs": 0.858208000000559,
+            "checkMs": 12.27624999999989,
+            "compileMs": 10.761457999999038,
+            "runMs": 1434.1511249999994,
+            "totalMs": 1461.844333000001
+          },
+          "functions": [
+            "coatspot",
+            "coatseed",
+            "grayscott"
+          ],
+          "values": [
+            {
+              "name": "N",
+              "type": "64"
+            },
+            {
+              "name": "R_0",
+              "type": "vector<real^8192>"
+            },
+            {
+              "name": "S_0",
+              "type": "vector<real^8192>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "N"
+              ],
+              "route": "compiled",
+              "compileMs": 0.65887500000008,
+              "runMs": 0.08466599999974278
+            },
+            {
+              "names": [
+                "R_0"
+              ],
+              "route": "compiled",
+              "compileMs": 4.493124999999964,
+              "runMs": 5.0767079999995985
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 5.609457999998995,
+              "runMs": 1422.5112920000001
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "galton-board",
+      "source": "\nconst NB = 700\nconst NR = 12\n// The position of each ball after each row: ball b after row r at the index\n// (b - 1)*(NR + 1) + r + 1. Each step is -1/2 or +1/2, from the Park-Miller\n// generator.\nfunction galtonpaths() -> list<real> {\n  let L = [0.0 for j in 1..NB*(NR + 1)]\n  let s = 1\n  for b in 1..NB {\n    let x = 0.0\n    for r in 1..NR {\n      s = (16807 * s) % 2147483647\n      if s > 1073741823 { x = x + 0.5 } else { x = x - 0.5 }\n      L[(b - 1)*(NR + 1) + r + 1] = x\n    }\n  }\n  L\n}\nconst X = galtonpaths()\n// The count of each bin after each number of balls: b balls, bin i at the\n// index b*(NR + 1) + i + 1, for b = 0..NB and i = 0..NR.\nfunction galtoncounts(X: list<real>) -> list<real> {\n  let C = [0.0 for j in 1..(NB + 1)*(NR + 1)]\n  for b in 1..NB {\n    for i in 0..NR {\n      C[b*(NR + 1) + i + 1] = C[(b - 1)*(NR + 1) + i + 1]\n    }\n    let i0 = floor(X[b*(NR + 1)] + NR/2 + 0.5)\n    C[b*(NR + 1) + i0 + 1] = C[b*(NR + 1) + i0 + 1] + 1\n  }\n  C\n}\nconst C = galtoncounts(X)\n",
+      "samples": [
+        {
+          "totalMs": 93.04275000000052,
+          "timings": {
+            "parseMs": 0.5921660000003612,
+            "checkMs": 5.433375000000524,
+            "compileMs": 71.06237499999952,
+            "runMs": 11.824000999997224,
+            "totalMs": 93.02724999999919
+          },
+          "functions": [
+            "galtonpaths",
+            "galtoncounts"
+          ],
+          "values": [
+            {
+              "name": "NB",
+              "type": "700"
+            },
+            {
+              "name": "NR",
+              "type": "12"
+            },
+            {
+              "name": "X",
+              "type": "vector<real^9100>"
+            },
+            {
+              "name": "C",
+              "type": "vector<integer^9113>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "NB"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6521249999987049,
+              "runMs": 0.08999999999832653
+            },
+            {
+              "names": [
+                "NR"
+              ],
+              "route": "compiled",
+              "compileMs": 0.34974999999940337,
+              "runMs": 0.044292000000496046
+            },
+            {
+              "names": [
+                "X"
+              ],
+              "route": "compiled",
+              "compileMs": 64.33504100000027,
+              "runMs": 4.686208999999508
+            },
+            {
+              "names": [
+                "C"
+              ],
+              "route": "compiled",
+              "compileMs": 5.725459000001138,
+              "runMs": 3.746499999997468
+            }
+          ]
+        },
+        {
+          "totalMs": 78.4754580000008,
+          "timings": {
+            "parseMs": 0.5522089999994932,
+            "checkMs": 5.137083000001439,
+            "compileMs": 56.307708000000275,
+            "runMs": 12.646038999997472,
+            "totalMs": 78.46025000000009
+          },
+          "functions": [
+            "galtonpaths",
+            "galtoncounts"
+          ],
+          "values": [
+            {
+              "name": "NB",
+              "type": "700"
+            },
+            {
+              "name": "NR",
+              "type": "12"
+            },
+            {
+              "name": "X",
+              "type": "vector<real^9100>"
+            },
+            {
+              "name": "C",
+              "type": "vector<integer^9113>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "NB"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5614999999997963,
+              "runMs": 0.07620799999858718
+            },
+            {
+              "names": [
+                "NR"
+              ],
+              "route": "compiled",
+              "compileMs": 0.31641599999966274,
+              "runMs": 0.04241599999841128
+            },
+            {
+              "names": [
+                "X"
+              ],
+              "route": "compiled",
+              "compileMs": 51.41929199999868,
+              "runMs": 4.286665999999968
+            },
+            {
+              "names": [
+                "C"
+              ],
+              "route": "compiled",
+              "compileMs": 4.010500000002139,
+              "runMs": 3.8494990000017424
+            }
+          ]
+        },
+        {
+          "totalMs": 79.36404200000106,
+          "timings": {
+            "parseMs": 0.5618329999997513,
+            "checkMs": 5.226166000000376,
+            "compileMs": 57.432080999999016,
+            "runMs": 11.542085000000952,
+            "totalMs": 79.34883300000001
+          },
+          "functions": [
+            "galtonpaths",
+            "galtoncounts"
+          ],
+          "values": [
+            {
+              "name": "NB",
+              "type": "700"
+            },
+            {
+              "name": "NR",
+              "type": "12"
+            },
+            {
+              "name": "X",
+              "type": "vector<real^9100>"
+            },
+            {
+              "name": "C",
+              "type": "vector<integer^9113>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "NB"
+              ],
+              "route": "compiled",
+              "compileMs": 0.5667499999999563,
+              "runMs": 0.08412500000122236
+            },
+            {
+              "names": [
+                "NR"
+              ],
+              "route": "compiled",
+              "compileMs": 0.3534159999999247,
+              "runMs": 0.04554199999984121
+            },
+            {
+              "names": [
+                "X"
+              ],
+              "route": "compiled",
+              "compileMs": 52.41466599999876,
+              "runMs": 4.259125000000495
+            },
+            {
+              "names": [
+                "C"
+              ],
+              "route": "compiled",
+              "compileMs": 4.0972490000003745,
+              "runMs": 3.6844590000000608
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fish-swarm",
+      "source": "\nconst NF = 40\nfunction fishhash(n: real) -> real { fract(43758.5453*sin(n)) }\n// The start: the fish spread over the box [-4, 4] x [-3, 3], at rest.\nfunction fishseed() -> list<real> {\n  [if k <= NF { 8*fract(0.7548777*k) - 4 } else {\n     if k <= 2*NF { 6*fract(0.5698403*(k - NF)) - 3 } else { 0.0 }\n   } for k in 1..4*NF + 1]\n}\n// n steps of the school, with the target (p, q) and the repulsion c.\nfunction fishstep(S: list<real>, p: real, q: real, c: real, n: integer) -> list<real> {\n  let A = [S[j] for j in 1..4*NF + 1]\n  let B = [0.0 for j in 1..4*NF + 1]\n  for t in 1..n {\n    let tt = A[4*NF + 1] + 1\n    for i in 1..NF {\n      let dx = p - A[i]\n      let dy = q - A[NF + i]\n      let d = max(sqrt(dx^2 + dy^2), 0.3)\n      let k = 2.5*(d - 1.2)/d\n      let ax = k*dx - dy/d\n      let ay = k*dy + dx/d\n      for j in 1..NF {\n        if j != i {\n          let ex = A[i] - A[j]\n          let ey = A[NF + i] - A[NF + j]\n          let r2 = ex^2 + ey^2 + 0.01\n          ax = ax + c*ex/r2^1.5\n          ay = ay + c*ey/r2^1.5\n        }\n      }\n      ax = ax + 5*(fishhash(97*tt + 13*i) - 0.5) - 0.5*A[2*NF + i]\n      ay = ay + 5*(fishhash(89*tt + 7*i + 0.5) - 0.5) - 0.5*A[3*NF + i]\n      let u = A[2*NF + i] + 0.05*ax\n      let v = A[3*NF + i] + 0.05*ay\n      let s = sqrt(u^2 + v^2)\n      if s > 1.3 {\n        u = 1.3*u/s\n        v = 1.3*v/s\n      }\n      B[i] = A[i] + 0.05*u\n      B[NF + i] = A[NF + i] + 0.05*v\n      B[2*NF + i] = u\n      B[3*NF + i] = v\n    }\n    B[4*NF + 1] = tt\n    for j in 1..4*NF + 1 { A[j] = B[j] }\n  }\n  A\n}\nconst R_0 = fishseed()\nconst S_0 = fishstep(R_0, 0, 0, 0.04, 300)\n",
+      "samples": [
+        {
+          "totalMs": 51.98079200000029,
+          "timings": {
+            "parseMs": 0.9618329999993875,
+            "checkMs": 14.320083000000523,
+            "compileMs": 16.473542000001544,
+            "runMs": 19.94037400000161,
+            "totalMs": 51.96516700000029
+          },
+          "functions": [
+            "fishhash",
+            "fishseed",
+            "fishstep"
+          ],
+          "values": [
+            {
+              "name": "NF",
+              "type": "40"
+            },
+            {
+              "name": "R_0",
+              "type": "vector<real^161>"
+            },
+            {
+              "name": "S_0",
+              "type": "vector<real^161>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "NF"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6308750000007421,
+              "runMs": 0.07987499999944703
+            },
+            {
+              "names": [
+                "R_0"
+              ],
+              "route": "compiled",
+              "compileMs": 3.7165420000001177,
+              "runMs": 0.3329169999997248
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 12.126125000000684,
+              "runMs": 10.48529100000087
+            }
+          ]
+        },
+        {
+          "totalMs": 48.547333000000435,
+          "timings": {
+            "parseMs": 0.9919580000005226,
+            "checkMs": 13.750249999999141,
+            "compileMs": 14.216458000000785,
+            "runMs": 19.310665999997582,
+            "totalMs": 48.533290999999736
+          },
+          "functions": [
+            "fishhash",
+            "fishseed",
+            "fishstep"
+          ],
+          "values": [
+            {
+              "name": "NF",
+              "type": "40"
+            },
+            {
+              "name": "R_0",
+              "type": "vector<real^161>"
+            },
+            {
+              "name": "S_0",
+              "type": "vector<real^161>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "NF"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6097499999996217,
+              "runMs": 0.08204200000000128
+            },
+            {
+              "names": [
+                "R_0"
+              ],
+              "route": "compiled",
+              "compileMs": 2.990125000000262,
+              "runMs": 0.2432909999988624
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 10.616583000000901,
+              "runMs": 10.007707999999184
+            }
+          ]
+        },
+        {
+          "totalMs": 48.85570899999948,
+          "timings": {
+            "parseMs": 0.8696250000011787,
+            "checkMs": 13.451333999999406,
+            "compileMs": 14.256207999998878,
+            "runMs": 20.010542000003625,
+            "totalMs": 48.842499999998836
+          },
+          "functions": [
+            "fishhash",
+            "fishseed",
+            "fishstep"
+          ],
+          "values": [
+            {
+              "name": "NF",
+              "type": "40"
+            },
+            {
+              "name": "R_0",
+              "type": "vector<real^161>"
+            },
+            {
+              "name": "S_0",
+              "type": "vector<real^161>"
+            }
+          ],
+          "statements": [
+            {
+              "names": [
+                "NF"
+              ],
+              "route": "compiled",
+              "compileMs": 0.6073749999995925,
+              "runMs": 0.08566600000267499
+            },
+            {
+              "names": [
+                "R_0"
+              ],
+              "route": "compiled",
+              "compileMs": 2.925041999998939,
+              "runMs": 0.23712500000146974
+            },
+            {
+              "names": [
+                "S_0"
+              ],
+              "route": "compiled",
+              "compileMs": 10.723791000000347,
+              "runMs": 9.300833999999668
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "black-hole",
+      "source": "\n// The brightness of the disk at the pixel (x, y), for the inclination a in\n// degrees. See the entry's description.\nfunction blackhole(x: real, y: real, a: real) -> real {\n  let i = a*pi/180\n  let b = sqrt(x^2 + y^2)\n  let ph = arctan2(y, x)\n  let psi = arctan2(cos(i), -sin(ph)*sin(i))\n  let r = max(b/max(sin(psi), 0.05), 1.5)\n  for n in 1..12 {\n    let ca = 1 - (1 - cos(psi))*(1 - 1/r)\n    let sa = sqrt(max(1 - ca^2, 0.000000001))\n    r = max(b*sqrt(1 - 1/r)/sa, 1.01)\n  }\n  if r >= 3 && r <= 12 {\n    let be = sqrt(0.5/(r - 1))\n    let dop = sqrt(1 - be^2)/(1 - be*cos(ph)*sin(i))\n    let T = (r/3)^(-0.75)*(1 - sqrt(3/r))^0.25\n    (dop*sqrt(1 - 1/r))^3*T\n  } else {\n    if b > 2.4 { 0.6*exp(-((b - 2.598)/0.07)^2) } else { 0.0 }\n  }\n}\n",
+      "samples": [
+        {
+          "totalMs": 10.528415999999197,
+          "timings": {
+            "parseMs": 0.6112909999992553,
+            "checkMs": 5.652417000001151,
+            "compileMs": 0,
+            "runMs": 4.224667000000409,
+            "totalMs": 10.509375000001455
+          },
+          "functions": [
+            "blackhole"
+          ],
+          "values": [],
+          "statements": []
+        },
+        {
+          "totalMs": 8.799082999999882,
+          "timings": {
+            "parseMs": 0.5502080000005662,
+            "checkMs": 4.984875000000102,
+            "compileMs": 0,
+            "runMs": 3.2245830000010756,
+            "totalMs": 8.783375000000888
+          },
+          "functions": [
+            "blackhole"
+          ],
+          "values": [],
+          "statements": []
+        },
+        {
+          "totalMs": 10.00629200000003,
+          "timings": {
+            "parseMs": 0.5679589999999735,
+            "checkMs": 6.07641700000022,
+            "compileMs": 0,
+            "runMs": 3.32799999999952,
+            "totalMs": 9.991916999999376
+          },
+          "functions": [
+            "blackhole"
+          ],
+          "values": [],
+          "statements": []
+        }
+      ]
+    },
+    {
+      "id": "notebook-epsil-open-rerun-edit",
+      "samples": [
+        {
+          "phase": "open",
+          "ms": 1.6007920000010927,
+          "run": [],
+          "result": [
+            [
+              "E",
+              "cycle"
+            ]
+          ]
+        },
+        {
+          "phase": "rerun",
+          "ms": 0.208042000000205,
+          "run": [],
+          "result": [
+            [
+              "E",
+              "cycle"
+            ]
+          ]
+        },
+        {
+          "phase": "edit",
+          "ms": 0.152791000000434,
+          "run": [],
+          "result": [
+            [
+              "E",
+              "cycle"
+            ]
+          ]
+        },
+        {
+          "phase": "open",
+          "ms": 0.22895900000003166,
+          "run": [],
+          "result": [
+            [
+              "E",
+              "cycle"
+            ]
+          ]
+        },
+        {
+          "phase": "rerun",
+          "ms": 0.16054199999962293,
+          "run": [],
+          "result": [
+            [
+              "E",
+              "cycle"
+            ]
+          ]
+        },
+        {
+          "phase": "edit",
+          "ms": 0.12850000000071304,
+          "run": [],
+          "result": [
+            [
+              "E",
+              "cycle"
+            ]
+          ]
+        },
+        {
+          "phase": "open",
+          "ms": 0.2251670000005106,
+          "run": [],
+          "result": [
+            [
+              "E",
+              "cycle"
+            ]
+          ]
+        },
+        {
+          "phase": "rerun",
+          "ms": 0.10383400000137044,
+          "run": [],
+          "result": [
+            [
+              "E",
+              "cycle"
+            ]
+          ]
+        },
+        {
+          "phase": "edit",
+          "ms": 0.09241699999984121,
+          "run": [],
+          "result": [
+            [
+              "E",
+              "cycle"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "prelude-edit-a",
+      "source": "function f(x) { x+1 }\nlet a = f(3)",
+      "samples": [
+        {
+          "totalMs": 2.5121670000007725,
+          "timings": {
+            "parseMs": 0.073500000000422,
+            "checkMs": 0.531542000000627,
+            "compileMs": 1.540208000000348,
+            "runMs": 0.2910830000000715,
+            "totalMs": 2.4908329999998386
+          }
+        },
+        {
+          "totalMs": 2.0933329999988928,
+          "timings": {
+            "parseMs": 0.08554199999889534,
+            "checkMs": 0.4837090000000899,
+            "compileMs": 1.2224999999998545,
+            "runMs": 0.24608399999851827,
+            "totalMs": 2.0775420000009035
+          }
+        },
+        {
+          "totalMs": 2.011207999999897,
+          "timings": {
+            "parseMs": 0.0787079999990965,
+            "checkMs": 0.462082999998529,
+            "compileMs": 1.1538330000003043,
+            "runMs": 0.2630830000016431,
+            "totalMs": 1.9995420000013837
+          }
+        }
+      ]
+    },
+    {
+      "id": "prelude-edit-b",
+      "source": "function f(x) { x+2 }\nlet a = f(3)",
+      "samples": [
+        {
+          "totalMs": 1.9115829999991547,
+          "timings": {
+            "parseMs": 0.0824590000011085,
+            "checkMs": 0.43387500000062573,
+            "compileMs": 1.115458000000217,
+            "runMs": 0.228291999999783,
+            "totalMs": 1.8986249999998108
+          }
+        },
+        {
+          "totalMs": 1.89154199999939,
+          "timings": {
+            "parseMs": 0.08325000000149885,
+            "checkMs": 0.4501249999993888,
+            "compileMs": 1.0327500000003056,
+            "runMs": 0.27162499999940337,
+            "totalMs": 1.8805840000004537
+          }
+        },
+        {
+          "totalMs": 2.121458999999959,
+          "timings": {
+            "parseMs": 0.08737500000097498,
+            "checkMs": 0.48070800000095915,
+            "compileMs": 1.1665410000005068,
+            "runMs": 0.330126000000746,
+            "totalMs": 2.1086249999989377
+          }
+        }
+      ]
+    }
+  ]
+}
