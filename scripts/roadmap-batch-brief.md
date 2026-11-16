@@ -47,6 +47,12 @@ Give each Jest test file by its path, never by a glob, because a glob that
 matches no file leaves Jest with no file argument, and Jest then runs the whole
 suite without the box lock.
 
+A Jest run of more than one test file, in the worktree as in the main tree,
+uses `-w 4` and holds the box lock
+(`node ~/.claude/scripts/box-lock.mjs acquire {{NAME}} <minutes> "<what>" --wait`,
+then `release`), because the default 12 workers of several sessions at once
+exhaust the memory of the box (`docs/COMPUTE-ENGINE-BOX-SPECIFICS.md` §2).
+
 ## Steps
 
 1. Run `node scripts/issues.mjs start {{ID}} {{NAME}}` in the main tree. If
