@@ -1,4 +1,5 @@
-import { bitLength } from '../../big-decimal/utils.js';
+import { BigDecimal } from '../../big-decimal/index.js';
+import { bigintDigits, bitLength, pow10 } from '../../big-decimal/utils.js';
 import { canonicalInteger, gcd, lcm } from './numeric.js';
 import {
   gcd as bigGcd,
@@ -472,6 +473,132 @@ export function rationalize(
     h = h2 + a * h1;
     k = k2 + a * k1;
     if (tol > 0 && Math.abs(h / k - x0) <= tol) return [h, k];
+  }
+
+  return [h, k];
+}
+
+/**
+ * The most digits after the point of a decimal that `rationalizeWithin()`
+ * expands: its exact denominator is `10` to that power.
+ */
+const MAX_FRACTION_DIGITS = 100_000;
+
+/**
+ * Return the continued-fraction convergent of `x` with the smallest
+ * denominator that is within `tolerance` of `x`: the result of
+ * `rationalize(x, tolerance)`, computed exactly.
+ *
+ * `x` and `tolerance` are each an exact rational, or a finite decimal, which
+ * is the exact rational `significand / 10^-exponent`. The expansion is done
+ * on bigints and each convergent is compared with the tolerance exactly, so a
+ * tolerance below double precision (`10^-25`) is kept. The expansion of a
+ * rational ends, so when no earlier convergent is within the tolerance the
+ * result is `x` itself.
+ *
+ * `tolerance` must be finite and positive. An integer decimal `x` is
+ * returned unchanged. A decimal with more than `MAX_FRACTION_DIGITS` digits
+ * after the point gives `undefined`, unless its floor is within the
+ * tolerance: its exact denominator would be too large to build.
+ */
+export function rationalizeWithin(
+  x: BigDecimal | Rational,
+  tolerance: BigDecimal | Rational
+): BigDecimal | [n: bigint, d: bigint] | undefined {
+  // A rational tolerance as `tn / td` with `td > 0`.
+  let tolRational: [tn: bigint, td: bigint] | undefined;
+  if (Array.isArray(tolerance)) {
+    let [tn, td] = [BigInt(tolerance[0]), BigInt(tolerance[1])];
+    if (td < 0n) [tn, td] = [-tn, -td];
+    tolRational = [tn, td];
+  }
+  // `floor(x)` is less than 1 from `x`.
+  const acceptsFloor =
+    tolRational !== undefined
+      ? tolRational[0] >= tolRational[1]
+      : (tolerance as BigDecimal).cmp(1) >= 0;
+
+  // `x = p / q` with `q > 0`.
+  let p: bigint;
+  let q: bigint;
+  if (Array.isArray(x)) {
+    p = BigInt(x[0]);
+    q = BigInt(x[1]);
+    if (q < 0n) [p, q] = [-p, -q];
+  } else {
+    if (x.isInteger()) return x;
+    // Checked before the denominator is built, and keeps a large decimal
+    // tolerance from being written as a bigint below.
+    if (acceptsFloor) {
+      // The floor of a value of magnitude less than 1 is 0 or -1:
+      // `BigDecimal.floor()` would build the denominator.
+      if (x.exponent + bigintDigits(x.significand) <= 0)
+        return [x.isPositive() ? 0n : -1n, 1n];
+      return x.floor();
+    }
+    if (-x.exponent > MAX_FRACTION_DIGITS) {
+      // `0 < x <= tolerance`: the floor, 0, is within the tolerance. The
+      // product of decimals is exact.
+      const xWithin =
+        tolRational !== undefined
+          ? x
+              .mul(new BigDecimal(tolRational[1]))
+              .cmp(new BigDecimal(tolRational[0])) <= 0
+          : x.cmp(tolerance as BigDecimal) <= 0;
+      if (x.isPositive() && xWithin) return [0n, 1n];
+      return undefined;
+    }
+    // Not an integer, so the exponent is negative.
+    p = x.significand;
+    q = pow10(-x.exponent);
+  }
+
+  // The floor of `p / q`: bigint division truncates toward zero.
+  let a = p / q;
+  if (p < 0n && a * q !== p) a -= 1n;
+  let h1 = 1n;
+  let k1 = 0n;
+  let h = a;
+  let k = 1n;
+
+  if (acceptsFloor) return [h, k];
+
+  // Each convergent `h / k` other than `x` has `k < q`, and so is more than
+  // `1 / q²` from `x`. A decimal tolerance below `1 / q²` accepts no
+  // convergent but `x`, and its exact denominator can be a very large bigint,
+  // so it is not built: the expansion runs to its end.
+  let tolExact = tolRational;
+  if (tolExact === undefined) {
+    const t = tolerance as BigDecimal;
+    const tolDigits = t.exponent + bigintDigits(t.significand);
+    // `t.exponent < 0`, since `t` is less than 1.
+    if (tolDigits >= -2 * bigintDigits(q))
+      tolExact = [t.significand, pow10(-t.exponent)];
+  }
+  let within = (_h: bigint, _k: bigint): boolean => false;
+  if (tolExact !== undefined) {
+    const [tn, td] = tolExact;
+    const x0p = p;
+    const x0q = q;
+    // `|h/k - x| <= tn/td`, that is `|h q - k p| td <= tn k q`.
+    within = (h, k) => {
+      let diff = h * x0q - k * x0p;
+      if (diff < 0n) diff = -diff;
+      return diff * td <= tn * k * x0q;
+    };
+  }
+  if (within(h, k)) return [h, k];
+
+  // `p / q` is now the remainder `x - a` (in `[0, 1)`), then the next
+  // complete quotient is its inverse `q / p`.
+  p = p - a * q;
+  while (p !== 0n) {
+    [p, q] = [q, p];
+    a = p / q;
+    p = p - a * q;
+    [h, h1] = [a * h + h1, h];
+    [k, k1] = [a * k + k1, k];
+    if (within(h, k)) return [h, k];
   }
 
   return [h, k];

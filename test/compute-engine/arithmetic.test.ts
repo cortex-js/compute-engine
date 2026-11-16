@@ -1007,6 +1007,67 @@ describe('RATIONALIZE', () => {
     // The classic π ≈ 22/7 within 1/100.
     expect(r(['Rationalize', 'Pi', ['Rational', 1, 100]])).toEqual('22/7');
   });
+  test('a tolerance below double precision is kept', () => {
+    // The expected values are the convergents computed with Python
+    // `fractions` from the decimal operand. The convergent of the doubles,
+    // 4115227/33333339, is 1.9e-16 from the operand.
+    expect(
+      r([
+        'Rationalize',
+        { num: '0.12345678901234567890123' },
+        { num: '1e-25' },
+      ])
+    ).toEqual('24324377007729/197027455535852');
+    // The first 25 digits of π.
+    expect(
+      r([
+        'Rationalize',
+        { num: '3.141592653589793238462643' },
+        { num: '1e-30' },
+      ])
+    ).toEqual('5180326708581625/1648949205003468');
+    // A tolerance below 10^-324 is 0 as a double, but it is still a
+    // tolerance; no convergent but the operand is within it.
+    expect(r(['Rationalize', -0.3, { num: '1e-400' }])).toEqual('-3/10');
+  });
+  test('an exact rational operand is expanded exactly', () => {
+    // Not its 21-digit decimal, which no tolerance below 10^-21 reaches.
+    expect(r(['Rationalize', ['Rational', 2, 7], { num: '1e-22' }])).toEqual(
+      '2/7'
+    );
+    expect(r(['Rationalize', ['Rational', 1, 3], { num: '1e-30' }])).toEqual(
+      '1/3'
+    );
+    expect(
+      r(['Rationalize', ['Rational', 355, 113], { num: '0.01' }])
+    ).toEqual('22/7');
+    expect(r(['Rationalize', ['Rational', -22, 7], { num: '0.5' }])).toEqual(
+      '-3'
+    );
+  });
+  test('an exact rational tolerance is read exactly', () => {
+    // |0 - 1/3| = 1/3: the floor is within the tolerance. The 21-digit
+    // decimal of 1/3 is smaller than 1/3 and would reject it.
+    expect(r(['Rationalize', ['Rational', 1, 3], ['Rational', 1, 3]])).toEqual(
+      '0'
+    );
+    expect(
+      r(['Rationalize', { num: '1e-1000000000' }, ['Rational', 1, 3]])
+    ).toEqual('0');
+  });
+  test('a tolerance of 1 or more gives the floor of the operand', () => {
+    expect(r(['Rationalize', 1.75, 5])).toEqual('1');
+    expect(r(['Rationalize', -1.75, { num: '1e500' }])).toEqual('-2');
+    // The denominator `10^1000000000` is not built.
+    expect(r(['Rationalize', { num: '1e-1000000000' }, 1])).toEqual('0');
+  });
+  test('a decimal with too many digits after the point declines', () => {
+    // Unless the floor, 0, is within the tolerance.
+    expect(r(['Rationalize', { num: '1e-1000000000' }, 0.5])).toEqual('0');
+    expect(r(['Rationalize', { num: '-1e-1000000000' }, 0.5])).toEqual(
+      'Rationalize(-1e-1000000000, 0.5)'
+    );
+  });
   test('integers and free variables stay put', () => {
     expect(r(['Rationalize', 4])).toEqual('4');
     expect(r(['Rationalize', 'x'])).toEqual('Rationalize(x)');

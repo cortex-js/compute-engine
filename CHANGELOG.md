@@ -66,6 +66,14 @@
 
 ### Bug Fixes
 
+- **`Rationalize(x, tolerance)` keeps a tolerance below double precision.**
+  The convergents were computed with doubles, so
+  `Rationalize(0.12345678901234567890123, 10^-25)` gave `4115227/33333339`,
+  which is `1.9e-16` from `x`. The convergents are now computed exactly, and
+  the result is `24324377007729/197027455535852`. An exact rational `x` or
+  tolerance is read as its numerator and denominator, any other value at
+  working precision. A positive tolerance below the smallest double
+  (`10^-400`) is now a tolerance too.
 - **`IntegerString(n)` of a symbol with no value stays unevaluated.** It was
   the error `incompatible-type` with the same type, `integer`, given as the
   expected type and as the actual type. The same applies to the base:
