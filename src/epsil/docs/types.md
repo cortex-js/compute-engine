@@ -258,7 +258,7 @@ function roll(n: integer) random -> integer { random(1..n) }
 
 Effect labels are part of the function type. See
 [Effect specifiers](/epsil/control-flow/#effect-specifiers) for the syntax and
-the [function type guide](/compute-engine/guides/types/#function-types) for how
+the [function type guide](/compute-engine/guides/types/#effects-and-subtyping) for how
 they affect subtyping.
 
 ## When a type doesn't fit

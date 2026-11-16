@@ -5,9 +5,10 @@
 // or a curated keyword (`antiderivative`) lands on the definition itself.
 //
 // The records come from the same `librarySections()` as the reference pages
-// (`build-library-reference.ts`), so every `url` names the heading that page
-// gives the definition. URLs are `/epsil/`-rooted like every link of these
-// docs; the site's sync rewrites them.
+// (`build-library-reference.ts`), and each `url` is the `referencePath()` that
+// `epsil doc` prints, so the site search and the CLI agree on every link. URLs
+// are `/epsil/`-rooted like every link of these docs; the site's sync
+// rewrites them.
 //
 // Run via `npm run doc` (scripts/doc.sh) or directly:
 //   npx tsx scripts/build-search-symbols.ts
@@ -15,17 +16,8 @@
 import { writeFileSync } from 'node:fs';
 
 import { ComputeEngine } from '../src/compute-engine/index.js';
+import { referencePath } from '../src/cli/doc.js';
 import { librarySections } from './library-docs-shared.js';
-
-/** The anchor Docusaurus gives a heading (github-slugger): lower case, no
- * punctuation except `-` and `_`, each space a `-`. */
-function slug(heading: string): string {
-  return heading
-    .toLowerCase()
-    .trim()
-    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
-    .replace(/\s/g, '-');
-}
 
 /** The first sentence of a description, for a one-line summary. */
 function summary(description: string[] | undefined): string | undefined {
@@ -62,13 +54,14 @@ type SearchSymbol = {
 const symbols: SearchSymbol[] = [];
 for (const section of librarySections(engine)) {
   for (const { entry } of section.rows) {
-    const heading = entry.epsilName ?? entry.id;
+    // The same path as `epsil doc` prints (`referencePath()`), rooted at
+    // `/epsil/` like every link of these docs; the site's sync rewrites it.
     const record: SearchSymbol = {
       id: entry.id,
       kind: entry.kind,
       library: section.name,
       libraryTitle: section.title,
-      url: `/epsil/reference/${section.name}/#${slug(heading)}`,
+      url: `/epsil${referencePath(entry.id, entry.epsilName)}`,
     };
     if (entry.epsilName !== undefined && entry.epsilName !== entry.id)
       record.epsil = entry.epsilName;

@@ -549,15 +549,31 @@ describe('Epsil CLI doc command', () => {
     for (const name of ['Sin', 'sin']) {
       const { io, stdout } = makeIo();
       expect(await main(['doc', name], io)).toBe(0);
-      expect(stdout()).toContain('Sin (function)');
+      // Epsil first: headed by the Epsil spelling, the MathJSON name after.
+      expect(stdout()).toContain('sin (function)');
+      expect(stdout()).toContain('MathJSON: Sin');
       expect(stdout()).toContain('->');
     }
+  });
+
+  test('links an entry to the library reference on the documentation site', async () => {
+    const { io, stdout } = makeIo();
+    expect(await main(['doc', 'sqrt'], io)).toBe(0);
+    expect(stdout()).toContain(
+      'More: https://epsil.dev/reference/arithmetic/#sqrt'
+    );
+    const json = makeIo();
+    expect(await main(['doc', 'Sqrt', '--json'], json.io)).toBe(0);
+    expect(JSON.parse(json.stdout()).matches[0].reference).toBe(
+      'https://epsil.dev/reference/arithmetic/#sqrt'
+    );
   });
 
   test('searches by keywords', async () => {
     const { io, stdout } = makeIo();
     expect(await main(['doc', 'greatest', 'common', 'divisor'], io)).toBe(0);
-    expect(stdout()).toContain('GCD (function)');
+    expect(stdout()).toContain('(function)');
+    expect(stdout()).toMatch(/^gcd \(function\)/m);
   });
 
   test('emits structured JSON matches', async () => {
