@@ -143,18 +143,16 @@ describe('GPU: inverse trigonometric functions of a complex argument', () => {
   });
 });
 
-// `arctan` and `arccot` are odd on their cuts (the imaginary axis outside
-// and inside [−i, i]): each half of a cut takes the side it is continuous
-// with, as in mpmath. Before, both halves took the side right of the axis,
-// and `arctan(−2i)` was `π/2 − 0.549i`. `[head, y, re, im]`: the value of
-// `head(iy)` from `mpmath.atan` and `mpmath.acot`.
-const ODD_ON_CUT: [string, number, number, number][] = [
-  ['Arctan', 2, 1.5707963267948966, 0.54930614433405485],
-  ['Arctan', -2, -1.5707963267948966, -0.54930614433405485],
-  ['Arctan', -10, -1.5707963267948966, -0.10033534773107558],
-  ['Arctan', -1e20, -1.5707963267948966, -1e-20],
-  ['Arccot', 0.5, -1.5707963267948966, -0.54930614433405485],
-  ['Arccot', -0.5, 1.5707963267948966, 0.54930614433405485],
+// `arctan` is odd on its cut (the imaginary axis outside [−i, i]): each half
+// of the cut takes the side it is continuous with, as in mpmath. Before,
+// both halves took the side right of the axis, and `arctan(−2i)` was
+// `π/2 − 0.549i`. `[y, re, im]`: the value of `arctan(iy)` from
+// `mpmath.atan`.
+const ODD_ON_CUT: [number, number, number][] = [
+  [2, 1.5707963267948966, 0.54930614433405485],
+  [-2, -1.5707963267948966, -0.54930614433405485],
+  [-10, -1.5707963267948966, -0.10033534773107558],
+  [-1e20, -1.5707963267948966, -1e-20],
 ];
 
 describe('GPU: arctan is odd on its branch cut', () => {
@@ -170,8 +168,7 @@ describe('GPU: arctan is odd on its branch cut', () => {
     it(`${language}: the value of mpmath on each half of the cut`, () => {
       const r = new Target().compile(ce.function('Arctan', ['z']));
       const run = shaderFunctions(`${r.preamble}\n${fn(r.code)}`, language);
-      for (const [head, y, re, im] of ODD_ON_CUT) {
-        if (head !== 'Arctan') continue;
+      for (const [y, re, im] of ODD_ON_CUT) {
         const v = run('_main', { x: 0, y }) as { x: number; y: number };
         expect(v.x).toBeCloseTo(re, 6);
         expect(v.y).toBeCloseTo(im, 6);

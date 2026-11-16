@@ -277,8 +277,8 @@ describe('the Pythagorean compositions', () => {
     });
 });
 
-describe('arccos and arcsec reflect, arcoth is odd', () => {
-  for (const f of ['Arccos', 'Arcsec']) {
+describe('arccos, arcsec and arccot reflect, arcoth is odd', () => {
+  for (const f of ['Arccos', 'Arcsec', 'Arccot']) {
     test(`${f}(-x) = π - ${f}(x) (simplify)`, () => {
       const e = ce.function(f, [ce.function('Negate', [ce.symbol('x')])]);
       expect(e.simplify().toString()).toBe(`-${f.toLowerCase()}(x) + pi`);

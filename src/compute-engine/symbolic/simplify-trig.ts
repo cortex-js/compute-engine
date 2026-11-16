@@ -46,11 +46,11 @@ const EVEN_TRIG = new Set(['Cos', 'Sec']);
 const ODD_INVERSE_TRIG = new Set(['Arcsin', 'Arctan', 'Arccsc']);
 
 // Inverse trig functions with values in [0, π]: f(-x) = π - f(x). The
-// principal value of Arccos is π/2 - Arcsin, and Arcsin is odd for every
-// complex x, so Arccos is reflected for every complex x as well; Arcsec(x) is
-// Arccos(1/x). Arccot is not here: its numeric kernel is odd off the real
-// axis (`Arccot(-3 - 2i)` is `-Arccot(3 + 2i)`) and reflects on it.
-const REFLECTED_INVERSE_TRIG = new Set(['Arccos', 'Arcsec']);
+// principal value of Arccos is π/2 - Arcsin and that of Arccot is
+// π/2 - Arctan, and Arcsin and Arctan are odd for every complex x, so Arccos
+// and Arccot are reflected for every complex x as well; Arcsec(x) is
+// Arccos(1/x).
+const REFLECTED_INVERSE_TRIG = new Set(['Arccos', 'Arcsec', 'Arccot']);
 
 // `negatedArgument()` lives in `boxed-expression/negated-argument.ts`, so that
 // `boxed-expression/simplify.ts` (a lower layer) can use it too. It is
@@ -508,8 +508,8 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       if (negated) return oddEvenStep(op, negated, true, ce);
     }
 
-    // arccos(-x) = π - arccos(x), and likewise arcsec: these inverses take
-    // values in [0, π], so the reflection is the symmetry (DLMF 4.23.5).
+    // arccos(-x) = π - arccos(x), and likewise arcsec and arccot (DLMF
+    // 4.23.5 for arccos; see the comment of the set for the others).
     if (REFLECTED_INVERSE_TRIG.has(op)) {
       const negated = negatedArgument(arg);
       if (negated) {

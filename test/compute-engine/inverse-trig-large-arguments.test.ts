@@ -217,14 +217,15 @@ describe('INVERSE TRIG: the side of each branch cut does not change', () => {
   );
 });
 
-describe('INVERSE TRIG: arctan and arccot are odd on their branch cuts', () => {
-  // The cut of `arctan` is the imaginary axis outside [−i, i], the cut of
-  // `arccot` the imaginary axis inside it. Each half of a cut takes the side
-  // it is continuous with (the values of mpmath and Mathematica), so
-  // `arctan(−z) = −arctan(z)` and `arccot(−z) = −arccot(z)` there. Before,
-  // both halves took the side right of the axis: `arctan(−2i)` was
-  // `π/2 − 0.549i` and `arccot(0.5i)` was `π/2 − 0.549i`.
-  // Values of `mpmath.atan(mpc(0, y))` and `mpmath.acot(mpc(0, y))`.
+describe('INVERSE TRIG: the branch cuts of arctan and arccot', () => {
+  // The cut of `arctan` is the imaginary axis outside [−i, i]. Each half of
+  // the cut takes the side it is continuous with (the values of mpmath and
+  // Mathematica), so `arctan(−z) = −arctan(z)` there. Before, both halves
+  // took the side right of the axis: `arctan(−2i)` was `π/2 − 0.549i`.
+  // `arccot z` is `π/2 − arctan z` (CE-1334): it is continuous on the
+  // imaginary axis between −i and i, its cut is the cut of `arctan`, and
+  // `arccot(−z) = π − arccot(z)` everywhere. Values of
+  // `mpmath.atan(mpc(0, y))`; the `Arccot` values are π/2 minus them.
   const CASES: [string, number, number, number][] = [
     ['Arctan', 1.5, 1.5707963267948966, 0.80471895621705019],
     ['Arctan', -1.5, -1.5707963267948966, -0.80471895621705019],
@@ -237,10 +238,14 @@ describe('INVERSE TRIG: arctan and arccot are odd on their branch cuts', () => {
     // Next to the branch points ±i.
     ['Arctan', 1.0000001, 1.5707963267948966, 8.4056214404671984],
     ['Arctan', -1.0000001, -1.5707963267948966, -8.4056214404671984],
-    ['Arccot', 0.5, -1.5707963267948966, -0.54930614433405485],
+    ['Arccot', 0.5, 1.5707963267948966, -0.54930614433405485],
     ['Arccot', -0.5, 1.5707963267948966, 0.54930614433405485],
-    ['Arccot', 0.2, -1.5707963267948966, -0.2027325540540822],
+    ['Arccot', 0.2, 1.5707963267948966, -0.2027325540540822],
     ['Arccot', -0.2, 1.5707963267948966, 0.2027325540540822],
+    ['Arccot', 2, 0, -0.54930614433405485],
+    ['Arccot', -2, Math.PI, 0.54930614433405485],
+    ['Arccot', 10, 0, -0.10033534773107558],
+    ['Arccot', -10, Math.PI, 0.10033534773107558],
   ];
 
   test.each(CASES)('%s(%pi)', (name, y, expRe, expIm) =>
@@ -263,7 +268,8 @@ describe('INVERSE TRIG: arctan and arccot are odd on their branch cuts', () => {
     // `_SYS.catan` and `_SYS.cacot` of a constant are folded at compile time.
     for (const [name, im, expected] of [
       ['Arctan', -2, [-1.5707963267948966, -0.54930614433405485]],
-      ['Arccot', 0.5, [-1.5707963267948966, -0.54930614433405485]],
+      ['Arccot', 0.5, [1.5707963267948966, -0.54930614433405485]],
+      ['Arccot', -2, [Math.PI, 0.54930614433405485]],
     ] as const) {
       const result = compile(ce.box([name, ['Complex', 0, im]]), {
         fallback: false,
@@ -277,8 +283,10 @@ describe('INVERSE TRIG: arctan and arccot are odd on their branch cuts', () => {
   });
 
   test('the value on the cut is the limit from its own side', () => {
-    // `arctan(−2i)` is the limit from the left of the imaginary axis, and
-    // `arccot(0.5i)` too. Values of mpmath at ±10⁻⁹ + iy.
+    // `arctan(−2i)` is the limit from the left of the imaginary axis, and so
+    // is `arccot(−2i)`. `arccot` is continuous across the axis between −i
+    // and i. Values of `mpmath.atan` at ±10⁻⁹ + iy, and for `Arccot` π/2
+    // minus them.
     expectClose(
       value(ce, 'Arctan', -1e-9, -2),
       [-1.5707963264615633, -0.54930614433405485]
@@ -288,8 +296,16 @@ describe('INVERSE TRIG: arctan and arccot are odd on their branch cuts', () => {
       [1.5707963264615633, -0.54930614433405485]
     );
     expectClose(
+      value(ce, 'Arccot', -1e-9, -2),
+      [3.1415926532564598, 0.54930614433405485]
+    );
+    expectClose(
+      value(ce, 'Arccot', 1e-9, -2),
+      [3.3333333333333335e-10, 0.54930614433405485]
+    );
+    expectClose(
       value(ce, 'Arccot', -1e-9, 0.5),
-      [-1.5707963254615633, -0.54930614433405484]
+      [1.5707963281282298, -0.54930614433405484]
     );
     expectClose(
       value(ce, 'Arccot', 1e-9, 0.5),
@@ -300,10 +316,26 @@ describe('INVERSE TRIG: arctan and arccot are odd on their branch cuts', () => {
       value(ce, 'Arctan', -1e-9, -2).re,
       8
     );
-    expect(onCut('Arccot', 0.5).re).toBeCloseTo(
-      value(ce, 'Arccot', -1e-9, 0.5).re,
+    expect(onCut('Arccot', -2).re).toBeCloseTo(
+      value(ce, 'Arccot', -1e-9, -2).re,
       8
     );
+  });
+
+  test('arccot is continuous across the real line (CE-1334)', () => {
+    // The real kernel gives `arccot(−3) = π − arccot(3)` in (0, π); the
+    // complex values next to it are the same, on both sides.
+    const real = ce.box(['Arccot', -3]).N().re;
+    expect(real).toBeCloseTo(2.819842099193151, 15);
+    for (const y of [1e-12, -1e-12]) {
+      const v = value(ce, 'Arccot', -3, y);
+      expect(v.re).toBeCloseTo(real, 12);
+      expect(v.im).toBeCloseTo(-y / 10, 20);
+    }
+    // arccot(−z) = π − arccot(z) off the axes.
+    const a = value(ce, 'Arccot', -3, 2);
+    const b = value(ce, 'Arccot', 3, -2);
+    expectClose(a, [Math.PI - b.re, -b.im]);
   });
 });
 
@@ -1112,11 +1144,12 @@ describe('INVERSE TRIG: arguments beyond the double range', () => {
       '1.5707963267948966',
       '2.2123893805309735e-402',
     ],
+    // `Arccot` with Re z < 0 is the mpmath value plus π (CE-1334).
     [
       'Arccot',
       [-3, 400],
       [2, 399],
-      '-3.3185840707964602e-401',
+      '3.1415926535897932',
       '-2.2123893805309735e-402',
     ],
     [
@@ -1310,7 +1343,7 @@ describe('INVERSE TRIG: arguments beyond the double range', () => {
       '2.8966139904629291',
       '7.5982276837712686e+2',
     ],
-    ['Arccot', [-2, -330], [5, -331], '-1.5707963267948966', '-5.0e-331'],
+    ['Arccot', [-2, -330], [5, -331], '1.5707963267948966', '-5.0e-331'],
     [
       'Arcsch',
       [-2, -330],

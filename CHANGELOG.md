@@ -66,6 +66,17 @@
 
 ### Bug Fixes
 
+- **`Arccot` of a complex number next to a negative real number is next to
+  the value at that real number** ([#563](https://github.com/cortex-js/compute-engine/issues/563)).
+  `Arccot(-3)` is `2.8198…`, in the range `(0, π)` of the engine, but
+  `N(Arccot(-3 + 10^-12 i))` was `-0.3217… - 10^-13 i`: the complex value
+  was `Arctan(1/z)`, which differs by `π` when the real part is negative.
+  The complex value is now `π/2 - Arctan(z)`, also in compiled JavaScript
+  code: it is continuous across the real line, and its branch cuts are those
+  of `Arctan`, the imaginary axis above `i` and below `-i`
+  (`N(Arccot(-2i))` is `π + 0.549i`, and `N(Arccot(0.5i))` is
+  `π/2 - 0.549i`). No value at a real argument changes. `simplify()` now
+  also rewrites `Arccot(-x)` as `π - Arccot(x)`.
 - **`LogIntegral(x)` at machine precision is accurate for a large `x`.** It
   was computed as `ExpIntegralEi(ln(x))`, so the rounding error of `ln(x)`
   was multiplied by `ln(x)`: `LogIntegral(1e300)` was

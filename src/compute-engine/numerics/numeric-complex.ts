@@ -803,15 +803,14 @@ export function complexAcoth(z: Complex): Complex {
 //
 // Inverse reciprocal circular functions of a complex value
 //
-// arccsc z = arcsin(1/z), arcsec z = arccos(1/z) and arccot z = arctan(1/z),
-// written in terms of z for the same reasons as the inverse reciprocal
-// hyperbolic functions above. The side of each branch cut is the side of
-// `arcsin`, `arccos` and `arctan` at `1/z`. For `arccsc` and `arcsec` it is
+// arccsc z = arcsin(1/z) and arcsec z = arccos(1/z), written in terms of z
+// for the same reasons as the inverse reciprocal hyperbolic functions above.
+// The side of each branch cut is the side of `arcsin` and `arccos` at `1/z`,
 // the side the engine used before these functions were added (`arccsc 0.5`
-// is `π/2 − 1.317i`, `arcsec(−0.5)` is `π − 1.317i`). For `arccot` it is the
-// side of mpmath, which makes `arccot` odd on its cut, the imaginary axis
-// between −i and i (`arccot(0.5i)` is `−π/2 − 0.549i` and `arccot(−0.5i)` is
-// `π/2 + 0.549i`).
+// is `π/2 − 1.317i`, `arcsec(−0.5)` is `π − 1.317i`). arccot z is
+// π/2 − arctan z, computed as arctan(1/z) plus π for Re z < 0: its cuts are
+// those of `arctan`, the imaginary axis above i and below −i (`arccot(2i)` is
+// `−0.549i` and `arccot(−2i)` is `π + 0.549i`); see `complexAcot()`.
 //
 
 /** The principal value of `arccsc z = arcsin(1/z)`. */
@@ -864,26 +863,31 @@ export function complexAsec(z: Complex): Complex {
   return new Complex(2 * Math.atan2(ar, br), Math.asinh(br * ai - bi * ar));
 }
 
-/** The principal value of `arccot z = arctan(1/z)`. */
+/** The principal value of `arccot z = π/2 − arctan z`. On the real line it
+ *  is the value in (0, π) of the real kernel `atan2(1, x)`, and it is
+ *  continuous across the real line. The cuts are the imaginary axis above
+ *  `i` and below `−i`, on the side of `complexAtan()`: the real part is 0
+ *  above `i` and π below `−i`. The value is `arctan(1/z)` for Re z > 0 and
+ *  `arctan(1/z) + π` for Re z < 0. */
 export function complexAcot(z: Complex): Complex {
   const x = z.re;
   const y = z.im;
-  if (!isFiniteComplex(x, y)) return complexAtan(complexInverse(z));
-  // A real z: the value in (0, π) that the engine gives a real argument
-  // (`Arccot` in `boxed-expression/trigonometry.ts`, `atan2(1, x)`), not
-  // the value of arctan(1/z) in (−π/2, π/2) (they differ by π for x < 0).
+  // The π to add to `arctan(1/z)`: left of the imaginary axis, and on the
+  // cut below −i.
+  const shift = x < 0 || (x === 0 && y < -1) ? Math.PI : 0;
+  if (!isFiniteComplex(x, y)) {
+    const w = complexAtan(complexInverse(z));
+    return new Complex(w.re + shift, w.im);
+  }
   if (y === 0) return new Complex(Math.atan2(1, x), 0);
-  // On the cut (the imaginary axis between −i and i): the side of
-  // `complexAtan()` at 1/z = −i/y, that is the side left of the axis for
-  // y > 0 and right of it for y < 0.
-  const xs = x === 0 ? (y > 0 ? -0 : 0) : x;
   const h = Math.hypot(x, y);
   if (h > 1e150) {
-    // arccot z = 1/z + O(1/z³), with |z|/4 against an overflow of |z|.
+    // arctan(1/z) = 1/z + O(1/z³), with |z|/4 against an overflow of |z|.
     const h4 = Math.hypot(x / 4, y / 4);
-    return new Complex(x / 16 / h4 / h4, -y / 16 / h4 / h4);
+    return new Complex(x / 16 / h4 / h4 + shift, -y / 16 / h4 / h4);
   }
-  // arccot z = (i/2)·ln((z − i)/(z + i)).
+  // arctan(1/z) = (i/2)·ln((z − i)/(z + i)), and its imaginary part is the
+  // imaginary part of arccot z.
   // Im: ¼·ln(|z − i|²/|z + i|²) = −¼·ln(1 + 4y/|z − i|²), computed for |y|
   // (as the real part in `atanhCore()`).
   const ay = Math.abs(y);
@@ -893,12 +897,19 @@ export function complexAcot(z: Complex): Complex {
     d < 1e-290
       ? 0.5 * (Math.log(Math.hypot(x, 1 + ay)) - Math.log(Math.hypot(x, u)))
       : 0.25 * Math.log1p((4 * ay) / d);
-  // Re: −½·arg((z − i)·conj(z + i)) = ½·atan2(2x, |z|² − 1). |z|² − 1 is
-  // computed from the larger part, whose difference with 1 is exact.
+  const imaginary = signBit(y) ? im : -im;
+  // On the imaginary axis: π/2 − arctan(iy) has the real part π/2 from −i
+  // to i (the poles included), and the side of the cut of `complexAtan()`
+  // beyond them.
+  if (x === 0)
+    return new Complex(ay <= 1 ? Math.PI / 2 : shift, imaginary);
+  // Re of arctan(1/z): −½·arg((z − i)·conj(z + i)) = ½·atan2(2x, |z|² − 1).
+  // |z|² − 1 is computed from the larger part, whose difference with 1 is
+  // exact.
   const ax = Math.abs(x);
   const m =
     ay >= ax ? x * x + (ay - 1) * (ay + 1) : (ax - 1) * (ax + 1) + y * y;
-  return new Complex(0.5 * Math.atan2(2 * xs, m), signBit(y) ? im : -im);
+  return new Complex(0.5 * Math.atan2(2 * x, m) + shift, imaginary);
 }
 
 /** cos(πx) and sin(πx) with the argument reduced exactly before the
