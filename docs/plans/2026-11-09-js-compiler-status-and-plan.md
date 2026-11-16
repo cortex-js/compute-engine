@@ -2318,6 +2318,39 @@ The build for Tycho is
 `_TASKS/2026-11-15-tycho-builds/cortex-js-compute-engine-0.193.0-tycho.a930c4e08.tgz`
 (announced in `issues/CE-1354.md`, set `fixed`).
 
+Per-target custom handlers, revisited with the user on 2026-11-16 after
+Tycho's row MK (the Desmos rules of `At` and `Which` rewritten at
+canonicalization into plain MathJSON, then backed out; report of `tycho-18`).
+Of its seven findings five are costs of the interpreter (a lazy `Map` that
+evaluates its captured lists again at each element, a chained lazy result,
+canonicalization evaluating a `Map` operand, every index wrapped in
+`Max(Floor(…), 0)`), one is the compile time of the existing compiler on the
+larger expression and one was a list input with no element type (CE-1357,
+fixed by Tycho's declaration): a compile handler per target answers none of
+the five. The IR arm of that report measured the interpreter: with
+`profile: 'ir'` and the engine's fallback on, a decline goes to the
+interpreter, and the build was 0.192.0; on main `5e286aa36` the profile
+compiles the eight documents faster than the existing compiler (10 to 95 ms
+per document against 41 to 27,408) and admits 74 of their 94 programs
+(existing 93). The form recommended to a host: a function written in MathJSON
+with a declared signature, CALLED at each site (one node per read, the
+wrapper once in the body): `dat := Function(At(L, Max(Floor(i), 0)), L, i)`
+declared `(list<real>, real) -> real` gives the Desmos index rule in the
+interpreter and on JavaScript with the profile, and compiles on GLSL and
+`interval-js` (probed on `5e286aa36`; with no signature the profile declines).
+Decision of the user: "Let's defer the native operators for now, but keep in
+mind we might need to revisit: some users other than Tycho may have used them
+and depending on how the migration to pure JSON works for them we might need
+to reconsider." So: no native floor-index read and no native selection over
+lists now (the two requests are issue files, deferred), no handler that
+splices text; the interpreter costs are engine defects, filed. Open for the
+deletion of the existing compilers: users of the npm package other than Tycho
+may have compile handlers of their own; the deletion needs a migration note
+(the called host function), and if a host has a need that MathJSON cannot
+express, the form to consider is a typed operator row (a signature, an effect
+class and the name of a host function per target), which keeps the passes and
+the interval mode sound.
+
 Queue from here. Speed: the written-out sums on JavaScript (`unrollSums`,
 after a look at the four programs it slows), the closed form of an integral
 on JavaScript (G20), colour constants computed once, no tick for a counted
