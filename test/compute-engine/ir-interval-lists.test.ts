@@ -64,6 +64,18 @@ ce.assign(
   ] as never)
 );
 
+// Functions of untyped parameters whose result the engine infers as a list
+// of `unknown` elements: the result is the shape of the lowered body.
+// Tycho's `v(x, y) = [x, y]`, `H(t) = C(t + [3, 2, 1]/3)` (a mapped call)
+// and `R(p, φ)`, whose parameter p the body reads as a list.
+ce.assign('vv', ce.box(['Function', ['List', 'a', 'b'], 'a', 'b'] as never));
+// prettier-ignore
+ce.assign('CC', ce.box(['Function', ['Which', ['Less', 't', 0], 0, ['Less', 1, 't'], 1, 'True', 't'], 't'] as never));
+// prettier-ignore
+ce.assign('HH', ce.box(['Function', ['CC', ['Add', ['Abs', ['Add', ['Multiply', 6, ['Mod', ['Add', 't', ['Multiply', ['Rational', 1, 3], ['List', 3, 2, 1]]], 1]], -3]], -1]], 't'] as never));
+// prettier-ignore
+ce.assign('RR', ce.box(['Function', ['List', ['Sum', ['Multiply', 'p', ['List', ['Cos', 'r'], ['Negate', ['Sin', 'r']]]]], ['Sum', ['Multiply', 'p', ['List', ['Sin', 'r'], ['Cos', 'r']]]]], 'p', 'r'] as never));
+
 /** The length of each list input of the containment cases. */
 const LENGTHS: Record<string, number> = { L: 4, V: 3, B: 200, P: 2 };
 
@@ -190,6 +202,11 @@ const CASES: Case[] = [
   C(['md', ['List', ['Negate', x], ['Negate', y]]], [0, 1]), C(['g1', 'L']), C(['Sum', ['g1', 'V']]),
   C(['h2', x, 'V']), C(['h2', 'V', 'V']), C(['h2', list3, y]), C(['w', 'V']),
   C(['At', ['g1', list3], ['Add', ['Floor', y], 1]], [0, 1, 2, 3]),
+  // A result of the shape of the body (untyped parameters): read by `At`
+  // and `Sum`, a mapped call as the body, a list bound whole.
+  C(['At', ['vv', x, y], 2]), C(['Sum', ['Multiply', ['vv', x, y], ['List', 0.64, 0.768]]]),
+  C(['At', ['HH', x], 1]), C(['Sum', ['HH', x]]),
+  C(['Sum', ['Power', ['RR', ['Add', ['vv', x, y], ['List', -0.57, 2.8]], y], 2]]),
 ];
 
 /** The programs whose result differs from the existing target's at some

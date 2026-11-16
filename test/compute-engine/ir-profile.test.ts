@@ -1403,7 +1403,137 @@ describe('a list argument of a user function of scalar parameters: the function 
     ['a function whose result is a list (a list of lists)', ['two', ['List', 1, 'x']], /a list argument of two, whose result is not a scalar/],
     ['a recursive call', ['rec', 'x'], /a list argument of a recursive call of rec/],
     ['a list of booleans for a real parameter (the interpreter: a list of errors)', ['f', ['List', 'True', ['Less', 'x', 0]]], /an argument of f that is not real/],
-    ['a parameter that the body reads as a list (bound whole)', ['len', ['List', 1, 'x']], /the parameter t of len is not a scalar/],
+    ['a parameter that the body reads as a list, of a run-time length (bound whole)', ['len', 'D'], /the parameter t of len is not a scalar/],
+  ])('%s declines', (_, json, cause) => {
+    expect(message(json)).toMatch(cause);
+  });
+});
+
+describe('a user function whose result is a list of elements of no stated type: the shape of its body', () => {
+  // The engine infers `list<unknown>` for `v(a, b) := [a, b]` with untyped
+  // parameters; the type of a call, inferred with the argument types, is
+  // `vector<real^2>`. The function is lowered once per binding, with the
+  // parameter types of its first call, and its result is the shape of the
+  // lowered body. Tycho's corpus: `v(x, y)`, `H(t) = C(t + [3, 2, 1]/3)`,
+  // `V(a, b)`, a list of 9 points.
+  const engine = (): ComputeEngine => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('y', 'real');
+    e.declare('n', 'integer');
+    e.declare('P', 'tuple<real, real>');
+    e.declare('Q', 'tuple<real, real>');
+    e.declare('D', 'list<real>');
+    const fn = (name: string, body: Json, ...params: string[]) =>
+      e.assign(name, box(['Function', body, ...params], e));
+    fn('v', ['List', 'a', 'b'], 'a', 'b');
+    fn('C', ['Which', ['Less', 't', 0], 0, ['Less', 1, 't'], 1, 'True', 't'], 't');
+    // prettier-ignore
+    fn('H', ['C', ['Add', ['Abs', ['Add', ['Multiply', 6, ['Mod', ['Add', 't', ['Multiply', ['Rational', 1, 3], ['List', 3, 2, 1]]], 1]], -3]], -1]], 't');
+    fn('pl', ['List', ['Tuple', 't', 't'], ['Tuple', 't', ['Multiply', 2, 't']]], 't');
+    // prettier-ignore
+    fn('rl', ['If', ['Less', 't', 0], ['List', 't', 'u'], ['rl', ['Subtract', 't', 1], 'u']], 't', 'u');
+    fn('mp', ['Map', ['Function', 't', 'k'], ['Range', 1, 'u']], 't', 'u');
+    fn('uu', ['Divide', ['v', 't', 's'], 't'], 't', 's');
+    e.declare('vd', '(real, real) -> list<real^3>');
+    fn('vd', ['List', 'a', 'b'], 'a', 'b');
+    // prettier-ignore
+    fn('R', ['List', ['Sum', ['Multiply', 'p', ['List', ['Cos', 'r'], ['Negate', ['Sin', 'r']]]]], ['Sum', ['Multiply', 'p', ['List', ['Sin', 'r'], ['Cos', 'r']]]]], 'p', 'r');
+    fn('len', ['Add', ['Length', 't'], 1], 't');
+    return e;
+  };
+  const e = engine();
+  const points = [
+    { x: 0.5, y: -1.25, n: 3 },
+    { x: -2.75, y: 3, n: 1 },
+    { x: 0.3, y: 0, n: 4 },
+  ];
+  const message = (json: Json, options: Record<string, unknown> = {}) => {
+    const o = outcome(box(json, e), options);
+    return 'message' in o ? o.message : 'compiled';
+  };
+
+  test('the engine leaves the elements open and types the call', () => {
+    expect(e.box('v').type.toString()).toBe(
+      '(a: unknown, b: unknown) -> list<unknown>'
+    );
+    expect(box(['v', 'x', 'y'], e).type.toString()).toBe('vector<real^2>');
+  });
+
+  test('values against the interpreter: At, Sum, an element-wise product, a mapped call as the body, a list of points', () => {
+    againstInterpreter(e, ['At', ['v', 'x', 'y'], 2], points);
+    againstInterpreter(e, ['Sum', ['v', 'x', 'y']], points);
+    // prettier-ignore
+    againstInterpreter(e, ['Sum', ['Multiply', ['v', 'x', 'y'], ['List', 0.64, 0.768]]], points);
+    againstInterpreter(e, ['v', 'x', ['Multiply', 2, 'n']], points);
+    // `H` is `C` mapped over a list of three (`mapOver()`).
+    for (const k of [1, 2, 3])
+      againstInterpreter(e, ['At', ['H', 'x'], k], points);
+    // A list of points: `PointX` of an element.
+    againstInterpreter(e, ['At', ['At', ['pl', 'x'], 2], 1], points);
+    // Points as arguments: a list of points (the interpreter: [(1, 2),
+    // (3, -4)]).
+    const r = compile(box(['v', 'P', 'Q'], e), {
+      ...IR,
+      fallback: false,
+    } as never);
+    expect(r.run!({ P: [1, 2], Q: [3, -4] } as never)).toEqual([
+      [1, 2],
+      [3, -4],
+    ]);
+  });
+
+  test('one function for two calls with the same argument types; a call with another shape than the first declines', () => {
+    const json = ['Add', ['At', ['v', 'x', 'y'], 1], ['At', ['v', 'y', 'x'], 2]];
+    againstInterpreter(e, json, points);
+    expect(
+      sliceProgram(box(json, e), {
+        target: 'javascript',
+        passes: { ...ALL_PASSES, inline: false },
+      }).functions.filter((f) => f.source === 'v')
+    ).toHaveLength(1);
+    // The function takes the shape of the parameters of its first call:
+    // points first, then scalars; scalars first, then points.
+    expect(
+      message(['List', ['At', ['At', ['v', 'P', 'Q'], 1], 1], ['At', ['v', 'x', 'y'], 1]])
+    ).toMatch(/an argument of v of another shape than at its first call/);
+    expect(
+      message(['List', ['At', ['v', 'x', 'y'], 1], ['At', ['At', ['v', 'P', 'Q'], 1], 1]])
+    ).toMatch(/a list argument of v/);
+  });
+
+  test('the same on JavaScript, GLSL and the interval mode; GLSL needs a stated length', () => {
+    const json = ['Sum', ['Multiply', ['v', 'x', 'y'], ['List', 2, 3]]];
+    for (const to of ['javascript', 'glsl', 'interval-js'])
+      expect([to, message(json, { to })]).toEqual([to, 'compiled']);
+    // A body of a run-time length: JavaScript only.
+    againstInterpreter(e, ['mp', 'x', 'n'], points);
+    expect(message(['Sum', ['mp', 'x', 'n']], { to: 'glsl' })).toMatch(
+      /it needs a stated length/
+    );
+  });
+
+  test('a parameter that the body reads as a list takes the list of the first call whole', () => {
+    // The interpreter binds the list whole (`paramsAreScalar()` is false).
+    againstInterpreter(e, ['R', ['List', -0.57, 2.8], 'x'], points);
+    againstInterpreter(e, ['len', ['List', 1, 'x']], points);
+    againstInterpreter(
+      e,
+      ['Sum', ['Power', ['R', ['Add', ['v', 'x', 'y'], ['List', -0.57, 2.8]], 'y'], 2]],
+      points
+    );
+    expect(
+      message(['Add', ['At', ['R', ['List', 1, 2], 'x'], 1], ['At', ['R', ['List', 1, 2, 3], 'x'], 1]])
+    ).toMatch(
+      /an argument of R of another length than at its first call: the list parameter p has the length 2 of that call \(list<integer\^3> here\)$/
+    );
+  });
+
+  // prettier-ignore
+  test.each([
+    ['a recursive function with an open list result', ['At', ['rl', 'x', 'y'], 1], /a recursive call of rl, a function with a list or tuple result/],
+    ['a declared settled result that the body contradicts', ['At', ['vd', 'x', 'y'], 1], /a body of vd that is not vector<real\^3>/],
+    ['a result whose elements are a union of a number and a list', ['At', ['uu', 'x', 'y'], 1], /the result of uu is not a scalar \(list<list<any> \| number>\)/],
   ])('%s declines', (_, json, cause) => {
     expect(message(json)).toMatch(cause);
   });

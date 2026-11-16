@@ -354,6 +354,17 @@
   together, and a scalar argument is passed to each call. A nested list, lists
   of different lengths, a list for a function whose result is a list, and a
   recursive call with a list argument are not compiled by the profile.
+- **The experimental profile `'ir'` compiles a user function whose result is
+  a list of elements of no stated type**, as the engine infers it for
+  parameters of no stated type: with `v(a, b) := List(a, b)`, whose result is
+  `list<unknown>`, `Sum(v(x, y)·List(0.64, 0.768))` gives 2.176 at `x = 1`,
+  `y = 2` on JavaScript, and compiles for GLSL and for `interval-js`. The
+  result has the shape of the body, a list of numbers or a list of points; a
+  recursive call and elements that can be a number or a list are not
+  compiled by the profile. A parameter that
+  the body reads as a list (`Sum(p·List(Cos(φ), Sin(φ)))`) takes a list
+  argument of a length known at compile time whole, as the interpreter binds
+  it.
 - **Code of the experimental profile `'ir'` runs lists and loops faster.**
   A list is built in one preallocated array, two element-wise operations
   in a row are one loop, and a loop checks its deadline once per 1,024

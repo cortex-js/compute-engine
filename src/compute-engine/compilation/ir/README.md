@@ -1196,8 +1196,17 @@ type, as the engine infers `list<…> | number | tuple` for
 (a tuple of real or integer numbers, `Function(Block(PointList(x, y)), x, y)`),
 and the result of a call is then a tuple; a result that is a tuple of such
 elements or of real or integer scalars (`tuple<unknown, unknown>`,
-`tuple<number, unknown>`) takes a point body of that length; a list body
-declines. A parameter of no declared type, or of a type that is not a scalar
+`tuple<number, unknown>`, `tuple<any, any>`) takes a point body of that length;
+a list body declines. A result that is a list of elements of no stated type
+(`list<unknown>`, `list<unknown^3>`, `list<tuple<unknown, unknown>^9>`, as the
+engine infers it for parameters of no stated type: `v(a, b) := [a, b]`) is the
+shape of the body, lowered with the parameter types of the first call: a flat
+list of numbers or booleans, or a list of points, of the lengths that the type
+states (the engine types a call of it as its body, with the argument types).
+Elements of a union of a number and a
+list (`list<list<any> | number>`) decline (R3: a declaration settles them), as
+do a recursive call of such a function and a rank of 2 that is not a list of
+points. A parameter of no declared type, or of a type that is not a scalar
 (`collection<any> | tuple`, inferred from `PointX(p)` in the body), takes the
 point of its argument at the function's first call: the arguments of that call
 are lowered before the function, and a parameter whose lowered argument is a
@@ -1206,7 +1215,12 @@ the static type of the argument (a parameter passed on, `(1 − t)·a + t·b`); 
 function per binding, as for a list parameter below. `C_mod(C_mul(A, X(x, y)))`
 of three functions assigned with no declaration compiles on both targets. A
 later call with an argument of another shape declines, naming the function and
-the parameter. When the lowered argument of the first call is not a point, a
+the parameter. When the interpreter binds the arguments whole
+(`paramsAreScalar()` is false: the body reads a parameter as a list), a flat
+list of numbers of a stated length as the first argument is a list of that
+length, and a later call with another length declines:
+`R(p, φ) := [Σ p·[cos φ, −sin φ], Σ p·[sin φ, cos φ]]` of `R([−0.57, 2.8], φ)`.
+Otherwise, when the lowered argument of the first call is not a point, a
 parameter of no declared type is a real, and one of a type that is not a scalar
 declines. A recursive one needs a result type (declared, or inferred by the
 engine). An input of the compilation that the body reads (a free name with no
