@@ -2275,6 +2275,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         // and compound arguments fall through to the Lagrange form below.
         const leibniz = serializeLeibnizPartial(serializer, expr);
         if (leibniz !== null) return leibniz;
+        // A negative order is written `\operatorname{Derivative}(f, -1)`, and
+        // a call that follows it would read as a product.
+        if (hasNegativeOrder(lhs))
+          return `\\operatorname{Apply}(${operands(expr)
+            .map((x) => serializer.serialize(x))
+            .join(', ')})`;
       }
       if (h === 'InverseFunction' || h === 'Derivative') {
         // For inverse functions and derivatives display as a regular function,
@@ -4373,10 +4379,18 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     name: 'Derivative',
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
-      const base = serializePrimeBase(serializer, operand(expr, 1));
-
       // The multi-index of orders, one per argument of the function.
       const orders = operands(expr).slice(1);
+
+      // A literal negative order has no Lagrange spelling: `f^{(-1)}` reads
+      // as a power of `f` when `f` is not declared a function. The function
+      // call reads back unchanged.
+      if (hasNegativeOrder(expr))
+        return `\\operatorname{Derivative}(${operands(expr)
+          .map((x) => serializer.serialize(x))
+          .join(', ')})`;
+
+      const base = serializePrimeBase(serializer, operand(expr, 1));
 
       // Multi-index (mixed partial): f^{(1,0)}. There is no unapplied Lagrange
       // prime notation for it, so use the parenthesized index list.
@@ -5115,6 +5129,22 @@ function absorbPrimeSubscript(
     return lhs;
   }
   return ['Subscript', lhs, sub];
+}
+
+/** True if an order of the `Derivative` `expr` is a negative number literal
+ * (`-1`, `["Rational", -1, 2]`, `["Rational", 1, -2]`). */
+function hasNegativeOrder(expr: MathJsonExpression | null): boolean {
+  return operands(expr)
+    .slice(1)
+    .some((o) => {
+      if (operator(o) === 'Rational') {
+        const n = machineValue(operand(o, 1));
+        const d = machineValue(operand(o, 2));
+        return n !== null && d !== null && n * d < 0;
+      }
+      const v = machineValue(o);
+      return v !== null && v < 0;
+    });
 }
 
 /**

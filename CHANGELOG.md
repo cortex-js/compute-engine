@@ -54,6 +54,11 @@
 
 ### Bug Fixes
 
+- **The LaTeX of a derivative of negative order reads back as the same
+  expression.** `["Derivative", "f", -1]` gave `f^{(-1)}`, which reads back
+  as `1/f` when `f` is not declared a function; it now gives
+  `\operatorname{Derivative}(f, -1)`. Applied to an argument it gives
+  `\operatorname{Apply}(\operatorname{Derivative}(f, -1), x)`.
 - **Epsil text for a product nested in a product reads back as the same
   expression when a factor is `%` or `/`.** `serializeEpsil(["Multiply",
   "a", ["Multiply", ["Mod", "x", 2], "b"]])` gave `a * x % 2 * b`, which

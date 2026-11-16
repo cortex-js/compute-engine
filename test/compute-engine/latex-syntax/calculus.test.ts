@@ -1696,6 +1696,25 @@ describe('PARTIAL DERIVATIVE NOTATION (∂)', () => {
       expect(ce.parse(ce.box(j).latex).json).toEqual(j);
   });
 
+  test('a negative Derivative order is a function call that round-trips', () => {
+    // `f^{(-1)}` would read as a power of `f` when `f` is not declared.
+    const ce2 = new ComputeEngine();
+    expect(ce2.box(['Derivative', 'f', -1]).latex).toBe(
+      '\\operatorname{Derivative}(f, -1)'
+    );
+    expect(ce2.box(['Apply', ['Derivative', 'f', -1], 'x']).latex).toBe(
+      '\\operatorname{Apply}(\\operatorname{Derivative}(f, -1), x)'
+    );
+    for (const j of [
+      ['Derivative', 'f', -1],
+      ['Derivative', 'f', -2],
+      ['Derivative', 'f', 1, -1],
+      ['Derivative', 'f', ['Rational', -1, 2]],
+      ['Apply', ['Derivative', 'f', -1], 'x'],
+    ] as const)
+      expect(ce2.parse(ce2.box(j).latex).json).toEqual(j);
+  });
+
   test('a multi-index Derivative order is read by the parser, not by canonicalization', () => {
     expect(ce.parse('f^{(0,1)}', { canonical: false }).json).toEqual([
       'Derivative',
