@@ -412,6 +412,11 @@ describe('IR profile, batch G11: arithmetic on points', () => {
     );
   });
 
+  test('a function of no stated result whose body is a list takes its shape', () => {
+    check(['At', ['lst', 'u'], 1], POINTS);
+    expect(glsl(['At', ['lst', 'u'], 1]).success).toBe(true);
+  });
+
   test('a mutual recursion of an untyped point parameter on JavaScript', () => {
     check(['ev', 'P', 5], POINTS);
     check(['Add', ['od', 'P', 2], ['ev', 'Q', 3]], POINTS);
@@ -436,7 +441,6 @@ describe('IR profile, batch G11: arithmetic on points', () => {
     ['a sum of points of two lengths', ['Add', 'P', 'P3'], ['javascript', 'glsl'], /lists of different lengths/],
     ['Distance of points of two lengths', ['Distance', 'P', 'P3'], ['javascript', 'glsl'], /lists of different lengths/],
     ['Distance of a point and a list of numbers', ['Distance', 'P', 'L2'], ['javascript', 'glsl'], /Distance of a value that is not a point/],
-    ['a function of no stated result whose body is a list', ['At', ['lst', 'u'], 1], ['javascript', 'glsl'], /a body of lst that is not a scalar or a point of numbers/],
     ['Distance of lists of points of two lengths', ['Distance', ['List', ['Tuple', 1, 2]], ['List', ['Tuple', 1, 2], ['Tuple', 'u', 'v']]], ['javascript'], /lists of different lengths/],
     ['an untyped parameter: a point, then a scalar', ['Add', ['Cmod', 'P'], ['Cmod', 'x']], ['javascript', 'glsl'], /x: an argument of Cmod of another shape than at its first call: the parameter p is a point of 2 numbers \(real here\)/],
     ['an untyped parameter: points of two lengths', ['Add', ['Cmod', 'P'], ['Cmod', 'P3']], ['javascript', 'glsl'], /an argument of Cmod of another shape than at its first call: the parameter p is a point of 2 numbers \(tuple<real, real, real> here\)/],

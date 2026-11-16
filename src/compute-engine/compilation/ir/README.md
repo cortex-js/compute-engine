@@ -1407,10 +1407,13 @@ type, as the engine infers `list<…> | number | tuple` for
 and the result of a call is then a tuple; a result that is a tuple of such
 elements or of real or integer scalars (`tuple<unknown, unknown>`,
 `tuple<number, unknown>`, `tuple<any, any>`) takes a point body of that length;
-a list body declines. A result that is a list of elements of no stated type
-(`list<unknown>`, `list<unknown^3>`, `list<tuple<unknown, unknown>^9>`, as the
-engine infers it for parameters of no stated type: `v(a, b) := [a, b]`) is the
-shape of the body, lowered with the parameter types of the first call: a flat
+a list body declines, except with no result at all (a function value declared
+with the bare type `function`): its list body is taken as for `list<unknown>`
+below, with the same conditions. A result that is a list of elements of no
+stated type (`list<unknown>`, `list<unknown^3>`,
+`list<tuple<unknown, unknown>^9>`, as the engine infers it for parameters of no
+stated type: `v(a, b) := [a, b]`) is the shape of the body, lowered with the
+parameter types of the first call: a flat
 list of numbers or booleans, or a list of points, of the lengths that the type
 states (the engine types a call of it as its body, with the argument types).
 Elements of a union of a number and a

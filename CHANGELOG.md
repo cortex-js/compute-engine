@@ -1890,6 +1890,8 @@ This is the content first numbered 0.191.0, a version that was not published.
   compiler; it can change or be removed without notice. A program or an
   option outside the profile declines with `outside-profile`, and `fallback`
   applies as for any other decline; without the option, nothing changes.
+  A user function declared with the bare type `function` whose body is a list
+  compiles, with the shape of its body, as one whose result is `list<unknown>`.
 
 - **`ce.temporaryName(hint, ...avoid)` gives a name for a temporary symbol.**
   It returns `<hint>_tmp<n>`, with `n` the smallest integer from 1 for which

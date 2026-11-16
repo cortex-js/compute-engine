@@ -481,21 +481,27 @@ export function functionLowering(
         // A list of elements of no stated type: a flat list of numbers or
         // booleans, or a list of points, of the lengths that it states.
         const axis = cx.tuples.get(body);
+        // No stated result and a body that is a list: the same.
+        const listed: typeof shaped =
+          shaped ??
+          (r === undefined && t.shape.length > 0 && axis !== 0
+            ? {}
+            : undefined);
         if (
-          shaped &&
+          listed &&
           (axis === 0 ||
             t.shape.length !== (axis === 1 ? 2 : 1) ||
-            t.shape[1] !== (shaped.point ?? t.shape[1]) ||
+            t.shape[1] !== (listed.point ?? t.shape[1]) ||
             !['real', 'integer', axis ? '' : 'boolean'].includes(t.lane) ||
-            (shaped.length !== undefined &&
-              !sameShape([t.shape[0]], [shaped.length], cx.constant)))
+            (listed.length !== undefined &&
+              !sameShape([t.shape[0]], [listed.length], cx.constant)))
         )
           decline(
             literal,
-            `a body of ${e.operator} that is not ${engineTypeToString(r!)}`
+            `a body of ${e.operator} that is not ${r ? engineTypeToString(r) : 'a scalar, a point, or a list of numbers, booleans or points (a result of no stated type)'}`
           );
         if (
-          (points !== undefined || (open && t.shape.length > 0)) &&
+          (points !== undefined || (open && !listed && t.shape.length > 0)) &&
           (cx.tuples.get(body) !== 0 ||
             t.shape.length !== 1 ||
             (t.lane !== 'real' && t.lane !== 'integer') ||

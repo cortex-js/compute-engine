@@ -1833,6 +1833,129 @@ describe('a user function whose result is a list of elements of no stated type: 
   });
 });
 
+describe('a user function of no stated result whose body is a list: the shape of its body', () => {
+  // Tycho declares a function value with the bare type `function`; its
+  // result is then the shape of the lowered body, as for `list<unknown>`.
+  // The corpus: neyret/62urmx2dcm (`V`, a list of points), neyret/pqflulcixs
+  // (`R`, a list of two sums), neyret/1dee4lkte2 (`f`, a list divided by a
+  // scalar), neyret/1d8vyqtvoj (`b`, an operation over a Range of 11).
+  const e = new ComputeEngine();
+  for (const [n, t] of [
+    ['x', 'real'],
+    ['y', 'real'],
+    ['h', 'real'],
+    ['P', 'tuple<real, real>'],
+    ['Q', 'tuple<real, real>'],
+  ])
+    e.declare(n, t);
+  const fn = (name: string, body: Json, ...params: string[]) =>
+    e.declare(name, {
+      type: 'function',
+      value: box(['Function', body, ...params], e),
+    });
+  fn('two', ['List', 'a', ['Multiply', 2, 'b']], 'a', 'b');
+  // prettier-ignore
+  fn('V', ['List', ['Tuple', ['Subtract', 'a', 'h'], 'b'], ['Tuple', 'a', 'b'], ['Tuple', ['Add', 'a', 'h'], ['Negate', 'b']]], 'a', 'b');
+  // prettier-ignore
+  fn('R', ['List', ['Sum', ['Multiply', 'p', ['List', ['Cos', 'r'], ['Negate', ['Sin', 'r']]]]], ['Sum', ['Multiply', 'p', ['List', ['Sin', 'r'], ['Cos', 'r']]]]], 'p', 'r');
+  fn('f', ['Divide', ['List', 'a', ['Add', 'a', 1]], 'b'], 'a', 'b');
+  fn('b', ['Multiply', 'a', ['Range', 0, 10]], 'a');
+  // prettier-ignore
+  fn('mp', ['Map', ['Function', ['At', ['two', 'k', 't'], 2], 'k'], ['List', 1, 2, 3]], 't');
+  // prettier-ignore
+  fn('rl', ['If', ['Less', 't', 0], ['List', 't', 'u'], ['rl', ['Subtract', 't', 1], 'u']], 't', 'u');
+  fn('un', ['If', ['Less', 't', 0], ['List', 't', 1], 't'], 't');
+  fn('nest', ['List', ['List', 't', 1], ['List', 1, 't']], 't');
+  fn('sc', ['Add', 't', 1], 't');
+  fn('pt', ['Tuple', 't', 1], 't');
+  const points = [
+    { x: 0.5, y: -1.25, h: 0.25 },
+    { x: -2.75, y: 3, h: 1 },
+    { x: 0.3, y: 0.75, h: -0.125 },
+  ];
+  const message = (json: Json, options: Record<string, unknown> = {}) => {
+    const o = outcome(box(json, e), options);
+    return 'message' in o ? o.message : 'compiled';
+  };
+  const R = ['R', ['List', -0.57, 2.8], 'x'];
+  const scalars: Json[] = [
+    ['Sum', ['two', 'x', 'y']],
+    ['Sum', ['PointX', ['V', 'x', 'y']]],
+    ['At', R, 2],
+    ['Sum', ['f', 'x', 'y']],
+    ['At', ['b', 'x'], 4],
+    ['Add', ['Length', ['two', 'x', 'y']], ['At', ['two', 'x', 'y'], 2]],
+    ['Sum', ['mp', 'x']],
+  ];
+
+  test('values against the interpreter on JavaScript', () => {
+    for (const json of [
+      ['two', 'x', 'y'],
+      ['PointX', ['V', 'x', 'y']],
+      R,
+      ['f', 'x', 'y'],
+      ['b', 'x'],
+      ['mp', 'x'],
+      ...scalars,
+    ])
+      againstInterpreter(e, json, points);
+    expect(message(['sc', 'x'])).toBe('compiled');
+    expect(message(['PointX', ['pt', 'x']])).toBe('compiled');
+  });
+
+  test('the interval mode contains the interpreter', () => {
+    for (const json of scalars) {
+      const r = compile(box(json, e), {
+        ...IR,
+        to: 'interval-js',
+        fallback: false,
+      } as never);
+      const got = r.run!({
+        x: { lo: 0.25, hi: 0.5 },
+        y: { lo: -1, hi: -0.5 },
+        h: { lo: 0.25, hi: 0.25 },
+      } as never) as { kind: string; value?: { lo: number; hi: number } };
+      for (const [x, y] of [
+        [0.25, -1],
+        [0.4, -0.7],
+        [0.5, -0.5],
+      ]) {
+        const v = interpret(e, box(json, e), { x, y, h: 0.25 }) as number;
+        expect([json, got.kind]).toEqual([json, 'interval']);
+        expect(got.value!.lo).toBeLessThanOrEqual(v + 1e-12);
+        expect(got.value!.hi).toBeGreaterThanOrEqual(v - 1e-12);
+      }
+    }
+  });
+
+  test('GLSL: as for a result list<unknown>', () => {
+    // A list of points declines on GLSL, as for `list<unknown>`.
+    const glsl = [
+      ['two', 'x', 'y'],
+      R,
+      ['f', 'x', 'y'],
+      ['b', 'x'],
+      ...scalars,
+    ];
+    for (const json of glsl.filter((j) => !JSON.stringify(j).includes('"V"')))
+      expect([json, message(json, { to: 'glsl' })]).toEqual([json, 'compiled']);
+    expect(
+      message(['Sum', ['PointX', ['V', 'x', 'y']]], { to: 'glsl' })
+    ).toMatch(/a list of rank 2 on glsl/);
+  });
+
+  // prettier-ignore
+  test.each([
+    ['scalars first, then points', ['List', ['At', ['two', 'x', 'y'], 1], ['At', ['At', ['two', 'P', 'Q'], 1], 1]], /a list argument of two \(the interpreter maps the function over the list\)/],
+    ['points first, then scalars', ['List', ['At', ['At', ['two', 'P', 'Q'], 1], 1], ['At', ['two', 'x', 'y'], 1]], /an argument of two of another shape than at its first call: the parameter a is a point of 2 numbers \(real here\)/],
+    ['a recursive function', ['At', ['rl', 'x', 'y'], 1], /arms of two types/],
+    ['a body of two shapes', ['At', ['un', 'x'], 1], /arms of two types/],
+    ['a list of lists', ['At', ['nest', 'x'], 1], /a body of nest that is not a scalar, a point, or a list of numbers, booleans or points \(a result of no stated type\)/],
+  ])('%s declines', (_, json, cause) => {
+    expect(message(json)).toMatch(cause);
+  });
+});
+
 describe('Degrees and Cot', () => {
   test('Degrees on both targets (the witness Sin(Degrees(h_0)))', () => {
     const engine = new ComputeEngine();
