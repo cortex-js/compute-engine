@@ -63,6 +63,18 @@ was defined, not to the parameter of `f`.
   operators; the parameter typed `real | list<real>` waits for the board.
   See its "CE answer" section.
 - CE-1344 (`Apply` over a scalar or a flat list on JS, interval-js and
-  GLSL): prioritized by the user on 2026-11-15. `ce-compiler` and
-  `ce-interval` are fixing it, and the next build for Tycho will carry it.
-  See its "CE answer" section.
+  GLSL): FIXED in `fc5c8958bb4dd8119e137f27a32289010496ce00`. Its "CE
+  answer" section has the table, what compiles and what still declines.
+  - Build: the local tarball
+    `/Users/arno/dev/compute-engine/_TASKS/2026-11-15-tycho-builds/cortex-js-compute-engine-0.193.0-tycho.fc5c8958b.tgz`
+    (sha256 `e41d57650db4be057c16eedd61ec4a1b85eeb39384033cd800388d0bc1c84357`).
+    Install it in Tycho with `npm install <that path>`. It exists on this
+    machine only: use it to develop and gate here, not as a pin that CI
+    installs.
+  - Compile with `profile: 'ir'`. Tycho's instrument prints READY only with
+    that option in its `compile()` call; the default route still runs the
+    old compilers.
+  - Limits: one untyped parameter, one argument, a scalar or a flat list of
+    numbers. On GLSL the list length must be known at compile time, 1 to
+    64 elements. Nested lists, tuples, lists of points, several parameters
+    with a list and a typed parameter decline and fall back.
