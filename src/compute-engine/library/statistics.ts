@@ -485,7 +485,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const onAxis = applyOnImaginaryAxis(
           x,
           (y) => [0, erfi(y)],
-          (y) => [0, bigErfi(ce, y)]
+          (y) => [0, bigErfi(ce, y, ce.precision)]
         );
         if (onAxis !== undefined) return onAxis ?? undefined;
         // Real args use the machine/bignum kernel; complex args the
@@ -493,7 +493,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         return apply(
           x,
           (x) => erf(x),
-          (x) => bigErf(ce, x),
+          (x) => bigErf(ce, x, ce.precision),
           erfComplex
         );
       }),
@@ -541,7 +541,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const onAxis = applyOnImaginaryAxis(
           x,
           (y) => [1, -erfi(y)],
-          (y) => [1, bigErfi(ce, y).neg()]
+          (y) => [1, bigErfi(ce, y, ce.precision).neg()]
         );
         if (onAxis !== undefined) return onAxis ?? undefined;
         // Real args use the machine/bignum kernel; a complex argument uses
@@ -549,7 +549,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         return apply(
           x,
           (x) => erfc(x),
-          (x) => bigErfc(ce, x),
+          (x) => bigErfc(ce, x, ce.precision),
           (z) => erfComplex(z).neg().add(1)
         );
       }),
@@ -641,7 +641,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         return apply(
           x,
           (x) => erfInv(x),
-          (x) => bigErfInv(ce, x)
+          (x) => bigErfInv(ce, x, ce.precision)
         );
       }),
     },
@@ -696,7 +696,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const onAxis = applyOnImaginaryAxis(
           x,
           (y) => [0, erf(y)],
-          (y) => [0, bigErf(ce, y)]
+          (y) => [0, bigErf(ce, y, ce.precision)]
         );
         if (onAxis !== undefined) return onAxis ?? undefined;
         // Real args use the machine/bignum kernel; complex args the
@@ -704,7 +704,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         return apply(
           x,
           (x) => erfi(x),
-          (x) => bigErfi(ce, x),
+          (x) => bigErfi(ce, x, ce.precision),
           erfiComplex
         );
       }),
@@ -800,7 +800,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           boxBignumResult(
             engine,
             bignumPreferred(engine)
-              ? bigMean(bigScalarsOf(xs))
+              ? bigMean(bigScalarsOf(xs), engine.precision)
               : mean(scalarsOf(xs))
           )
         );
@@ -869,7 +869,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           boxBignumResult(
             engine,
             bignumPreferred(engine)
-              ? bigMedian(bigScalarsOf(xs))
+              ? bigMedian(bigScalarsOf(xs), engine.precision)
               : median(scalarsOf(xs))
           )
         );
@@ -955,7 +955,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           boxBignumResult(
             engine,
             bignumPreferred(engine)
-              ? bigVariance(bigScalarsOf(xs))
+              ? bigVariance(bigScalarsOf(xs), engine.precision)
               : variance(scalarsOf(xs))
           )
         );
@@ -1033,7 +1033,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           boxBignumResult(
             engine,
             bignumPreferred(engine)
-              ? bigPopulationVariance(bigScalarsOf(xs))
+              ? bigPopulationVariance(bigScalarsOf(xs), engine.precision)
               : populationVariance(scalarsOf(xs))
           )
         );
@@ -1127,7 +1127,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           boxBignumResult(
             engine,
             bignumPreferred(engine)
-              ? bigVariance(bigScalarsOf(xs)).sqrt()
+              ? bigVariance(bigScalarsOf(xs), engine.precision).sqrt(
+                  engine.precision
+                )
               : standardDeviation(scalarsOf(xs))
           )
         );
@@ -1210,7 +1212,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           boxBignumResult(
             engine,
             bignumPreferred(engine)
-              ? bigPopulationVariance(bigScalarsOf(xs)).sqrt()
+              ? bigPopulationVariance(bigScalarsOf(xs), engine.precision).sqrt(
+                  engine.precision
+                )
               : populationStandardDeviation(scalarsOf(xs))
           )
         );
@@ -1262,7 +1266,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           boxBignumResult(
             engine,
             bignumPreferred(engine)
-              ? bigKurtosis(bigScalarsOf(xs))
+              ? bigKurtosis(bigScalarsOf(xs), engine.precision)
               : kurtosis(scalarsOf(xs))
           )
         );
@@ -1314,7 +1318,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           boxBignumResult(
             engine,
             bignumPreferred(engine)
-              ? bigSkewness(bigScalarsOf(xs))
+              ? bigSkewness(bigScalarsOf(xs), engine.precision)
               : skewness(scalarsOf(xs))
           )
         );
@@ -1367,7 +1371,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         return boxBignumResult(
           engine,
           bignumPreferred(engine)
-            ? bigMode(bigScalarsOf(xs))
+            ? bigMode(bigScalarsOf(xs), engine.precision)
             : mode(scalarsOf(xs))
         );
       },
@@ -1450,7 +1454,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         }
         const [lower, mid, upper] = (
           bignumPreferred(engine)
-            ? bigQuartiles(bigScalarsOf(xs))
+            ? bigQuartiles(bigScalarsOf(xs), engine.precision)
             : quartiles(scalarsOf(xs))
         ).map((v) => floatIfFloatOperand(xs, boxBignumResult(engine, v))!);
         return engine.tuple(lower, mid, upper);
@@ -1517,7 +1521,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           boxBignumResult(
             engine,
             bignumPreferred(engine)
-              ? bigInterquartileRange(bigScalarsOf(xs))
+              ? bigInterquartileRange(bigScalarsOf(xs), engine.precision)
               : interquartileRange(scalarsOf(xs))
           )
         );
@@ -2848,8 +2852,8 @@ function evaluateCovariance(
       boxBignumResult(
         ce,
         population
-          ? bigPopulationCovariance(bigVals(xs), bigVals(ys))
-          : bigCovariance(bigVals(xs), bigVals(ys))
+          ? bigPopulationCovariance(bigVals(xs), bigVals(ys), ce.precision)
+          : bigCovariance(bigVals(xs), bigVals(ys), ce.precision)
       )
     )!;
   return floatIfFloatOperand(
@@ -2896,7 +2900,7 @@ function evaluateCorrelation(
   }
 
   const r = bignumPreferred(ce)
-    ? bigCorrelation(bigVals(xs), bigVals(ys))
+    ? bigCorrelation(bigVals(xs), bigVals(ys), ce.precision)
     : correlation(machineVals(xs), machineVals(ys));
   // A float datum makes the coefficient a float, even when it is `±1`.
   const num = floatIfFloatOperand([...xs, ...ys], boxBignumResult(ce, r))!;

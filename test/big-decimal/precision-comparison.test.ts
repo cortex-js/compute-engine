@@ -405,7 +405,7 @@ describe('Precision: Gamma (vs exact values)', () => {
       BigDecimal.precision = prec;
       const ce = new ComputeEngine();
       ce.precision = prec;
-      const result: BigDecimal = bigGamma(ce, new BigDecimal(z));
+      const result: BigDecimal = bigGamma(ce, new BigDecimal(z), ce.precision);
       const resultStr = result.toString();
       const ref = refFn(prec);
       const digits = matchingDigits(resultStr, ref);
@@ -526,14 +526,14 @@ describe('Precision: Gamma (vs exact values)', () => {
     ce.precision = prec;
 
     // Integer: Gamma(10) = 9! = 362880 (exact)
-    const g10: BigDecimal = bigGamma(ce, new BigDecimal('10'));
+    const g10: BigDecimal = bigGamma(ce, new BigDecimal('10'), ce.precision);
     expect(g10.toString()).toBe('362880');
 
     // Half-integer: Gamma(1/2) = sqrt(pi)
     BigDecimal.precision = prec + 50;
     const sqrtPiRef = BigDecimal.PI.sqrt().toString();
     BigDecimal.precision = prec;
-    const g05: BigDecimal = bigGamma(ce, new BigDecimal('0.5'));
+    const g05: BigDecimal = bigGamma(ce, new BigDecimal('0.5'), ce.precision);
     const digits05 = matchingDigits(g05.toString(), sqrtPiRef);
     expect(digits05).toBeGreaterThan(100); // currently ~16
 

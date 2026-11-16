@@ -562,13 +562,16 @@ export function factorByRationalRoots(
     // once would leave the other copies in the quotient, where they could
     // come back in another form, (x − p/q) or (p − qx), that does not merge.
     while (polynomialDegree(remaining, variable) > 0) {
-      // Evaluate the remaining polynomial at the candidate root
-      const value = remaining.subs({ [variable]: root }).N();
+      // Evaluate the remaining polynomial at the candidate root, exactly
+      // when its coefficients are exact numbers: a numeric value at the
+      // precision of the engine can miss a root where the terms are large
+      // (`2x^{122}-5x^{121}-…` at 3, whose terms are about 10^58).
+      const exact = remaining.subs({ [variable]: root }).evaluate();
+      const value = isNumber(exact) && exact.isExact ? exact : exact.N();
       if (!value.isSame(0)) break;
 
-      // The root test above is numeric, so it can accept a value that is
-      // only close to a root. Keep the factor only when the division is
-      // exact.
+      // A numeric root test can accept a value that is only close to a
+      // root. Keep the factor only when the division is exact.
       const divResult = polynomialDivide(remaining, linearFactor, variable);
       if (!divResult || !divResult[1].isSame(0)) break;
 
@@ -1522,7 +1525,7 @@ function factorUncached(expr: Expression): Expression {
     if (!common || common.isOne) return expr;
 
     const newTerms = terms.map(({ coeff, term }) =>
-      mul(term, ce.expr(coeff.div(common)))
+      mul(term, ce.expr(coeff.div(common, ce.precision)))
     );
 
     // Build the factored product WITHOUT the expanding `mul()` helper:

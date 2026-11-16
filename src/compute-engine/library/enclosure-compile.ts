@@ -46,7 +46,10 @@ import {
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { realPowerBranchTerms } from '../numerics/real-power.js';
+import {
+  realPowerBranchTerms,
+  realPowerReconstructionDigits,
+} from '../numerics/real-power.js';
 import { isRecord } from '../interval/run-support.js';
 import {
   enclosureEndpointClass,
@@ -187,7 +190,11 @@ function fold(fn: string, codes: ReadonlyArray<string>): string {
  * other float → `pow`. `undefined` for an integer beyond the safe integers:
  * the kernels take a double, which loses its parity.
  */
-function pointPowerSource(x: string, form: ExponentForm): string | undefined {
+function pointPowerSource(
+  x: string,
+  form: ExponentForm,
+  precision: number
+): string | undefined {
   switch (form.kind) {
     case 'integer': {
       if (!isSafe(form.n)) return undefined;
@@ -208,7 +215,11 @@ function pointPowerSource(x: string, form: ExponentForm): string | undefined {
     case 'float': {
       const value = form.value;
       if (value === 0.5) return `_IA.sqrt(${x})`;
-      const terms = realPowerBranchTerms(undefined, value);
+      const terms = realPowerBranchTerms(
+        undefined,
+        value,
+        realPowerReconstructionDigits(precision)
+      );
       if (terms !== undefined && terms[1] % 2 !== 0) {
         const [p, q] = terms;
         return p / q === value
@@ -264,7 +275,7 @@ function powerByPointSource(
     if (isNumber(e) && e.isFinite === false) return EMPTY;
     const form = exponentForm(e);
     if (form === undefined) return undefined;
-    const code = pointPowerSource(x, form);
+    const code = pointPowerSource(x, form, e.engine.precision);
     return code === undefined ? undefined : enclose(code);
   }
   // An exponent read at run time (`x^n` with `n: integer`): `powInterval`
@@ -329,7 +340,7 @@ function powerFormSource(
 ): string | undefined {
   const code = operandSource(x, compile, true);
   if (code === undefined) return undefined;
-  const power = pointPowerSource(code, form);
+  const power = pointPowerSource(code, form, x.engine.precision);
   return power === undefined ? undefined : enclose(power);
 }
 

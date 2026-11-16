@@ -52,6 +52,14 @@
 
 ### Behavior Changes
 
+- **Creating an engine or setting its `precision` no longer changes
+  `BigDecimal.precision`.** `BigDecimal.precision` is now only the default
+  precision of the `BigDecimal` operations called without a precision
+  argument (50, unless the host sets it). After
+  `new ComputeEngine({ precision: 80 })`, `BigDecimal.precision` was `80`; it
+  is now unchanged. A host that computes with `BigDecimal` directly at the
+  precision of an engine passes it: `x.div(y, ce.precision)`. Setting
+  `BigDecimal.precision` does not change the results of any engine.
 - **Runtime-local self-quotients evaluate before cancellation.**
   `const x = 0; x/x` returned `1`; it now returns `NaN`. Nonzero library
   constants retain their ordinary self-quotient simplification.
@@ -99,13 +107,11 @@
   ([#556](https://github.com/cortex-js/compute-engine/issues/556)). With an
   engine `a` at precision 30, creating an engine `b` at
   `precision = 'machine'` made `a.expr(['Sqrt', 2]).N().toString()` give
-  `1.4142135623731` instead of `1.41421356237309504880168872421`. `.N()` of a
-  number, the arithmetic methods of an expression (`add`, `mul`, `div`,
-  `pow`, `root`, `sqrt`, `inv`), the numeric values of `Sqrt`, `Root`, `Ln`
-  and `Power`, and the display of a number now use the precision of their own
-  engine. Trigonometric and special functions still use the precision of the
-  engine that was created or configured last: for them, keep using one engine
-  per program.
+  `1.4142135623731` instead of `1.41421356237309504880168872421`. Every
+  numeric evaluation of an engine (arithmetic, `.N()`, trigonometric and
+  special functions, statistics, comparisons, compilation, and the display of
+  a number) now uses the precision of that engine, so several engines with
+  different precisions can be used in one program.
 - **A numeric constant tested against a `Set` of numbers is decided by
   value** ([#593](https://github.com/cortex-js/compute-engine/issues/593)).
   `Contains(Set(1, 2, 3), ExponentialE)`, `Element(ExponentialE, Set(1, 2))`

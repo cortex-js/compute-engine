@@ -2031,7 +2031,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
       const nv1 = exact(v1);
       const nv2 = exact(v2);
       if (nv1 !== undefined && nv2 !== undefined && !nv2.isZero) {
-        const q = nv1.div(nv2);
+        const q = nv1.div(nv2, ce.precision);
         if (q.isExact) return ce.number(q);
       }
       return ce._fn('Divide', [op1, op2]);
@@ -2058,7 +2058,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
         v2.isExact &&
         isSubtype(v2.type, 'integer')
       ) {
-        const b = v2.bignumRe;
+        const b = v2.bignumReAt(ce.precision);
         if (b !== undefined) {
           if (b.isInteger()) return ce.number([bigint(v1)!, bigint(b)!]);
         } else {
@@ -2079,7 +2079,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
       const nv1 = typeof v1 === 'number' ? ce._numericValue(v1) : v1;
       const nv2 = typeof v2 === 'number' ? ce._numericValue(v2) : v2;
       if (nv1.isExact && nv2.isExact && !nv2.isZero) {
-        const q = nv1.div(nv2);
+        const q = nv1.div(nv2, ce.precision);
         if (q.isExact) return ce.number(q);
         // The quotient is not exact when its radicand is too large to store
         // (`(√1009/1009)/√1013`). Write it as one fraction with the integer
@@ -2088,15 +2088,15 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
         if (!nv1.isComplex && !nv2.isComplex) {
           const a = nv1.asExact!;
           const b = nv2.asExact!;
-          let n = a.numerator.mul(b.denominator);
-          let d = a.denominator.mul(b.numerator);
+          let n = a.numerator.mul(b.denominator, ce.precision);
+          let d = a.denominator.mul(b.numerator, ce.precision);
           // Divide out the common factor of the two sides:
           // `(2√1009)/(4√1013)` is `√1009/(2√1013)`
           if (n.isExact && d.isExact) {
             const g = n.gcd(d);
             if (g.isExact && !g.isOne && !g.isZero) {
-              const n1 = n.div(g);
-              const d1 = d.div(g);
+              const n1 = n.div(g, ce.precision);
+              const d1 = d.div(g, ce.precision);
               if (n1.isExact && d1.isExact) {
                 n = n1;
                 d = d1;
@@ -2132,7 +2132,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // for `x/(0.0·y)`. Keep the division structural.
   if (c2.isZero) return ce._fn('Divide', [op1, op2]);
 
-  const c = c1.div(c2);
+  const c = c1.div(c2, ce.precision);
 
   // Float coefficients must not mint an exact cancellation. Binary `0.3/0.1`
   // is not exactly `3`, yet `c1.div(c2)` on the decimal coefficients yields an
@@ -2652,13 +2652,15 @@ export function canonicalMultiply(
         // factor as a separate term, so the product stays exact. A factor
         // that was kept separate can still combine with a later one
         // (`√1013·√1013 = 1013`): that product is then folded in its place.
-        let candidate = product.mul(next);
+        let candidate = product.mul(next, ce.precision);
         while (!candidate.isExact && !candidate.isNaN) {
-          const j = separate.findIndex((s) => s.mul(next).isExact);
+          const j = separate.findIndex(
+            (s) => s.mul(next, ce.precision).isExact
+          );
           if (j < 0) break;
-          next = separate[j].mul(next);
+          next = separate[j].mul(next, ce.precision);
           separate.splice(j, 1);
-          candidate = product.mul(next);
+          candidate = product.mul(next, ce.precision);
         }
         if (!candidate.isExact && !candidate.isNaN) {
           // Only the radical of a real factor is kept separate. Its
@@ -2666,7 +2668,7 @@ export function canonicalMultiply(
           // `2√1009·3√1013` is `6√1009·√1013`, not `2√1009·3√1013`.
           const split = splitRationalRadical(next);
           if (split !== undefined) {
-            const scaled = product.mul(split[0]);
+            const scaled = product.mul(split[0], ce.precision);
             if (scaled.isExact) {
               product = scaled;
               next = split[1];
@@ -2732,7 +2734,7 @@ export function canonicalMultiply(
         sign = -sign;
         product = product.neg();
       }
-      if (!product.eq(1)) nonNumeric.unshift(ce.number(product));
+      if (!product.eq(1, ce.precision)) nonNumeric.unshift(ce.number(product));
       xs = nonNumeric;
     }
     // else: 0 or 1 exact numerics — xs is unchanged, no folding needed
@@ -3514,7 +3516,7 @@ export function isOutOfDoubleRangeLiteral(x: Expression): boolean {
   // A value with a big-decimal part (an exact value, or a big decimal) holds
   // a tiny or a huge magnitude without loss: only a double can be out of the
   // range.
-  return nv.bignumRe === undefined;
+  return !nv.isExact && nv.bignumRe === undefined;
 }
 
 /**
@@ -3642,7 +3644,7 @@ function exactCoefficientOutOfRange(
     op === 'Divide'
       ? ce.function('Divide', [ce.One, x.ops[1]])
       : ce.function('Multiply', x.ops.slice(1));
-  return [nv.bignumRe, rest];
+  return [nv.bignumReAt(ce.precision), rest];
 }
 
 /**

@@ -229,7 +229,7 @@ import type { KernelPool } from '../kernel-pool-types.js';
  * change after the compilation, and a runtime bundle has its own `BigDecimal`,
  * whose precision is not the precision of the engine. When no compiled code
  * that records a number is running, the value is `undefined` and the helpers
- * use the current working precision.
+ * read the exponent to 17 digits.
  */
 let activeReconstructionDigits: number | undefined;
 
@@ -257,7 +257,10 @@ const negativeBaseRealPow = (
     base,
     exact,
     expValue,
-    activeReconstructionDigits
+    // No compiled code that records its digits is running: the exponent is
+    // read to the 17 digits of a double, as `load()` reads stored code that
+    // records no digits.
+    activeReconstructionDigits ?? 17
   );
 
 /**

@@ -155,7 +155,8 @@ export abstract class NumericValue {
    * `mul`, `div`, `pow`, `root`, `sqrt`, `abs`, `ln`, `exp`) take an
    * optional last argument `prec`, the number of significant digits of the
    * working precision. An engine passes its own precision; the default is
-   * `BigDecimal.precision`, which the last engine made or configured wrote.
+   * `BigDecimal.precision`, which no engine writes (50 unless the host sets
+   * it).
    */
   abstract N(prec?: number): NumericValue;
 
@@ -199,11 +200,20 @@ export abstract class NumericValue {
   abstract ceil(): NumericValue;
   abstract round(): NumericValue;
 
-  abstract eq(other: number | NumericValue): boolean;
-  abstract lt(other: number | NumericValue): boolean | undefined;
-  abstract lte(other: number | NumericValue): boolean | undefined;
-  abstract gt(other: number | NumericValue): boolean | undefined;
-  abstract gte(other: number | NumericValue): boolean | undefined;
+  /* The comparisons take the working precision `prec` too (default
+   * `BigDecimal.precision`): an exact value is compared with an inexact one
+   * as a big decimal at `prec` significant digits. */
+  abstract eq(other: number | NumericValue, prec?: number): boolean;
+  abstract lt(other: number | NumericValue, prec?: number): boolean | undefined;
+  abstract lte(
+    other: number | NumericValue,
+    prec?: number
+  ): boolean | undefined;
+  abstract gt(other: number | NumericValue, prec?: number): boolean | undefined;
+  abstract gte(
+    other: number | NumericValue,
+    prec?: number
+  ): boolean | undefined;
 
   //
   // JavaScript Object methods
@@ -211,7 +221,9 @@ export abstract class NumericValue {
 
   /** Object.valueOf(): returns a primitive value, preferably a JavaScript
    *  number over a string, even if at the expense of precision. A complex
-   *  value is a string with `prec` significant digits in each part. */
+   *  value is a string with `prec` significant digits in each part. Without
+   *  `prec`, it uses `BigDecimal.precision`, not the precision of an
+   *  engine. */
   valueOf(prec?: number): number | string {
     if (!this.isComplex) {
       const big = prec === undefined ? this.bignumRe : this.bignumReAt(prec);
@@ -221,14 +233,16 @@ export abstract class NumericValue {
     return this.toString(prec);
   }
 
-  /** Object.toPrimitive() */
+  /** Object.toPrimitive(). It uses `BigDecimal.precision`, not the
+   * precision of an engine. */
   [Symbol.toPrimitive](
     hint: 'number' | 'string' | 'default'
   ): number | string | null {
     return hint === 'string' ? this.toString() : this.valueOf();
   }
 
-  /** Object.toJSON */
+  /** Object.toJSON. It uses `BigDecimal.precision`, not the precision of
+   * an engine. */
   toJSON(): unknown {
     if (!this.isComplex) {
       const r = this.re;
@@ -242,6 +256,8 @@ export abstract class NumericValue {
    * significant digits (default `BigDecimal.precision`). */
   abstract toString(prec?: number): string;
 
+  /** Print the value to the console. It uses `BigDecimal.precision`, not
+   * the precision of an engine. */
   print(): void {
     // Make sure the console.log is not removed by minification
     const log = console['log'];

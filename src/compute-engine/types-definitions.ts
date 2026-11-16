@@ -706,6 +706,11 @@ export interface PureEngineView {
    * membership handler consults (`Element` declines rather than refute a
    * near-match inside it). */
   readonly tolerance: number;
+  /** The engine's precision, the number of significant digits of its
+   * numeric calculations (`ComputeEngine.precision`): a handler that reads
+   * a float literal reads it to the digits it was rounded to (the branch of
+   * `Power` for a negative base and a float exponent). */
+  readonly precision: number;
   /** True when the engine checks the types of operands when it boxes an
    * expression (`ComputeEngine.strict`). A handler that answers `error` for
    * an operand that the boxing check refuses reads it, so that a non-strict

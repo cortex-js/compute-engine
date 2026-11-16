@@ -685,7 +685,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
             a,
             z,
             (a, z) => gammaQ(a, z),
-            (a, z) => bigGammaQNegativeOrder(ce, a, z)
+            (a, z) => bigGammaQNegativeOrder(ce, a, z, ce.precision)
           );
           if (
             q !== undefined &&
@@ -711,7 +711,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           a,
           z,
           (a, z) => gammaQ(a, z),
-          (a, z) => bigGammaQ(ce, a, z)
+          (a, z) => bigGammaQ(ce, a, z, ce.precision)
         );
       },
     },
@@ -793,7 +793,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
         return applyN(
           [x, a, b],
           (x, a, b) => betaRegularized(x, a, b),
-          (x, a, b) => bigBetaRegularized(ce, x, a, b)
+          (x, a, b) => bigBetaRegularized(ce, x, a, b, ce.precision)
         );
       },
     },

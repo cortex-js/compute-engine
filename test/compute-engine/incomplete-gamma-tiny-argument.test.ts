@@ -70,9 +70,14 @@ describe('GammaRegularized at a tiny argument', () => {
     ['2.5', '1e-200000', '3.00901111225470019706e-500001'],
     ['1e-20', '1e-1000000000', '0.999999999976974149076'],
   ])('P(%s, %s)', (a, x, expected) => {
-    expect(bigGammaP(ce, new BigDecimal(a), new BigDecimal(x)).toString()).toBe(
-      new BigDecimal(expected).toString()
-    );
+    expect(
+      bigGammaP(
+        ce,
+        new BigDecimal(a),
+        new BigDecimal(x),
+        ce.precision
+      ).toString()
+    ).toBe(new BigDecimal(expected).toString());
   });
 });
 

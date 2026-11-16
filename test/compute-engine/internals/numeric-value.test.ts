@@ -138,10 +138,10 @@ describe('multiplication', () => {
 describe('multiplication', () => {
   it('should divide two floats', () => {
     const a = ce._numericValue(-1.234);
-    const b = a.div(ce._numericValue(3.5));
+    const b = a.div(ce._numericValue(3.5), ce.precision);
     expect(b.re).toMatchInlineSnapshot(`-0.3525714285714286`);
     // float / float = float
-    expect(b.toString()).toMatchInlineSnapshot(
+    expect(b.toString(ce.precision)).toMatchInlineSnapshot(
       `-0.3525714285714285714285714285714285714285714285714285714285714285714285714285714285714285714285714286`
     );
   });
@@ -156,10 +156,10 @@ describe('multiplication', () => {
 
   it('should divide a floats and an integer', () => {
     const a = ce._numericValue(-1.234);
-    const b = a.div(ce._numericValue(3));
+    const b = a.div(ce._numericValue(3), ce.precision);
     expect(b.re).toMatchInlineSnapshot(`-0.41133333333333333`);
     // float / float = float
-    expect(b.toString()).toMatchInlineSnapshot(
+    expect(b.toString(ce.precision)).toMatchInlineSnapshot(
       `-0.4113333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333`
     );
   });
@@ -176,14 +176,14 @@ describe('multiplication', () => {
 
 describe('power', () => {
   it('should take an exact square root', () => {
-    const s = ce._numericValue(3).sqrt();
-    const a = ce._numericValue(11).mul(s);
+    const s = ce._numericValue(3).sqrt(ce.precision);
+    const a = ce._numericValue(11).mul(s, ce.precision);
 
-    const b = a.pow(0.5);
+    const b = a.pow(0.5, ce.precision);
     expect(b.re).toMatchInlineSnapshot(`4.36492369730075`);
     // Correctly rounded at 100 digits (mpmath dps=110: …83679331); was …794
     // (1 ulp off) before the bignumRe guard-digit fix (CORRECTNESS P2 #17/21).
-    expect(b.toString()).toMatchInlineSnapshot(
+    expect(b.toString(ce.precision)).toMatchInlineSnapshot(
       `4.364923697300750093468524970855094140038109174685876230519106820203445844167467177594069909134836793`
     );
   });
@@ -292,11 +292,15 @@ describe('Numeric-value correctness (REVIEW.md D11–D19)', () => {
   it('D11: nth root is full precision (matches raising back to the power)', () => {
     const big = new ComputeEngine();
     big.precision = 50;
-    const r = big._numericValue(7).root(3); // 7^(1/3)
+    const r = big._numericValue(7).root(3, big.precision); // 7^(1/3)
     // Full-precision result has ~50 digits, not the old ~17.
-    expect(r.toString().replace(/[^0-9]/g, '').length).toBeGreaterThan(40);
+    expect(
+      r.toString(big.precision).replace(/[^0-9]/g, '').length
+    ).toBeGreaterThan(40);
     // Matches the dedicated full-precision cbrt.
-    expect(r.toString()).toEqual(big.bignum(7).cbrt().toString());
+    expect(r.toString(big.precision)).toEqual(
+      big.bignum(7).cbrt(big.precision).toString()
+    );
   });
 
   // D12: NaN·0 returned 0 (the zero branches omitted the isNaN check).

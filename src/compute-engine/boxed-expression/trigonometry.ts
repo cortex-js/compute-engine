@@ -435,6 +435,7 @@ function integerPartDigits([p, q]: BigRational): number {
  */
 function exactLargeAngle(
   raw: Expression,
+  prec: number,
   anyMultiple = false
 ): BigDecimal | undefined {
   const ce = raw.engine;
@@ -483,21 +484,17 @@ function exactLargeAngle(
       // (tp/tq)·π modulo 2π is ((tp mod 2tq)/tq)·π exactly
       const tReduced = tp % (2n * tq);
       const digits = integerPartDigits([cp, cq]) + 2;
-      const saved = BigDecimal.precision;
-      BigDecimal.precision = saved + digits + 5;
-      try {
-        const pi = BigDecimal.PI;
-        const piSquaredTerm = pi
-          .mul(pi)
-          .mul(new BigDecimal(cp))
-          .div(new BigDecimal(cq));
-        if (tReduced === 0n) return piSquaredTerm;
-        return piSquaredTerm.add(
-          pi.mul(new BigDecimal(tReduced)).div(new BigDecimal(tq))
-        );
-      } finally {
-        BigDecimal.precision = saved;
-      }
+      const raised = prec + digits + 5;
+      const pi = BigDecimal.pi(raised);
+      const piSquaredTerm = pi
+        .mul(pi)
+        .mul(new BigDecimal(cp))
+        .div(new BigDecimal(cq), raised);
+      if (tReduced === 0n) return piSquaredTerm;
+      return piSquaredTerm.add(
+        pi.mul(new BigDecimal(tReduced)).div(new BigDecimal(tq), raised),
+        raised
+      );
     }
   }
 
@@ -514,33 +511,47 @@ function exactLargeAngle(
   let theta =
     cReduced === 0n
       ? BigDecimal.ZERO
-      : BigDecimal.PI.mul(new BigDecimal(cReduced)).div(new BigDecimal(cq));
+      : BigDecimal.pi(prec)
+          .mul(new BigDecimal(cReduced))
+          .div(new BigDecimal(cq), prec);
   // The integer part of t is added exactly (`add` does not round)
-  theta = theta.add(new BigDecimal(tp / tq));
+  theta = theta.add(new BigDecimal(tp / tq), prec);
   const tFraction = tp % tq;
   if (tFraction !== 0n)
-    theta = theta.add(new BigDecimal(tFraction).div(new BigDecimal(tq)));
+    theta = theta.add(
+      new BigDecimal(tFraction).div(new BigDecimal(tq), prec),
+      prec
+    );
   return theta;
 }
 
 function applyAngle(
   angle: Expression,
   fn: (x: number) => number | Complex | Expression,
-  bigFn?: (x: BigDecimal) => BigDecimal | Complex | number | Expression,
+  /** The big-decimal kernel, computing at `prec` digits. */
+  bigFn?: (
+    x: BigDecimal,
+    prec: number
+  ) => BigDecimal | Complex | number | Expression,
   complexFn?: (x: Complex) => number | Complex,
   raw?: Expression
 ): Expression | undefined {
+  const ce = angle.engine;
+  const atWorkingPrecision =
+    bigFn === undefined
+      ? undefined
+      : (x: BigDecimal) =>
+          bigFn(x, ce.precision) as BigDecimal | Complex | number;
   // An exact large angle is not rounded to the working precision before the
   // kernel reduces it modulo 2π (see `exactLargeAngle`).
   if (raw && bigFn) {
-    const ce = raw.engine;
     if (bignumPreferred(ce)) {
-      const big = exactLargeAngle(raw);
+      const big = exactLargeAngle(raw, ce.precision);
       if (big !== undefined)
         return apply(
           boxBignumResult(ce, big),
           fn as (x: number) => number | Complex,
-          bigFn as (x: BigDecimal) => BigDecimal | Complex | number,
+          atWorkingPrecision,
           complexFn
         );
     } else {
@@ -548,15 +559,10 @@ function applyAngle(
       // big-decimal kernel with enough digits for a double (the working
       // precision of big decimals is then 15 digits), and round its value
       // to a double.
-      const saved = BigDecimal.precision;
+      const prec = Math.max(ce.precision, 20);
       let r: BigDecimal | Complex | number | Expression | undefined;
-      try {
-        BigDecimal.precision = Math.max(saved, 20);
-        const big = exactLargeAngle(raw, true);
-        if (big !== undefined) r = bigFn(big);
-      } finally {
-        BigDecimal.precision = saved;
-      }
+      const big = exactLargeAngle(raw, prec, true);
+      if (big !== undefined) r = bigFn(big, prec);
       // The value is a float, as a value of `.N()` is, even when it is an
       // integer: `sin(π)` is the float `0`.
       if (r instanceof BigDecimal)
@@ -581,7 +587,7 @@ function applyAngle(
   return apply(
     theta,
     fn as (x: number) => number | Complex,
-    bigFn as ((x: BigDecimal) => BigDecimal | Complex | number) | undefined,
+    atWorkingPrecision,
     complexFn
   );
 }
@@ -618,21 +624,21 @@ export function radiansToAngle(
   // at that precision: a conversion with machine numbers answers
   // `arcsin(0.5)` in degrees as `30.000000000000004`, which is not the
   // value at the working precision.
+  const prec = ce.precision;
   const nv = isNumber(n) ? n.numericValue : undefined;
-  if (
-    nv !== undefined &&
-    typeof nv !== 'number' &&
-    !nv.isComplex &&
-    nv.bignumRe !== undefined
-  ) {
-    const big = nv.bignumRe;
+  const big =
+    nv !== undefined && typeof nv !== 'number' && !nv.isComplex
+      ? nv.bignumReAt(prec)
+      : undefined;
+  if (big !== undefined) {
+    const pi = BigDecimal.pi(prec);
     const converted =
       angularUnit === 'deg'
-        ? big.mul(180).div(BigDecimal.PI)
+        ? big.mul(180).div(pi, prec)
         : angularUnit === 'grad'
-          ? big.mul(200).div(BigDecimal.PI)
+          ? big.mul(200).div(pi, prec)
           : angularUnit === 'turn'
-            ? big.div(BigDecimal.PI.mul(2))
+            ? big.div(pi.mul(2), prec)
             : undefined;
     if (converted !== undefined) return boxBignumResult(ce, converted);
   }
@@ -791,32 +797,32 @@ function poleDust(
 function inverseAngle(
   op: Expression,
   fn: (x: number) => number,
-  bigFn: (x: BigDecimal) => BigDecimal,
+  /** The big-decimal kernel, computing at `prec` digits. */
+  bigFn: (x: BigDecimal, prec: number) => BigDecimal,
   complexFn: (x: Complex) => number | Complex
 ): Expression | undefined {
-  const unit = op.engine.angularUnit;
-  if (unit === 'rad') return apply(op, fn, bigFn, complexFn);
+  const ce = op.engine;
+  const unit = ce.angularUnit;
+  if (unit === 'rad')
+    return apply(op, fn, (x) => bigFn(x, ce.precision), complexFn);
   let converted = false;
   const result = apply(
     op,
     fn,
     (x) => {
-      const saved = BigDecimal.precision;
-      BigDecimal.precision = saved + 10;
-      try {
-        const theta = bigFn(x);
-        if (!theta.isFinite()) return theta;
-        const angle =
-          unit === 'deg'
-            ? theta.mul(180).div(BigDecimal.PI)
-            : unit === 'grad'
-              ? theta.mul(200).div(BigDecimal.PI)
-              : theta.div(BigDecimal.PI.mul(2));
-        converted = true;
-        return angle.toPrecision(saved);
-      } finally {
-        BigDecimal.precision = saved;
-      }
+      const working = ce.precision;
+      const prec = working + 10;
+      const theta = bigFn(x, prec);
+      if (!theta.isFinite()) return theta;
+      const pi = BigDecimal.pi(prec);
+      const angle =
+        unit === 'deg'
+          ? theta.mul(180).div(pi, prec)
+          : unit === 'grad'
+            ? theta.mul(200).div(pi, prec)
+            : theta.div(pi.mul(2), prec);
+      converted = true;
+      return angle.toPrecision(working);
     },
     complexFn
   );
@@ -1012,7 +1018,7 @@ function digitsPastOne(source: Expression): number {
   }
   const x = source.bignumRe;
   if (x === undefined || !x.isFinite()) return 0;
-  const d = x.abs().sub(BigDecimal.ONE);
+  const d = x.abs().sub(BigDecimal.ONE, source.engine.precision);
   if (d.isZero()) return 0;
   const s = d.significand < 0n ? -d.significand : d.significand;
   // |d| = s·10^exponent, so log₁₀|d| is about exponent + digits(s) − 1.
@@ -1177,66 +1183,61 @@ export function inverseTrigBigDecimalValue(
     }
   }
   if (pastOne > BRANCH_POINT_DIGITS_LIMIT) return null;
-  const saved = BigDecimal.precision;
-  BigDecimal.precision = digits + pastOne + OUTSIDE_RANGE_GUARD_DIGITS;
-  let result: { re: number | BigDecimal; im: number | BigDecimal };
-  try {
-    // Next to ±1 the exact rational is read again with the added digits
-    // (a big decimal read earlier at the working precision is ±1).
-    const rational = pastOne > 0 ? nearRational : undefined;
-    const re = rational
-      ? new BigDecimal(String(rational[0])).div(
-          new BigDecimal(String(rational[1]))
-        )
-      : (source.bignumRe ?? new BigDecimal(sre));
-    const im = source.bignumIm ?? new BigDecimal(sim);
-    if (!re.isFinite() || !im.isFinite()) return undefined;
-    // An exact part is outside the range below the smallest normal double.
-    // An inexact part only when a double cannot hold it at all: a subnormal
-    // float is the double the kernels were given (`ce.number(1e-320)`), and
-    // stays on them. Inside the range, a real argument at which the value is
-    // complex is computed here above machine precision, and an argument
-    // next to ±1 (a real one, or a complex one by its real part) at every
-    // precision.
-    const outside = source.isExact ? isOutsideDoubleRange : beyondDouble;
-    if (
-      !outside(re) &&
-      !outside(im) &&
-      !(real && !machine && complexOnRealAxis(name, re)) &&
-      !(pastOne > 0)
-    )
-      return undefined;
-    const head = name as InverseTrigHead;
-    const value = real
-      ? realInverseTrig(head, re)
-      : complexInverseTrig(head, re, im);
-    if (value === null) return null;
-    if (value === undefined) return undefined;
-    // An angle in another unit than radians is converted with the guard
-    // digits, before the rounding.
-    const unit = ce.angularUnit;
-    if (isAngle && unit !== 'rad') {
-      const pi = BigDecimal.PI;
-      const scale =
-        unit === 'deg'
-          ? new BigDecimal(180).div(pi)
-          : unit === 'grad'
-            ? new BigDecimal(200).div(pi)
-            : BigDecimal.ONE.div(pi.mul(2));
-      value.re = value.re.mul(scale);
-      value.im = value.im.mul(scale);
-    }
-    // A complex argument has the digits of a double: a part that a double
-    // holds is a double, and a part outside its range keeps 17 digits.
-    const part = (x: BigDecimal): number | BigDecimal => {
-      if (machine) return x.toNumber();
-      if (real) return x.toPrecision(digits);
-      return isOutsideDoubleRange(x) ? x.toPrecision(17) : x.toNumber();
-    };
-    result = { re: part(value.re), im: part(value.im) };
-  } finally {
-    BigDecimal.precision = saved;
+  const prec = digits + pastOne + OUTSIDE_RANGE_GUARD_DIGITS;
+  // Next to ±1 the exact rational is read again with the added digits
+  // (a big decimal read earlier at the working precision is ±1).
+  const rational = pastOne > 0 ? nearRational : undefined;
+  const re = rational
+    ? new BigDecimal(String(rational[0])).div(
+        new BigDecimal(String(rational[1])),
+        prec
+      )
+    : (source.bignumRe ?? new BigDecimal(sre));
+  const im = source.bignumIm ?? new BigDecimal(sim);
+  if (!re.isFinite() || !im.isFinite()) return undefined;
+  // An exact part is outside the range below the smallest normal double.
+  // An inexact part only when a double cannot hold it at all: a subnormal
+  // float is the double the kernels were given (`ce.number(1e-320)`), and
+  // stays on them. Inside the range, a real argument at which the value is
+  // complex is computed here above machine precision, and an argument
+  // next to ±1 (a real one, or a complex one by its real part) at every
+  // precision.
+  const outside = source.isExact ? isOutsideDoubleRange : beyondDouble;
+  if (
+    !outside(re) &&
+    !outside(im) &&
+    !(real && !machine && complexOnRealAxis(name, re)) &&
+    !(pastOne > 0)
+  )
+    return undefined;
+  const head = name as InverseTrigHead;
+  const value = real
+    ? realInverseTrig(head, re, prec)
+    : complexInverseTrig(head, re, im, prec);
+  if (value === null) return null;
+  if (value === undefined) return undefined;
+  // An angle in another unit than radians is converted with the guard
+  // digits, before the rounding.
+  const unit = ce.angularUnit;
+  if (isAngle && unit !== 'rad') {
+    const pi = BigDecimal.pi(prec);
+    const scale =
+      unit === 'deg'
+        ? new BigDecimal(180).div(pi, prec)
+        : unit === 'grad'
+          ? new BigDecimal(200).div(pi, prec)
+          : BigDecimal.ONE.div(pi.mul(2), prec);
+    value.re = value.re.mul(scale);
+    value.im = value.im.mul(scale);
   }
+  // A complex argument has the digits of a double: a part that a double
+  // holds is a double, and a part outside its range keeps 17 digits.
+  const part = (x: BigDecimal): number | BigDecimal => {
+    if (machine) return x.toNumber();
+    if (real) return x.toPrecision(digits);
+    return isOutsideDoubleRange(x) ? x.toPrecision(17) : x.toNumber();
+  };
+  const result = { re: part(value.re), im: part(value.im) };
   return ce.number(ce._inexactNumericValue(result));
 }
 
@@ -1259,19 +1260,24 @@ export function evalTrig(
 
   switch (name) {
     case 'Arccos':
-      return inverseAngle(op, Math.acos, (x) => x.acos(), complexAcos);
+      return inverseAngle(
+        op,
+        Math.acos,
+        (x, prec) => x.acos(prec),
+        complexAcos
+      );
     case 'Arccot':
       return inverseAngle(
         op,
         (x) => Math.atan2(1, x),
-        (x) => BigDecimal.atan2(BigDecimal.ONE, x),
+        (x, prec) => BigDecimal.atan2(BigDecimal.ONE, x, prec),
         complexAcot
       );
     case 'Arccsc':
       return inverseAngle(
         op,
         (x) => Math.asin(1 / x),
-        (x) => BigDecimal.ONE.div(x).asin(),
+        (x, prec) => BigDecimal.ONE.div(x, prec).asin(prec),
         complexAcsc
       );
     // Inverse HYPERBOLIC functions return an area (a dimensionless real),
@@ -1290,8 +1296,8 @@ export function evalTrig(
         // loses relative precision near 1 and for a large `x`.
         (x) =>
           x.gte(-1) && x.lt(1)
-            ? new Complex(0, Number(x.acos().toString()))
-            : x.acosh(),
+            ? new Complex(0, Number(x.acos(ce.precision).toString()))
+            : x.acosh(ce.precision),
         complexAcosh
       );
     case 'Arcoth':
@@ -1303,13 +1309,15 @@ export function evalTrig(
       return apply(
         op,
         arcothReal,
-        (x) =>
-          x.abs().gte(BigDecimal.TWO)
-            ? BigDecimal.ONE.div(x).atanh()
-            : BigDecimal.ONE.add(x)
-                .div(x.sub(BigDecimal.ONE))
-                .ln()
-                .div(BigDecimal.TWO),
+        (x) => {
+          const prec = ce.precision;
+          return x.abs().gte(BigDecimal.TWO)
+            ? BigDecimal.ONE.div(x, prec).atanh(prec)
+            : BigDecimal.ONE.add(x, prec)
+                .div(x.sub(BigDecimal.ONE, prec), prec)
+                .ln(prec)
+                .div(BigDecimal.TWO, prec);
+        },
         // `complexAcoth()`, not `ln((1+x)/(x−1))/2`: the hand-rolled formula
         // picks the wrong side of the cut for negative real arguments in
         // `(−1, 0)` (imaginary part sign flips).
@@ -1325,7 +1333,7 @@ export function evalTrig(
       return apply(
         op,
         arcschReal,
-        (x) => BigDecimal.ONE.div(x).asinh(),
+        (x) => BigDecimal.ONE.div(x, ce.precision).asinh(ce.precision),
         complexAcsch
       );
 
@@ -1333,12 +1341,17 @@ export function evalTrig(
       return inverseAngle(
         op,
         (x) => Math.acos(1 / x),
-        (x) => BigDecimal.ONE.div(x).acos(),
+        (x, prec) => BigDecimal.ONE.div(x, prec).acos(prec),
         complexAsec
       );
 
     case 'Arcsin':
-      return inverseAngle(op, Math.asin, (x) => x.asin(), complexAsin);
+      return inverseAngle(
+        op,
+        Math.asin,
+        (x, prec) => x.asin(prec),
+        complexAsin
+      );
 
     case 'Arsech':
       return apply(
@@ -1349,14 +1362,19 @@ export function evalTrig(
         // uses arsech x = artanh(t) for x ≥ 1/2. Outside (0, 1] both give
         // NaN, and `apply` then uses the complex kernel.
         arsechReal,
-        (x) =>
-          x.gte(BigDecimal.HALF) && x.lte(BigDecimal.ONE)
-            ? BigDecimal.ONE.sub(x).mul(BigDecimal.ONE.add(x)).sqrt().atanh()
-            : BigDecimal.ONE.sub(x.mul(x))
-                .sqrt()
-                .add(BigDecimal.ONE)
-                .div(x)
-                .ln(),
+        (x) => {
+          const prec = ce.precision;
+          return x.gte(BigDecimal.HALF) && x.lte(BigDecimal.ONE)
+            ? BigDecimal.ONE.sub(x, prec)
+                .mul(BigDecimal.ONE.add(x, prec))
+                .sqrt(prec)
+                .atanh(prec)
+            : BigDecimal.ONE.sub(x.mul(x), prec)
+                .sqrt(prec)
+                .add(BigDecimal.ONE, prec)
+                .div(x, prec)
+                .ln(prec);
+        },
         // `complexAsech()`: the previous inline expression dropped the `sqrt`
         // (computed `ln((2 − x²)/x)`), and `complex.js`'s `asech` lost
         // digits near ±1 and overflowed for a small |x|.
@@ -1370,12 +1388,17 @@ export function evalTrig(
         // `BigDecimal.asinh()`, not `ln(x + √(x² + 1))`: the direct formula
         // cancels near 0 (a relative error of 5e-11 at x = 10⁻¹⁰), which
         // breaks the error bound that exact ordering relies on.
-        (x) => x.asinh(),
+        (x) => x.asinh(ce.precision),
         complexAsinh
       );
 
     case 'Arctan':
-      return inverseAngle(op, Math.atan, (x) => x.atan(), complexAtan);
+      return inverseAngle(
+        op,
+        Math.atan,
+        (x, prec) => x.atan(prec),
+        complexAtan
+      );
 
     case 'Artanh':
       return apply(
@@ -1388,7 +1411,7 @@ export function evalTrig(
         // NaN for |x| > 1, where `apply` then uses the complex kernel. The
         // exact ordering relies on a relative error of a few units in the
         // last digit.
-        (x) => x.atanh(),
+        (x) => x.atanh(ce.precision),
         complexAtanh
       );
 
@@ -1396,7 +1419,7 @@ export function evalTrig(
       return applyAngle(
         op,
         Math.cos,
-        (x) => chopBignumDust(ce, x.cos(), x),
+        (x, prec) => chopBignumDust(ce, x.cos(prec), x),
         (x) => x.cos(),
         raw
       );
@@ -1408,7 +1431,7 @@ export function evalTrig(
       return apply(
         op,
         Math.cosh,
-        (x) => x.cosh(),
+        (x) => x.cosh(ce.precision),
         (x) => x.cosh()
       );
 
@@ -1427,7 +1450,8 @@ export function evalTrig(
       return applyAngle(
         op,
         (x) => poleDust(ce, 1 / Math.tan(x), x),
-        (x) => bigZeroAndPoleDust(ce, BigDecimal.ONE.div(x.tan()), x),
+        (x, prec) =>
+          bigZeroAndPoleDust(ce, BigDecimal.ONE.div(x.tan(prec), prec), x),
         (x) => complexInverse(x.tan()),
         raw
       );
@@ -1436,7 +1460,7 @@ export function evalTrig(
       return apply(
         op,
         (x) => 1 / Math.tanh(x),
-        (x) => BigDecimal.ONE.div(x.tanh()),
+        (x) => BigDecimal.ONE.div(x.tanh(ce.precision), ce.precision),
         (x) => complexInverse(x.tanh())
       );
     case 'Csc': {
@@ -1450,7 +1474,7 @@ export function evalTrig(
       return applyAngle(
         op,
         (x) => poleDust(ce, 1 / Math.sin(x), x),
-        (x) => bigPoleDust(ce, BigDecimal.ONE.div(x.sin()), x),
+        (x, prec) => bigPoleDust(ce, BigDecimal.ONE.div(x.sin(prec), prec), x),
         (x) => complexInverse(x.sin()),
         raw
       );
@@ -1459,7 +1483,7 @@ export function evalTrig(
       return apply(
         op,
         (x) => 1 / Math.sinh(x),
-        (x) => BigDecimal.ONE.div(x.sinh()),
+        (x) => BigDecimal.ONE.div(x.sinh(ce.precision), ce.precision),
         (x) => complexInverse(x.sinh())
       );
     case 'Sec':
@@ -1468,7 +1492,7 @@ export function evalTrig(
       return applyAngle(
         op,
         (x) => poleDust(ce, 1 / Math.cos(x), x),
-        (x) => bigPoleDust(ce, BigDecimal.ONE.div(x.cos()), x),
+        (x, prec) => bigPoleDust(ce, BigDecimal.ONE.div(x.cos(prec), prec), x),
         (x) => complexInverse(x.cos()),
         raw
       );
@@ -1476,14 +1500,14 @@ export function evalTrig(
       return apply(
         op,
         (x) => 1 / Math.cosh(x),
-        (x) => BigDecimal.ONE.div(x.cosh()),
+        (x) => BigDecimal.ONE.div(x.cosh(ce.precision), ce.precision),
         (x) => complexInverse(x.cosh())
       );
     case 'Sin':
       return applyAngle(
         op,
         Math.sin,
-        (x) => chopBignumDust(ce, x.sin(), x),
+        (x, prec) => chopBignumDust(ce, x.sin(prec), x),
         (x) => x.sin(),
         raw
       );
@@ -1491,7 +1515,7 @@ export function evalTrig(
       return apply(
         op,
         Math.sinh,
-        (x) => x.sinh(),
+        (x) => x.sinh(ce.precision),
         (x) => x.sinh()
       );
     case 'Tan': {
@@ -1499,7 +1523,7 @@ export function evalTrig(
       return applyAngle(
         op,
         (x) => poleDust(ce, Math.tan(x), x),
-        (x) => bigZeroAndPoleDust(ce, x.tan(), x),
+        (x, prec) => bigZeroAndPoleDust(ce, x.tan(prec), x),
         (x) => x.tan(),
         raw
       );
@@ -1508,7 +1532,7 @@ export function evalTrig(
       return apply(
         op,
         Math.tanh,
-        (x) => x.tanh(),
+        (x) => x.tanh(ce.precision),
         (x) => x.tanh()
       );
   }
@@ -2152,14 +2176,14 @@ function floatSpecialCoefficient(c: Expression): [bigint, bigint] | undefined {
   if (!big.isFinite()) return undefined;
   if (big.isZero()) return [0n, 1n];
   const epsilon = bignumPreferred(c.engine)
-    ? new BigDecimal(10).pow(1 - c.engine.precision)
+    ? new BigDecimal(10).pow(1 - c.engine.precision, c.engine.precision)
     : new BigDecimal(Number.EPSILON);
   const ulp = big.abs().mul(epsilon);
   if (ulp.mul(264).gte(1)) return undefined;
   for (const q of SPECIAL_ANGLE_DENOMINATORS) {
     const scaled = big.mul(new BigDecimal(q));
     const p = scaled.round();
-    const error = scaled.sub(p).abs();
+    const error = scaled.sub(p, c.engine.precision).abs();
     if (error.lte(ulp.mul(new BigDecimal(q)))) {
       const n = p.toBigInt();
       const g = bigGcd(n, q);
@@ -2221,24 +2245,26 @@ function quadrant(theta: Expression): [number | undefined, number | undefined] {
 
   if (bignumPreferred(ce)) {
     const value = theta.bignumRe ?? ce.bignum(theta.re);
+    const prec = ce.precision;
+    const pi = BigDecimal.pi(prec);
     // The angle in radians
     const t =
       unit === 'deg'
-        ? value.mul(BigDecimal.PI).div(180)
+        ? value.mul(pi).div(180, prec)
         : unit === 'grad'
-          ? value.mul(BigDecimal.PI).div(200)
+          ? value.mul(pi).div(200, prec)
           : unit === 'turn'
-            ? value.mul(BigDecimal.PI.mul(2))
+            ? value.mul(pi.mul(2))
             : value;
-    const quarter = BigDecimal.PI.div(2);
-    const k = t.div(quarter).floor();
+    const quarter = pi.div(2, prec);
+    const k = t.div(quarter, prec).floor();
     // The distance of the angle above the multiple `k` of a quarter-turn
-    const r = t.sub(quarter.mul(k));
+    const r = t.sub(quarter.mul(k), prec);
     const at = t.abs();
     const margin = (at.gt(BigDecimal.ONE) ? at : BigDecimal.ONE).mul(
       new BigDecimal(`1e${3 - ce.precision}`)
     );
-    if (r.lte(margin) || quarter.sub(r).lte(margin))
+    if (r.lte(margin) || quarter.sub(r, prec).lte(margin))
       return [undefined, undefined];
     const q = Number(((k.toBigInt() % 4n) + 4n) % 4n);
     return [q + 1, undefined];
@@ -2497,28 +2523,29 @@ function cosSinHalfTurns(
   // quotient `√3/2` of the rounded `√3` was one unit high in its last digit
   // (`cos(π/6)` at 21 digits ended `…646765`, not `…646764`), and so can be
   // the cosine of the rounded `t·π`.
-  const precision = BigDecimal.precision;
-  BigDecimal.precision = precision + COS_SIN_GUARD_DIGITS;
-  try {
-    if (tn === 0n) {
-      c = BigDecimal.ONE;
-      s = BigDecimal.ZERO;
-    } else if (at * 4n === td) {
-      c = BigDecimal.TWO.sqrt().div(BigDecimal.TWO).toPrecision(precision);
-      s = tn < 0n ? c.neg() : c;
-    } else if (at * 6n === td) {
-      if (needC)
-        c = new BigDecimal(3).sqrt().div(BigDecimal.TWO).toPrecision(precision);
-      s = tn < 0n ? BigDecimal.HALF.neg() : BigDecimal.HALF;
-    } else {
-      const angle = BigDecimal.PI.mul(new BigDecimal(tn)).div(
-        new BigDecimal(td)
-      );
-      if (needC) c = angle.cos().toPrecision(precision);
-      if (needS) s = angle.sin().toPrecision(precision);
-    }
-  } finally {
-    BigDecimal.precision = precision;
+  const precision = ce.precision;
+  const prec = precision + COS_SIN_GUARD_DIGITS;
+  if (tn === 0n) {
+    c = BigDecimal.ONE;
+    s = BigDecimal.ZERO;
+  } else if (at * 4n === td) {
+    c = BigDecimal.TWO.sqrt(prec)
+      .div(BigDecimal.TWO, prec)
+      .toPrecision(precision);
+    s = tn < 0n ? c.neg() : c;
+  } else if (at * 6n === td) {
+    if (needC)
+      c = new BigDecimal(3)
+        .sqrt(prec)
+        .div(BigDecimal.TWO, prec)
+        .toPrecision(precision);
+    s = tn < 0n ? BigDecimal.HALF.neg() : BigDecimal.HALF;
+  } else {
+    const angle = BigDecimal.pi(prec)
+      .mul(new BigDecimal(tn))
+      .div(new BigDecimal(td), prec);
+    if (needC) c = angle.cos(prec).toPrecision(precision);
+    if (needS) s = angle.sin(prec).toPrecision(precision);
   }
   if (n === 0) return [c, s];
   if (n === 1) return [s.neg(), c];
@@ -2537,12 +2564,13 @@ function negPart(x: number | BigDecimal): number | BigDecimal {
 }
 function divPart(
   a: number | BigDecimal,
-  b: number | BigDecimal
+  b: number | BigDecimal,
+  prec: number
 ): number | BigDecimal {
   if (typeof a === 'number' && typeof b === 'number') return a / b;
   const big = (x: number | BigDecimal) =>
     typeof x === 'number' ? new BigDecimal(x) : x;
-  return big(a).div(big(b));
+  return big(a).div(big(b), prec);
 }
 
 /** Box a complex value whose parts are doubles or big decimals, as a float. */
@@ -2638,15 +2666,18 @@ const HYPERBOLIC_OF_IMAGINARY: Record<
   string,
   (
     c: number | BigDecimal,
-    s: number | BigDecimal
+    s: number | BigDecimal,
+    prec: number
   ) => [number | BigDecimal, number | BigDecimal] | 'pole'
 > = {
   Sinh: (_c, s) => [0, s],
   Cosh: (c) => [c, 0],
-  Tanh: (c, s) => (isZeroPart(c) ? 'pole' : [0, divPart(s, c)]),
-  Csch: (_c, s) => (isZeroPart(s) ? 'pole' : [0, negPart(divPart(1, s))]),
-  Sech: (c) => (isZeroPart(c) ? 'pole' : [divPart(1, c), 0]),
-  Coth: (c, s) => (isZeroPart(s) ? 'pole' : [0, negPart(divPart(c, s))]),
+  Tanh: (c, s, prec) => (isZeroPart(c) ? 'pole' : [0, divPart(s, c, prec)]),
+  Csch: (_c, s, prec) =>
+    isZeroPart(s) ? 'pole' : [0, negPart(divPart(1, s, prec))],
+  Sech: (c, _s, prec) => (isZeroPart(c) ? 'pole' : [divPart(1, c, prec), 0]),
+  Coth: (c, s, prec) =>
+    isZeroPart(s) ? 'pole' : [0, negPart(divPart(c, s, prec))],
 };
 
 /** The circular functions of `θ` that each entry of
@@ -2689,25 +2720,32 @@ function circularOfRadians(
 ): Expression | undefined {
   type BigKernel = (x: BigDecimal) => BigDecimal | Complex | number;
   type MachineKernel = (x: number) => number | Complex;
+  const prec = ce.precision;
   const kernels: Record<string, [MachineKernel, BigKernel]> = {
-    Sin: [Math.sin, (x) => chopBignumDust(ce, x.sin(), x)],
-    Cos: [Math.cos, (x) => chopBignumDust(ce, x.cos(), x)],
+    Sin: [Math.sin, (x) => chopBignumDust(ce, x.sin(prec), x)],
+    Cos: [Math.cos, (x) => chopBignumDust(ce, x.cos(prec), x)],
     Tan: [
       (x) => poleDust(ce, Math.tan(x), x) as number,
-      (x) => bigZeroAndPoleDust(ce, x.tan(), x) as BigDecimal,
+      (x) => bigZeroAndPoleDust(ce, x.tan(prec), x) as BigDecimal,
     ],
     Cot: [
       (x) => poleDust(ce, 1 / Math.tan(x), x) as number,
       (x) =>
-        bigZeroAndPoleDust(ce, BigDecimal.ONE.div(x.tan()), x) as BigDecimal,
+        bigZeroAndPoleDust(
+          ce,
+          BigDecimal.ONE.div(x.tan(prec), prec),
+          x
+        ) as BigDecimal,
     ],
     Sec: [
       (x) => poleDust(ce, 1 / Math.cos(x), x) as number,
-      (x) => bigPoleDust(ce, BigDecimal.ONE.div(x.cos()), x) as BigDecimal,
+      (x) =>
+        bigPoleDust(ce, BigDecimal.ONE.div(x.cos(prec), prec), x) as BigDecimal,
     ],
     Csc: [
       (x) => poleDust(ce, 1 / Math.sin(x), x) as number,
-      (x) => bigPoleDust(ce, BigDecimal.ONE.div(x.sin()), x) as BigDecimal,
+      (x) =>
+        bigPoleDust(ce, BigDecimal.ONE.div(x.sin(prec), prec), x) as BigDecimal,
     ],
   };
   const [fn, bigFn] = kernels[name];
@@ -2783,7 +2821,7 @@ function hyperbolicOfImaginaryAngle(
     turns,
     HYPERBOLIC_OF_IMAGINARY_NEEDS[name]
   );
-  const result = value(c, s);
+  const result = value(c, s, ce.precision);
   if (result === 'pole') return ce.ComplexInfinity;
   return boxParts(ce, result[0], result[1]);
 }

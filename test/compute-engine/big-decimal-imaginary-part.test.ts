@@ -106,7 +106,7 @@ describe('THE TWO REGIMES OF THE ROUNDING-NOISE RULE', () => {
   // Small-component regime: exp(a + ib) = e^a·(1 + ib) for a small b.
   test('e^{i·10^{-800}} keeps its imaginary part (kernel)', () => {
     const z = new BigNumericValue({ re: 0, im: new BigDecimal('1e-800') });
-    const r = z.exp();
+    const r = z.exp(ce.precision);
     expect(r.bignumRe!.eq(1)).toBe(true);
     expect(r.bignumIm!.eq(new BigDecimal('1e-800'))).toBe(true);
   });
@@ -129,7 +129,7 @@ describe('THE TWO REGIMES OF THE ROUNDING-NOISE RULE', () => {
 
   test('(1 + i·10^{-30})^3 (kernel)', () => {
     const z = new BigNumericValue({ re: 1, im: new BigDecimal('1e-30') });
-    const r = z.pow(3);
+    const r = z.pow(3, ce.precision);
     expect(r.bignumRe!.eq(1)).toBe(true);
     expect(r.bignumIm!.eq(new BigDecimal('3e-30'))).toBe(true);
   });
@@ -142,7 +142,7 @@ describe('THE TWO REGIMES OF THE ROUNDING-NOISE RULE', () => {
 
   test('ln(1 + i·10^{-30}) (kernel)', () => {
     const z = new BigNumericValue({ re: 1, im: new BigDecimal('1e-30') });
-    const r = z.ln();
+    const r = z.ln(undefined, ce.precision);
     expect(r.bignumIm!.eq(new BigDecimal('1e-30'))).toBe(true);
   });
 
@@ -151,7 +151,7 @@ describe('THE TWO REGIMES OF THE ROUNDING-NOISE RULE', () => {
   // loses.
   test('(10^{-30} + i)^2 (kernel, small real part)', () => {
     const z = new BigNumericValue({ re: new BigDecimal('1e-30'), im: 1 });
-    const r = z.pow(2);
+    const r = z.pow(2, ce.precision);
     expect(r.bignumRe!.eq(-1)).toBe(true);
     expect(r.bignumIm!.eq(new BigDecimal('2e-30'))).toBe(true);
   });
@@ -161,7 +161,10 @@ describe('THE TWO REGIMES OF THE ROUNDING-NOISE RULE', () => {
   test('e^{iπ} is -1', () => expect(N('e^{i\\pi}')).toBe('-1'));
 
   test('e^{iπ} is -1 (kernel, π at the working precision)', () => {
-    const r = new BigNumericValue({ re: 0, im: BigDecimal.PI }).exp();
+    const r = new BigNumericValue({
+      re: 0,
+      im: BigDecimal.pi(ce.precision),
+    }).exp(ce.precision);
     expect(r.bignumRe!.eq(-1)).toBe(true);
     expect(r.bignumIm!.isZero()).toBe(true);
     expect(r.isComplex).toBe(false);
@@ -170,25 +173,25 @@ describe('THE TWO REGIMES OF THE ROUNDING-NOISE RULE', () => {
   test('e^{iπ/2} is i (kernel)', () => {
     const r = new BigNumericValue({
       re: 0,
-      im: BigDecimal.PI.div(2),
-    }).exp();
+      im: BigDecimal.pi(ce.precision).div(2, ce.precision),
+    }).exp(ce.precision);
     expect(r.bignumRe!.isZero()).toBe(true);
     expect(r.bignumIm!.eq(1)).toBe(true);
   });
 
   test('((-1)^{1/2})^2 is -1', () => {
     expect(N('((-1)^{1/2})^2')).toBe('-1');
-    const i = new BigNumericValue(-1).sqrt();
+    const i = new BigNumericValue(-1).sqrt(ce.precision);
     expect(i.bignumRe!.isZero()).toBe(true);
     expect(i.bignumIm!.eq(1)).toBe(true);
-    const r = i.pow(2);
+    const r = i.pow(2, ce.precision);
     expect(r.bignumRe!.eq(-1)).toBe(true);
     expect(r.bignumIm!.isZero()).toBe(true);
   });
 
   test('\\sqrt{-4} is 2i', () => {
     expect(N('\\sqrt{-4}')).toBe('2i');
-    const r = new BigNumericValue(-4).sqrt();
+    const r = new BigNumericValue(-4).sqrt(ce.precision);
     expect(r.bignumRe!.isZero()).toBe(true);
     expect(r.bignumIm!.eq(2)).toBe(true);
   });
@@ -197,10 +200,10 @@ describe('THE TWO REGIMES OF THE ROUNDING-NOISE RULE', () => {
   // angle 4·π/4 = π and 8·π/4 = 2π, whose sine is rounding noise.
   test('(1 + i)^4 and (1 + i)^8 (kernel)', () => {
     const z = new BigNumericValue({ re: 1, im: 1 });
-    const r4 = z.pow(4);
+    const r4 = z.pow(4, ce.precision);
     expect(r4.bignumRe!.eq(-4)).toBe(true);
     expect(r4.bignumIm!.isZero()).toBe(true);
-    const r8 = z.pow(8);
+    const r8 = z.pow(8, ce.precision);
     expect(r8.bignumRe!.eq(16)).toBe(true);
     expect(r8.bignumIm!.isZero()).toBe(true);
   });
@@ -208,7 +211,10 @@ describe('THE TWO REGIMES OF THE ROUNDING-NOISE RULE', () => {
   // (10^{-6}i)^3 = −10^{-18}i: a small RESULT is not noise; the chop is
   // relative to the modulus of the result.
   test('(10^{-6}i)^3 is -10^{-18}i (kernel)', () => {
-    const r = new BigNumericValue({ re: 0, im: new BigDecimal('1e-6') }).pow(3);
+    const r = new BigNumericValue({ re: 0, im: new BigDecimal('1e-6') }).pow(
+      3,
+      ce.precision
+    );
     expect(r.bignumRe!.isZero()).toBe(true);
     expect(r.bignumIm!.eq(new BigDecimal('-1e-18'))).toBe(true);
   });
@@ -233,14 +239,17 @@ describe('A FINITE IMAGINARY PART BEYOND THE DOUBLE RANGE', () => {
 
   test('10^{800}i multiplies correctly', () => {
     // 2·10^{800}i
-    const twice = big().mul(2);
+    const twice = big().mul(2, ce.precision);
     expect(twice.bignumIm!.eq(new BigDecimal('2e800'))).toBe(true);
     // (10^{800}i)^2 = −10^{1600}
-    const square = big().mul(big());
+    const square = big().mul(big(), ce.precision);
     expect(square.isComplex).toBe(false);
     expect(square.bignumRe!.eq(new BigDecimal('-1e1600'))).toBe(true);
     // (10^{800}i)(1 + i) = −10^{800} + 10^{800}i
-    const turned = big().mul(new BigNumericValue({ re: 1, im: 1 }));
+    const turned = big().mul(
+      new BigNumericValue({ re: 1, im: 1 }),
+      ce.precision
+    );
     expect(turned.bignumRe!.eq(new BigDecimal('-1e800'))).toBe(true);
     expect(turned.bignumIm!.eq(new BigDecimal('1e800'))).toBe(true);
     expect(N('10^{800}i\\cdot 2')).toBe('2e+800i');
@@ -375,11 +384,11 @@ describe('THE CARTESIAN INTEGER POWER KEEPS A SMALL PART', () => {
       re: new BigDecimal('1'),
       im: new BigDecimal('1.00000000000000000001'),
     });
-    const square = z.pow(2);
-    expect(square.toString()).toBe(
+    const square = z.pow(2, ce.precision);
+    expect(square.toString(ce.precision)).toBe(
       '(-2.00000000000000000001e-20 + 2.00000000000000000002i)'
     );
-    expect(square.eq(z.mul(z))).toBe(true);
+    expect(square.eq(z.mul(z, ce.precision))).toBe(true);
   });
 
   // A Gaussian integer operand gives exact parts: (1 + i)^2 = 2i and
@@ -389,7 +398,7 @@ describe('THE CARTESIAN INTEGER POWER KEEPS A SMALL PART', () => {
       re: new BigDecimal('1'),
       im: new BigDecimal('1'),
     });
-    const p = z.pow(4);
+    const p = z.pow(4, ce.precision);
     expect(p.bignumRe!.toString()).toBe('-4');
     expect(p.bignumIm!.isZero()).toBe(true);
     expect(N('(1+i)^4')).toBe('-4');
@@ -482,7 +491,7 @@ describe('A NEGATIVE REAL PART AND A NON-INTEGER EXPONENT', () => {
       const value = new BigNumericValue({
         re: new BigDecimal(-4),
         im: new BigDecimal(b),
-      }).pow(1.5);
+      }).pow(1.5, ce.precision);
       expect(value.bignumRe.eq(new BigDecimal(re))).toBe(true);
       expect(value.bignumIm.eq(new BigDecimal(im))).toBe(true);
     })
@@ -496,8 +505,8 @@ describe('A NEGATIVE REAL PART AND A NON-INTEGER EXPONENT', () => {
           re: new BigDecimal(-1),
           im: new BigDecimal('-0.001'),
         })
-          .pow(1.5)
-          .toString()
+          .pow(1.5, ce.precision)
+          .toString(ce.precision)
       ).toBe(
         '(-0.001500000062499988281254394529067994428634 + 0.9999996250000234374931640655212385978709i)'
       )
@@ -514,7 +523,7 @@ describe('THE BOUND ON THE DIGITS OF A COMPLEX PRODUCT', () => {
         re: new BigDecimal('0.6'),
         im: new BigDecimal('0.7'),
       });
-      for (let i = 0; i < 20; i++) z = z.mul(z);
+      for (let i = 0; i < 20; i++) z = z.mul(z, ce.precision);
       expect(z.bignumRe!.significand.toString().length).toBeLessThanOrEqual(62);
       expect(z.bignumIm!.significand.toString().length).toBeLessThanOrEqual(62);
     }));
@@ -527,7 +536,7 @@ describe('THE BOUND ON THE DIGITS OF A COMPLEX PRODUCT', () => {
       const M = new BigDecimal('1e40');
       const a = new BigNumericValue({ re: M.add(1), im: M });
       const b = new BigNumericValue({ re: M.sub(1), im: M });
-      const p = a.mul(b);
+      const p = a.mul(b, ce.precision);
       expect(p.bignumRe!.eq(-1)).toBe(true);
       expect(p.bignumIm!.eq(M.mul(M).mul(2))).toBe(true);
     }));
@@ -536,7 +545,7 @@ describe('THE BOUND ON THE DIGITS OF A COMPLEX PRODUCT', () => {
     atPrecision(21, () => {
       const x = new BigDecimal('0.' + '3'.repeat(40));
       const z = new BigNumericValue({ re: x, im: x });
-      const p = z.mul(x);
+      const p = z.mul(x, ce.precision);
       expect(p.bignumRe!.significand.toString().length).toBeLessThanOrEqual(62);
       expect(p.bignumIm!.significand.toString().length).toBeLessThanOrEqual(62);
     }));

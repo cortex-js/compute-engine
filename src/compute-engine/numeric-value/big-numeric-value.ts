@@ -11,6 +11,7 @@ import {
 } from '../numerics/expression.js';
 import { withFractionPart } from '../numerics/strings.js';
 import { bigint } from '../numerics/bigint.js';
+import { isInteger } from '../numerics/rationals.js';
 import { NumericPrimitiveType } from '../../common/type/types.js';
 import { complexNoiseRatio, isComplexDust } from './roundoff.js';
 
@@ -27,7 +28,7 @@ const REAL_IM = new BigDecimal(0);
  * `N(x, n)` computes its result at more than `n` digits (guard digits),
  * rounds it to `n` digits, and then restores the precision of the engine. A
  * value is usually displayed with the precision of the engine
- * (`BigDecimal.precision`): the digits past the precision are noise of the
+ * (`ce.precision`): the digits past the precision are noise of the
  * computation. When `n` is more than the precision, the result of
  * `N(x, n)` is displayed with `n` digits, but only when it changes with the
  * precision. A value that does not change with the precision (a float of
@@ -161,7 +162,7 @@ export class BigNumericValue extends NumericValue {
   /**
    * Serialize to MathJSON. Preserves the full raw `BigDecimal` value
    * with no rounding, ensuring lossless round-tripping. Digits beyond
-   * `BigDecimal.precision` may be present (from exact arithmetic) but
+   * the working precision may be present (from exact arithmetic) but
    * are not guaranteed to be accurate after precision-bounded operations.
    */
   toJSON(): MathJsonExpression {
@@ -1008,10 +1009,26 @@ export class BigNumericValue extends NumericValue {
 
     if (this.isComplex || other.isComplex) return this._makeExact(NaN);
     if (!this.decimal.isInteger()) return this._makeExact(1);
-    let b = other.bignumRe
-      ? new BigDecimal(other.bignumRe)
-      : new BigDecimal(other.re);
-    if (!b.isInteger()) return this._makeExact(1);
+    // An exact operand is read from its rational: its big decimal at a
+    // working precision rounds an integer with more digits than the
+    // precision. An exact value that is not an integer has no gcd here.
+    let b: BigDecimal;
+    if (other instanceof ExactNumericValue) {
+      if (
+        other.radical !== 1 ||
+        !isInteger(other.rational) ||
+        other.isNaN ||
+        other.isPositiveInfinity ||
+        other.isNegativeInfinity
+      )
+        return this._makeExact(1);
+      b = new BigDecimal(BigInt(other.rational[0]));
+    } else {
+      b = other.bignumRe
+        ? new BigDecimal(other.bignumRe)
+        : new BigDecimal(other.re);
+      if (!b.isInteger()) return this._makeExact(1);
+    }
 
     let a = this.decimal;
     while (!b.isZero()) {
@@ -1133,7 +1150,7 @@ export class BigNumericValue extends NumericValue {
     return this._makeExact(bigint(this.decimal.round())!);
   }
 
-  eq(other: number | NumericValue): boolean {
+  eq(other: number | NumericValue, prec?: number): boolean {
     if (this.isNaN) return false;
     if (typeof other === 'number')
       return !this.isComplex && this.decimal.eq(other);
@@ -1141,7 +1158,7 @@ export class BigNumericValue extends NumericValue {
     // from the exact value: its double `im` is `0` for `10^{-800}i`, and
     // comparing it here would make an inexact `0` equal to that value from
     // this side only. Delegating keeps `eq` symmetric.
-    if (other instanceof ExactNumericValue) return other.eq(this);
+    if (other instanceof ExactNumericValue) return other.eq(this, prec);
     if (other.isNaN) return false;
     // Every part is compared as a big decimal: the double `im` is `0` for
     // `10^{-800}`, `Infinity` for a finite `10^{800}`, and has 16 digits.
@@ -1153,34 +1170,43 @@ export class BigNumericValue extends NumericValue {
     );
   }
 
-  lt(other: number | NumericValue): boolean | undefined {
+  lt(other: number | NumericValue, prec?: number): boolean | undefined {
     // Complex values are unordered: any non-real operand → indeterminate
     if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal.lt(other);
     if (other.isComplex) return undefined;
-    return this.decimal.lt(other.bignumRe ?? other.re);
+    return this.decimal.lt(realPartAt(other, prec));
   }
 
-  lte(other: number | NumericValue): boolean | undefined {
+  lte(other: number | NumericValue, prec?: number): boolean | undefined {
     if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal.lte(other);
     if (other.isComplex) return undefined;
-    return this.decimal.lte(other.bignumRe ?? other.re);
+    return this.decimal.lte(realPartAt(other, prec));
   }
 
-  gt(other: number | NumericValue): boolean | undefined {
+  gt(other: number | NumericValue, prec?: number): boolean | undefined {
     if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal.gt(other);
     if (other.isComplex) return undefined;
-    return this.decimal.gt(other.bignumRe ?? other.re);
+    return this.decimal.gt(realPartAt(other, prec));
   }
 
-  gte(other: number | NumericValue): boolean | undefined {
+  gte(other: number | NumericValue, prec?: number): boolean | undefined {
     if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal.gte(other);
     if (other.isComplex) return undefined;
-    return this.decimal.gte(other.bignumRe ?? other.re);
+    return this.decimal.gte(realPartAt(other, prec));
   }
+}
+
+/** The real part of `v` as a big decimal, or its double when it has none.
+ * An exact value is rounded to `prec` significant digits (default
+ * `BigDecimal.precision`, read only for an exact value). */
+function realPartAt(v: NumericValue, prec?: number): BigDecimal | number {
+  if (v instanceof ExactNumericValue)
+    return v.bignumReAt(prec ?? BigDecimal.precision);
+  return v.bignumRe ?? v.re;
 }
 
 function decimalToString(num: BigDecimal): string {

@@ -131,11 +131,15 @@ export function gpuExactConstant(op: Expression): Expression | undefined {
   return isNumber(v) && !v.isComplex && v.isFinite === true ? v : undefined;
 }
 
-/** The value of a number literal as a `BigDecimal`, at the current precision. */
-export function gpuBigValue(op: Expression): BigDecimal | undefined {
+/** The value of a number literal as a `BigDecimal`, at `prec` significant
+ * digits. */
+export function gpuBigValue(
+  op: Expression,
+  prec: number
+): BigDecimal | undefined {
   if (!isNumber(op)) return undefined;
   const v = op.numericValue;
-  const b = typeof v === 'number' ? new BigDecimal(v) : v.bignumRe;
+  const b = typeof v === 'number' ? new BigDecimal(v) : v.bignumReAt(prec);
   return b !== undefined && b.isFinite() ? b : undefined;
 }
 
@@ -147,48 +151,44 @@ export function gpuBigValue(op: Expression): BigDecimal | undefined {
  *
  * The constant is first added at 50 digits to read its magnitude; `fn` then
  * runs at the precision that magnitude needs, so that the integer part of
- * `c/P` for any period `P` is exact. `BigDecimal.precision` is global, so it
- * is restored afterwards.
+ * `c/P` for any period `P` is exact. `fn` receives that precision, the
+ * number of significant digits of its own computations. The precisions do
+ * not depend on the precision of the engine: the compiled code computes in
+ * float32.
  */
 export function gpuWithExactConstant<T>(
   literals: ReadonlyArray<Expression>,
   piFactors: ReadonlyArray<Expression>,
-  fn: (c: BigDecimal) => T | undefined
+  fn: (c: BigDecimal, prec: number) => T | undefined
 ): T | undefined {
-  const constant = (): BigDecimal | undefined => {
+  const constant = (prec: number): BigDecimal | undefined => {
     let c = BigDecimal.ZERO;
     for (const op of literals) {
-      const v = gpuBigValue(op);
+      const v = gpuBigValue(op, prec);
       if (v === undefined) return undefined;
-      c = c.add(v);
+      c = c.add(v, prec);
     }
     if (piFactors.length > 0) {
       let k = BigDecimal.ZERO;
       for (const op of piFactors) {
-        const v = gpuBigValue(op);
+        const v = gpuBigValue(op, prec);
         if (v === undefined) return undefined;
-        k = k.add(v);
+        k = k.add(v, prec);
       }
-      c = c.add(k.mul(BigDecimal.PI));
+      c = c.add(k.mul(BigDecimal.pi(prec)), prec);
     }
     return c;
   };
-  const savedPrecision = BigDecimal.precision;
-  try {
-    BigDecimal.precision = 50;
-    const rough = constant();
-    if (rough === undefined) return undefined;
-    if (rough.isZero()) return fn(rough);
-    const significand =
-      rough.significand < 0n ? -rough.significand : rough.significand;
-    const digits = rough.exponent + significand.toString().length;
-    if (digits > 10000) return undefined;
-    BigDecimal.precision = Math.max(50, digits + 30);
-    const c = constant();
-    return c === undefined ? undefined : fn(c);
-  } finally {
-    BigDecimal.precision = savedPrecision;
-  }
+  const rough = constant(50);
+  if (rough === undefined) return undefined;
+  if (rough.isZero()) return fn(rough, 50);
+  const significand =
+    rough.significand < 0n ? -rough.significand : rough.significand;
+  const digits = rough.exponent + significand.toString().length;
+  if (digits > 10000) return undefined;
+  const prec = Math.max(50, digits + 30);
+  const c = constant(prec);
+  return c === undefined ? undefined : fn(c, prec);
 }
 
 /**
@@ -770,19 +770,14 @@ function float32Parts(
   pi: boolean
 ): { hi: number; lo: number; residual: number } {
   if (k === undefined) return { hi: 1, lo: 0, residual: 0 };
-  const savedPrecision = BigDecimal.precision;
-  try {
-    BigDecimal.precision = 50;
-    let v = gpuBigValue(k) ?? new BigDecimal(k.re);
-    if (pi) v = v.mul(BigDecimal.PI);
-    const hi = Math.fround(v.toNumber());
-    const rest = v.sub(new BigDecimal(hi));
-    const lo = Math.fround(rest.toNumber());
-    const residual = Math.abs(rest.sub(new BigDecimal(lo)).toNumber());
-    return { hi, lo, residual };
-  } finally {
-    BigDecimal.precision = savedPrecision;
-  }
+  const prec = 50;
+  let v = gpuBigValue(k, prec) ?? new BigDecimal(k.re);
+  if (pi) v = v.mul(BigDecimal.pi(prec));
+  const hi = Math.fround(v.toNumber());
+  const rest = v.sub(new BigDecimal(hi), prec);
+  const lo = Math.fround(rest.toNumber());
+  const residual = Math.abs(rest.sub(new BigDecimal(lo), prec).toNumber());
+  return { hi, lo, residual };
 }
 
 /** The largest float32 value that is not above `v`. */
@@ -857,15 +852,19 @@ export function gpuAmplifiedTrigMod(
   // compiled, so that the usual code can still be emitted instead.
   let constant: { hi: number; lo: number; q: number } | undefined;
   if (shape.literals.length + shape.piFactors.length > 0) {
-    constant = gpuWithExactConstant(shape.literals, shape.piFactors, (c) => {
-      const quarter = BigDecimal.PI.div(2);
-      const k = c.div(quarter).round();
-      const r = c.sub(k.mul(quarter));
-      const q = k.sub(k.div(4).floor().mul(4)).toNumber();
-      const hi = Math.fround(r.toNumber());
-      const lo = Math.fround(r.sub(new BigDecimal(hi)).toNumber());
-      return { hi, lo, q };
-    });
+    constant = gpuWithExactConstant(
+      shape.literals,
+      shape.piFactors,
+      (c, prec) => {
+        const quarter = BigDecimal.pi(prec).div(2, prec);
+        const k = c.div(quarter, prec).round();
+        const r = c.sub(k.mul(quarter), prec);
+        const q = k.sub(k.div(4, prec).floor().mul(4), prec).toNumber();
+        const hi = Math.fround(r.toNumber());
+        const lo = Math.fround(r.sub(new BigDecimal(hi), prec).toNumber());
+        return { hi, lo, q };
+      }
+    );
     // A constant that cannot be computed exactly (more than 10 000 digits)
     // cannot be left out either: the value would be wrong.
     if (constant === undefined)

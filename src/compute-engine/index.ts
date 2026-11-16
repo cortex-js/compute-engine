@@ -1999,11 +1999,9 @@ export class ComputeEngine implements IComputeEngine {
    *
    * If the precision is set to `auto`, the precision is set to a default value.
    *
-   * The precision of the arbitrary-precision arithmetic is shared by every
-   * engine in the program: creating an engine, or setting the precision of
-   * any engine, sets it for all of them. A program that sets different
-   * precisions on two engines computes in both at the precision set last,
-   * so use one engine per program.
+   * Each engine computes at its own precision: creating an engine, or
+   * setting the precision of one engine, does not change the precision of
+   * another.
    *
    */
   set precision(p: number | 'machine' | 'auto') {
@@ -2011,8 +2009,8 @@ export class ComputeEngine implements IComputeEngine {
     this._reset();
   }
 
-  /** Run `fn` at the precision `digits` (of the engine and of the big
-   * decimals) without a reset of the engine: see
+  /** Run `fn` at the precision `digits` of the engine without a reset of
+   * the engine: see
    * `EngineNumericConfiguration.withTransientPrecision`.
    * @internal */
   _withTransientPrecision<T>(digits: number, fn: () => T): T {

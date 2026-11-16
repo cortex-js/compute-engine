@@ -496,17 +496,21 @@ function evaluateBinomial(
       // A negative non-integer `k`: the Γ quotient goes through the
       // reflection formula of `Γ(k+1)`, whose sine has no correct digits
       // for a large `|k|`. The log form reduces `k` exactly first.
+      const prec = ce.precision;
       if (k.isNegative() && !k.isInteger()) {
-        const v = bigBinomialLogForm(ce, n, k);
+        const v = bigBinomialLogForm(ce, n, k, prec);
         if (v !== undefined) return v;
       }
-      const r = bigGamma(ce, n.add(1)).div(
-        bigGamma(ce, k.add(1)).mul(bigGamma(ce, n.sub(k).add(1)))
+      const r = bigGamma(ce, n.add(1, prec), prec).div(
+        bigGamma(ce, k.add(1, prec), prec).mul(
+          bigGamma(ce, n.sub(k, prec).add(1, prec), prec)
+        ),
+        prec
       );
       // A `0` that is not on a pole is a quotient whose numerator
       // underflowed (`Γ(n+1)` for `n` near `−10¹⁵`): the log form decides.
       if (r.isFinite() && !r.isZero()) return r;
-      return bigBinomialLogForm(ce, n, k) ?? r;
+      return bigBinomialLogForm(ce, n, k, prec) ?? r;
     });
   }
 
@@ -692,7 +696,11 @@ function evaluatePochhammer(
     aExpr,
     kExpr,
     (a, k) => gamma(a + k) / gamma(a),
-    (a, k) => bigGamma(ce, a.add(k)).div(bigGamma(ce, a))
+    (a, k) =>
+      bigGamma(ce, a.add(k, ce.precision), ce.precision).div(
+        bigGamma(ce, a, ce.precision),
+        ce.precision
+      )
   );
 }
 

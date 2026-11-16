@@ -780,15 +780,17 @@ function gpuReduceSumOffset(
 
   // The constant `c`, exact (`gpuWithExactConstant`), and its remainder
   // `c − P·round(c/P)` when `|c| > P/2`.
-  const remainder = gpuWithExactConstant(literals, piTerms, (c) => {
-    let p = inRadians ? BigDecimal.PI.mul(period) : new BigDecimal(period);
+  const remainder = gpuWithExactConstant(literals, piTerms, (c, prec) => {
+    let p = inRadians
+      ? BigDecimal.pi(prec).mul(period)
+      : new BigDecimal(period);
     if (scale !== undefined) {
-      const k = gpuBigValue(scale);
+      const k = gpuBigValue(scale, prec);
       if (k === undefined || k.isZero()) return undefined;
-      p = p.div(k.abs());
+      p = p.div(k.abs(), prec);
     }
-    if (c.abs().cmp(p.div(2)) <= 0) return undefined;
-    return c.sub(c.div(p).round().mul(p)).toNumber();
+    if (c.abs().cmp(p.div(2, prec)) <= 0) return undefined;
+    return c.sub(c.div(p, prec).round().mul(p), prec).toNumber();
   });
   if (remainder === undefined) return x;
   const ce = x.engine;

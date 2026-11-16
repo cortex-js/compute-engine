@@ -69,22 +69,42 @@ function binomialTail(
   return [numerator, q ** BigInt(n)];
 }
 
-function withPrecision<T>(digits: number, fn: () => T): T {
-  const saved = BigDecimal.precision;
-  BigDecimal.precision = digits;
-  try {
-    return fn();
-  } finally {
-    BigDecimal.precision = saved;
-  }
-}
-
 /** log₁₀|x| for x ≠ 0. */
-function log10Abs(x: BigDecimal): number {
+function log10Abs(x: BigDecimal, prec: number): number {
   const v = Math.abs(x.toNumber());
   return v > 0 && Number.isFinite(v)
     ? Math.log10(v)
-    : x.abs().ln().toNumber() / Math.LN10;
+    : x.abs().ln(prec).toNumber() / Math.LN10;
+}
+
+/** The sum of `alternatingSum` at the precision `wp`, and the digits it lost. */
+function alternatingSumAt(
+  x: BigDecimal,
+  a: BigDecimal,
+  b: number,
+  wp: number
+): { value: BigDecimal; lost: number } {
+  const xa = a.mul(x.ln(wp)).exp(wp);
+  let binomial = BigDecimal.ONE;
+  let power = xa;
+  let sum = BigDecimal.ZERO;
+  let largest = BigDecimal.ZERO;
+  // a(a+1)…(a+b−1)/(b−1)!, the reciprocal of B(a, b)
+  let scale = BigDecimal.ONE;
+  for (let j = 0; j < b; j++) {
+    const term = binomial.mul(power).div(a.add(j, wp), wp);
+    sum = j % 2 === 0 ? sum.add(term, wp) : sum.sub(term, wp);
+    if (term.gt(largest)) largest = term;
+    scale = scale.mul(a.add(j, wp));
+    if (j > 0) scale = scale.div(j, wp);
+    binomial = binomial.mul(b - 1 - j).div(j + 1, wp);
+    power = power.mul(x);
+  }
+  if (sum.isZero()) return { value: sum, lost: Infinity };
+  return {
+    value: sum.mul(scale),
+    lost: Math.max(0, log10Abs(largest, wp) - log10Abs(sum, wp)),
+  };
 }
 
 /**
@@ -95,34 +115,12 @@ function log10Abs(x: BigDecimal): number {
 function alternatingSum(
   x: BigDecimal,
   a: BigDecimal,
-  b: number
+  b: number,
+  target: number
 ): BigDecimal | undefined {
-  const target = BigDecimal.precision;
   let extra = 15;
   for (;;) {
-    const attempt = withPrecision(target + extra, () => {
-      const xa = a.mul(x.ln()).exp();
-      let binomial = BigDecimal.ONE;
-      let power = xa;
-      let sum = BigDecimal.ZERO;
-      let largest = BigDecimal.ZERO;
-      // a(a+1)…(a+b−1)/(b−1)!, the reciprocal of B(a, b)
-      let scale = BigDecimal.ONE;
-      for (let j = 0; j < b; j++) {
-        const term = binomial.mul(power).div(a.add(j));
-        sum = j % 2 === 0 ? sum.add(term) : sum.sub(term);
-        if (term.gt(largest)) largest = term;
-        scale = scale.mul(a.add(j));
-        if (j > 0) scale = scale.div(j);
-        binomial = binomial.mul(b - 1 - j).div(j + 1);
-        power = power.mul(x);
-      }
-      if (sum.isZero()) return { value: sum, lost: Infinity };
-      return {
-        value: sum.mul(scale),
-        lost: Math.max(0, log10Abs(largest) - log10Abs(sum)),
-      };
-    });
+    const attempt = alternatingSumAt(x, a, b, target + extra);
     if (attempt.lost <= extra - 5) return attempt.value.toPrecision(target);
     extra = Math.ceil(attempt.lost) + 15;
     if (!(extra <= BETA_ALTERNATING_MAX_EXTRA)) return undefined;
@@ -133,9 +131,9 @@ function alternatingSum(
 export function bigBetaRegularizedOutside(
   x: BigDecimal,
   a: BigDecimal,
-  b: BigDecimal
+  b: BigDecimal,
+  target: number
 ): BigDecimal {
-  const target = BigDecimal.precision;
   const na = smallPositiveInteger(a, BETA_POLYNOMIAL_MAX_DEGREE);
   const nb = smallPositiveInteger(b, BETA_POLYNOMIAL_MAX_DEGREE);
   if (
@@ -151,13 +149,13 @@ export function bigBetaRegularizedOutside(
       na,
       na + nb - 1
     );
-    return withPrecision(target + 5, () =>
-      new BigDecimal(numerator).div(new BigDecimal(denominator))
-    ).toPrecision(target);
+    return new BigDecimal(numerator)
+      .div(new BigDecimal(denominator), target + 5)
+      .toPrecision(target);
   }
   if (nb === undefined || nb > BETA_ALTERNATING_MAX_B || !x.gt(1))
     return BigDecimal.NAN;
-  return alternatingSum(x, a, nb) ?? BigDecimal.NAN;
+  return alternatingSum(x, a, nb, target) ?? BigDecimal.NAN;
 }
 
 /** I_x(a, b) for x < 0 or x > 1, as a double, or NaN. */
@@ -169,11 +167,10 @@ export function betaRegularizedOutside(
   if (!Number.isFinite(x) || !Number.isFinite(a) || !Number.isFinite(b))
     return NaN;
   // 30 digits in, one rounding out: the sum is not summed in doubles
-  return withPrecision(30, () =>
-    bigBetaRegularizedOutside(
-      new BigDecimal(x),
-      new BigDecimal(a),
-      new BigDecimal(b)
-    )
+  return bigBetaRegularizedOutside(
+    new BigDecimal(x),
+    new BigDecimal(a),
+    new BigDecimal(b),
+    30
   ).toNumber();
 }

@@ -1501,8 +1501,9 @@ describe('N() of a sum of quantities', () => {
     ]);
     const result = expr.N();
     expect(result.operator).toBe('Quantity');
-    // An exact magnitude would serialize as `["Rational", 2, 3]`.
-    expect(result.op1.json).toEqual({ num: '0.666666666666666666666' });
+    // An exact magnitude would serialize as `["Rational", 2, 3]`. The
+    // shared engine computes at its precision, 100 digits (`test/utils.ts`).
+    expect(result.op1.json).toEqual({ num: '0.' + '6'.repeat(100) });
     expect(result.op1.re).toBeCloseTo(2 / 3, 15);
     expect(result.op2.json).toBe('m');
   });

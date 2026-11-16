@@ -391,14 +391,14 @@ export function bigFloatBroadcast(
     } else {
       const b = cellOf(columns[1], i);
       if (!a.float && !b.float) return undefined;
-      if (operator === 'Add') r = a.decimal.addBounded(b.decimal);
+      if (operator === 'Add') r = a.decimal.addBounded(b.decimal, ce.precision);
       else {
         if (
           (!a.float && a.decimal.isZero()) ||
           (!b.float && b.decimal.isZero())
         )
           return undefined;
-        r = bigProduct(a.decimal, b.decimal);
+        r = bigProduct(a.decimal, b.decimal, ce.precision);
       }
     }
     out[i] = ce.number(ce._inexactNumericValue(r));
@@ -411,15 +411,15 @@ export function bigFloatBroadcast(
  * to `1` or `-1`, exact or a float, gives the other factor, or its negation,
  * with all its digits (`BigNumericValue.mul()` and `ExactNumericValue.mul()`
  * do not multiply then). Every other product is `mulBounded()`, which rounds
- * past twice the working precision: an operand can hold more digits than
- * that, because `addBounded()` keeps them.
+ * past twice `prec`, the precision of the engine: an operand can hold more
+ * digits than that, because `addBounded()` keeps them.
  */
-function bigProduct(a: BigDecimal, b: BigDecimal): BigDecimal {
+function bigProduct(a: BigDecimal, b: BigDecimal, prec: number): BigDecimal {
   if (a.eq(1)) return b;
   if (a.eq(-1)) return b.neg();
   if (b.eq(1)) return a;
   if (b.eq(-1)) return a.neg();
-  return a.mulBounded(b);
+  return a.mulBounded(b, prec);
 }
 
 /** An operand of a cell of {@link bigFloatBroadcast}: the decimal that the
@@ -1015,9 +1015,9 @@ const COMPLEX_KERNELS: Record<
     ) => NumericValue;
   }
 > = {
-  Add: { arity: 2, apply: (_ce, a, b) => a.add(b) },
-  Multiply: { arity: 2, apply: (_ce, a, b) => a.mul(b) },
-  Divide: { arity: 2, apply: (_ce, a, b) => a.div(b) },
+  Add: { arity: 2, apply: (ce, a, b) => a.add(b, ce.precision) },
+  Multiply: { arity: 2, apply: (ce, a, b) => a.mul(b, ce.precision) },
+  Divide: { arity: 2, apply: (ce, a, b) => a.div(b, ce.precision) },
   Negate: { arity: 1, apply: (_ce, a) => a.neg() },
   Conjugate: {
     arity: 1,

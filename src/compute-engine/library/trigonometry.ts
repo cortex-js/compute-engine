@@ -321,7 +321,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       value: (engine) =>
         boxBignumResult(
           engine,
-          bignumPreferred(engine) ? BigDecimal.PI : Math.PI
+          bignumPreferred(engine) ? BigDecimal.pi(engine.precision) : Math.PI
         ),
     },
   },
@@ -947,7 +947,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // float `3.14…`, not the exact `π` of the exact branches below.
         if (numericApproximation || hasFloatOperand([y, x]))
           return radiansToAngle(
-            apply2(y, x, Math.atan2, (a, b) => BigDecimal.atan2(a, b))
+            apply2(y, x, Math.atan2, (a, b) =>
+              BigDecimal.atan2(a, b, ce.precision)
+            )
           );
 
         // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
@@ -1414,7 +1416,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           const onAxis = applyOnImaginaryAxis(
             x,
             (y) => [sincImaginaryAxis(y), 0],
-            (y) => [y.sinh().div(y), 0]
+            (y) => [y.sinh(ce.precision).div(y, ce.precision), 0]
           );
           if (onAxis === null) return ce.PositiveInfinity;
           if (onAxis !== undefined) return onAxis;
@@ -1422,7 +1424,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
             apply(
               x,
               (x) => sinc(x),
-              (x) => bigSinc(x),
+              (x) => bigSinc(x, ce.precision),
               sincComplex
             )
           );
@@ -1460,14 +1462,14 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const onAxis = applyOnImaginaryAxis(
           x,
           (y) => [0, -fresnelS(y)],
-          (y) => [0, bigFresnelS(y).neg()]
+          (y) => [0, bigFresnelS(y, ce.precision).neg()]
         );
         if (onAxis !== undefined) return onAxis ?? undefined;
         return complexKernelValue(
           apply(
             x,
             (x) => fresnelS(x),
-            (x) => bigFresnelS(x),
+            (x) => bigFresnelS(x, ce.precision),
             fresnelSComplex
           )
         );
@@ -1504,14 +1506,14 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const onAxis = applyOnImaginaryAxis(
           x,
           (y) => [0, fresnelC(y)],
-          (y) => [0, bigFresnelC(y)]
+          (y) => [0, bigFresnelC(y, ce.precision)]
         );
         if (onAxis !== undefined) return onAxis ?? undefined;
         return complexKernelValue(
           apply(
             x,
             (x) => fresnelC(x),
-            (x) => bigFresnelC(x),
+            (x) => bigFresnelC(x, ce.precision),
             fresnelCComplex
           )
         );

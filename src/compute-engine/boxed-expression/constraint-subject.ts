@@ -293,10 +293,10 @@ export function exactCompareNumbers(
   // it strictly greater — after `assume(x ≥ 1/2)`, `x.isGreater(0.5)` was
   // `true`. `lt` and `gt` both go through the exact ordering.
   const order = (x: NumericValue, y: number | NumericValue) => {
-    const lt = x.lt(y);
+    const lt = x.lt(y, a.engine.precision);
     if (lt === undefined) return undefined;
     if (lt) return -1;
-    const gt = x.gt(y);
+    const gt = x.gt(y, a.engine.precision);
     if (gt === undefined) return undefined;
     return gt ? 1 : 0;
   };

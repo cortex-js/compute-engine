@@ -1135,27 +1135,21 @@ export function erfInv(x: number): number {
 }
 
 /**
- * Run `fn` with the global `BigDecimal.precision` raised by `guard` extra
- * digits, then restore it. The returned value carries the extra correct
- * digits; the engine rounds to the active precision for display.
+ * Run `fn` at the precision `prec` raised by `guard` extra digits (its
+ * argument), then round its result to `prec` digits.
  *
  * Series/acceleration kernels below accumulate rounding error across many
  * operations (and, for ζ, work with intermediates far larger than the result).
  * Computing at exactly the requested precision therefore loses the last
  * several digits. Evaluating with guard digits and rounding once at the end
- * restores a fully-accurate result. (`BigDecimal.precision` is process-global,
- * so this must always restore it — hence the `try/finally`.)
+ * restores a fully-accurate result.
  */
-function withGuardDigits(guard: number, fn: () => BigNum): BigNum {
-  const saved = BigDecimal.precision;
-  BigDecimal.precision = saved + guard;
-  try {
-    // Compute with guard digits, then round the (correct) result back to the
-    // requested precision so the kernel returns exactly `saved` good digits.
-    return fn().toPrecision(saved);
-  } finally {
-    BigDecimal.precision = saved;
-  }
+function withGuardDigits(
+  prec: number,
+  guard: number,
+  fn: (prec: number) => BigNum
+): BigNum {
+  return fn(prec + guard).toPrecision(prec);
 }
 
 /** Working-precision guard (extra digits) for the bignum Gamma/Zeta kernels. */
@@ -1186,18 +1180,20 @@ const MAX_EXACT_ZETA_EVEN_N = 500;
 
 /**
  * Bignum log-Gamma via Stirling asymptotic series with runtime-computed
- * Bernoulli numbers.  Precision scales with BigDecimal.precision.
+ * Bernoulli numbers.  Precision scales with `prec`.
  *
  * Uses reflection for z < 0.5, exact formulas for positive integers and
  * half-integers, and for the general case shifts z upward so the asymptotic
  * series converges rapidly.
  */
-export function bigGammaln(ce: ComputeEngine, z: BigNum): BigNum {
+export function bigGammaln(ce: ComputeEngine, z: BigNum, prec: number): BigNum {
   if (!z.isFinite()) return BigDecimal.NAN;
-  return withGuardDigits(SPECIAL_FN_GUARD, () => gammalnCore(ce, z));
+  return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
+    gammalnCore(ce, z, prec)
+  );
 }
 
-function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
+function gammalnCore(ce: ComputeEngine, z: BigNum, prec: number): BigNum {
   if (!z.isFinite()) return BigDecimal.NAN;
 
   // Reflection: ln(Gamma(z)) = ln(pi) - ln(|sin(pi*z)|) - ln(Gamma(1-z))
@@ -1205,13 +1201,13 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
     // `sin(π·z)` from the distance of z to the nearest integer
     // (`bigSinPi`): the sine of the product π·z loses digits near a
     // negative integer.
-    const pi = BigDecimal.PI;
-    const sinPiZ = bigSinPi(z).abs();
+    const pi = BigDecimal.pi(prec);
+    const sinPiZ = bigSinPi(z, prec).abs();
     if (sinPiZ.isZero()) return BigDecimal.NAN;
     return pi
-      .ln()
-      .sub(sinPiZ.ln())
-      .sub(gammalnCore(ce, BigDecimal.ONE.sub(z)));
+      .ln(prec)
+      .sub(sinPiZ.ln(prec), prec)
+      .sub(gammalnCore(ce, BigDecimal.ONE.sub(z, prec), prec), prec);
   }
 
   // Exact: positive integer z -> ln((z-1)!). Beyond MAX_EXACT_FACTORIAL_N,
@@ -1227,17 +1223,17 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
         if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
         fact *= BigInt(i);
       }
-      return new BigDecimal(fact.toString()).ln();
+      return new BigDecimal(fact.toString()).ln(prec);
     }
   }
 
   // Exact: half-integer z = n + 1/2 -> ln((2n)! * sqrt(pi) / (4^n * n!))
-  const zMinusHalf = z.sub(BigDecimal.HALF);
+  const zMinusHalf = z.sub(BigDecimal.HALF, prec);
   if (zMinusHalf.isInteger() && !zMinusHalf.isNegative()) {
     const n = zMinusHalf.toNumber();
     if (n === 0) {
       // Gamma(1/2) = sqrt(pi), so ln(Gamma(1/2)) = ln(sqrt(pi)) = ln(pi)/2
-      return BigDecimal.PI.ln().div(BigDecimal.TWO);
+      return BigDecimal.pi(prec).ln(prec).div(BigDecimal.TWO, prec);
     }
     if (n <= MAX_EXACT_FACTORIAL_N) {
       let steps = 0;
@@ -1253,10 +1249,10 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
       }
       const fourN = 4n ** BigInt(n);
       return new BigDecimal(fact2n.toString())
-        .ln()
-        .add(BigDecimal.PI.ln().div(BigDecimal.TWO))
-        .sub(new BigDecimal(fourN.toString()).ln())
-        .sub(new BigDecimal(factN.toString()).ln());
+        .ln(prec)
+        .add(BigDecimal.pi(prec).ln(prec).div(BigDecimal.TWO, prec), prec)
+        .sub(new BigDecimal(fourN.toString()).ln(prec), prec)
+        .sub(new BigDecimal(factN.toString()).ln(prec), prec);
     }
   }
 
@@ -1269,7 +1265,7 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
   // rational. Shifting to w ≈ p instead drops the floor far below tolerance, so
   // the tol break fires after only ≈0.4·p terms (a measured 3–5× fewer), at the
   // cost of more — but cheap — shift multiplications. (See ROADMAP B1.)
-  const p = BigDecimal.precision;
+  const p = prec;
   const guard = 10;
   const shiftTarget = Math.ceil(p);
   const zNum = z.toNumber();
@@ -1289,9 +1285,9 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
   for (let i = 0; i < m; i++) {
     if ((i & 0xff) === 0) checkDeadline(ce._deadlineFrame);
     shiftProduct = shiftProduct._mulToPrecision(w, p);
-    w = w.add(BigDecimal.ONE);
+    w = w.add(BigDecimal.ONE, prec);
   }
-  const logProduct = m > 0 ? shiftProduct.ln() : BigDecimal.ZERO;
+  const logProduct = m > 0 ? shiftProduct.ln(prec) : BigDecimal.ZERO;
 
   // The series converges (tol break) in ≈0.4·p terms at this shift; bound the
   // Bernoulli table generously above that rather than at the old π·w (which,
@@ -1301,20 +1297,26 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
 
   // Stirling: (w - 1/2)*ln(w) - w + ln(2*pi)/2 + sum B_{2k}/(2k*(2k-1)*w^{2k-1})
   let result = w
-    .sub(BigDecimal.HALF)
-    .mul(w.ln())
-    .sub(w)
-    .add(BigDecimal.PI.mul(BigDecimal.TWO).ln().div(BigDecimal.TWO));
+    .sub(BigDecimal.HALF, prec)
+    .mul(w.ln(prec))
+    .sub(w, prec)
+    .add(
+      BigDecimal.pi(prec)
+        .mul(BigDecimal.TWO)
+        .ln(prec)
+        .div(BigDecimal.TWO, prec),
+      prec
+    );
 
   // Evaluate Σ B_{2k}/(2k(2k-1)) · w^{-(2k-1)} forward, multiplying by a
   // precomputed u = 1/w² each step instead of dividing by the growing w^{2k-1}
   // (the Bernoulli coefficient's only division is then by its *small* integer
   // denominator). As above, round each running power/term back to p digits so
   // significands stay bounded.
-  const inv = BigDecimal.ONE.div(w); // 1/w
+  const inv = BigDecimal.ONE.div(w, prec); // 1/w
   const u = inv._mulToPrecision(inv, p); // 1/w²
   let pw = inv; // w^{-(2k-1)}, starting at w^{-1}
-  const tol = new BigDecimal(10).pow(-(p + guard));
+  const tol = new BigDecimal(10).pow(-(p + guard), prec);
   const nTerms = Math.min(maxTerms, bernoulliRationals.length);
   for (let k = 0; k < nTerms; k++) {
     // Each term divides by a Bernoulli rational of thousands of digits at a
@@ -1324,15 +1326,16 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
     const [bNum, bDen] = bernoulliRationals[k];
     const denom = BigInt(twoK) * BigInt(twoK - 1);
     const coeff = new BigDecimal(bNum.toString()).div(
-      new BigDecimal((bDen * denom).toString())
+      new BigDecimal((bDen * denom).toString()),
+      prec
     );
     const term = coeff._mulToPrecision(pw, p);
     if (k > 0 && term.abs().lt(tol)) break;
-    result = result.add(term);
+    result = result.add(term, prec);
     pw = pw._mulToPrecision(u, p);
   }
 
-  return result.sub(logProduct);
+  return result.sub(logProduct, prec);
 }
 
 /**
@@ -1354,23 +1357,24 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
 export function bigLnGammaRatio(
   ce: ComputeEngine,
   a: BigNum,
-  d: BigNum
+  d: BigNum,
+  prec: number
 ): BigNum | undefined {
-  const p = BigDecimal.precision;
-  const b = a.sub(d);
+  const p = prec;
+  const b = a.sub(d, prec);
   const minimum = new BigDecimal(Math.max(p, 20));
   if (a.lt(minimum) || b.lt(minimum)) return undefined;
-  return withGuardDigits(SPECIAL_FN_GUARD, () => {
-    const q = BigDecimal.precision;
+  return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) => {
+    const q = prec;
     const main = b
-      .sub(BigDecimal.HALF)
-      .mul(d.div(b).log1p())
-      .add(d.mul(a.ln().sub(BigDecimal.ONE)));
+      .sub(BigDecimal.HALF, prec)
+      .mul(d.div(b, prec).log1p(prec))
+      .add(d.mul(a.ln(prec).sub(BigDecimal.ONE, prec)), prec);
     const maxTerms = Math.max(20, Math.ceil(0.6 * q) + 20);
     const bernoulliRationals = getBernoulliRationals(ce, maxTerms);
-    const tol = new BigDecimal(10).pow(-(q + 10));
+    const tol = new BigDecimal(10).pow(-(q + 10), prec);
     const stirling = (w: BigNum): BigNum => {
-      const inv = BigDecimal.ONE.div(w);
+      const inv = BigDecimal.ONE.div(w, prec);
       const u = inv._mulToPrecision(inv, q);
       let pw = inv;
       let sum = BigDecimal.ZERO;
@@ -1379,16 +1383,17 @@ export function bigLnGammaRatio(
         const twoK = 2 * (k + 1);
         const [bNum, bDen] = bernoulliRationals[k];
         const coeff = new BigDecimal(bNum.toString()).div(
-          new BigDecimal((bDen * BigInt(twoK) * BigInt(twoK - 1)).toString())
+          new BigDecimal((bDen * BigInt(twoK) * BigInt(twoK - 1)).toString()),
+          prec
         );
         const term = coeff._mulToPrecision(pw, q);
         if (k > 0 && term.abs().lt(tol)) break;
-        sum = sum.add(term);
+        sum = sum.add(term, prec);
         pw = pw._mulToPrecision(u, q);
       }
       return sum;
     };
-    return main.add(stirling(a)).sub(stirling(b));
+    return main.add(stirling(a), prec).sub(stirling(b), prec);
   });
 }
 
@@ -1404,10 +1409,11 @@ export function bigLnGammaRatio(
 export function bigBinomialLogForm(
   ce: ComputeEngine,
   n: BigNum,
-  k: BigNum
+  k: BigNum,
+  prec: number
 ): BigNum | undefined {
-  const nPlus1 = n.add(BigDecimal.ONE);
-  const nk = n.sub(k);
+  const nPlus1 = n.add(BigDecimal.ONE, prec);
+  const nk = n.sub(k, prec);
   // A negative non-integer `n + 1`: `Γ(n+1)` and one of the two denominator
   // factors are reflected (`Γ(x) = π/(sin(πx)·Γ(1−x))`), which gives a
   // coefficient whose `Γ` arguments are positive:
@@ -1424,28 +1430,37 @@ export function bigBinomialLogForm(
   if (nPlus1.isNegative()) {
     if (n.isInteger()) return undefined;
     if (k.gt(nPlus1)) {
-      const c = bigBinomialLogForm(ce, k.sub(nPlus1), k);
+      const c = bigBinomialLogForm(ce, k.sub(nPlus1, prec), k, prec);
       if (c === undefined) return undefined;
-      return withGuardDigits(SPECIAL_FN_GUARD, () =>
-        bigSinPi(nk.add(BigDecimal.ONE)).div(bigSinPi(nPlus1)).mul(c)
+      return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
+        bigSinPi(nk.add(BigDecimal.ONE, prec), prec)
+          .div(bigSinPi(nPlus1, prec), prec)
+          .mul(c)
       );
     }
     if (k.lt(nPlus1)) {
-      const c = bigBinomialLogForm(ce, k.neg().sub(BigDecimal.ONE), nk);
+      const c = bigBinomialLogForm(
+        ce,
+        k.neg().sub(BigDecimal.ONE, prec),
+        nk,
+        prec
+      );
       if (c === undefined) return undefined;
-      return withGuardDigits(SPECIAL_FN_GUARD, () =>
-        bigSinPi(k.add(BigDecimal.ONE)).div(bigSinPi(nPlus1)).mul(c)
+      return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
+        bigSinPi(k.add(BigDecimal.ONE, prec), prec)
+          .div(bigSinPi(nPlus1, prec), prec)
+          .mul(c)
       );
     }
     // `k = n + 1`: `Γ(n−k+1) = Γ(0)` is a pole, and `C(n, k)` is `0`.
     return BigDecimal.ZERO;
   }
-  if (!nPlus1.isPositive() || !nk.add(BigDecimal.ONE).isPositive())
+  if (!nPlus1.isPositive() || !nk.add(BigDecimal.ONE, prec).isPositive())
     return undefined;
   // The logarithm is computed with guard digits: `exp` turns its absolute
   // error into a relative error of the result, and the logarithm of a large
   // coefficient has many digits before the decimal point.
-  return withGuardDigits(SPECIAL_FN_GUARD, () => {
+  return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) => {
     // A negative `k` uses the reflection formula
     // `1/Γ(k+1) = sin(π(k+1))·Γ(−k)/π`, so that
     // `C(n, k) = sin(π(k+1))/π · Γ(n+1)·Γ(−k)/Γ(n−k+1)`. The three `Γ`
@@ -1459,28 +1474,31 @@ export function bigBinomialLogForm(
     // `π·(k+1)` has no correct digits for a large `|k|`.
     if (k.isNegative()) {
       // A negative integer `k` is a pole of `Γ(k+1)`, and `Γ(n+1)` is finite.
-      if (k.sub(k.floor()).isZero()) return BigDecimal.ZERO;
+      if (k.sub(k.floor(), prec).isZero()) return BigDecimal.ZERO;
       const minusK = k.neg();
       const [small, large] = nPlus1.lt(minusK)
         ? [nPlus1, minusK]
         : [minusK, nPlus1];
-      const sum = nk.add(BigDecimal.ONE);
+      const sum = nk.add(BigDecimal.ONE, prec);
       const lnRatio =
-        bigLnGammaRatio(ce, sum, small) ??
-        bigGammaln(ce, sum).sub(bigGammaln(ce, large));
-      const sine = bigSinPi(k.add(BigDecimal.ONE));
-      return bigGammaln(ce, small)
-        .sub(lnRatio)
-        .exp()
+        bigLnGammaRatio(ce, sum, small, prec) ??
+        bigGammaln(ce, sum, prec).sub(bigGammaln(ce, large, prec), prec);
+      const sine = bigSinPi(k.add(BigDecimal.ONE, prec), prec);
+      return bigGammaln(ce, small, prec)
+        .sub(lnRatio, prec)
+        .exp(prec)
         .mul(sine)
-        .div(BigDecimal.PI);
+        .div(BigDecimal.pi(prec), prec);
     }
     const small = k.lt(nk) ? k : nk;
     const large = k.lt(nk) ? nk : k;
     const lnRatio =
-      bigLnGammaRatio(ce, nPlus1, small) ??
-      bigGammaln(ce, nPlus1).sub(bigGammaln(ce, large.add(BigDecimal.ONE)));
-    const smallPlus1 = small.add(BigDecimal.ONE);
+      bigLnGammaRatio(ce, nPlus1, small, prec) ??
+      bigGammaln(ce, nPlus1, prec).sub(
+        bigGammaln(ce, large.add(BigDecimal.ONE, prec), prec),
+        prec
+      );
+    const smallPlus1 = small.add(BigDecimal.ONE, prec);
     // Γ is positive for a positive argument; on (−m−1, −m) its sign is
     // (−1)^(m+1).
     // The parity is read as a bigint: `toNumber()` rounds a floor above
@@ -1488,7 +1506,7 @@ export function bigBinomialLogForm(
     const negativeGamma =
       smallPlus1.isNegative() &&
       BigInt(smallPlus1.floor().toFixed(0)) % 2n !== 0n;
-    const value = lnRatio.sub(bigGammaln(ce, smallPlus1)).exp();
+    const value = lnRatio.sub(bigGammaln(ce, smallPlus1, prec), prec).exp(prec);
     return negativeGamma ? value.neg() : value;
   });
 }
@@ -1503,22 +1521,22 @@ export function bigBinomialLogForm(
  * `m` is read as a bigint: `toNumber()` rounds an integer above 2^53 to an
  * even double.
  */
-function bigSinPi(x: BigNum): BigNum {
+function bigSinPi(x: BigNum, prec: number): BigNum {
   const m = x.round();
-  const f = x.sub(m);
+  const f = x.sub(m, prec);
   if (f.isZero()) return BigDecimal.ZERO;
-  const s = BigDecimal.PI.mul(f).sin();
+  const s = BigDecimal.pi(prec).mul(f).sin(prec);
   return BigInt(m.toFixed(0)) % 2n !== 0n ? s.neg() : s;
 }
 
 /**
- * Bignum Gamma function.  Precision scales with BigDecimal.precision.
+ * Bignum Gamma function.  Precision scales with `prec`.
  *
  * Reflection for z < 0.5; general case delegates to exp(bigGammaln(z)).
  * Note: integer fast paths are in bigGammaln (returning exact ln(n!)).
  * bigGamma goes through exp(ln(...)) so the result is a full-precision float.
  */
-export function bigGamma(ce: ComputeEngine, z: BigNum): BigNum {
+export function bigGamma(ce: ComputeEngine, z: BigNum, prec: number): BigNum {
   // Exact: positive integer → (z-1)! (precision-independent, skip the
   // guard). Beyond MAX_EXACT_FACTORIAL_N, fall through to the general path.
   if (z.isInteger() && z.isPositive()) {
@@ -1533,7 +1551,9 @@ export function bigGamma(ce: ComputeEngine, z: BigNum): BigNum {
       return new BigDecimal(fact.toString());
     }
   }
-  const result = withGuardDigits(SPECIAL_FN_GUARD, () => gammaCore(ce, z));
+  const result = withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
+    gammaCore(ce, z, prec)
+  );
   // Γ has no zero at a finite argument. A zero result means the value is
   // smaller than the smallest representable number (from about z = −10^15, by
   // reflection), so answer NaN, not a value that a caller could use (CE-180.3).
@@ -1541,21 +1561,24 @@ export function bigGamma(ce: ComputeEngine, z: BigNum): BigNum {
   return result;
 }
 
-function gammaCore(ce: ComputeEngine, z: BigNum): BigNum {
+function gammaCore(ce: ComputeEngine, z: BigNum, prec: number): BigNum {
   // Reflection for z < 0.5: Gamma(z) = pi / (sin(pi*z) * Gamma(1-z))
   if (z.lt(BigDecimal.HALF)) {
     // `sin(π·z)` from the distance of z to the nearest integer
     // (`bigSinPi`). Computed as the sine of the product π·z, it lost about
     // −log10|z − round(z)| digits near a negative integer:
     // Γ(−1.(45 nines)) at 50 digits had 33 correct digits.
-    const pi = BigDecimal.PI;
-    const sinPiZ = bigSinPi(z);
+    const pi = BigDecimal.pi(prec);
+    const sinPiZ = bigSinPi(z, prec);
     if (sinPiZ.isZero()) return BigDecimal.NAN;
-    return pi.div(sinPiZ.mul(gammaCore(ce, BigDecimal.ONE.sub(z))));
+    return pi.div(
+      sinPiZ.mul(gammaCore(ce, BigDecimal.ONE.sub(z, prec), prec)),
+      prec
+    );
   }
 
   // General case
-  return gammalnCore(ce, z).exp();
+  return gammalnCore(ce, z, prec).exp(prec);
 }
 
 function gcdBigint(a: bigint, b: bigint): bigint {
@@ -1717,12 +1740,14 @@ export function getBernoulliRationals(
  * Same algorithm as machine `digamma`: reflection for negative z,
  * recurrence to shift z > 7, then asymptotic expansion with Bernoulli numbers.
  */
-export function bigDigamma(ce: ComputeEngine, z: BigNum): BigNum {
+export function bigDigamma(ce: ComputeEngine, z: BigNum, prec: number): BigNum {
   if (!z.isFinite()) return BigDecimal.NAN;
-  return withGuardDigits(SPECIAL_FN_GUARD, () => digammaCore(ce, z));
+  return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
+    digammaCore(ce, z, prec)
+  );
 }
 
-function digammaCore(ce: ComputeEngine, z: BigNum): BigNum {
+function digammaCore(ce: ComputeEngine, z: BigNum, prec: number): BigNum {
   // Reflection formula for negative values: ψ(1-z) = ψ(z) + π·cot(πz)
   if (z.isNegative()) {
     if (z.isInteger()) return BigDecimal.NAN; // poles at non-positive integers
@@ -1730,15 +1755,18 @@ function digammaCore(ce: ComputeEngine, z: BigNum): BigNum {
     // The sine of the product π·z lost about −log10|f| digits near a
     // negative integer (ψ(−1.(45 nines)) at 50 digits had 33 correct
     // digits).
-    const pi = BigDecimal.PI;
-    const piF = pi.mul(z.sub(z.round()));
-    const cotPiZ = piF.cos().div(piF.sin());
-    return digammaCore(ce, BigDecimal.ONE.sub(z)).sub(pi.mul(cotPiZ));
+    const pi = BigDecimal.pi(prec);
+    const piF = pi.mul(z.sub(z.round(), prec));
+    const cotPiZ = piF.cos(prec).div(piF.sin(prec), prec);
+    return digammaCore(ce, BigDecimal.ONE.sub(z, prec), prec).sub(
+      pi.mul(cotPiZ),
+      prec
+    );
   }
 
   if (z.isZero()) return BigDecimal.NAN; // pole
 
-  const p = BigDecimal.precision;
+  const p = prec;
   const guard = 10;
   // Shift to w ≈ p (not the old 0.37·p, which left the asymptotic series' floor
   // at the target tolerance, forcing it to run its full ≈π·w terms). The larger
@@ -1749,8 +1777,8 @@ function digammaCore(ce: ComputeEngine, z: BigNum): BigNum {
   let result = new BigDecimal(0);
   let w = z;
   while (w.lt(shift)) {
-    result = result.sub(BigDecimal.ONE.div(w));
-    w = w.add(BigDecimal.ONE);
+    result = result.sub(BigDecimal.ONE.div(w, prec), prec);
+    w = w.add(BigDecimal.ONE, prec);
   }
 
   const maxTerms = Math.max(20, Math.ceil(0.6 * p) + 20);
@@ -1760,19 +1788,22 @@ function digammaCore(ce: ComputeEngine, z: BigNum): BigNum {
   // Round the running power w^{2k} each step: `mul` keeps the full product, so an
   // un-rounded accumulator grows ~p digits per step and the loop becomes
   // quadratic (see `gammalnCore`).
-  result = result.add(w.ln()).sub(BigDecimal.ONE.div(w.mul(2)));
+  result = result
+    .add(w.ln(prec), prec)
+    .sub(BigDecimal.ONE.div(w.mul(2), prec), prec);
   let w2k = w._mulToPrecision(w, p); // w^2
   const w2 = w2k;
-  const tol = new BigDecimal(10).pow(-(p + guard));
+  const tol = new BigDecimal(10).pow(-(p + guard), prec);
   const nTerms = Math.min(maxTerms, bernoulli.length);
   for (let k = 0; k < nTerms; k++) {
     const [bNum, bDen] = bernoulli[k];
     const twoK = BigInt(2 * (k + 1));
     const term = new BigDecimal(bNum.toString()).div(
-      new BigDecimal((bDen * twoK).toString()).mul(w2k)
+      new BigDecimal((bDen * twoK).toString()).mul(w2k),
+      prec
     );
     if (k > 0 && term.abs().lt(tol)) break;
-    result = result.sub(term);
+    result = result.sub(term, prec);
     w2k = w2k._mulToPrecision(w2, p);
   }
 
@@ -1783,29 +1814,35 @@ function digammaCore(ce: ComputeEngine, z: BigNum): BigNum {
  * Bignum Trigamma function ψ₁(z) = d/dz ψ(z) = d²/dz² ln(Γ(z))
  * Same recurrence/asymptotic structure as digamma but for the second derivative.
  */
-export function bigTrigamma(ce: ComputeEngine, z: BigNum): BigNum {
+export function bigTrigamma(
+  ce: ComputeEngine,
+  z: BigNum,
+  prec: number
+): BigNum {
   if (!z.isFinite()) return BigDecimal.NAN;
-  return withGuardDigits(SPECIAL_FN_GUARD, () => trigammaCore(ce, z));
+  return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
+    trigammaCore(ce, z, prec)
+  );
 }
 
-function trigammaCore(ce: ComputeEngine, z: BigNum): BigNum {
+function trigammaCore(ce: ComputeEngine, z: BigNum, prec: number): BigNum {
   // Reflection formula: ψ₁(1-z) + ψ₁(z) = π²/sin²(πz)
   if (z.isNegative()) {
     if (z.isInteger()) return BigDecimal.NAN;
     // `sin(π·z)` from the distance of z to the nearest integer
     // (`bigSinPi`): the sine of the product π·z loses digits near a
     // negative integer.
-    const pi = BigDecimal.PI;
-    const s = bigSinPi(z);
+    const pi = BigDecimal.pi(prec);
+    const s = bigSinPi(z, prec);
     return pi
       .mul(pi)
-      .div(s.mul(s))
-      .sub(trigammaCore(ce, BigDecimal.ONE.sub(z)));
+      .div(s.mul(s), prec)
+      .sub(trigammaCore(ce, BigDecimal.ONE.sub(z, prec), prec), prec);
   }
 
   if (z.isZero()) return BigDecimal.NAN; // pole
 
-  const p = BigDecimal.precision;
+  const p = prec;
   const guard = 10;
   // Shift to w ≈ p so the asymptotic series converges in ≈0.4·p terms rather
   // than running its full ≈π·w (see `gammalnCore`).
@@ -1815,8 +1852,8 @@ function trigammaCore(ce: ComputeEngine, z: BigNum): BigNum {
   let result = new BigDecimal(0);
   let w = z;
   while (w.lt(shift)) {
-    result = result.add(BigDecimal.ONE.div(w.mul(w)));
-    w = w.add(BigDecimal.ONE);
+    result = result.add(BigDecimal.ONE.div(w.mul(w), prec), prec);
+    w = w.add(BigDecimal.ONE, prec);
   }
 
   const maxTerms = Math.max(20, Math.ceil(0.6 * p) + 20);
@@ -1824,19 +1861,20 @@ function trigammaCore(ce: ComputeEngine, z: BigNum): BigNum {
 
   // Asymptotic: ψ₁(w) ~ 1/w + 1/(2w²) + Σ B_{2k}/w^{2k+1}. Round the running
   // power each step (un-rounded `mul` grows the significand; see `gammalnCore`).
-  result = result.add(BigDecimal.ONE.div(w));
-  result = result.add(BigDecimal.ONE.div(w.mul(w).mul(2)));
+  result = result.add(BigDecimal.ONE.div(w, prec), prec);
+  result = result.add(BigDecimal.ONE.div(w.mul(w).mul(2), prec), prec);
   let w2kp1 = w.mul(w)._mulToPrecision(w, p); // w^3
   const w2 = w._mulToPrecision(w, p);
-  const tol = new BigDecimal(10).pow(-(p + guard));
+  const tol = new BigDecimal(10).pow(-(p + guard), prec);
   const nTerms = Math.min(maxTerms, bernoulli.length);
   for (let k = 0; k < nTerms; k++) {
     const [bNum, bDen] = bernoulli[k];
     const term = new BigDecimal(bNum.toString()).div(
-      new BigDecimal(bDen.toString()).mul(w2kp1)
+      new BigDecimal(bDen.toString()).mul(w2kp1),
+      prec
     );
     if (k > 0 && term.abs().lt(tol)) break;
-    result = result.add(term);
+    result = result.add(term, prec);
     w2kp1 = w2kp1._mulToPrecision(w2, p);
   }
 
@@ -1853,18 +1891,30 @@ function trigammaCore(ce: ComputeEngine, z: BigNum): BigNum {
  * an order of 10⁵ runs for minutes. The complex kernel `polygammaComplex`
  * uses the same limit.
  */
-export function bigPolygamma(ce: ComputeEngine, n: BigNum, z: BigNum): BigNum {
+export function bigPolygamma(
+  ce: ComputeEngine,
+  n: BigNum,
+  z: BigNum,
+  prec: number
+): BigNum {
   const nNum = n.toNumber();
   if (!Number.isInteger(nNum) || nNum < 0 || nNum > POLYGAMMA_MAX_ORDER)
     return BigDecimal.NAN;
-  if (nNum === 0) return bigDigamma(ce, z); // already guarded
-  if (nNum === 1) return bigTrigamma(ce, z); // already guarded
+  if (nNum === 0) return bigDigamma(ce, z, prec); // already guarded
+  if (nNum === 1) return bigTrigamma(ce, z, prec); // already guarded
   if (!z.isFinite() || z.isZero()) return BigDecimal.NAN;
-  return withGuardDigits(SPECIAL_FN_GUARD, () => polygammaCore(ce, nNum, z));
+  return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
+    polygammaCore(ce, nNum, z, prec)
+  );
 }
 
-function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
-  const p = BigDecimal.precision;
+function polygammaCore(
+  ce: ComputeEngine,
+  nNum: number,
+  z: BigNum,
+  prec: number
+): BigNum {
+  const p = prec;
   const guard = 10;
 
   // Bignum factorial helper. Rounded at each step: the exact m! has about
@@ -1895,9 +1945,10 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
   const bigFactN = bigFactorial(nNum);
   while (w.lt(shift)) {
     result = result.add(
-      new BigDecimal(sign).mul(bigFactN).div(w.pow(nNum + 1))
+      new BigDecimal(sign).mul(bigFactN).div(w.pow(nNum + 1, prec), prec),
+      prec
     );
-    w = w.add(BigDecimal.ONE);
+    w = w.add(BigDecimal.ONE, prec);
   }
 
   const maxTerms = Math.max(20, Math.ceil(0.6 * p) + 20);
@@ -1910,19 +1961,23 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
   const signA = nNum % 2 === 0 ? -1 : 1; // (−1)^{n−1}
   // (n−1)!, also used by the Bernoulli-term coefficients below
   const factNm1 = bigFactorial(nNum - 1);
-  result = result.add(new BigDecimal(signA).mul(factNm1).div(w.pow(nNum)));
   result = result.add(
-    new BigDecimal(signA).mul(bigFactN).div(w.pow(nNum + 1).mul(2))
+    new BigDecimal(signA).mul(factNm1).div(w.pow(nNum, prec), prec),
+    prec
+  );
+  result = result.add(
+    new BigDecimal(signA).mul(bigFactN).div(w.pow(nNum + 1, prec).mul(2), prec),
+    prec
   );
 
   // Higher-order terms using Bernoulli numbers. Round the running power each
   // step (un-rounded `mul` grows the significand; see `gammalnCore`).
-  let wPow = w.pow(nNum + 2).toPrecision(p);
+  let wPow = w.pow(nNum + 2, prec).toPrecision(p);
   const w2 = w._mulToPrecision(w, p);
   // The tolerance is relative to the result: an absolute one stopped the
   // series after one term when |ψ⁽ⁿ⁾| is small (ψ⁽²⁰⁰⁾(300) ≈ −2·10⁻¹²³ was
   // right to 4 digits only).
-  const tol = result.abs().mul(new BigDecimal(10).pow(-(p + guard)));
+  const tol = result.abs().mul(new BigDecimal(10).pow(-(p + guard), prec));
   const nTerms = Math.min(maxTerms, bernoulli.length);
   for (let k = 0; k < nTerms; k++) {
     const m = 2 * (k + 1);
@@ -1937,9 +1992,9 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
     // term = signA * B_{2k} * (2k+n−1)! / ((2k)! * w^{n+2k})
     const term = new BigDecimal((BigInt(signA) * bNum).toString())
       .mul(coeff)
-      .div(new BigDecimal((bDen * factM).toString()).mul(wPow));
+      .div(new BigDecimal((bDen * factM).toString()).mul(wPow), prec);
     if (k > 0 && term.abs().lt(tol)) break;
-    result = result.add(term);
+    result = result.add(term, prec);
     wPow = wPow._mulToPrecision(w2, p);
   }
 
@@ -1950,7 +2005,12 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
  * Bignum Beta function B(a, b) = Γ(a)Γ(b)/Γ(a+b)
  * Uses bigGamma directly. The poles of Γ(a + b) are answered as in `beta()`.
  */
-export function bigBeta(ce: ComputeEngine, a: BigNum, b: BigNum): BigNum {
+export function bigBeta(
+  ce: ComputeEngine,
+  a: BigNum,
+  b: BigNum,
+  prec: number
+): BigNum {
   if (a.isInteger() && b.isInteger()) {
     const [n, m] =
       !a.isPositive() && b.isPositive()
@@ -1960,18 +2020,18 @@ export function bigBeta(ce: ComputeEngine, a: BigNum, b: BigNum): BigNum {
           : [];
     if (n !== undefined && m !== undefined) {
       if (n.lt(m)) return BigDecimal.NAN;
-      const r = bigBeta(ce, m, n.sub(m).add(BigDecimal.ONE));
+      const r = bigBeta(ce, m, n.sub(m, prec).add(BigDecimal.ONE, prec), prec);
       return m.toBigInt() % 2n === 0n ? r : r.neg();
     }
   }
   // `add()` is exact, so an integer sum is a pole of Γ(a + b).
-  const s = a.add(b);
+  const s = a.add(b, prec);
   if (s.isInteger() && !s.isPositive() && !a.isInteger() && !b.isInteger())
     return BigDecimal.ZERO;
-  return withGuardDigits(SPECIAL_FN_GUARD, () =>
-    gammaCore(ce, a)
-      .mul(gammaCore(ce, b))
-      .div(gammaCore(ce, a.add(b)))
+  return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
+    gammaCore(ce, a, prec)
+      .mul(gammaCore(ce, b, prec))
+      .div(gammaCore(ce, a.add(b, prec), prec), prec)
   );
 }
 
@@ -1990,26 +2050,40 @@ export function bigBeta(ce: ComputeEngine, a: BigNum, b: BigNum): BigNum {
 /** The power series Σ xⁿ / (a(a+1)…(a+n)) of the lower incomplete gamma,
  *  without its prefactor: γ(a, x) = xᵃ e⁻ˣ · (this sum). Converges for every
  *  real `a` that is not a non-positive integer and every x ≥ 0. */
-function bigGammaPSeriesSum(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
-  const p = BigDecimal.precision;
-  const tol = new BigDecimal(10).pow(-p);
+function bigGammaPSeriesSum(
+  ce: ComputeEngine,
+  a: BigNum,
+  x: BigNum,
+  prec: number
+): BigNum {
+  const p = prec;
+  const tol = new BigDecimal(10).pow(-p, prec);
   let ap = a;
-  let del = BigDecimal.ONE.div(a);
+  let del = BigDecimal.ONE.div(a, prec);
   let sum = del;
   const maxTerms = 2000 + 20 * Math.ceil(Math.abs(x.toNumber())) + 20 * p;
   for (let n = 0; n < maxTerms; n++) {
     if ((n & 0xff) === 0) checkDeadline(ce._deadlineFrame);
-    ap = ap.add(BigDecimal.ONE);
-    del = del.mul(x).div(ap);
-    sum = sum.add(del);
+    ap = ap.add(BigDecimal.ONE, prec);
+    del = del.mul(x).div(ap, prec);
+    sum = sum.add(del, prec);
     if (del.abs().lt(sum.abs().mul(tol))) break;
   }
   return sum;
 }
 
-function bigGammaPSeries(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
-  const prefactor = a.mul(x.ln()).sub(x).sub(gammalnCore(ce, a)).exp();
-  return bigGammaPSeriesSum(ce, a, x).mul(prefactor);
+function bigGammaPSeries(
+  ce: ComputeEngine,
+  a: BigNum,
+  x: BigNum,
+  prec: number
+): BigNum {
+  const prefactor = a
+    .mul(x.ln(prec))
+    .sub(x, prec)
+    .sub(gammalnCore(ce, a, prec), prec)
+    .exp(prec);
+  return bigGammaPSeriesSum(ce, a, x, prec).mul(prefactor);
 }
 
 /** Upper regularized gamma Q(a,x) = Γ(a, x)/Γ(a) for x > 0 and an order
@@ -2026,15 +2100,31 @@ function bigGammaPSeries(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
  *  for a > 0: Γ(a, x) and Γ(a) can each be out of the BigDecimal exponent
  *  range when Q is not (Q(10¹⁵, 2.1·10¹⁵) ≈ 2.08·10⁻¹⁵⁵⁵⁰⁴⁶³⁵³⁵⁹⁶⁶⁶, while
  *  Γ(10¹⁵) is about 10^(1.4·10¹⁶)). */
-function bigGammaQUpperTail(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
-  const fraction = bigUpperGammaFraction(ce, a, x);
+function bigGammaQUpperTail(
+  ce: ComputeEngine,
+  a: BigNum,
+  x: BigNum,
+  prec: number
+): BigNum {
+  const fraction = bigUpperGammaFraction(ce, a, x, prec);
   if (fraction !== undefined) {
     const prefactor = a.isPositive()
-      ? a.mul(x.ln()).sub(x).sub(gammalnCore(ce, a)).exp()
-      : a.mul(x.ln()).sub(x).exp().div(bigGamma(ce, a));
+      ? a
+          .mul(x.ln(prec))
+          .sub(x, prec)
+          .sub(gammalnCore(ce, a, prec), prec)
+          .exp(prec)
+      : a
+          .mul(x.ln(prec))
+          .sub(x, prec)
+          .exp(prec)
+          .div(bigGamma(ce, a, prec), prec);
     return prefactor.mul(fraction);
   }
-  return bigUpperGammaBySubtraction(ce, a, x).div(bigGamma(ce, a));
+  return bigUpperGammaBySubtraction(ce, a, x, prec).div(
+    bigGamma(ce, a, prec),
+    prec
+  );
 }
 
 /** The Legendre continued fraction of the upper incomplete gamma (Lentz),
@@ -2044,32 +2134,33 @@ function bigGammaQUpperTail(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
 function bigGammaQContinuedFractionValue(
   ce: ComputeEngine,
   a: BigNum,
-  x: BigNum
+  x: BigNum,
+  prec: number
 ): BigNum {
-  const p = BigDecimal.precision;
-  const tol = new BigDecimal(10).pow(-p);
-  const tiny = new BigDecimal(10).pow(-(2 * p));
-  let b = x.add(BigDecimal.ONE).sub(a);
-  let c = BigDecimal.ONE.div(tiny);
-  let d = BigDecimal.ONE.div(b);
+  const p = prec;
+  const tol = new BigDecimal(10).pow(-p, prec);
+  const tiny = new BigDecimal(10).pow(-(2 * p), prec);
+  let b = x.add(BigDecimal.ONE, prec).sub(a, prec);
+  let c = BigDecimal.ONE.div(tiny, prec);
+  let d = BigDecimal.ONE.div(b, prec);
   let h = d;
   let settled = 0;
   const maxTerms = 2000 + 20 * p;
   for (let i = 1; i < maxTerms; i++) {
     if ((i & 0xff) === 0) checkDeadline(ce._deadlineFrame);
-    const an = new BigDecimal(i).sub(a).mul(-i); // −i·(i−a)
-    b = b.add(BigDecimal.TWO);
-    d = an.mul(d).add(b);
+    const an = new BigDecimal(i).sub(a, prec).mul(-i); // −i·(i−a)
+    b = b.add(BigDecimal.TWO, prec);
+    d = an.mul(d).add(b, prec);
     if (d.abs().lt(tiny)) d = tiny;
-    c = b.add(an.div(c));
+    c = b.add(an.div(c, prec), prec);
     if (c.abs().lt(tiny)) c = tiny;
-    d = BigDecimal.ONE.div(d);
+    d = BigDecimal.ONE.div(d, prec);
     const del = d.mul(c);
     // A product of BigDecimal values is exact, so without the rounding the
     // digits of `h` grew by about 2p at each term: 1.9 million digits after
     // the 1963 terms of Γ(10⁴, 10001) at 524 digits, which took 4 s.
     h = h.mul(del).toPrecision(p);
-    settled = del.sub(BigDecimal.ONE).abs().lt(tol) ? settled + 1 : 0;
+    settled = del.sub(BigDecimal.ONE, prec).abs().lt(tol) ? settled + 1 : 0;
     if (settled >= GAMMA_CF_CONSECUTIVE) return h;
   }
   return BigDecimal.NAN;
@@ -2104,23 +2195,24 @@ const INCOMPLETE_GAMMA_MIN_MAGNITUDE = -100_000;
 function tinyGammaPLeadingTerm(
   ce: ComputeEngine,
   a: BigNum,
-  x: BigNum
+  x: BigNum,
+  prec: number
 ): { log: BigNum; negative: boolean } | undefined {
-  const a1 = a.add(BigDecimal.ONE);
+  const a1 = a.add(BigDecimal.ONE, prec);
   // For a > −1 the smallest |a + k| is a + 1. Below, it is the distance of
   // `a` to the nearest integer, which is then −k for a k ≥ 1.
   const d = a.gt(BigDecimal.NEGATIVE_ONE)
     ? a1
-    : a.sub(a.floor()).lt(a.ceil().sub(a))
-      ? a.sub(a.floor())
-      : a.ceil().sub(a);
+    : a.sub(a.floor(), prec).lt(a.ceil().sub(a, prec))
+      ? a.sub(a.floor(), prec)
+      : a.ceil().sub(a, prec);
   if (d.isZero()) return undefined;
   const bound = decimalMagnitude(x) + Math.max(0, 1 - decimalMagnitude(d)) + 1;
-  if (bound > -BigDecimal.precision - 1) return undefined;
-  const log = a.mul(x.ln()).sub(gammalnOnePlus(ce, a));
+  if (bound > -prec - 1) return undefined;
+  const log = a.mul(x.ln(prec)).sub(gammalnOnePlus(ce, a, prec), prec);
   // For a + 1 < 1/2, Γ(a + 1) = π/(sin(π(a + 1))·Γ(−a)) with Γ(−a) > 0, so
   // its sign is the sign of sin(π(a + 1)). Above, Γ(a + 1) is positive.
-  const negative = a1.lt(BigDecimal.HALF) && bigSinPi(a1).isNegative();
+  const negative = a1.lt(BigDecimal.HALF) && bigSinPi(a1, prec).isNegative();
   return { log, negative };
 }
 
@@ -2138,23 +2230,19 @@ function tinyGammaPLeadingTerm(
  * terms: the first term left out is below 10^(−2·precision) relative to the
  * sum.
  */
-function gammalnOnePlus(ce: ComputeEngine, a: BigNum): BigNum {
+function gammalnOnePlus(ce: ComputeEngine, a: BigNum, prec: number): BigNum {
   if (a.isZero()) return BigDecimal.ZERO;
   const mag = decimalMagnitude(a);
-  const a1 = a.add(BigDecimal.ONE);
-  if (mag > 0) return gammalnCore(ce, a1);
-  const saved = BigDecimal.precision;
-  if (-mag > saved) {
+  const a1 = a.add(BigDecimal.ONE, prec);
+  if (mag > 0) return gammalnCore(ce, a1, prec);
+  if (-mag > prec) {
     // ζ(2)/2 = π²/12
-    const halfZeta2 = BigDecimal.PI.mul(BigDecimal.PI).div(12);
-    return a.mul(a.mul(halfZeta2).sub(BigDecimal.EULER_GAMMA));
+    const halfZeta2 = BigDecimal.pi(prec)
+      .mul(BigDecimal.pi(prec))
+      .div(12, prec);
+    return a.mul(a.mul(halfZeta2).sub(BigDecimal.eulerGamma(prec), prec));
   }
-  BigDecimal.precision = saved - mag + 2;
-  try {
-    return gammalnCore(ce, a1).toPrecision(saved);
-  } finally {
-    BigDecimal.precision = saved;
-  }
+  return gammalnCore(ce, a1, prec - mag + 2).toPrecision(prec);
 }
 
 /** The upper regularized gamma Q(a, x) = 1 − P(a, x) from the leading term
@@ -2163,54 +2251,67 @@ function gammalnOnePlus(ce: ComputeEngine, a: BigNum): BigNum {
  *  close to 1 (a tiny order) does not lose digits to the subtraction, and
  *  Q = 1 + exp(log) when it is negative. Called inside the guard-digit
  *  context. */
-function tinyGammaQ(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
-  const term = tinyGammaPLeadingTerm(ce, a, x);
+function tinyGammaQ(
+  ce: ComputeEngine,
+  a: BigNum,
+  x: BigNum,
+  prec: number
+): BigNum {
+  const term = tinyGammaPLeadingTerm(ce, a, x, prec);
   if (term === undefined) return BigDecimal.NAN;
   return term.negative
-    ? BigDecimal.ONE.add(term.log.exp())
-    : term.log.expm1().neg();
+    ? BigDecimal.ONE.add(term.log.exp(prec), prec)
+    : term.log.expm1(prec).neg();
 }
 
 /**
  * Bignum upper regularized incomplete gamma Q(a, x) = Γ(a, x)/Γ(a) for a
  * NEGATIVE NON-INTEGER order `a` and x > 0, where Γ(a) is finite and of
  * either sign (`bigGammaQUpperTail`). Precision scales with
- * `BigDecimal.precision`. Returns NaN outside that domain.
+ * `prec`. Returns NaN outside that domain.
  */
 export function bigGammaQNegativeOrder(
   ce: ComputeEngine,
   a: BigNum,
-  x: BigNum
+  x: BigNum,
+  prec: number
 ): BigNum {
   if (a.isNaN() || x.isNaN()) return BigDecimal.NAN;
   if (!a.isFinite() || !x.isFinite()) return BigDecimal.NAN;
   if (!a.isNegative() || a.isInteger()) return BigDecimal.NAN;
   if (!x.isPositive()) return BigDecimal.NAN;
   if (decimalMagnitude(x) < INCOMPLETE_GAMMA_MIN_MAGNITUDE)
-    return withGuardDigits(SPECIAL_FN_GUARD, () => tinyGammaQ(ce, a, x));
-  return withGuardDigits(SPECIAL_FN_GUARD, () => {
-    const tail = bigGammaQUpperTail(ce, a, x);
+    return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
+      tinyGammaQ(ce, a, x, prec)
+    );
+  return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) => {
+    const tail = bigGammaQUpperTail(ce, a, x, prec);
     // A tiny order at a small x: the upper tail declines, and the leading
     // term of P gives Q when x is small enough (`bigGammaQ`).
-    return tail.isNaN() ? tinyGammaQ(ce, a, x) : tail;
+    return tail.isNaN() ? tinyGammaQ(ce, a, x, prec) : tail;
   });
 }
 
 /**
  * Bignum lower regularized incomplete gamma P(a,x) = γ(a,x)/Γ(a), for a > 0
- * and x ≥ 0. Precision scales with `BigDecimal.precision`. Returns a NaN
+ * and x ≥ 0. Precision scales with `prec`. Returns a NaN
  * BigNum outside the validated domain.
  */
-export function bigGammaP(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
+export function bigGammaP(
+  ce: ComputeEngine,
+  a: BigNum,
+  x: BigNum,
+  prec: number
+): BigNum {
   if (a.isNaN() || x.isNaN()) return BigDecimal.NAN;
   if (!a.isFinite() || !x.isFinite()) return BigDecimal.NAN;
   if (!a.isPositive()) return BigDecimal.NAN;
   if (x.isNegative()) return BigDecimal.NAN;
   if (x.isZero()) return BigDecimal.ZERO;
   if (decimalMagnitude(x) < INCOMPLETE_GAMMA_MIN_MAGNITUDE)
-    return withGuardDigits(SPECIAL_FN_GUARD, () => {
-      const term = tinyGammaPLeadingTerm(ce, a, x);
-      return term === undefined ? BigDecimal.NAN : term.log.exp();
+    return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) => {
+      const term = tinyGammaPLeadingTerm(ce, a, x, prec);
+      return term === undefined ? BigDecimal.NAN : term.log.exp(prec);
     });
   // Series when x < 2a+2, 1 − Q otherwise (Q is then small, so the
   // subtraction loses nothing; `bigGammaQUpperTail`). The band just above
@@ -2218,10 +2319,10 @@ export function bigGammaP(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
   // slowest (linearly, ~x/digit near x = a+1) — at high precision the power
   // series, which needs only ≈(x−a)+O(p) terms there, is far cheaper, so this
   // boundary is pushed out well past NR's machine-precision x = a+1.
-  return withGuardDigits(SPECIAL_FN_GUARD, () =>
-    x.lt(a.mul(2).add(BigDecimal.TWO))
-      ? bigGammaPSeries(ce, a, x)
-      : BigDecimal.ONE.subBounded(bigGammaQUpperTail(ce, a, x))
+  return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
+    x.lt(a.mul(2).add(BigDecimal.TWO, prec))
+      ? bigGammaPSeries(ce, a, x, prec)
+      : BigDecimal.ONE.subBounded(bigGammaQUpperTail(ce, a, x, prec), prec)
   );
 }
 
@@ -2243,7 +2344,7 @@ const BIG_CANCELLED_MIN = new BigDecimal(`1e-${SPECIAL_FN_GUARD - 4}`);
 
 /**
  * Bignum upper regularized incomplete gamma Q(a,x) = Γ(a,x)/Γ(a) = 1 − P(a,x),
- * for a > 0 and x ≥ 0. Precision scales with `BigDecimal.precision`. Below
+ * for a > 0 and x ≥ 0. Precision scales with `prec`. Below
  * x = 2a+2 the series is cheaper (see bigGammaP), and Q = 1 − P is taken from
  * it while Q is at least `BIG_GAMMA_Q_SERIES_MIN`; a smaller Q, and every
  * x ≥ 2a+2, comes from Γ(a, x)/Γ(a) directly (`bigGammaQUpperTail`) so the
@@ -2252,28 +2353,35 @@ const BIG_CANCELLED_MIN = new BigDecimal(`1e-${SPECIAL_FN_GUARD - 4}`);
  * is kept while it is at least `BIG_CANCELLED_MIN`. Returns a NaN BigNum
  * outside the validated domain.
  */
-export function bigGammaQ(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
+export function bigGammaQ(
+  ce: ComputeEngine,
+  a: BigNum,
+  x: BigNum,
+  prec: number
+): BigNum {
   if (a.isNaN() || x.isNaN()) return BigDecimal.NAN;
   if (!a.isFinite() || !x.isFinite()) return BigDecimal.NAN;
   if (!a.isPositive()) return BigDecimal.NAN;
   if (x.isNegative()) return BigDecimal.NAN;
   if (x.isZero()) return BigDecimal.ONE;
   if (decimalMagnitude(x) < INCOMPLETE_GAMMA_MIN_MAGNITUDE)
-    return withGuardDigits(SPECIAL_FN_GUARD, () => tinyGammaQ(ce, a, x));
-  return withGuardDigits(SPECIAL_FN_GUARD, () => {
+    return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
+      tinyGammaQ(ce, a, x, prec)
+    );
+  return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) => {
     let q: BigNum | undefined;
-    if (x.lt(a.mul(2).add(BigDecimal.TWO))) {
-      q = BigDecimal.ONE.sub(bigGammaPSeries(ce, a, x));
+    if (x.lt(a.mul(2).add(BigDecimal.TWO, prec))) {
+      q = BigDecimal.ONE.sub(bigGammaPSeries(ce, a, x, prec), prec);
       if (q.gte(BIG_GAMMA_Q_SERIES_MIN)) return q;
     }
-    const tail = bigGammaQUpperTail(ce, a, x);
+    const tail = bigGammaQUpperTail(ce, a, x, prec);
     if (!tail.isNaN()) return tail;
     if (q !== undefined && q.gte(BIG_CANCELLED_MIN)) return q;
     // A tiny order at a small x (a = 10⁻¹⁰⁰, x = 10⁻¹⁰⁰⁰): Q is about
     // −a·ln x, the subtraction 1 − P loses every digit, and the upper tail
     // declines. The leading term of P gives Q without the subtraction when
     // x is small enough (it is NaN otherwise).
-    return tinyGammaQ(ce, a, x);
+    return tinyGammaQ(ce, a, x, prec);
   });
 }
 
@@ -2347,10 +2455,10 @@ function upperGammaSeriesTerms(
  * double (s = −2 + 10⁻⁴⁰⁰) or round to 0 in a double (s = −10²⁰ − 0.5, where
  * a loop over s + n in doubles found a factor z/0).
  */
-function upperGammaCrossingGain(s: BigNum, z: BigNum): number {
-  const f = s.sub(s.floor());
+function upperGammaCrossingGain(s: BigNum, z: BigNum, prec: number): number {
+  const f = s.sub(s.floor(), prec);
   let gain = (2 * z.toNumber()) / Math.LN10;
-  for (const x of [f, BigDecimal.ONE.sub(f)])
+  for (const x of [f, BigDecimal.ONE.sub(f, prec)])
     if (x.lt(z)) gain += decimalMagnitude(z) + 1 - decimalMagnitude(x);
   return gain;
 }
@@ -2378,9 +2486,10 @@ function upperGammaCrossingGain(s: BigNum, z: BigNum): number {
 function bigUpperGammaBySeries(
   ce: ComputeEngine,
   s: BigNum,
-  z: BigNum
+  z: BigNum,
+  prec: number
 ): UpperGammaResult {
-  const p = BigDecimal.precision;
+  const p = prec;
   const zNum = z.toNumber();
   const estimate = upperGammaSeriesTerms(
     s.toNumber(),
@@ -2389,15 +2498,15 @@ function bigUpperGammaBySeries(
     UPPER_GAMMA_MAX_WORK / p
   );
   if (!Number.isFinite(estimate)) return UPPER_GAMMA_DECLINED;
-  const tol = new BigDecimal(10).pow(-p);
+  const tol = new BigDecimal(10).pow(-p, prec);
   let ap = s;
-  let term = BigDecimal.ONE.div(s);
+  let term = BigDecimal.ONE.div(s, prec);
   let sum = term;
   let largest = decimalMagnitude(term);
   const minusZ = z.neg();
   // The decimal digits that the factors z/(s + n) larger than 1 add, for
   // the n with |s + n| < z that are still to come (used only for s < −z)
-  const crossingGain = s.lt(minusZ) ? upperGammaCrossingGain(s, z) : 0;
+  const crossingGain = s.lt(minusZ) ? upperGammaCrossingGain(s, z, prec) : 0;
   // The estimate does not count the digits that the sum loses to the
   // alternating signs of the terms for s < 0 (they are found after the
   // loop, and the computation is then made again with more digits).
@@ -2406,9 +2515,9 @@ function bigUpperGammaBySeries(
   let converged = false;
   for (let n = 0; n < maxTerms; n++) {
     if ((n & 0xff) === 0) checkDeadline(ce._deadlineFrame);
-    ap = ap.add(BigDecimal.ONE);
-    term = term.mul(z).div(ap);
-    sum = sum.add(term);
+    ap = ap.add(BigDecimal.ONE, prec);
+    term = term.mul(z).div(ap, prec);
+    sum = sum.add(term, prec);
     largest = Math.max(largest, decimalMagnitude(term));
     if (ap.gt(z) && term.abs().lt(sum.abs().mul(tol))) {
       converged = true;
@@ -2423,9 +2532,9 @@ function bigUpperGammaBySeries(
     }
   }
   if (!converged) return UPPER_GAMMA_DECLINED;
-  const prefactor = s.mul(z.ln()).sub(z).exp();
-  const gammaS = bigGamma(ce, s);
-  const value = gammaS.subBounded(prefactor.mul(sum));
+  const prefactor = s.mul(z.ln(prec)).sub(z, prec).exp(prec);
+  const gammaS = bigGamma(ce, s, prec);
+  const value = gammaS.subBounded(prefactor.mul(sum), prec);
   if (value.isZero()) return { value, lost: Infinity };
   const top = Math.max(
     decimalMagnitude(gammaS),
@@ -2456,16 +2565,17 @@ const UPPER_GAMMA_MAX_RECURRENCE = 10_000;
 function bigUpperGammaNonPositiveInteger(
   ce: ComputeEngine,
   n: number,
-  z: BigNum
+  z: BigNum,
+  prec: number
 ): UpperGammaResult {
-  const p = BigDecimal.precision;
+  const p = prec;
   const zNum = z.toNumber();
   if (n > UPPER_GAMMA_MAX_RECURRENCE) return UPPER_GAMMA_DECLINED;
   if (!((3 * zNum + 2 * p) * p <= UPPER_GAMMA_MAX_WORK))
     return UPPER_GAMMA_DECLINED;
-  const tol = new BigDecimal(10).pow(-p);
-  const eulerGamma = BigDecimal.EULER_GAMMA;
-  const lnZ = z.ln();
+  const tol = new BigDecimal(10).pow(-p, prec);
+  const eulerGamma = BigDecimal.eulerGamma(prec);
+  const lnZ = z.ln(prec);
   // zᵏ/k!, then the term zᵏ/(k·k!) with its sign
   let power = BigDecimal.ONE;
   let sum = BigDecimal.ZERO;
@@ -2474,9 +2584,9 @@ function bigUpperGammaNonPositiveInteger(
   let converged = false;
   for (let k = 1; k < maxTerms; k++) {
     if ((k & 0xff) === 0) checkDeadline(ce._deadlineFrame);
-    power = power.mul(z).div(k);
-    const term = power.div(k);
-    sum = k % 2 === 1 ? sum.add(term) : sum.sub(term);
+    power = power.mul(z).div(k, prec);
+    const term = power.div(k, prec);
+    sum = k % 2 === 1 ? sum.add(term, prec) : sum.sub(term, prec);
     largest = Math.max(largest, decimalMagnitude(term));
     if (k > zNum && term.lt(sum.abs().mul(tol))) {
       converged = true;
@@ -2484,22 +2594,22 @@ function bigUpperGammaNonPositiveInteger(
     }
   }
   if (!converged) return UPPER_GAMMA_DECLINED;
-  let g = sum.sub(eulerGamma).sub(lnZ);
+  let g = sum.sub(eulerGamma, prec).sub(lnZ, prec);
   if (g.isZero()) return { value: g, lost: Infinity };
   let lost = Math.max(0, largest - decimalMagnitude(g));
   // z^{a−1} e⁻ᶻ, divided by z at each step
-  let t = z.neg().exp().div(z);
+  let t = z.neg().exp(prec).div(z, prec);
   for (let a = 0; a > -n; a--) {
     if ((a & 0xff) === 0) checkDeadline(ce._deadlineFrame);
-    if (a < 0) t = t.div(z);
-    const difference = g.subBounded(t);
+    if (a < 0) t = t.div(z, prec);
+    const difference = g.subBounded(t, prec);
     if (difference.isZero()) return { value: difference, lost: Infinity };
     lost += Math.max(
       0,
       Math.max(decimalMagnitude(g), decimalMagnitude(t)) -
         decimalMagnitude(difference)
     );
-    g = difference.div(a - 1);
+    g = difference.div(a - 1, prec);
   }
   return { value: g, lost };
 }
@@ -2532,14 +2642,16 @@ const UPPER_GAMMA_MAX_GUARD_FACTOR = 8;
 function bigUpperGammaFraction(
   ce: ComputeEngine,
   s: BigNum,
-  z: BigNum
+  z: BigNum,
+  prec: number
 ): BigNum | undefined {
-  const digits = BigDecimal.precision;
+  const digits = prec;
   const applies =
     s.lte(-digits) ||
-    (z.gte(digits / 4) && (!s.isPositive() || z.gte(s.add(BigDecimal.ONE))));
+    (z.gte(digits / 4) &&
+      (!s.isPositive() || z.gte(s.add(BigDecimal.ONE, prec))));
   if (!applies) return undefined;
-  const fraction = bigGammaQContinuedFractionValue(ce, s, z);
+  const fraction = bigGammaQContinuedFractionValue(ce, s, z, prec);
   return fraction.isNaN() ? undefined : fraction;
 }
 
@@ -2556,9 +2668,10 @@ function bigUpperGammaFraction(
 function bigUpperGammaBySubtraction(
   ce: ComputeEngine,
   s: BigNum,
-  z: BigNum
+  z: BigNum,
+  prec: number
 ): BigNum {
-  const p = BigDecimal.precision;
+  const p = prec;
   const nonPositiveInteger = s.isInteger() && !s.isPositive();
   if (nonPositiveInteger && !Number.isSafeInteger(s.toNumber()))
     return BigDecimal.NAN;
@@ -2566,10 +2679,10 @@ function bigUpperGammaBySubtraction(
   const maxGuard = UPPER_GAMMA_MAX_GUARD_FACTOR * p + SPECIAL_FN_GUARD;
   while (guard <= maxGuard) {
     let lost = 0;
-    const value = withGuardDigits(guard, () => {
+    const value = withGuardDigits(prec, guard, (prec) => {
       const result = nonPositiveInteger
-        ? bigUpperGammaNonPositiveInteger(ce, -s.toNumber(), z)
-        : bigUpperGammaBySeries(ce, s, z);
+        ? bigUpperGammaNonPositiveInteger(ce, -s.toNumber(), z, prec)
+        : bigUpperGammaBySeries(ce, s, z, prec);
       lost = result.lost;
       return result.value;
     });
@@ -2592,7 +2705,7 @@ const UPPER_GAMMA_MAX_Z = new BigDecimal('1e18');
 
 /**
  * Bignum upper incomplete gamma Γ(s, z) = ∫_z^∞ t^{s−1} e^{−t} dt, for real s
- * and real z > 0, at the working precision (`BigDecimal.precision`). Returns
+ * and real z > 0, at the working precision `prec`. Returns
  * NaN for z ≤ 0 (the value is then complex in general, and the caller uses
  * the complex kernel), for a non-finite operand, and where no kernel is
  * fast and correct (the caller then uses the machine kernel).
@@ -2605,7 +2718,8 @@ const UPPER_GAMMA_MAX_Z = new BigDecimal('1e18');
 export function bigIncompleteGammaUpper(
   ce: ComputeEngine,
   s: BigNum,
-  z: BigNum
+  z: BigNum,
+  prec: number
 ): BigNum {
   if (s.isNaN() || z.isNaN()) return BigDecimal.NAN;
   if (!s.isFinite() || !z.isFinite()) return BigDecimal.NAN;
@@ -2617,16 +2731,16 @@ export function bigIncompleteGammaUpper(
   // |s|·(|ln z| + 1), below 10^−(p+6) here, since |ln z| < 10⁶ in the domain
   // above. The subtraction route loses about −log₁₀|s| digits and declined
   // (NaN), and the machine kernel answered with its 16 digits.
-  if (!s.isZero() && decimalMagnitude(s) < -(BigDecimal.precision + 12))
-    return bigIncompleteGammaUpper(ce, BigDecimal.ZERO, z);
+  if (!s.isZero() && decimalMagnitude(s) < -(prec + 12))
+    return bigIncompleteGammaUpper(ce, BigDecimal.ZERO, z, prec);
   let usedFraction = false;
-  const value = withGuardDigits(SPECIAL_FN_GUARD, () => {
-    const fraction = bigUpperGammaFraction(ce, s, z);
+  const value = withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) => {
+    const fraction = bigUpperGammaFraction(ce, s, z, prec);
     if (fraction === undefined) return BigDecimal.NAN;
     usedFraction = true;
-    return s.mul(z.ln()).sub(z).exp().mul(fraction);
+    return s.mul(z.ln(prec)).sub(z, prec).exp(prec).mul(fraction);
   });
-  return usedFraction ? value : bigUpperGammaBySubtraction(ce, s, z);
+  return usedFraction ? value : bigUpperGammaBySubtraction(ce, s, z, prec);
 }
 
 /** Continued fraction for the regularized incomplete beta (NR betacf, Lentz),
@@ -2637,18 +2751,19 @@ function bigBetaContinuedFraction(
   ce: ComputeEngine,
   a: BigNum,
   b: BigNum,
-  x: BigNum
+  x: BigNum,
+  prec: number
 ): BigNum {
-  const p = BigDecimal.precision;
-  const tol = new BigDecimal(10).pow(-p);
-  const tiny = new BigDecimal(10).pow(-(2 * p));
-  const qab = a.add(b);
-  const qap = a.add(BigDecimal.ONE);
-  const qam = a.sub(BigDecimal.ONE);
+  const p = prec;
+  const tol = new BigDecimal(10).pow(-p, prec);
+  const tiny = new BigDecimal(10).pow(-(2 * p), prec);
+  const qab = a.add(b, prec);
+  const qap = a.add(BigDecimal.ONE, prec);
+  const qam = a.sub(BigDecimal.ONE, prec);
   let c = BigDecimal.ONE;
-  let d = BigDecimal.ONE.sub(qab.mul(x).div(qap));
+  let d = BigDecimal.ONE.sub(qab.mul(x).div(qap, prec), prec);
   if (d.abs().lt(tiny)) d = tiny;
-  d = BigDecimal.ONE.div(d);
+  d = BigDecimal.ONE.div(d, prec);
   let h = d;
   let settled = 0;
   const maxTerms = 1000 + 10 * p;
@@ -2657,33 +2772,33 @@ function bigBetaContinuedFraction(
     const m2 = 2 * m;
     // m·(b−m)·x / ((a−1+2m)·(a+2m))
     let aa = b
-      .sub(m)
+      .sub(m, prec)
       .mul(m)
       .mul(x)
-      .div(qam.add(m2).mul(a.add(m2)));
-    d = BigDecimal.ONE.add(aa.mul(d));
+      .div(qam.add(m2, prec).mul(a.add(m2, prec)), prec);
+    d = BigDecimal.ONE.add(aa.mul(d), prec);
     if (d.abs().lt(tiny)) d = tiny;
-    c = BigDecimal.ONE.add(aa.div(c));
+    c = BigDecimal.ONE.add(aa.div(c, prec), prec);
     if (c.abs().lt(tiny)) c = tiny;
-    d = BigDecimal.ONE.div(d);
+    d = BigDecimal.ONE.div(d, prec);
     // Rounded: a product of BigDecimal values is exact, and the digits of
     // `h` would otherwise grow at each term.
     h = h.mul(d).mul(c).toPrecision(p);
     // −(a+m)·(a+b+m)·x / ((a+2m)·(a+1+2m))
     aa = a
-      .add(m)
-      .mul(qab.add(m))
+      .add(m, prec)
+      .mul(qab.add(m, prec))
       .mul(x)
       .neg()
-      .div(a.add(m2).mul(qap.add(m2)));
-    d = BigDecimal.ONE.add(aa.mul(d));
+      .div(a.add(m2, prec).mul(qap.add(m2, prec)), prec);
+    d = BigDecimal.ONE.add(aa.mul(d), prec);
     if (d.abs().lt(tiny)) d = tiny;
-    c = BigDecimal.ONE.add(aa.div(c));
+    c = BigDecimal.ONE.add(aa.div(c, prec), prec);
     if (c.abs().lt(tiny)) c = tiny;
-    d = BigDecimal.ONE.div(d);
+    d = BigDecimal.ONE.div(d, prec);
     const del = d.mul(c);
     h = h.mul(del).toPrecision(p);
-    settled = del.sub(BigDecimal.ONE).abs().lt(tol) ? settled + 1 : 0;
+    settled = del.sub(BigDecimal.ONE, prec).abs().lt(tol) ? settled + 1 : 0;
     if (settled >= GAMMA_CF_CONSECUTIVE) return h;
   }
   return BigDecimal.NAN;
@@ -2692,34 +2807,42 @@ function bigBetaContinuedFraction(
 /**
  * Bignum regularized incomplete beta I_x(a,b) (Mathematica's
  * BetaRegularized[x,a,b]), for a > 0, b > 0 and 0 ≤ x ≤ 1. Precision scales
- * with `BigDecimal.precision`. Returns the exact endpoints 0/1, and a NaN
+ * with `prec`. Returns the exact endpoints 0/1, and a NaN
  * BigNum outside the validated domain.
  */
 export function bigBetaRegularized(
   ce: ComputeEngine,
   x: BigNum,
   a: BigNum,
-  b: BigNum
+  b: BigNum,
+  prec: number
 ): BigNum {
   if (x.isNaN() || a.isNaN() || b.isNaN()) return BigDecimal.NAN;
   if (!x.isFinite() || !a.isFinite() || !b.isFinite()) return BigDecimal.NAN;
   if (!a.isPositive() || !b.isPositive()) return BigDecimal.NAN;
   if (x.isNegative() || x.gt(BigDecimal.ONE))
-    return bigBetaRegularizedOutside(x, a, b);
+    return bigBetaRegularizedOutside(x, a, b, prec);
   if (x.isZero()) return BigDecimal.ZERO;
   if (x.eq(BigDecimal.ONE)) return BigDecimal.ONE;
-  return withGuardDigits(SPECIAL_FN_GUARD, () => {
-    const bt = gammalnCore(ce, a.add(b))
-      .sub(gammalnCore(ce, a))
-      .sub(gammalnCore(ce, b))
-      .add(a.mul(x.ln()))
-      .add(b.mul(BigDecimal.ONE.sub(x).ln()))
-      .exp();
-    const boundary = a.add(BigDecimal.ONE).div(a.add(b).add(BigDecimal.TWO));
+  return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) => {
+    const bt = gammalnCore(ce, a.add(b, prec), prec)
+      .sub(gammalnCore(ce, a, prec), prec)
+      .sub(gammalnCore(ce, b, prec), prec)
+      .add(a.mul(x.ln(prec)), prec)
+      .add(b.mul(BigDecimal.ONE.sub(x, prec).ln(prec)), prec)
+      .exp(prec);
+    const boundary = a
+      .add(BigDecimal.ONE, prec)
+      .div(a.add(b, prec).add(BigDecimal.TWO, prec), prec);
     if (x.lt(boundary))
-      return bt.mul(bigBetaContinuedFraction(ce, a, b, x)).div(a);
+      return bt.mul(bigBetaContinuedFraction(ce, a, b, x, prec)).div(a, prec);
     const r = BigDecimal.ONE.sub(
-      bt.mul(bigBetaContinuedFraction(ce, b, a, BigDecimal.ONE.sub(x))).div(b)
+      bt
+        .mul(
+          bigBetaContinuedFraction(ce, b, a, BigDecimal.ONE.sub(x, prec), prec)
+        )
+        .div(b, prec),
+      prec
     );
     // See betaRegularized: a small I_x is taken from its own fraction. The
     // thresholds differ from the machine kernel's because this one works with
@@ -2729,7 +2852,9 @@ export function bigBetaRegularized(
     // fraction declines, the symmetric value is kept down to
     // `BIG_CANCELLED_MIN`.
     if (r.gte(BIG_GAMMA_Q_SERIES_MIN)) return r;
-    const direct = bt.mul(bigBetaContinuedFraction(ce, a, b, x)).div(a);
+    const direct = bt
+      .mul(bigBetaContinuedFraction(ce, a, b, x, prec))
+      .div(a, prec);
     if (!direct.isNaN()) return direct;
     return r.gte(BIG_CANCELLED_MIN) ? r : BigDecimal.NAN;
   });
@@ -2743,14 +2868,16 @@ export function bigBetaRegularized(
  * accuracy per term); the kernel runs with working-precision guard digits so
  * the result is accurate to the full requested precision.
  */
-export function bigZeta(ce: ComputeEngine, s: BigNum): BigNum {
+export function bigZeta(ce: ComputeEngine, s: BigNum, prec: number): BigNum {
   if (!s.isFinite()) return BigDecimal.NAN;
   if (s.eq(1)) return new BigDecimal(Infinity); // pole
-  return withGuardDigits(SPECIAL_FN_GUARD, () => zetaCore(ce, s));
+  return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
+    zetaCore(ce, s, prec)
+  );
 }
 
-function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
-  const pi = BigDecimal.PI;
+function zetaCore(ce: ComputeEngine, s: BigNum, prec: number): BigNum {
+  const pi = BigDecimal.pi(prec);
 
   // Special value: ζ(0) = -1/2
   if (s.isZero()) return BigDecimal.HALF.neg();
@@ -2767,7 +2894,8 @@ function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
       const bernoulli = getBernoulliRationals(ce, k);
       const [bNum, bDen] = bernoulli[k - 1];
       const bernAbs = new BigDecimal(absBigint(bNum).toString()).div(
-        new BigDecimal(bDen.toString())
+        new BigDecimal(bDen.toString()),
+        prec
       );
       const twoPi = pi.mul(2);
       let factVal: BigNum = BigDecimal.ONE;
@@ -2776,7 +2904,7 @@ function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
         if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
         factVal = factVal.mul(i);
       }
-      return bernAbs.mul(twoPi.pow(sn)).div(factVal.mul(2));
+      return bernAbs.mul(twoPi.pow(sn, prec)).div(factVal.mul(2), prec);
     }
   }
 
@@ -2795,14 +2923,14 @@ function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
   // ζ(s) = 2^s π^{s-1} sin(πs/2) Γ(1-s) ζ(1-s)
   if (s.isNegative()) {
     return new BigDecimal(2)
-      .pow(s)
-      .mul(pi.pow(s.sub(1)))
-      .mul(pi.mul(s).div(2).sin())
-      .mul(gammaCore(ce, BigDecimal.ONE.sub(s)))
-      .mul(zetaCore(ce, BigDecimal.ONE.sub(s)));
+      .pow(s, prec)
+      .mul(pi.pow(s.sub(1, prec), prec))
+      .mul(pi.mul(s).div(2, prec).sin(prec))
+      .mul(gammaCore(ce, BigDecimal.ONE.sub(s, prec), prec))
+      .mul(zetaCore(ce, BigDecimal.ONE.sub(s, prec), prec));
   }
 
-  const wp = BigDecimal.precision;
+  const wp = prec;
 
   // Huge s: ζ(s) − 1 = 2^{−s} + 3^{−s} + … < 10^{−(wp+10)}, so ζ(s) rounds
   // to exactly 1 at this precision. Guard BEFORE the acceleration loop: its
@@ -2819,24 +2947,28 @@ function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
   // (The earlier binomial-partial-sum form converged only as 2^{−n}, so the
   // 1.3·p term budget delivered only ~0.4·p correct digits.)
   const n = Math.max(22, Math.ceil(1.32 * wp) + 3);
-  const alpha = new BigDecimal(3).add(new BigDecimal(8).sqrt()); // 3 + √8
-  const alphaN = alpha.pow(n);
-  const d = alphaN.add(BigDecimal.ONE.div(alphaN)).div(2); // ½((3+√8)ⁿ+(3−√8)ⁿ)
+  const alpha = new BigDecimal(3).add(new BigDecimal(8).sqrt(prec), prec); // 3 + √8
+  const alphaN = alpha.pow(n, prec);
+  const d = alphaN.add(BigDecimal.ONE.div(alphaN, prec), prec).div(2, prec); // ½((3+√8)ⁿ+(3−√8)ⁿ)
   let b = BigDecimal.NEGATIVE_ONE;
   let c = d.neg();
   let sum = BigDecimal.ZERO;
   for (let k = 0; k < n; k++) {
     if ((k & 0xff) === 0) checkDeadline(ce._deadlineFrame);
-    c = b.sub(c);
-    sum = sum.add(c.div(new BigDecimal(k + 1).pow(s)));
+    c = b.sub(c, prec);
+    sum = sum.add(c.div(new BigDecimal(k + 1).pow(s, prec), prec), prec);
     // b_{k+1} = (k+n)(k−n) / ((k+½)(k+1)) · b_k
     b = b
       .mul(new BigDecimal(k + n).mul(k - n))
-      .div(new BigDecimal(k).add(BigDecimal.HALF).mul(k + 1));
+      .div(new BigDecimal(k).add(BigDecimal.HALF, prec).mul(k + 1), prec);
   }
-  const eta = sum.div(d);
+  const eta = sum.div(d, prec);
   return eta.div(
-    BigDecimal.ONE.sub(new BigDecimal(2).pow(BigDecimal.ONE.sub(s)))
+    BigDecimal.ONE.sub(
+      new BigDecimal(2).pow(BigDecimal.ONE.sub(s, prec), prec),
+      prec
+    ),
+    prec
   );
 }
 
@@ -2906,10 +3038,10 @@ function isRationalOperand(x: HurwitzOperand): x is readonly [bigint, bigint] {
   return Array.isArray(x);
 }
 
-/** The operand as a BigDecimal, at the current `BigDecimal.precision`. */
-function hurwitzOperandBig(x: HurwitzOperand): BigNum {
+/** The operand as a BigDecimal, at the precision `prec`. */
+function hurwitzOperandBig(x: HurwitzOperand, prec: number): BigNum {
   if (!isRationalOperand(x)) return x;
-  return new BigDecimal(x[0]).div(new BigDecimal(x[1]));
+  return new BigDecimal(x[0]).div(new BigDecimal(x[1]), prec);
 }
 
 /** The operand as an exact rational: a BigDecimal is sig·10^exp exactly. */
@@ -2921,8 +3053,8 @@ function hurwitzOperandRational(x: HurwitzOperand): [bigint, bigint] {
 }
 
 /** The operand as a double (planning only). */
-function hurwitzOperandNumber(x: HurwitzOperand): number {
-  return hurwitzOperandBig(x).toNumber();
+function hurwitzOperandNumber(x: HurwitzOperand, prec: number): number {
+  return hurwitzOperandBig(x, prec).toNumber();
 }
 
 function hurwitzOperandIsInteger(x: HurwitzOperand): boolean {
@@ -2939,15 +3071,24 @@ function hurwitzOperandIsHalf(x: HurwitzOperand): boolean {
 }
 
 /** x + k, exact. */
-function hurwitzOperandAddInt(x: HurwitzOperand, k: bigint): HurwitzOperand {
+function hurwitzOperandAddInt(
+  x: HurwitzOperand,
+  k: bigint,
+  prec: number
+): HurwitzOperand {
   return isRationalOperand(x)
     ? [x[0] + k * x[1], x[1]]
-    : x.add(new BigDecimal(k));
+    : x.add(new BigDecimal(k), prec);
 }
 
 /** 1 − x, exact. */
-function hurwitzOperandOneMinus(x: HurwitzOperand): HurwitzOperand {
-  return isRationalOperand(x) ? [x[1] - x[0], x[1]] : BigDecimal.ONE.sub(x);
+function hurwitzOperandOneMinus(
+  x: HurwitzOperand,
+  prec: number
+): HurwitzOperand {
+  return isRationalOperand(x)
+    ? [x[1] - x[0], x[1]]
+    : BigDecimal.ONE.sub(x, prec);
 }
 
 interface HurwitzEMPlan {
@@ -3105,16 +3246,11 @@ function hurwitzEmCoeff(
       hurwitzEmFact *=
         BigInt(2 * hurwitzEmFactIndex - 1) * BigInt(2 * hurwitzEmFactIndex);
     }
-    const saved = BigDecimal.precision;
-    BigDecimal.precision = hurwitzEmCoeffDigits;
-    try {
-      const [num, den] = bernoulli[j - 1]; // B₂ⱼ
-      hurwitzEmCoeffCache[j] = new BigDecimal(num).div(
-        new BigDecimal(den * hurwitzEmFact)
-      );
-    } finally {
-      BigDecimal.precision = saved;
-    }
+    const [num, den] = bernoulli[j - 1]; // B₂ⱼ
+    hurwitzEmCoeffCache[j] = new BigDecimal(num).div(
+      new BigDecimal(den * hurwitzEmFact),
+      hurwitzEmCoeffDigits
+    );
   }
   return digits === hurwitzEmCoeffDigits
     ? hurwitzEmCoeffCache[j]
@@ -3122,11 +3258,11 @@ function hurwitzEmCoeff(
 }
 
 /**
- * Euler-Maclaurin sum for a `plan`, run with `BigDecimal.precision` already
- * set to `workDigits`. Every intermediate is rounded to `workDigits`: `add`
- * and `mul` are exact and unrounded (see `BigDecimal.mul`'s doc comment),
- * so an accumulating product (`poch`, `zPow`) left unrounded would grow its
- * significand every step.
+ * Euler-Maclaurin sum for a `plan`, at the precision `workDigits`. Every
+ * intermediate is rounded to `workDigits`: `add` and `mul` are exact and
+ * unrounded (see `BigDecimal.mul`'s doc comment), so an accumulating
+ * product (`poch`, `zPow`) left unrounded would grow its significand every
+ * step.
  */
 function hurwitzZetaBigEM(
   ce: ComputeEngine,
@@ -3147,16 +3283,20 @@ function hurwitzZetaBigEM(
     if ((k & 0xff) === 0) checkDeadline(ce._deadlineFrame);
     const w = addRounded(a, new BigDecimal(k), workDigits);
     if (w.isZero()) continue; // Wolfram's HurwitzZeta drops the (k+a) = 0 term
-    sum = addRounded(sum, rnd(w.pow(negS)), workDigits);
+    sum = addRounded(sum, rnd(w.pow(negS, workDigits)), workDigits);
   }
   const z = addRounded(a, new BigDecimal(plan.terms), workDigits);
-  const zNegS = rnd(z.pow(negS));
-  sum = addRounded(sum, rnd(zNegS.mul(z).div(s.sub(1))), workDigits); // z^{1-s}/(s-1)
+  const zNegS = rnd(z.pow(negS, workDigits));
+  sum = addRounded(
+    sum,
+    rnd(zNegS.mul(z).div(s.sub(1, workDigits), workDigits)),
+    workDigits
+  ); // z^{1-s}/(s-1)
   sum = addRounded(sum, rnd(zNegS.mul(BigDecimal.HALF)), workDigits); // ½z^{-s}
   if (plan.pairs === 0) return sum;
   const bernoulli = getBernoulliRationals(ce, plan.pairs);
-  const zInv2 = rnd(BigDecimal.ONE.div(z.mul(z)));
-  let zPow = rnd(zNegS.div(z)); // z^{-s-2j+1}, starting from j = 1
+  const zInv2 = rnd(BigDecimal.ONE.div(z.mul(z), workDigits));
+  let zPow = rnd(zNegS.div(z, workDigits)); // z^{-s-2j+1}, starting from j = 1
   let poch = s; // (s)_{2j-1}
   for (let j = 1; j <= plan.pairs; j++) {
     if ((j & 0xff) === 0) checkDeadline(ce._deadlineFrame);
@@ -3165,7 +3305,9 @@ function hurwitzZetaBigEM(
       rnd(rnd(poch.mul(zPow)).mul(hurwitzEmCoeff(bernoulli, j, workDigits))),
       workDigits
     );
-    poch = rnd(rnd(poch.mul(s.add(2 * j - 1))).mul(s.add(2 * j)));
+    poch = rnd(
+      rnd(poch.mul(s.add(2 * j - 1, workDigits))).mul(s.add(2 * j, workDigits))
+    );
     zPow = rnd(zPow.mul(zInv2));
   }
   return sum;
@@ -3182,12 +3324,12 @@ function hurwitzZetaBigEM(
 function bigHurwitzZetaEM(
   ce: ComputeEngine,
   s: HurwitzOperand,
-  a: HurwitzOperand
+  a: HurwitzOperand,
+  requested: number
 ): BigNum | undefined {
-  const requested = BigDecimal.precision;
   const sInteger = hurwitzOperandIsInteger(s);
-  const sRe = hurwitzOperandNumber(s);
-  const aRe = hurwitzOperandNumber(a);
+  const sRe = hurwitzOperandNumber(s, requested);
+  const aRe = hurwitzOperandNumber(a, requested);
   if (!Number.isFinite(sRe) || !Number.isFinite(aRe)) return undefined;
   if (sInteger && sRe === 1) return undefined; // pole; caller special-cases s = 1
 
@@ -3200,14 +3342,9 @@ function bigHurwitzZetaEM(
 
   let sDist = 0;
   if (!sInteger) {
-    const saved = BigDecimal.precision;
-    BigDecimal.precision = requested + SPECIAL_FN_GUARD;
-    try {
-      const sBig = hurwitzOperandBig(s);
-      sDist = sBig.sub(sBig.round()).abs().toNumber();
-    } finally {
-      BigDecimal.precision = saved;
-    }
+    const wp = requested + SPECIAL_FN_GUARD;
+    const sBig = hurwitzOperandBig(s, wp);
+    sDist = sBig.sub(sBig.round(), wp).abs().toNumber();
   }
 
   const relative = requested + SPECIAL_FN_GUARD;
@@ -3221,20 +3358,13 @@ function bigHurwitzZetaEM(
     const working = Math.max(relative, absolute + Math.ceil(plan.largest) + 12);
     if (working > HURWITZ_BIG_MAX_WORKING_DIGITS) return undefined;
 
-    const saved = BigDecimal.precision;
-    BigDecimal.precision = working;
-    let r: BigNum;
-    try {
-      r = hurwitzZetaBigEM(
-        ce,
-        hurwitzOperandBig(s),
-        hurwitzOperandBig(a),
-        plan,
-        working
-      );
-    } finally {
-      BigDecimal.precision = saved;
-    }
+    const r = hurwitzZetaBigEM(
+      ce,
+      hurwitzOperandBig(s, working),
+      hurwitzOperandBig(a, working),
+      plan,
+      working
+    );
     if (!r.isFinite()) return undefined;
 
     // The error is about 10^(−absolute). Accept once the result is large
@@ -3292,33 +3422,27 @@ function bigHurwitzZetaNegativeInteger(
     return bigDecimalQuotient(re, den, requested);
   }
   const xBig = isRationalOperand(a) || a.isZero() ? undefined : a;
-  const saved = BigDecimal.precision;
   let guard = 10;
-  try {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      BigDecimal.precision = requested + guard;
-      const point = xBig ?? new BigDecimal(x[0]).div(new BigDecimal(x[1])); // a ≠ 0 here
-      const r = bigBernoulliPolynomialHorner(n + 1, point);
-      if (r === undefined) return undefined;
-      if (r.lost <= guard - 5) {
-        BigDecimal.precision = requested + guard;
-        return r.value
-          .div(n + 1)
-          .neg()
-          .toPrecision(requested);
-      }
-      // A result of 0 at the working precision leaves the loss unknown.
-      if (!Number.isFinite(r.lost)) return undefined;
-      guard = Math.ceil(r.lost) + 10;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const wp = requested + guard;
+    const point = xBig ?? new BigDecimal(x[0]).div(new BigDecimal(x[1]), wp); // a ≠ 0 here
+    const r = bigBernoulliPolynomialHorner(n + 1, point, wp);
+    if (r === undefined) return undefined;
+    if (r.lost <= guard - 5) {
+      return r.value
+        .div(n + 1, wp)
+        .neg()
+        .toPrecision(requested);
     }
-  } finally {
-    BigDecimal.precision = saved;
+    // A result of 0 at the working precision leaves the loss unknown.
+    if (!Number.isFinite(r.lost)) return undefined;
+    guard = Math.ceil(r.lost) + 10;
   }
   return undefined;
 }
 
 /**
- * B_N(x) by Horner's rule in big decimals at `BigDecimal.precision`, with
+ * B_N(x) by Horner's rule in big decimals at the precision `prec`, with
  * the number of digits lost to cancellation: the log10 of the largest term
  * eⱼxʲ/D minus the log10 of the result (`lost` is `Infinity` when the
  * result is 0). For an x with an extreme exponent the terms decrease (tiny
@@ -3329,15 +3453,15 @@ function bigHurwitzZetaNegativeInteger(
  */
 function bigBernoulliPolynomialHorner(
   N: number,
-  x: BigNum
+  x: BigNum,
+  prec: number
 ): { value: BigNum; lost: number } | undefined {
   if (!x.isFinite()) return undefined;
   const { e, d } = bernoulliPolynomialInteger(N);
-  const prec = BigDecimal.precision;
   let acc = new BigDecimal(e[N]);
   for (let j = N - 1; j >= 0; j--)
     acc = addRounded(acc.mul(x).toPrecision(prec), new BigDecimal(e[j]), prec);
-  const value = acc.div(new BigDecimal(d));
+  const value = acc.div(new BigDecimal(d), prec);
   const log10x = bigLog10Abs(x);
   let largest = -Infinity;
   for (let j = 0; j <= N; j++) {
@@ -3363,7 +3487,7 @@ function addRounded(u: BigNum, v: BigNum, prec: number): BigNum {
   const mv = magnitude(v);
   if (mu < mv - prec - 5) return v.toPrecision(prec);
   if (mv < mu - prec - 5) return u.toPrecision(prec);
-  return u.add(v).toPrecision(prec);
+  return u.add(v, prec).toPrecision(prec);
 }
 
 /**
@@ -3415,58 +3539,62 @@ function bigZetaFront(
   ce: ComputeEngine,
   s: HurwitzOperand,
   a: HurwitzOperand,
-  sign: 1 | -1
+  sign: 1 | -1,
+  requested: number
 ): BigNum | undefined {
   // m = ⌈−a⌉ ≥ 1, the number of k ≥ 0 with k + a < 0
   const m = isRationalOperand(a)
     ? (-a[0] + a[1] - 1n) / a[1]
     : a.neg().ceil().toBigInt();
-  const rest = hurwitzOperandAddInt(a, m); // in [0, 1)
-  const f = hurwitzOperandOneMinus(rest); // in (0, 1]
+  const rest = hurwitzOperandAddInt(a, m, requested); // in [0, 1)
+  const f = hurwitzOperandOneMinus(rest, requested); // in (0, 1]
   if (sign < 0 && hurwitzOperandIsHalf(rest))
-    return bigHurwitzZetaEM(ce, s, hurwitzOperandAddInt(f, m));
-  const requested = BigDecimal.precision;
+    return bigHurwitzZetaEM(
+      ce,
+      s,
+      hurwitzOperandAddInt(f, m, requested),
+      requested
+    );
   let guard = SPECIAL_FN_GUARD;
   for (let attempt = 0; attempt < 2; attempt++) {
-    BigDecimal.precision = requested + guard;
-    try {
-      const parts: BigNum[] = [];
-      const tail = bigHurwitzZetaEM(ce, s, rest);
-      if (tail === undefined) return undefined;
-      parts.push(tail);
-      if (m <= BigInt(HURWITZ_BIG_DIRECT_FRONT)) {
-        const negS = hurwitzOperandBig(s).neg();
-        const fBig = hurwitzOperandBig(f);
-        const count = Number(m);
-        let front = BigDecimal.ZERO;
-        for (let j = 0; j < count; j++) {
-          if ((j & 0xff) === 0) checkDeadline(ce._deadlineFrame);
-          front = front
-            .add(fBig.add(j).pow(negS))
-            .toPrecision(BigDecimal.precision);
-        }
-        parts.push(sign < 0 ? front.neg() : front);
-      } else {
-        const head = bigHurwitzZetaEM(ce, s, f);
-        if (head === undefined) return undefined;
-        const shifted = bigHurwitzZetaEM(ce, s, hurwitzOperandAddInt(f, m));
-        if (shifted === undefined) return undefined;
-        parts.push(sign < 0 ? head.neg() : head);
-        parts.push(sign < 0 ? shifted : shifted.neg());
+    const wp = requested + guard;
+    const parts: BigNum[] = [];
+    const tail = bigHurwitzZetaEM(ce, s, rest, wp);
+    if (tail === undefined) return undefined;
+    parts.push(tail);
+    if (m <= BigInt(HURWITZ_BIG_DIRECT_FRONT)) {
+      const negS = hurwitzOperandBig(s, wp).neg();
+      const fBig = hurwitzOperandBig(f, wp);
+      const count = Number(m);
+      let front = BigDecimal.ZERO;
+      for (let j = 0; j < count; j++) {
+        if ((j & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+        front = front.add(fBig.add(j, wp).pow(negS, wp), wp).toPrecision(wp);
       }
-      let sum = BigDecimal.ZERO;
-      for (const p of parts) sum = sum.add(p);
-      let largest = -Infinity;
-      for (const p of parts)
-        if (!p.isZero()) largest = Math.max(largest, bigLog10Abs(p));
-      if (largest === -Infinity) return BigDecimal.ZERO;
-      const lost = sum.isZero() ? Infinity : largest - bigLog10Abs(sum);
-      if (lost <= guard - 8) return sum.toPrecision(requested);
-      if (!Number.isFinite(lost)) return undefined;
-      guard = Math.ceil(lost) + SPECIAL_FN_GUARD;
-    } finally {
-      BigDecimal.precision = requested;
+      parts.push(sign < 0 ? front.neg() : front);
+    } else {
+      const head = bigHurwitzZetaEM(ce, s, f, wp);
+      if (head === undefined) return undefined;
+      const shifted = bigHurwitzZetaEM(
+        ce,
+        s,
+        hurwitzOperandAddInt(f, m, wp),
+        wp
+      );
+      if (shifted === undefined) return undefined;
+      parts.push(sign < 0 ? head.neg() : head);
+      parts.push(sign < 0 ? shifted : shifted.neg());
     }
+    let sum = BigDecimal.ZERO;
+    for (const p of parts) sum = sum.add(p, wp);
+    let largest = -Infinity;
+    for (const p of parts)
+      if (!p.isZero()) largest = Math.max(largest, bigLog10Abs(p));
+    if (largest === -Infinity) return BigDecimal.ZERO;
+    const lost = sum.isZero() ? Infinity : largest - bigLog10Abs(sum);
+    if (lost <= guard - 8) return sum.toPrecision(requested);
+    if (!Number.isFinite(lost)) return undefined;
+    guard = Math.ceil(lost) + SPECIAL_FN_GUARD;
   }
   return undefined;
 }
@@ -3489,15 +3617,16 @@ function bigZetaFront(
 export function bigHurwitzZeta(
   ce: ComputeEngine,
   s: HurwitzOperand,
-  a: HurwitzOperand
+  a: HurwitzOperand,
+  prec: number
 ): BigNum | undefined {
-  if (!hurwitzOperandIsNegative(a)) return bigHurwitzZetaEM(ce, s, a);
+  if (!hurwitzOperandIsNegative(a)) return bigHurwitzZetaEM(ce, s, a, prec);
   if (!hurwitzOperandIsInteger(s)) return undefined; // complex value
   // (k + a)^(−s) = (−1)^s·|k + a|^(−s) for k + a < 0 and integer s
   const odd = isRationalOperand(s)
     ? (s[0] / s[1]) % 2n !== 0n
     : !s.mod(BigDecimal.TWO).isZero();
-  return bigZetaFront(ce, s, a, odd ? -1 : 1);
+  return bigZetaFront(ce, s, a, odd ? -1 : 1, prec);
 }
 
 /**
@@ -3510,10 +3639,11 @@ export function bigHurwitzZeta(
 export function bigZetaGeneralized(
   ce: ComputeEngine,
   s: HurwitzOperand,
-  a: HurwitzOperand
+  a: HurwitzOperand,
+  prec: number
 ): BigNum | undefined {
-  if (!hurwitzOperandIsNegative(a)) return bigHurwitzZetaEM(ce, s, a);
-  return bigZetaFront(ce, s, a, 1);
+  if (!hurwitzOperandIsNegative(a)) return bigHurwitzZetaEM(ce, s, a, prec);
+  return bigZetaFront(ce, s, a, 1, prec);
 }
 
 // --- Dirichlet eta and beta, arbitrary precision ---------------------------
@@ -3530,8 +3660,8 @@ export function bigZetaGeneralized(
 const DIRICHLET_POLE_GUARD_LIMIT = 400;
 
 /** Extra working digits for the cancellation at the pole s = 1, or undefined past the limit. */
-function dirichletGuard(s: BigNum): number | undefined {
-  const d = s.sub(BigDecimal.ONE).abs();
+function dirichletGuard(s: BigNum, prec: number): number | undefined {
+  const d = s.sub(BigDecimal.ONE, prec).abs();
   if (d.isZero()) return undefined;
   const lost = d.lt(BigDecimal.ONE) ? Math.ceil(-Math.log10(d.toNumber())) : 0;
   if (!Number.isFinite(lost) || lost > DIRICHLET_POLE_GUARD_LIMIT)
@@ -3546,25 +3676,28 @@ function dirichletGuard(s: BigNum): number | undefined {
  */
 export function bigDirichletEta(
   ce: ComputeEngine,
-  s: BigNum
+  s: BigNum,
+  prec: number
 ): BigNum | undefined {
   if (!s.isFinite()) return undefined;
-  const guard = dirichletGuard(s);
+  const guard = dirichletGuard(s, prec);
   if (guard === undefined) {
     // Closer to s = 1 than the guard digits reach. η is entire with
     // |η′(1)| = |γ ln 2 − ln²2 / 2| < 0.2, so when |s − 1| is below
     // 10^−(precision + 2) the value is ln 2 to every digit asked for.
-    const d = s.sub(BigDecimal.ONE).abs();
-    if (d.isZero() || d.gte(new BigDecimal(`1e-${BigDecimal.precision + 2}`)))
-      return undefined;
-    return withGuardDigits(SPECIAL_FN_GUARD, () => BigDecimal.TWO.ln());
+    const d = s.sub(BigDecimal.ONE, prec).abs();
+    if (d.isZero() || d.gte(new BigDecimal(`1e-${prec + 2}`))) return undefined;
+    return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
+      BigDecimal.TWO.ln(prec)
+    );
   }
-  return withGuardDigits(guard, () => {
+  return withGuardDigits(prec, guard, (prec) => {
     // 1 − 2^{1−s}
     const factor = BigDecimal.ONE.sub(
-      BigDecimal.TWO.pow(BigDecimal.ONE.sub(s))
+      BigDecimal.TWO.pow(BigDecimal.ONE.sub(s, prec), prec),
+      prec
     );
-    return factor.mul(bigZeta(ce, s));
+    return factor.mul(bigZeta(ce, s, prec));
   });
 }
 
@@ -3582,45 +3715,38 @@ export function bigDirichletL(
   ce: ComputeEngine,
   s: BigNum,
   k: number,
-  chi: readonly number[]
+  chi: readonly number[],
+  prec: number
 ): BigNum | undefined {
   if (!s.isFinite()) return undefined;
-  const guard = dirichletGuard(s); // undefined at s = 1, where the caller has the closed form
+  const guard = dirichletGuard(s, prec); // undefined at s = 1, where the caller has the closed form
   // The Hurwitz kernel plans its working digits from s as a double. When that
   // double is 1 (|s − 1| below about 10⁻¹⁶), the plan sees the pole and the
   // kernel throws, so the Laurent series is the only option.
   if (guard === undefined || s.toNumber() === 1)
-    return bigDirichletLNearOne(ce, s, k, chi);
-  const saved = BigDecimal.precision;
-  BigDecimal.precision = saved + guard;
-  try {
-    // Closer to the pole than about 10⁻¹⁵ the Hurwitz kernel's own working-digit
-    // plan fails (it throws).
-    // Not seeded with 0: adding a value of exponent 10⁶ to ZERO is slow.
-    let sum: BigNum | undefined;
-    for (let r = 1; r <= k; r++) {
-      if ((r & 0x3f) === 0) checkDeadline(ce._deadlineFrame);
-      const c = chi[r - 1];
-      if (c === 0) continue;
-      let zeta: BigNum | undefined;
-      try {
-        zeta = bigHurwitzZeta(ce, s, [BigInt(r), BigInt(k)]);
-      } catch {
-        zeta = undefined;
-      }
-      if (zeta === undefined) {
-        BigDecimal.precision = saved;
-        return bigDirichletLNearOne(ce, s, k, chi);
-      }
-      const term = c > 0 ? zeta : zeta.neg();
-      sum = sum === undefined ? term : sum.add(term);
+    return bigDirichletLNearOne(ce, s, k, chi, prec);
+  const wp = prec + guard;
+  // Closer to the pole than about 10⁻¹⁵ the Hurwitz kernel's own working-digit
+  // plan fails (it throws).
+  // Not seeded with 0: adding a value of exponent 10⁶ to ZERO is slow.
+  let sum: BigNum | undefined;
+  for (let r = 1; r <= k; r++) {
+    if ((r & 0x3f) === 0) checkDeadline(ce._deadlineFrame);
+    const c = chi[r - 1];
+    if (c === 0) continue;
+    let zeta: BigNum | undefined;
+    try {
+      zeta = bigHurwitzZeta(ce, s, [BigInt(r), BigInt(k)], wp);
+    } catch {
+      zeta = undefined;
     }
-    if (sum === undefined) return undefined;
-    const scale = new BigDecimal(k).pow(s.neg()); // k^{−s}
-    return scale.mul(sum).toPrecision(saved);
-  } finally {
-    BigDecimal.precision = saved;
+    if (zeta === undefined) return bigDirichletLNearOne(ce, s, k, chi, prec);
+    const term = c > 0 ? zeta : zeta.neg();
+    sum = sum === undefined ? term : sum.add(term, wp);
   }
+  if (sum === undefined) return undefined;
+  const scale = new BigDecimal(k).pow(s.neg(), wp); // k^{−s}
+  return scale.mul(sum).toPrecision(prec);
 }
 
 /**
@@ -3687,13 +3813,13 @@ function bigDirichletLNearOne(
   ce: ComputeEngine,
   s: BigNum,
   k: number,
-  chi: readonly number[]
+  chi: readonly number[],
+  prec: number
 ): BigNum | undefined {
-  const d = s.sub(BigDecimal.ONE);
+  const d = s.sub(BigDecimal.ONE, prec);
   if (d.isZero() || d.abs().gt(DIRICHLET_LAURENT_RADIUS)) return undefined;
-  const saved = BigDecimal.precision;
   // G₀ cancels by up to log₁₀ k digits (|ψ(r/k)| < k/r + 1).
-  const working = saved + SPECIAL_FN_GUARD + Math.ceil(Math.log10(k + 1));
+  const working = prec + SPECIAL_FN_GUARD + Math.ceil(Math.log10(k + 1));
 
   // The plan, in doubles: the size of G₀ from the double digamma, then the
   // digits of each order n ≥ 1 from its bound Bₙ.
@@ -3711,7 +3837,7 @@ function bigDirichletLNearOne(
   const logD = bigLog10Abs(d);
   // log₁₀ of the tolerance on each term: 10^−(precision + guard)·|G₀|
   const logTolerance =
-    Math.log10(Math.abs(g0Estimate)) - saved - DIRICHLET_LAURENT_GUARD;
+    Math.log10(Math.abs(g0Estimate)) - prec - DIRICHLET_LAURENT_GUARD;
   const digits: number[] = []; // digits of Gₙ, from n = 1
   let logFactorial = 0;
   let cost = (calls * stieltjesCallCost(working)) / 8; // the digamma is ~8× cheaper
@@ -3731,39 +3857,34 @@ function bigDirichletLNearOne(
   if (cost > DIRICHLET_LAURENT_MAX_COST) return undefined;
 
   const frame = ce._deadlineFrame;
-  BigDecimal.precision = working;
-  try {
-    // G₀ = −Σ χ(r) ψ(r/k)
-    let sum = BigDecimal.ZERO;
+  // G₀ = −Σ χ(r) ψ(r/k)
+  let sum = BigDecimal.ZERO;
+  for (let r = 1; r <= k; r++) {
+    if ((r & 0x3f) === 0) checkDeadline(frame);
+    const c = chi[r - 1];
+    if (c === 0) continue;
+    const psi = bigDigamma(ce, new BigDecimal(r).div(k, working), working);
+    sum = c > 0 ? sum.sub(psi, working) : sum.add(psi, working);
+  }
+  let factor = BigDecimal.ONE; // (−1)ⁿ (s − 1)ⁿ / n!
+  for (let n = 1; n <= digits.length; n++) {
+    factor = factor.mul(d.neg()).div(n, working);
+    let g = BigDecimal.ZERO;
     for (let r = 1; r <= k; r++) {
-      if ((r & 0x3f) === 0) checkDeadline(frame);
       const c = chi[r - 1];
       if (c === 0) continue;
-      const psi = bigDigamma(ce, new BigDecimal(r).div(k));
-      sum = c > 0 ? sum.sub(psi) : sum.add(psi);
+      const gamma = bigStieltjesGamma(
+        n,
+        [BigInt(r), BigInt(k)],
+        digits[n - 1],
+        frame
+      );
+      if (gamma === undefined) return undefined;
+      g = c > 0 ? g.add(gamma, working) : g.sub(gamma, working);
     }
-    let factor = BigDecimal.ONE; // (−1)ⁿ (s − 1)ⁿ / n!
-    for (let n = 1; n <= digits.length; n++) {
-      factor = factor.mul(d.neg()).div(n);
-      let g = BigDecimal.ZERO;
-      for (let r = 1; r <= k; r++) {
-        const c = chi[r - 1];
-        if (c === 0) continue;
-        const gamma = bigStieltjesGamma(
-          n,
-          [BigInt(r), BigInt(k)],
-          digits[n - 1],
-          frame
-        );
-        if (gamma === undefined) return undefined;
-        g = c > 0 ? g.add(gamma) : g.sub(gamma);
-      }
-      sum = sum.add(factor.mul(g));
-    }
-    return new BigDecimal(k).pow(s.neg()).mul(sum).toPrecision(saved);
-  } finally {
-    BigDecimal.precision = saved;
+    sum = sum.add(factor.mul(g), working);
   }
+  return new BigDecimal(k).pow(s.neg(), working).mul(sum).toPrecision(prec);
 }
 
 /**
@@ -3772,8 +3893,9 @@ function bigDirichletLNearOne(
  */
 export const bigDirichletBeta = (
   ce: ComputeEngine,
-  s: BigNum
-): BigNum | undefined => bigDirichletL(ce, s, 4, [1, 0, -1, 0]);
+  s: BigNum,
+  prec: number
+): BigNum | undefined => bigDirichletL(ce, s, 4, [1, 0, -1, 0], prec);
 
 // --- LerchPhi / PolyLog, arbitrary precision -------------------------------
 // cortex-js/compute-engine#374: `LerchPhi` and `PolyLog` answer in doubles
@@ -3799,7 +3921,7 @@ const LERCH_BIG_MAX_TERMS = 30_000;
 const LERCH_BIG_CONSECUTIVE = 3;
 
 /**
- * Φ(z, s, a) = Σ_{k≥0} zᵏ(k+a)^(−s) at `BigDecimal.precision` significant
+ * Φ(z, s, a) = Σ_{k≥0} zᵏ(k+a)^(−s) at `requested` significant
  * digits, for real z, s, a with |z| < 1 — the arbitrary-precision twin of
  * `numerics/lerch-phi.ts`'s double series (`lerchPhiComplex`), for the
  * same disk of convergence. `PolyLog` rides on it at a = 1, via
@@ -3829,32 +3951,28 @@ export function bigLerchPhi(
   ce: ComputeEngine,
   z: HurwitzOperand,
   s: HurwitzOperand,
-  a: HurwitzOperand
+  a: HurwitzOperand,
+  requested: number
 ): BigNum | undefined {
-  const zd = hurwitzOperandNumber(z);
-  const sd = hurwitzOperandNumber(s);
-  const ad = hurwitzOperandNumber(a);
+  const zd = hurwitzOperandNumber(z, requested);
+  const sd = hurwitzOperandNumber(s, requested);
+  const ad = hurwitzOperandNumber(a, requested);
   if (!(Math.abs(zd) < 1) || !Number.isFinite(sd) || !Number.isFinite(ad))
     return undefined;
 
-  const requested = BigDecimal.precision;
   let guard = SPECIAL_FN_GUARD;
   for (let attempt = 0; attempt < 2; attempt++) {
-    BigDecimal.precision = requested + guard;
-    let r: { readonly sum: BigNum; readonly largest: number } | undefined;
-    try {
-      r = lerchPhiSeries(
-        ce,
-        hurwitzOperandBig(z),
-        hurwitzOperandBig(s),
-        hurwitzOperandBig(a),
-        zd,
-        sd,
-        ad
-      );
-    } finally {
-      BigDecimal.precision = requested;
-    }
+    const working = requested + guard;
+    const r = lerchPhiSeries(
+      ce,
+      hurwitzOperandBig(z, working),
+      hurwitzOperandBig(s, working),
+      hurwitzOperandBig(a, working),
+      zd,
+      sd,
+      ad,
+      working
+    );
     if (r === undefined) return undefined;
     if (r.sum.isZero()) return r.sum.toPrecision(requested);
     // Terms larger than the sum cancel (an alternating series, z < 0): if
@@ -3867,7 +3985,7 @@ export function bigLerchPhi(
   return undefined;
 }
 
-/** The series at `BigDecimal.precision` (already raised by the caller),
+/** The series at the precision `working` (raised by the caller),
  * with log10 of its largest term — how many digits the sum cancelled, if
  * it ended up much smaller. `zd`/`sd`/`ad` are the operands as doubles,
  * sizing the tail-bound estimate before paying for the exact `BigNum`
@@ -3879,9 +3997,9 @@ function lerchPhiSeries(
   a: BigNum,
   zd: number,
   sd: number,
-  ad: number
+  ad: number,
+  working: number
 ): { readonly sum: BigNum; readonly largest: number } | undefined {
-  const working = BigDecimal.precision;
   const rnd = (x: BigNum): BigNum => x.toPrecision(working);
   const negS = s.neg();
   const growth = Math.max(0, -sd); // max(0, −s), the ratio bound's growth term
@@ -3892,8 +4010,8 @@ function lerchPhiSeries(
   let confirmed = 0; // consecutive terms that cleared the tail bound
   for (let k = 0; k < LERCH_BIG_MAX_TERMS; k++) {
     if ((k & 0xff) === 0) checkDeadline(ce._deadlineFrame);
-    const w = a.add(k);
-    const power = rnd(w.pow(negS));
+    const w = a.add(k, working);
+    const power = rnd(w.pow(negS, working));
     if (power.isNaN()) return undefined; // w < 0, non-integer s: complex
     if (!power.isFinite()) return undefined; // w = 0, s > 0: a pole
     const term = rnd(zPow.mul(power));
@@ -3906,7 +4024,7 @@ function lerchPhiSeries(
     // together they change the sum by less than 10^(−1.5·working) of it,
     // far below its last digit.
     if (sum.isZero() || termLog >= bigLog10Abs(sum) - 2 * working)
-      sum = rnd(sum.add(term));
+      sum = rnd(sum.add(term, working));
     // Past k = 0, zᵏ = 0 (z = 0) makes every later term zero too, so the
     // sum is complete. A zero term is not enough: (k + a)^(−s) is 0 at
     // k = −a for a negative integer a and s < 0, and the terms after it are
@@ -3979,7 +4097,7 @@ function lerchPhiSeriesFits(
 
 /**
  * PolyLog's arbitrary-precision route: Liₛ(z) = z·Φ(z, s, 1) on
- * `bigLerchPhi`, at `BigDecimal.precision` significant digits — the same
+ * `bigLerchPhi`, at `requested` significant digits — the same
  * identity the double kernel (`polylogOrderReal`/`polylogOrderComplex`)
  * uses, but exact for a rational z or s and answering the requested
  * digits above machine precision.
@@ -3987,44 +4105,46 @@ function lerchPhiSeriesFits(
 export function bigPolyLog(
   ce: ComputeEngine,
   s: HurwitzOperand,
-  z: HurwitzOperand
+  z: HurwitzOperand,
+  requested: number
 ): BigNum | undefined {
   // Φ is returned with 3 digits more than requested: rounding Φ to the
   // requested digits first, then rounding the product z·Φ again, can move
   // the last requested digit of Liₛ(z) by more than one unit. (`bigLerchPhi`
   // keeps its own guard digits while it sums; these 3 only protect the
   // final product, so they add few terms to the series.)
-  const requested = BigDecimal.precision;
-  BigDecimal.precision = requested + 3;
-  try {
-    const phi = bigLerchPhi(ce, z, s, [1n, 1n]);
-    if (phi === undefined) return undefined;
-    return hurwitzOperandBig(z).mul(phi).toPrecision(requested);
-  } finally {
-    BigDecimal.precision = requested;
-  }
+  const phi = bigLerchPhi(ce, z, s, [1n, 1n], requested + 3);
+  if (phi === undefined) return undefined;
+  return hurwitzOperandBig(z, requested + 3)
+    .mul(phi)
+    .toPrecision(requested);
 }
 
 /** Halley refinement of a BigDecimal Lambert W estimate `w` toward the root of
  *  w·e^w = x (branch-independent), rounded to working precision. `tol` is the
  *  convergence tolerance. */
-function bigLambertWHalley(w: BigNum, x: BigNum, tol: BigNum): BigNum {
+function bigLambertWHalley(
+  w: BigNum,
+  x: BigNum,
+  tol: BigNum,
+  prec: number
+): BigNum {
   // Halley's method: converges cubically
   for (let i = 0; i < 100; i++) {
-    const ew = w.exp();
+    const ew = w.exp(prec);
     const wew = w.mul(ew);
-    const f = wew.sub(x);
-    const fp = ew.mul(w.add(1));
-    const fpp = ew.mul(w.add(2));
-    const delta = f.div(fp.sub(f.mul(fpp).div(fp.mul(2))));
-    w = w.sub(delta);
-    if (delta.abs().lt(tol.mul(w.abs().add(1)))) break;
+    const f = wew.sub(x, prec);
+    const fp = ew.mul(w.add(1, prec));
+    const fpp = ew.mul(w.add(2, prec));
+    const delta = f.div(fp.sub(f.mul(fpp).div(fp.mul(2), prec), prec), prec);
+    w = w.sub(delta, prec);
+    if (delta.abs().lt(tol.mul(w.abs().add(1, prec)))) break;
   }
 
   // Round to working precision: `sub`/`mul` in the Halley loop don't round, so
-  // `w` carries digits beyond BigDecimal.precision that are not converged.
+  // `w` carries digits beyond `prec` that are not converged.
   // (NU-P1-10)
-  return w.toPrecision(BigDecimal.precision);
+  return w.toPrecision(prec);
 }
 
 /**
@@ -4045,22 +4165,23 @@ function bigLambertWHalley(w: BigNum, x: BigNum, tol: BigNum): BigNum {
  */
 function bigLambertWNearBranchPoint(
   x: BigNum,
-  sign: 1 | -1
+  sign: 1 | -1,
+  prec: number
 ): BigNum | undefined {
-  const invE = BigDecimal.ONE.div(BigDecimal.ONE.exp());
-  const d0 = x.add(invE);
+  const invE = BigDecimal.ONE.div(BigDecimal.ONE.exp(prec), prec);
+  const d0 = x.add(invE, prec);
   // x is −1/e to the working precision when x + 1/e is below the rounding
   // error of x and of 1/e (a few units of 10^−precision): x is then −1/e
   // rounded, and W = −1. A larger negative x + 1/e is outside the real
   // domain: the caller uses the complex kernel.
-  if (d0.abs().lt(new BigDecimal(10).pow(1 - BigDecimal.precision)))
+  if (d0.abs().lt(new BigDecimal(10).pow(1 - prec, prec)))
     return BigDecimal.NEGATIVE_ONE;
   if (d0.isNegative() || d0.gte(0.05)) return undefined;
-  const prec = BigDecimal.precision;
-  return withGuardDigits(10, () => {
-    const e = BigDecimal.ONE.exp();
-    const d = x.add(BigDecimal.ONE.div(e));
-    let p = d.mul(e).mul(2).sqrt();
+  const requested = prec;
+  return withGuardDigits(prec, 10, (prec) => {
+    const e = BigDecimal.ONE.exp(prec);
+    const d = x.add(BigDecimal.ONE.div(e, prec), prec);
+    let p = d.mul(e).mul(2).sqrt(prec);
     if (sign < 0) p = p.neg();
     // |p| is between 10^(magnitude − 1) and 10^magnitude.
     const magnitude = p.exponent + p._digitCount();
@@ -4076,21 +4197,13 @@ function bigLambertWNearBranchPoint(
     let w: BigNum = BigDecimal.ZERO;
     let power: BigNum = BigDecimal.ONE;
     for (const [num, den] of coefficients) {
-      w = w.add(power.mul(num).div(den));
+      w = w.add(power.mul(num).div(den, prec), prec);
       power = power.mul(p);
     }
-    if (-7 * (magnitude - 1) > prec + 15) return w;
+    if (-7 * (magnitude - 1) > requested + 15) return w;
     const extra = Math.max(0, -magnitude) + 10;
-    BigDecimal.precision += extra;
-    try {
-      return bigLambertWHalley(
-        w,
-        x,
-        new BigDecimal(10).pow(-BigDecimal.precision)
-      );
-    } finally {
-      BigDecimal.precision -= extra;
-    }
+    const wp = prec + extra;
+    return bigLambertWHalley(w, x, new BigDecimal(10).pow(-wp, wp), wp);
   });
 }
 
@@ -4102,23 +4215,28 @@ function bigLambertWNearBranchPoint(
  * non-integer) branch index returns NaN — the complex branches are out of
  * scope for this real kernel. Uses Halley's method with adaptive precision.
  */
-export function bigLambertW(ce: ComputeEngine, x: BigNum, branch = 0): BigNum {
+export function bigLambertW(
+  ce: ComputeEngine,
+  x: BigNum,
+  branch: number,
+  prec: number
+): BigNum {
   if (!x.isFinite()) return x; // ±Infinity, NaN
 
-  const invE = BigDecimal.ONE.div(BigDecimal.ONE.exp()); // 1/e
+  const invE = BigDecimal.ONE.div(BigDecimal.ONE.exp(prec), prec); // 1/e
   const negInvE = invE.neg();
 
-  // The convergence tolerance is the *working* precision (BigDecimal.precision),
+  // The convergence tolerance is the *working* precision (`prec`),
   // not `ce.precision`: everything else in this iteration rounds to
-  // BigDecimal.precision, and reading a looser `ce.precision` here let Halley
+  // `prec`, and reading a looser `ce.precision` here let Halley
   // stop early (or, when the working precision was higher, left a garbage tail
   // beyond the true precision). (NU-P1-10)
-  const tol = new BigDecimal(10).pow(-BigDecimal.precision);
+  const tol = new BigDecimal(10).pow(-prec, prec);
 
   if (branch === 0) {
     if (x.isZero()) return new BigDecimal(0);
 
-    const near = bigLambertWNearBranchPoint(x, 1);
+    const near = bigLambertWNearBranchPoint(x, 1, prec);
     if (near !== undefined) return near;
 
     // W₀ is defined for x >= -1/e
@@ -4136,15 +4254,15 @@ export function bigLambertW(ce: ComputeEngine, x: BigNum, branch = 0): BigNum {
       const lnx = Math.log(xNum);
       w = new BigDecimal(lnx - Math.log(lnx));
     } else {
-      const l1 = x.ln();
-      const l2 = l1.ln();
-      w = l1.sub(l2).add(l2.div(l1));
+      const l1 = x.ln(prec);
+      const l2 = l1.ln(prec);
+      w = l1.sub(l2, prec).add(l2.div(l1, prec), prec);
     }
-    return bigLambertWHalley(w, x, tol);
+    return bigLambertWHalley(w, x, tol, prec);
   }
 
   if (branch === -1) {
-    const near = bigLambertWNearBranchPoint(x, -1);
+    const near = bigLambertWNearBranchPoint(x, -1, prec);
     if (near !== undefined) return near;
 
     // W₋₁ is real only on -1/e <= x < 0
@@ -4161,7 +4279,7 @@ export function bigLambertW(ce: ComputeEngine, x: BigNum, branch = 0): BigNum {
       const l1 = Math.log(-xNum);
       w = new BigDecimal(l1 - Math.log(-l1));
     }
-    return bigLambertWHalley(w, x, tol);
+    return bigLambertWHalley(w, x, tol, prec);
   }
 
   // Other (complex) branches are out of scope for the real kernel.
@@ -5872,7 +5990,7 @@ export function sinc(x: number): number {
 // ---------------- Bignum kernels (REVIEW.md B23) ----------------
 //
 // Precision policy: like the other bignum kernels in this file (bigGammaln,
-// bigDigamma, ...), convergence tolerances use `BigDecimal.precision` plus
+// bigDigamma, ...), convergence tolerances use the precision `prec` plus
 // ~10 guard digits. Unlike those kernels, the series below can suffer
 // subtractive cancellation (1 − erf for erfc, the alternating Fresnel
 // Taylor series), so the working precision itself is temporarily raised by
@@ -5890,17 +6008,14 @@ export function sinc(x: number): number {
 const LOG10E = Math.LOG10E; // log10(e) ≈ 0.4343
 
 /**
- * Run `fn` with `BigDecimal.precision` temporarily raised by `extra`
- * digits (BigDecimal precision is a module-global, so save/restore).
+ * Run `fn` at the precision `prec` raised by `extra` digits (its argument).
  */
-function withExtraPrecision(extra: number, fn: () => BigNum): BigNum {
-  const saved = BigDecimal.precision;
-  BigDecimal.precision = saved + Math.max(0, Math.ceil(extra));
-  try {
-    return fn();
-  } finally {
-    BigDecimal.precision = saved;
-  }
+function withExtraPrecision(
+  prec: number,
+  extra: number,
+  fn: (prec: number) => BigNum
+): BigNum {
+  return fn(prec + Math.max(0, Math.ceil(extra)));
 }
 
 /**
@@ -5911,20 +6026,23 @@ function withExtraPrecision(extra: number, fn: () => BigNum): BigNum {
  *
  * `tolDigits` is the relative truncation tolerance (10^−tolDigits).
  */
-function bigErfSeries(x: BigNum, tolDigits: number): BigNum {
+function bigErfSeries(x: BigNum, tolDigits: number, prec: number): BigNum {
   const x2 = x.mul(x);
   const twoX2 = x2.mul(2);
   let term = x;
   let sum = x;
-  const tol = new BigDecimal(10).pow(-tolDigits);
+  const tol = new BigDecimal(10).pow(-tolDigits, prec);
   // Terms decay once 2n+1 > 2x²; generous cap (the loop breaks on tol)
   const maxTerms = 1000 + 10 * Math.ceil(x2.toNumber()) + 10 * tolDigits;
   for (let n = 1; n <= maxTerms; n++) {
-    term = term.mul(twoX2).div(2 * n + 1);
-    sum = sum.add(term);
+    term = term.mul(twoX2).div(2 * n + 1, prec);
+    sum = sum.add(term, prec);
     if (term.lt(sum.mul(tol))) break;
   }
-  return sum.mul(2).mul(x2.neg().exp()).div(BigDecimal.PI.sqrt());
+  return sum
+    .mul(2)
+    .mul(x2.neg().exp(prec))
+    .div(BigDecimal.pi(prec).sqrt(prec), prec);
 }
 
 /**
@@ -5934,97 +6052,102 @@ function bigErfSeries(x: BigNum, tolDigits: number): BigNum {
  * x²·log10(e) digits — callers must only use it when that exceeds the
  * requested tolerance. Must be called with x > 0.
  */
-function bigErfcAsymptotic(x: BigNum, tolDigits: number): BigNum {
+function bigErfcAsymptotic(x: BigNum, tolDigits: number, prec: number): BigNum {
   const twoX2 = x.mul(x).mul(2);
   let term: BigNum = BigDecimal.ONE;
   let sum: BigNum = BigDecimal.ONE;
   let prev = term.abs();
-  const tol = new BigDecimal(10).pow(-tolDigits);
+  const tol = new BigDecimal(10).pow(-tolDigits, prec);
   for (let m = 1; m <= 100000; m++) {
     term = term
       .mul(2 * m - 1)
-      .div(twoX2)
+      .div(twoX2, prec)
       .neg();
     const tAbs = term.abs();
     // Divergence guard: stop at the smallest term of the asymptotic series
     if (tAbs.gt(prev)) break;
     prev = tAbs;
-    sum = sum.add(term);
+    sum = sum.add(term, prec);
     if (tAbs.lt(tol)) break;
   }
-  return x.mul(x).neg().exp().div(x.mul(BigDecimal.PI.sqrt())).mul(sum);
+  return x
+    .mul(x)
+    .neg()
+    .exp(prec)
+    .div(x.mul(BigDecimal.pi(prec).sqrt(prec)), prec)
+    .mul(sum);
 }
 
 /**
- * Bignum error function. Precision scales with `BigDecimal.precision`.
+ * Bignum error function. Precision scales with `prec`.
  *
  * - |x| ≤ √((p+10)·ln 10): Maclaurin series (DLMF 7.6.2), no cancellation.
  * - beyond: erf(x) rounds to ±1 at the working precision
  *   (erfc(x) < e^{−x²} ≤ 10^{−(p+10)}).
  */
-export function bigErf(ce: ComputeEngine, x: BigNum): BigNum {
+export function bigErf(ce: ComputeEngine, x: BigNum, prec: number): BigNum {
   if (x.isNaN()) return BigDecimal.NAN;
   if (!x.isFinite())
     return x.isNegative() ? BigDecimal.NEGATIVE_ONE : BigDecimal.ONE;
   if (x.isZero()) return BigDecimal.ZERO;
-  if (x.isNegative()) return bigErf(ce, x.neg()).neg();
+  if (x.isNegative()) return bigErf(ce, x.neg(), prec).neg();
 
-  const p = BigDecimal.precision;
+  const p = prec;
   const guard = 10;
 
   const xN = x.toNumber();
   if (xN * xN * LOG10E >= p + guard) return BigDecimal.ONE;
 
-  return withExtraPrecision(guard, () =>
-    bigErfSeries(x, p + guard)
+  return withExtraPrecision(prec, guard, (prec) =>
+    bigErfSeries(x, p + guard, prec)
   ).toPrecision(p);
 }
 
 /**
  * Bignum imaginary error function, Maclaurin series. The series has only
  * positive terms (no cancellation), so the relative error tracks the working
- * precision. Precision scales with `BigDecimal.precision`. It needs about
+ * precision. Precision scales with `prec`. It needs about
  * e·x² terms, so `bigErfi()` uses it only for a moderate x.
  */
-function bigErfiSeries(x: BigNum, tolDigits: number): BigNum {
+function bigErfiSeries(x: BigNum, tolDigits: number, prec: number): BigNum {
   const x2 = x.mul(x);
   let term = x; // n = 0
   let sum = x;
-  const tol = new BigDecimal(10).pow(-tolDigits);
+  const tol = new BigDecimal(10).pow(-tolDigits, prec);
   const maxTerms = 1000 + 10 * Math.ceil(x2.toNumber()) + 10 * tolDigits;
   for (let n = 1; n <= maxTerms; n++) {
     // tₙ = tₙ₋₁ · x²·(2n−1) / (n·(2n+1))
     term = term
       .mul(x2)
       .mul(2 * n - 1)
-      .div(n * (2 * n + 1));
-    sum = sum.add(term);
+      .div(n * (2 * n + 1), prec);
+    sum = sum.add(term, prec);
     if (term.lt(sum.mul(tol))) break;
   }
-  return sum.mul(2).div(BigDecimal.PI.sqrt());
+  return sum.mul(2).div(BigDecimal.pi(prec).sqrt(prec), prec);
 }
 
-export function bigErfi(ce: ComputeEngine, x: BigNum): BigNum {
+export function bigErfi(ce: ComputeEngine, x: BigNum, prec: number): BigNum {
   if (x.isNaN()) return BigDecimal.NAN;
   if (!x.isFinite())
     return x.isNegative()
       ? BigDecimal.NEGATIVE_INFINITY
       : BigDecimal.POSITIVE_INFINITY;
   if (x.isZero()) return BigDecimal.ZERO;
-  if (x.isNegative()) return bigErfi(ce, x.neg()).neg();
+  if (x.isNegative()) return bigErfi(ce, x.neg(), prec).neg();
 
-  const p = BigDecimal.precision;
+  const p = prec;
   const guard = 10;
   // The asymptotic series is accurate to about e^{−x²} relative, enough once
   // x²·log₁₀(e) ≥ p + guard. The Maclaurin series needs about e·x² terms,
   // too many for a large x (a million for x = 1000).
   const xN = x.toNumber();
   if (xN * xN * LOG10E >= p + guard)
-    return withExtraPrecision(guard, () =>
-      bigErfiAsymptotic(x, p + guard)
+    return withExtraPrecision(prec, guard, (prec) =>
+      bigErfiAsymptotic(x, p + guard, prec)
     ).toPrecision(p);
-  return withExtraPrecision(guard, () =>
-    bigErfiSeries(x, p + guard)
+  return withExtraPrecision(prec, guard, (prec) =>
+    bigErfiSeries(x, p + guard, prec)
   ).toPrecision(p);
 }
 
@@ -6039,62 +6162,66 @@ export function bigErfi(ce: ComputeEngine, x: BigNum): BigNum {
  * Past the exponent range of a big decimal (x² larger than about 2·10¹⁶),
  * e^{x²} is infinite and so is the result.
  */
-function bigErfiAsymptotic(x: BigNum, tolDigits: number): BigNum {
+function bigErfiAsymptotic(x: BigNum, tolDigits: number, prec: number): BigNum {
   const x2 = x.mul(x);
   // Checked first: for a very large x the terms are so small that adding
   // one to the sum would build a number with billions of digits.
-  const scale = x2.exp();
+  const scale = x2.exp(prec);
   if (!scale.isFinite()) return scale;
   const twoX2 = x2.mul(2);
   let term: BigNum = BigDecimal.ONE;
   let sum: BigNum = BigDecimal.ONE;
-  const tol = new BigDecimal(10).pow(-tolDigits);
+  const tol = new BigDecimal(10).pow(-tolDigits, prec);
   for (let m = 1; m <= 100000; m++) {
-    const next = term.mul(2 * m - 1).div(twoX2);
+    const next = term.mul(2 * m - 1).div(twoX2, prec);
     if (next.gt(term) || next.lt(tol)) break;
     term = next;
-    sum = sum.add(term);
+    sum = sum.add(term, prec);
   }
-  return scale.div(x.mul(BigDecimal.PI.sqrt())).mul(sum);
+  return scale.div(x.mul(BigDecimal.pi(prec).sqrt(prec)), prec).mul(sum);
 }
 
 const EULER_GAMMA = 0.5772156649015328606; // Euler–Mascheroni constant γ
 
 /**
  * Bignum complementary error function.
- * Precision scales with `BigDecimal.precision`.
+ * Precision scales with `prec`.
  *
  * - x² log10(e) ≤ p+10: computed as 1 − erf(x) with the working precision
  *   raised by the x²·log10(e) digits lost to cancellation.
  * - beyond: the asymptotic series (DLMF 7.12.1), which by construction of
  *   the switchover delivers ≥ p+10 digits there.
  */
-export function bigErfc(ce: ComputeEngine, x: BigNum): BigNum {
+export function bigErfc(ce: ComputeEngine, x: BigNum, prec: number): BigNum {
   if (x.isNaN()) return BigDecimal.NAN;
   if (!x.isFinite()) return x.isNegative() ? BigDecimal.TWO : BigDecimal.ZERO;
   if (x.isZero()) return BigDecimal.ONE;
-  if (x.isNegative()) return BigDecimal.TWO.sub(bigErfc(ce, x.neg()));
+  if (x.isNegative())
+    return BigDecimal.TWO.sub(bigErfc(ce, x.neg(), prec), prec);
 
-  const p = BigDecimal.precision;
+  const p = prec;
   const guard = 10;
 
   const xN = x.toNumber();
   const cancellation = xN * xN * LOG10E; // digits lost in 1 − erf(x)
 
   if (cancellation <= p + guard) {
-    return withExtraPrecision(cancellation + guard, () =>
-      BigDecimal.ONE.sub(bigErfSeries(x, p + Math.ceil(cancellation) + guard))
+    return withExtraPrecision(prec, cancellation + guard, (prec) =>
+      BigDecimal.ONE.sub(
+        bigErfSeries(x, p + Math.ceil(cancellation) + guard, prec),
+        prec
+      )
     ).toPrecision(p);
   }
 
-  return withExtraPrecision(guard, () =>
-    bigErfcAsymptotic(x, p + guard)
+  return withExtraPrecision(prec, guard, (prec) =>
+    bigErfcAsymptotic(x, p + guard, prec)
   ).toPrecision(p);
 }
 
 /**
  * Bignum inverse error function: y such that erf(y) = x, for x ∈ [−1, 1].
- * Precision scales with `BigDecimal.precision`.
+ * Precision scales with `prec`.
  *
  * Newton iteration on `bigErf`:
  *    y ← y − (erf(y) − x)·(√π/2)·e^{y²}
@@ -6104,30 +6231,33 @@ export function bigErfc(ce: ComputeEngine, x: BigNum): BigNum {
  * best possible for the given input, but tiny perturbations of x near ±1
  * produce large changes in y.
  */
-export function bigErfInv(ce: ComputeEngine, x: BigNum): BigNum {
+export function bigErfInv(ce: ComputeEngine, x: BigNum, prec: number): BigNum {
   if (x.isNaN()) return BigDecimal.NAN;
   if (x.abs().gt(BigDecimal.ONE)) return BigDecimal.NAN;
   if (x.isZero()) return BigDecimal.ZERO;
   if (x.eq(BigDecimal.ONE)) return new BigDecimal(Infinity);
   if (x.eq(BigDecimal.NEGATIVE_ONE)) return new BigDecimal(-Infinity);
-  if (x.isNegative()) return bigErfInv(ce, x.neg()).neg();
+  if (x.isNegative()) return bigErfInv(ce, x.neg(), prec).neg();
 
-  const p = BigDecimal.precision;
+  const p = prec;
   const guard = 15;
 
-  return withExtraPrecision(guard, () => {
+  return withExtraPrecision(prec, guard, (prec) => {
     // Seed: machine Winitzki estimate; if 1−x² underflows in double
     // (x within ~1e−17 of 1), use the leading asymptotic √(−ln(1−x²))
     let y: BigNum;
     const xN = x.toNumber();
     if (1 - xN * xN > 0) y = new BigDecimal(erfInvApprox(xN));
-    else y = BigDecimal.ONE.sub(x.mul(x)).ln().neg().sqrt();
+    else y = BigDecimal.ONE.sub(x.mul(x), prec).ln(prec).neg().sqrt(prec);
 
-    const halfSqrtPi = BigDecimal.PI.sqrt().div(2);
-    const tol = new BigDecimal(10).pow(-(p + 5));
+    const halfSqrtPi = BigDecimal.pi(prec).sqrt(prec).div(2, prec);
+    const tol = new BigDecimal(10).pow(-(p + 5), prec);
     for (let i = 0; i < 100; i++) {
-      const delta = bigErf(ce, y).sub(x).mul(halfSqrtPi).mul(y.mul(y).exp());
-      y = y.sub(delta);
+      const delta = bigErf(ce, y, prec)
+        .sub(x, prec)
+        .mul(halfSqrtPi)
+        .mul(y.mul(y).exp(prec));
+      y = y.sub(delta, prec);
       if (delta.abs().lt(y.abs().mul(tol))) break;
     }
     return y;
@@ -6136,14 +6266,14 @@ export function bigErfInv(ce: ComputeEngine, x: BigNum): BigNum {
 
 /**
  * Bignum unnormalized cardinal sine: sinc(x) = sin(x)/x, sinc(0) = 1.
- * Precision scales with `BigDecimal.precision` (sin uses the engine's
+ * Precision scales with `prec` (sin uses the engine's
  * 1100-digit π for argument reduction).
  */
-export function bigSinc(x: BigNum): BigNum {
+export function bigSinc(x: BigNum, prec: number): BigNum {
   if (x.isNaN()) return BigDecimal.NAN;
   if (!x.isFinite()) return BigDecimal.ZERO; // lim sinc(±∞) = 0
   if (x.isZero()) return BigDecimal.ONE;
-  return x.sin().div(x);
+  return x.sin(prec).div(x, prec);
 }
 
 /**
@@ -6157,9 +6287,10 @@ export function bigSinc(x: BigNum): BigNum {
 function bigFresnelTaylor(
   x: BigNum,
   kind: 's' | 'c',
-  tolDigits: number
+  tolDigits: number,
+  prec: number
 ): BigNum {
-  const h = BigDecimal.PI.div(2);
+  const h = BigDecimal.pi(prec).div(2, prec);
   const h2 = h.mul(h);
   const x4 = x.mul(x).mul(x).mul(x);
   const h2x4 = h2.mul(x4);
@@ -6169,21 +6300,21 @@ function bigFresnelTaylor(
   let sum: BigNum;
   if (kind === 's') {
     c = h.mul(x).mul(x).mul(x);
-    sum = c.div(3);
+    sum = c.div(3, prec);
   } else {
     c = x;
     sum = x;
   }
 
-  const tol = new BigDecimal(10).pow(-tolDigits);
+  const tol = new BigDecimal(10).pow(-tolDigits, prec);
   const uN = (Math.PI / 2) * x.toNumber() ** 2;
   // Terms decay once 2n > πx²/2; generous cap (the loop breaks on tol)
   const maxTerms = 100 + 2 * Math.ceil(uN) + 2 * tolDigits;
   for (let n = 1; n <= maxTerms; n++) {
     const d = kind === 's' ? 2 * n * (2 * n + 1) : (2 * n - 1) * (2 * n);
-    c = c.mul(h2x4).div(d).neg();
-    const t = c.div(kind === 's' ? 4 * n + 3 : 4 * n + 1);
-    sum = sum.add(t);
+    c = c.mul(h2x4).div(d, prec).neg();
+    const t = c.div(kind === 's' ? 4 * n + 3 : 4 * n + 1, prec);
+    sum = sum.add(t, prec);
     if (t.abs().lt(tol)) break;
   }
   return sum;
@@ -6202,45 +6333,47 @@ function bigFresnelTaylor(
 function bigFresnelAsymptotic(
   x: BigNum,
   kind: 's' | 'c',
-  tolDigits: number
+  tolDigits: number,
+  prec: number
 ): BigNum {
-  const pi = BigDecimal.PI;
-  const u = pi.mul(x).mul(x).div(2);
+  const pi = BigDecimal.pi(prec);
+  const u = pi.mul(x).mul(x).div(2, prec);
   const fourU2 = u.mul(u).mul(4);
   const piX = pi.mul(x);
 
   // Pochhammer ratios: (1/2)_{2m}/(1/2)_{2m−2} = (4m−3)(4m−1)/4
   //                    (1/2)_{2m+1}/(1/2)_{2m−1} = (4m−1)(4m+1)/4
   let fTerm: BigNum = BigDecimal.ONE;
-  let gTerm: BigNum = BigDecimal.HALF.div(u);
+  let gTerm: BigNum = BigDecimal.HALF.div(u, prec);
   let fSum = fTerm;
   let gSum = gTerm;
   let prev = fTerm.abs();
-  const tol = new BigDecimal(10).pow(-tolDigits);
+  const tol = new BigDecimal(10).pow(-tolDigits, prec);
   for (let m = 1; m <= 100000; m++) {
     fTerm = fTerm
       .mul((4 * m - 3) * (4 * m - 1))
-      .div(fourU2)
+      .div(fourU2, prec)
       .neg();
     gTerm = gTerm
       .mul((4 * m - 1) * (4 * m + 1))
-      .div(fourU2)
+      .div(fourU2, prec)
       .neg();
     const fAbs = fTerm.abs();
     // Divergence guard: stop at the smallest term of the asymptotic series
     if (fAbs.gt(prev)) break;
     prev = fAbs;
-    fSum = fSum.add(fTerm);
-    gSum = gSum.add(gTerm);
+    fSum = fSum.add(fTerm, prec);
+    gSum = gSum.add(gTerm, prec);
     if (fAbs.lt(tol) && gTerm.abs().lt(tol)) break;
   }
-  const f = fSum.div(piX);
-  const g = gSum.div(piX);
-  const sinU = u.sin();
-  const cosU = u.cos();
+  const f = fSum.div(piX, prec);
+  const g = gSum.div(piX, prec);
+  const sinU = u.sin(prec);
+  const cosU = u.cos(prec);
 
-  if (kind === 's') return BigDecimal.HALF.sub(f.mul(cosU)).sub(g.mul(sinU));
-  return BigDecimal.HALF.add(f.mul(sinU)).sub(g.mul(cosU));
+  if (kind === 's')
+    return BigDecimal.HALF.sub(f.mul(cosU), prec).sub(g.mul(sinU), prec);
+  return BigDecimal.HALF.add(f.mul(sinU), prec).sub(g.mul(cosU), prec);
 }
 
 /**
@@ -6262,14 +6395,14 @@ function bigLog10Abs(x: BigNum): number {
   return x.exponent + shift + Math.log10(lead);
 }
 
-function bigFresnel(x: BigNum, kind: 's' | 'c'): BigNum {
+function bigFresnel(x: BigNum, kind: 's' | 'c', prec: number): BigNum {
   if (x.isNaN()) return BigDecimal.NAN;
   if (!x.isFinite())
     return x.isNegative() ? BigDecimal.HALF.neg() : BigDecimal.HALF;
   if (x.isZero()) return BigDecimal.ZERO;
-  if (x.isNegative()) return bigFresnel(x.neg(), kind).neg(); // odd
+  if (x.isNegative()) return bigFresnel(x.neg(), kind, prec).neg(); // odd
 
-  const p = BigDecimal.precision;
+  const p = prec;
   const guard = 10;
 
   const xN = x.toNumber();
@@ -6285,8 +6418,8 @@ function bigFresnel(x: BigNum, kind: 's' | 'c'): BigNum {
   const log10X = bigLog10Abs(x);
 
   if (cancellation <= p + 2 * guard) {
-    return withExtraPrecision(cancellation + guard, () =>
-      bigFresnelTaylor(x, kind, p + guard)
+    return withExtraPrecision(prec, cancellation + guard, (prec) =>
+      bigFresnelTaylor(x, kind, p + guard, prec)
     ).toPrecision(p);
   }
 
@@ -6301,35 +6434,34 @@ function bigFresnel(x: BigNum, kind: 's' | 'c'): BigNum {
   // Extra digits also cover the absolute phase accuracy of sin/cos(πx²/2).
   // log10(πx²/2) is derived from log10(x) when the phase itself overflows
   // the double: `Math.log10(Infinity)` made `extra` — and hence the
-  // process-global `BigDecimal.precision` set by `withExtraPrecision` —
-  // Infinity, which sent the Chudnovsky π binary splitting into unbounded
-  // recursion ("Maximum call stack size exceeded"). The 1/2 shortcut above
+  // precision that `withExtraPrecision` passes — Infinity, which sent the
+  // Chudnovsky π binary splitting into unbounded recursion ("Maximum call stack size exceeded"). The 1/2 shortcut above
   // does not cover this on its own: at a working precision above ~150 digits
   // an x whose phase overflows still needs the series.
   const log10U = Number.isFinite(uN)
     ? Math.log10(uN)
     : 2 * log10X + Math.log10(Math.PI / 2);
   const extra = guard + Math.ceil(Math.max(0, log10U));
-  return withExtraPrecision(extra, () =>
-    bigFresnelAsymptotic(x, kind, p + guard)
+  return withExtraPrecision(prec, extra, (prec) =>
+    bigFresnelAsymptotic(x, kind, p + guard, prec)
   ).toPrecision(p);
 }
 
 /**
  * Bignum Fresnel sine integral S(x). Precision scales with
- * `BigDecimal.precision`: Taylor series for πx²/2·log10(e) ≤ p+20 (with
+ * `prec`: Taylor series for πx²/2·log10(e) ≤ p+20 (with
  * raised working precision to absorb the alternating-series cancellation),
  * asymptotic expansion beyond (where it delivers ≥ p+10 digits).
  */
-export function bigFresnelS(x: BigNum): BigNum {
-  return bigFresnel(x, 's');
+export function bigFresnelS(x: BigNum, prec: number): BigNum {
+  return bigFresnel(x, 's', prec);
 }
 
 /**
  * Bignum Fresnel cosine integral C(x). Same switchover as `bigFresnelS`.
  */
-export function bigFresnelC(x: BigNum): BigNum {
-  return bigFresnel(x, 'c');
+export function bigFresnelC(x: BigNum, prec: number): BigNum {
+  return bigFresnel(x, 'c', prec);
 }
 
 //
@@ -6355,20 +6487,19 @@ export function agm(a: number, b: number): number {
 
 /**
  * Bignum arithmetic-geometric mean of two non-negative reals, at the
- * current `BigDecimal.precision` (callers should raise precision around
- * this for guard digits).
+ * precision `prec` (callers should raise it for guard digits).
  */
-export function bigAgm(a: BigNum, b: BigNum): BigNum {
+export function bigAgm(a: BigNum, b: BigNum, prec: number): BigNum {
   if (a.isNaN() || b.isNaN() || a.isNegative() || b.isNegative())
     return BigDecimal.NAN;
   if (a.isZero() || b.isZero()) return BigDecimal.ZERO;
-  const tol = new BigDecimal(10).pow(-(BigDecimal.precision - 2));
-  for (let i = 0; i < 200 && a.sub(b).abs().gt(tol.mul(a.abs())); i++) {
-    const an = a.add(b).div(BigDecimal.TWO);
-    b = a.mul(b).sqrt();
+  const tol = new BigDecimal(10).pow(-(prec - 2), prec);
+  for (let i = 0; i < 200 && a.sub(b, prec).abs().gt(tol.mul(a.abs())); i++) {
+    const an = a.add(b, prec).div(BigDecimal.TWO, prec);
+    b = a.mul(b).sqrt(prec);
     a = an;
   }
-  return a.add(b).div(BigDecimal.TWO);
+  return a.add(b, prec).div(BigDecimal.TWO, prec);
 }
 
 //
@@ -6418,39 +6549,50 @@ export function ellipticE(m: number): number {
 }
 
 /** Bignum K(m) for m < 1 (parameter convention). */
-export function bigEllipticK(ce: ComputeEngine, m: BigNum): BigNum {
+export function bigEllipticK(
+  ce: ComputeEngine,
+  m: BigNum,
+  prec: number
+): BigNum {
   if (m.isNaN() || m.gte(BigDecimal.ONE)) return BigDecimal.NAN;
-  const p = BigDecimal.precision;
+  const p = prec;
   const guard = 10;
-  return withExtraPrecision(guard, () =>
-    BigDecimal.PI.div(
-      BigDecimal.TWO.mul(bigAgm(BigDecimal.ONE, BigDecimal.ONE.sub(m).sqrt()))
+  return withExtraPrecision(prec, guard, (prec) =>
+    BigDecimal.pi(prec).div(
+      BigDecimal.TWO.mul(
+        bigAgm(BigDecimal.ONE, BigDecimal.ONE.sub(m, prec).sqrt(prec), prec)
+      ),
+      prec
     )
   ).toPrecision(p);
 }
 
 /** Bignum E(m) for m < 1 (parameter convention). */
-export function bigEllipticE(ce: ComputeEngine, m: BigNum): BigNum {
+export function bigEllipticE(
+  ce: ComputeEngine,
+  m: BigNum,
+  prec: number
+): BigNum {
   if (m.isNaN() || m.gt(BigDecimal.ONE)) return BigDecimal.NAN;
   if (m.eq(BigDecimal.ONE)) return BigDecimal.ONE;
-  const p = BigDecimal.precision;
+  const p = prec;
   const guard = 10;
-  return withExtraPrecision(guard, () => {
-    const tol = new BigDecimal(10).pow(-(BigDecimal.precision - 2));
+  return withExtraPrecision(prec, guard, (prec) => {
+    const tol = new BigDecimal(10).pow(-(prec - 2), prec);
     let a = BigDecimal.ONE;
-    let b = BigDecimal.ONE.sub(m).sqrt();
-    let sum = m.div(BigDecimal.TWO); // 2^{−1}·c₀²
+    let b = BigDecimal.ONE.sub(m, prec).sqrt(prec);
+    let sum = m.div(BigDecimal.TWO, prec); // 2^{−1}·c₀²
     let pow2 = BigDecimal.HALF;
-    for (let i = 0; i < 200 && a.sub(b).abs().gt(tol.mul(a)); i++) {
-      const c = a.sub(b).div(BigDecimal.TWO);
-      const an = a.add(b).div(BigDecimal.TWO);
-      b = a.mul(b).sqrt();
+    for (let i = 0; i < 200 && a.sub(b, prec).abs().gt(tol.mul(a)); i++) {
+      const c = a.sub(b, prec).div(BigDecimal.TWO, prec);
+      const an = a.add(b, prec).div(BigDecimal.TWO, prec);
+      b = a.mul(b).sqrt(prec);
       a = an;
       pow2 = pow2.mul(BigDecimal.TWO);
-      sum = sum.add(pow2.mul(c).mul(c));
+      sum = sum.add(pow2.mul(c).mul(c), prec);
     }
-    const K = BigDecimal.PI.div(BigDecimal.TWO.mul(a));
-    return K.mul(BigDecimal.ONE.sub(sum));
+    const K = BigDecimal.pi(prec).div(BigDecimal.TWO.mul(a), prec);
+    return K.mul(BigDecimal.ONE.sub(sum, prec));
   }).toPrecision(p);
 }
 
@@ -7561,10 +7703,11 @@ function bigGauss2F1Series(
   c: BigNum,
   z: BigNum,
   maxTerms: number,
+  prec: number,
   polynomial = false,
   retried = false
 ): BigNum {
-  const tol = new BigDecimal(10).pow(-(BigDecimal.precision + 2));
+  const tol = new BigDecimal(10).pow(-(prec + 2), prec);
   const start = gauss2F1SeriesStart(
     a.toNumber(),
     b.toNumber(),
@@ -7580,22 +7723,22 @@ function bigGauss2F1Series(
     const nn = new BigDecimal(n);
     const previous = term;
     term = term
-      .mul(a.add(nn))
-      .mul(b.add(nn))
+      .mul(a.add(nn, prec))
+      .mul(b.add(nn, prec))
       .mul(z)
-      .div(c.add(nn).mul(new BigDecimal(n + 1)));
+      .div(c.add(nn, prec).mul(new BigDecimal(n + 1)), prec);
     if (term.isZero()) {
       done = true;
       break;
     }
     if (term.abs().gt(big)) big = term.abs();
-    sum = sum.add(term);
+    sum = sum.add(term, prec);
     // A small term ends the sum only while the terms decrease: just after
     // n = −c the terms can grow again from a very small value.
     if (
       n >= start &&
       term.abs().lt(previous.abs()) &&
-      term.abs().lt(tol.mul(sum.abs().add(BigDecimal.ONE)))
+      term.abs().lt(tol.mul(sum.abs().add(BigDecimal.ONE, prec)))
     ) {
       done = true;
       break;
@@ -7603,12 +7746,12 @@ function bigGauss2F1Series(
   }
   if (!done) return BigDecimal.NAN;
   if (!retried && !sum.isZero()) {
-    const lost = Math.log10(big.div(sum.abs()).toNumber());
+    const lost = Math.log10(big.div(sum.abs(), prec).toNumber());
     // More than 1000 lost digits: the sum is not computed.
     if (!(lost <= 1000)) return BigDecimal.NAN;
     if (lost > 8)
-      return withExtraPrecision(lost + 2, () =>
-        bigGauss2F1Series(ce, a, b, c, z, maxTerms, polynomial, true)
+      return withExtraPrecision(prec, lost + 2, (prec) =>
+        bigGauss2F1Series(ce, a, b, c, z, maxTerms, prec, polynomial, true)
       );
   }
   return sum;
@@ -7624,11 +7767,12 @@ export function bigHypergeometric2F1(
   a: BigNum,
   b: BigNum,
   c: BigNum,
-  z: BigNum
+  z: BigNum,
+  prec: number
 ): BigNum {
   if (a.isNaN() || b.isNaN() || c.isNaN() || z.isNaN()) return BigDecimal.NAN;
 
-  const p = BigDecimal.precision;
+  const p = prec;
   const guard = 10;
   const maxTerms = Math.max(10_000, 40 * (p + guard));
 
@@ -7639,43 +7783,55 @@ export function bigHypergeometric2F1(
     if (nTerms === Infinity || nTerms > -c.toNumber()) return BigDecimal.NAN;
   }
   if (nTerms !== Infinity && nTerms < maxTerms) {
-    return withExtraPrecision(guard, () =>
-      bigGauss2F1Series(ce, a, b, c, z, nTerms, true)
+    return withExtraPrecision(prec, guard, (prec) =>
+      bigGauss2F1Series(ce, a, b, c, z, nTerms, prec, true)
     ).toPrecision(p);
   }
 
   if (z.isZero()) return BigDecimal.ONE;
   const one = BigDecimal.ONE;
   if (z.eq(one)) {
-    const s = c.sub(a).sub(b);
+    const s = c.sub(a, prec).sub(b, prec);
     if (!s.isPositive()) return BigDecimal.NAN; // divergent (or pole at s = 0)
-    return withExtraPrecision(guard, () =>
-      bigGamma(ce, c)
-        .mul(bigGamma(ce, s))
-        .div(bigGamma(ce, c.sub(a)).mul(bigGamma(ce, c.sub(b))))
+    return withExtraPrecision(prec, guard, (prec) =>
+      bigGamma(ce, c, prec)
+        .mul(bigGamma(ce, s, prec))
+        .div(
+          bigGamma(ce, c.sub(a, prec), prec).mul(
+            bigGamma(ce, c.sub(b, prec), prec)
+          ),
+          prec
+        )
     ).toPrecision(p);
   }
   if (z.gt(one)) return BigDecimal.NAN; // complex value
 
   if (z.isNegative()) {
     // Pfaff: (1−z)^{−a}·₂F₁(a, c−b; c; z/(z−1))
-    return withExtraPrecision(guard, () => {
-      const oneMinusZ = one.sub(z);
-      const factor = a.neg().mul(oneMinusZ.ln()).exp(); // (1−z)^{−a}
+    return withExtraPrecision(prec, guard, (prec) => {
+      const oneMinusZ = one.sub(z, prec);
+      const factor = a.neg().mul(oneMinusZ.ln(prec)).exp(prec); // (1−z)^{−a}
       return factor.mul(
-        bigHypergeometric2F1(ce, a, c.sub(b), c, z.div(z.sub(one)))
+        bigHypergeometric2F1(
+          ce,
+          a,
+          c.sub(b, prec),
+          c,
+          z.div(z.sub(one, prec), prec),
+          prec
+        )
       );
     }).toPrecision(p);
   }
 
   if (z.lte(BigDecimal.HALF)) {
-    return withExtraPrecision(guard, () =>
-      bigGauss2F1Series(ce, a, b, c, z, maxTerms)
+    return withExtraPrecision(prec, guard, (prec) =>
+      bigGauss2F1Series(ce, a, b, c, z, maxTerms, prec)
     ).toPrecision(p);
   }
 
   // z ∈ (0.5, 1): connection formula at 1−z, generic case
-  const s = c.sub(a).sub(b);
+  const s = c.sub(a, prec).sub(b, prec);
   if (s.isInteger()) {
     // Degenerate case (the connection formula needs a logarithmic limit): the
     // direct series still converges for z < 1 (radius 1), just slowly near 1.
@@ -7705,8 +7861,8 @@ export function bigHypergeometric2F1(
         Math.ceil((p + guard + 2) / -Math.log10((1 + zNum) / 2)) +
         100;
       if (slowMax <= 2_000_000)
-        return withExtraPrecision(guard, () =>
-          bigGauss2F1Series(ce, a, b, c, z, slowMax)
+        return withExtraPrecision(prec, guard, (prec) =>
+          bigGauss2F1Series(ce, a, b, c, z, slowMax, prec)
         ).toPrecision(p);
     }
     return BigDecimal.NAN; // too slow: stays symbolic
@@ -7717,29 +7873,45 @@ export function bigHypergeometric2F1(
   // with that many more digits; beyond 1000 lost digits the result is NaN.
   const connection = (extra: number): { value: BigNum; lost: number } => {
     let lost = Infinity;
-    const value = withExtraPrecision(extra, () => {
-      const oneMinusZ = one.sub(z);
-      const t1 = bigGamma(ce, c)
-        .mul(bigGamma(ce, s))
-        .div(bigGamma(ce, c.sub(a)).mul(bigGamma(ce, c.sub(b))))
-        .mul(bigGauss2F1Series(ce, a, b, one.sub(s), oneMinusZ, maxTerms));
-      const t2 = bigGamma(ce, c)
-        .mul(bigGamma(ce, s.neg()))
-        .div(bigGamma(ce, a).mul(bigGamma(ce, b)))
-        .mul(s.mul(oneMinusZ.ln()).exp()) // (1−z)^s
+    const value = withExtraPrecision(prec, extra, (prec) => {
+      const oneMinusZ = one.sub(z, prec);
+      const t1 = bigGamma(ce, c, prec)
+        .mul(bigGamma(ce, s, prec))
+        .div(
+          bigGamma(ce, c.sub(a, prec), prec).mul(
+            bigGamma(ce, c.sub(b, prec), prec)
+          ),
+          prec
+        )
         .mul(
           bigGauss2F1Series(
             ce,
-            c.sub(a),
-            c.sub(b),
-            one.add(s),
+            a,
+            b,
+            one.sub(s, prec),
             oneMinusZ,
-            maxTerms
+            maxTerms,
+            prec
           )
         );
-      const sum = t1.add(t2);
+      const t2 = bigGamma(ce, c, prec)
+        .mul(bigGamma(ce, s.neg(), prec))
+        .div(bigGamma(ce, a, prec).mul(bigGamma(ce, b, prec)), prec)
+        .mul(s.mul(oneMinusZ.ln(prec)).exp(prec)) // (1−z)^s
+        .mul(
+          bigGauss2F1Series(
+            ce,
+            c.sub(a, prec),
+            c.sub(b, prec),
+            one.add(s, prec),
+            oneMinusZ,
+            maxTerms,
+            prec
+          )
+        );
+      const sum = t1.add(t2, prec);
       const big = t1.abs().gt(t2.abs()) ? t1.abs() : t2.abs();
-      if (!sum.isZero()) lost = Math.log10(big.div(sum.abs()).toNumber());
+      if (!sum.isZero()) lost = Math.log10(big.div(sum.abs(), prec).toNumber());
       return sum;
     });
     return { value, lost };
@@ -7758,21 +7930,22 @@ function bigKummer1F1Series(
   a: BigNum,
   b: BigNum,
   z: BigNum,
-  maxTerms: number
+  maxTerms: number,
+  prec: number
 ): BigNum {
-  const tol = new BigDecimal(10).pow(-(BigDecimal.precision + 2));
+  const tol = new BigDecimal(10).pow(-(prec + 2), prec);
   let term: BigNum = BigDecimal.ONE;
   let sum: BigNum = BigDecimal.ONE;
   for (let n = 0; n < maxTerms; n++) {
     if ((n & 0xff) === 0) checkDeadline(ce._deadlineFrame);
     const nn = new BigDecimal(n);
     term = term
-      .mul(a.add(nn))
+      .mul(a.add(nn, prec))
       .mul(z)
-      .div(b.add(nn).mul(new BigDecimal(n + 1)));
+      .div(b.add(nn, prec).mul(new BigDecimal(n + 1)), prec);
     if (term.isZero()) return sum;
-    sum = sum.add(term);
-    if (n > 2 && term.abs().lt(tol.mul(sum.abs().add(BigDecimal.ONE))))
+    sum = sum.add(term, prec);
+    if (n > 2 && term.abs().lt(tol.mul(sum.abs().add(BigDecimal.ONE, prec))))
       return sum;
   }
   return sum;
@@ -7783,11 +7956,12 @@ export function bigHypergeometric1F1(
   ce: ComputeEngine,
   a: BigNum,
   b: BigNum,
-  z: BigNum
+  z: BigNum,
+  prec: number
 ): BigNum {
   if (a.isNaN() || b.isNaN() || z.isNaN()) return BigDecimal.NAN;
 
-  const p = BigDecimal.precision;
+  const p = prec;
   const guard = 10;
   const maxTerms = Math.max(20_000, 40 * (p + guard));
 
@@ -7796,17 +7970,19 @@ export function bigHypergeometric1F1(
     if (aTerm === Infinity || aTerm > -b.toNumber()) return BigDecimal.NAN;
   }
   if (aTerm !== Infinity && aTerm < maxTerms) {
-    return withExtraPrecision(guard, () =>
-      bigKummer1F1Series(ce, a, b, z, aTerm + 1)
+    return withExtraPrecision(prec, guard, (prec) =>
+      bigKummer1F1Series(ce, a, b, z, aTerm + 1, prec)
     ).toPrecision(p);
   }
   if (z.isNegative()) {
     // Kummer transformation: e^z·₁F₁(b−a; b; −z) — all-positive series
-    return withExtraPrecision(guard, () =>
-      z.exp().mul(bigHypergeometric1F1(ce, b.sub(a), b, z.neg()))
+    return withExtraPrecision(prec, guard, (prec) =>
+      z
+        .exp(prec)
+        .mul(bigHypergeometric1F1(ce, b.sub(a, prec), b, z.neg(), prec))
     ).toPrecision(p);
   }
-  return withExtraPrecision(guard, () =>
-    bigKummer1F1Series(ce, a, b, z, maxTerms)
+  return withExtraPrecision(prec, guard, (prec) =>
+    bigKummer1F1Series(ce, a, b, z, maxTerms, prec)
   ).toPrecision(p);
 }

@@ -119,7 +119,7 @@ export function asBignum(expr: Expression | undefined): BigDecimal | null {
 
   if (num.isComplex) return null;
 
-  const re = num.bignumRe ?? num.re;
+  const re = num.bignumReAt(expr.engine.precision) ?? num.re;
   if (typeof re === 'number' && isNaN(re)) return null;
   return expr.engine.bignum(re);
 }
@@ -261,7 +261,7 @@ export function toBigint(expr: Expression | undefined): bigint | null {
   const exact = exactIntegerValue(num);
   if (exact !== null) return exact;
 
-  const n = num.bignumRe ?? num.re;
+  const n = num.bignumReAt(expr.engine.precision) ?? num.re;
   if (typeof n === 'number')
     return Number.isFinite(n) ? BigInt(Math.round(n)) : null;
 

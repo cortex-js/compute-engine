@@ -68,7 +68,10 @@ import {
 import { exactCompareNumbers } from '../boxed-expression/constraint-subject.js';
 import { asRational } from '../boxed-expression/numerics.js';
 import { halfTurnAngle } from '../boxed-expression/trigonometry.js';
-import { realPowerBranchTerms } from '../numerics/real-power.js';
+import {
+  realPowerBranchTerms,
+  realPowerReconstructionDigits,
+} from '../numerics/real-power.js';
 import { nextDown, nextUp } from '../numerics/numeric.js';
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
 import { IntervalArithmetic as IA } from '../interval/index.js';
@@ -1019,7 +1022,11 @@ function numericPower(
     case 'float': {
       const value = form.value;
       if (value === 0.5) return result(IA.sqrt(v));
-      const terms = realPowerBranchTerms(undefined, value);
+      const terms = realPowerBranchTerms(
+        undefined,
+        value,
+        realPowerReconstructionDigits(ce.precision)
+      );
       if (terms !== undefined && terms[1] % 2 !== 0) {
         const [p, q] = terms;
         return p / q === value

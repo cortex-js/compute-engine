@@ -160,33 +160,38 @@ interface Scaled {
   scale: BigDecimal;
 }
 
-/** ζ(m) for an integer m ≠ 1. */
-function bigZetaInteger(ce: ComputeEngine, m: number): BigDecimal {
-  if (m >= 2) return bigZeta(ce, new BigDecimal(m));
+/** ζ(m) for an integer m ≠ 1, at `prec` digits. */
+function bigZetaInteger(
+  ce: ComputeEngine,
+  m: number,
+  prec: number
+): BigDecimal {
+  if (m >= 2) return bigZeta(ce, new BigDecimal(m), prec);
   if (m === 0) return BigDecimal.HALF.neg();
   if (m % 2 === 0) return BigDecimal.ZERO; // trivial zeros
   const [num, den] = zetaNegativeInteger(-m);
-  return new BigDecimal(num).div(new BigDecimal(den));
+  return new BigDecimal(num).div(new BigDecimal(den), prec);
 }
 
 /** x · iᵏ added into (re, im). */
 function addQuadrant(
   acc: { re: BigDecimal; im: BigDecimal },
   k: number,
-  x: BigDecimal
+  x: BigDecimal,
+  prec: number
 ): void {
   switch (k & 3) {
     case 0:
-      acc.re = acc.re.add(x);
+      acc.re = acc.re.add(x, prec);
       break;
     case 1:
-      acc.im = acc.im.add(x);
+      acc.im = acc.im.add(x, prec);
       break;
     case 2:
-      acc.re = acc.re.sub(x);
+      acc.re = acc.re.sub(x, prec);
       break;
     default:
-      acc.im = acc.im.sub(x);
+      acc.im = acc.im.sub(x, prec);
   }
 }
 
@@ -199,9 +204,9 @@ function addQuadrant(
 function bigClausenExpansion(
   ce: ComputeEngine,
   n: number,
-  t: BigDecimal
+  t: BigDecimal,
+  working: number
 ): Scaled | undefined {
-  const working = BigDecimal.precision;
   const tolerance = new BigDecimal(`1e-${working}`);
   const maxTerms = Math.ceil(working / Math.log10(8 / 3)) + 4 * n + 40;
   const acc = { re: BigDecimal.ZERO, im: BigDecimal.ZERO };
@@ -210,16 +215,18 @@ function bigClausenExpansion(
   let power = BigDecimal.ONE; // tᵏ/k!
   let small = 0;
   for (let k = 0; k < maxTerms; k++) {
-    if (k > 0) power = power.mul(t).div(k);
+    if (k > 0) power = power.mul(t).div(k, working);
     if (k === n - 1) {
       // tⁿ⁻¹/(n−1)! · (H_{n−1} − ln|t| + i·sgn(t)·π/2), times iⁿ⁻¹
       let harmonic = BigDecimal.ZERO;
       for (let j = 1; j < n; j++)
-        harmonic = harmonic.add(BigDecimal.ONE.div(j));
-      const cRe = harmonic.sub(t.abs().ln());
-      const cIm = BigDecimal.PI.div(2).mul(t.isNegative() ? -1 : 1);
-      addQuadrant(acc, n - 1, power.mul(cRe));
-      addQuadrant(acc, n, power.mul(cIm)); // i·iⁿ⁻¹
+        harmonic = harmonic.add(BigDecimal.ONE.div(j, working), working);
+      const cRe = harmonic.sub(t.abs().ln(working), working);
+      const cIm = BigDecimal.pi(working)
+        .div(2, working)
+        .mul(t.isNegative() ? -1 : 1);
+      addQuadrant(acc, n - 1, power.mul(cRe), working);
+      addQuadrant(acc, n, power.mul(cIm), working); // i·iⁿ⁻¹
       // Only the part in iⁿ⁻¹ lands in the component returned (Im for an
       // even n, Re for an odd one); the part in iⁿ lands in the other one.
       const big = power.mul(cRe).abs();
@@ -228,8 +235,8 @@ function bigClausenExpansion(
     }
     const m = n - k;
     if (m < 0 && m % 2 === 0) continue; // trivial zero
-    const c = power.mul(bigZetaInteger(ce, m));
-    addQuadrant(acc, k, c);
+    const c = power.mul(bigZetaInteger(ce, m, working));
+    addQuadrant(acc, k, c, working);
     const mag = c.abs();
     // The scale measures cancellation in the returned component only: the
     // terms with k + n odd. The others (ζ(n) at k = 0 for an even n, of
@@ -248,29 +255,32 @@ function bigClausenReduced(
   ce: ComputeEngine,
   n: number,
   t: BigDecimal,
-  twoPi: BigDecimal
+  twoPi: BigDecimal,
+  working: number
 ): Scaled | undefined {
   if (t.isZero()) {
     if (n % 2 === 0) return { value: BigDecimal.ZERO, scale: BigDecimal.ZERO };
     if (n === 1) return undefined;
-    const value = bigZeta(ce, new BigDecimal(n));
+    const value = bigZeta(ce, new BigDecimal(n), working);
     return { value, scale: value };
   }
-  if (t.abs().lte(BigDecimal.PI.mul(3).div(4)))
-    return bigClausenExpansion(ce, n, t);
+  const pi = BigDecimal.pi(working);
+  if (t.abs().lte(pi.mul(3).div(4, working)))
+    return bigClausenExpansion(ce, n, t, working);
   const wrap = (x: BigDecimal): BigDecimal => {
-    const r = x.sub(twoPi.mul(x.div(twoPi).round()));
+    const r = x.sub(twoPi.mul(x.div(twoPi, working).round()), working);
     return r;
   };
-  const a = bigClausenReduced(ce, n, wrap(t.mul(2)), twoPi);
+  const a = bigClausenReduced(ce, n, wrap(t.mul(2)), twoPi, working);
   const b = bigClausenReduced(
     ce,
     n,
-    t.isPositive() ? t.sub(BigDecimal.PI) : t.add(BigDecimal.PI),
-    twoPi
+    t.isPositive() ? t.sub(pi, working) : t.add(pi, working),
+    twoPi,
+    working
   );
   if (a === undefined || b === undefined) return undefined;
-  const half = BigDecimal.TWO.pow(1 - n); // 2¹⁻ⁿ
+  const half = BigDecimal.TWO.pow(1 - n, working); // 2¹⁻ⁿ
   const scaledA = a.value.mul(half);
   const scale = [
     a.scale.mul(half),
@@ -278,11 +288,11 @@ function bigClausenReduced(
     scaledA.abs(),
     b.value.abs(),
   ].reduce((m, x) => (x.gt(m) ? x : m));
-  return { value: scaledA.sub(b.value), scale };
+  return { value: scaledA.sub(b.value, working), scale };
 }
 
 /**
- * Clₙ(θ) at `BigDecimal.precision` digits for an integer 2 ≤ n ≤
+ * Clₙ(θ) at `prec` digits for an integer 2 ≤ n ≤
  * `CLAUSEN_BIG_MAX_ORDER` (n = 1 is −ln|2 sin(θ/2)|) and a finite real θ with
  * |θ| ≤ 10¹²; `undefined` where the kernel cannot vouch for the digits: past
  * those bounds, at θ ≡ 0 for n = 1, or where the value cancels against its
@@ -292,33 +302,32 @@ function bigClausenReduced(
 export function bigClausen(
   ce: ComputeEngine,
   n: number,
-  theta: BigDecimal
+  theta: BigDecimal,
+  prec: number
 ): BigDecimal | undefined {
   if (!Number.isInteger(n) || n < 1 || n > CLAUSEN_BIG_MAX_ORDER)
     return undefined;
   if (!theta.isFinite() || theta.abs().gt(CLAUSEN_BIG_MAX_ARGUMENT))
     return undefined;
-  const digits = BigDecimal.precision;
+  const digits = prec;
   const guard =
     CLAUSEN_GUARD_DIGITS + Math.ceil(Math.log10(theta.abs().toNumber() + 1));
-  BigDecimal.precision = digits + guard;
-  try {
-    const twoPi = BigDecimal.PI.mul(2);
-    const t = theta.sub(twoPi.mul(theta.div(twoPi).round())); // (−π, π]
-    let result: Scaled | undefined;
-    if (n === 1) {
-      if (t.isZero()) return undefined;
-      const value = BigDecimal.TWO.mul(t.div(2).sin().abs()).ln().neg();
-      result = { value, scale: BigDecimal.ONE };
-    } else result = bigClausenReduced(ce, n, t, twoPi);
-    if (result === undefined) return undefined;
-    // The value must not have cancelled to below the digits carried.
-    const floor = new BigDecimal(`1e-${CLAUSEN_CANCELLATION_DIGITS}`).mul(
-      result.scale
-    );
-    if (result.value.abs().lt(floor)) return undefined;
-    return result.value.toPrecision(digits);
-  } finally {
-    BigDecimal.precision = digits;
-  }
+  const working = digits + guard;
+  const twoPi = BigDecimal.pi(working).mul(2);
+  const t = theta.sub(twoPi.mul(theta.div(twoPi, working).round()), working); // (−π, π]
+  let result: Scaled | undefined;
+  if (n === 1) {
+    if (t.isZero()) return undefined;
+    const value = BigDecimal.TWO.mul(t.div(2, working).sin(working).abs())
+      .ln(working)
+      .neg();
+    result = { value, scale: BigDecimal.ONE };
+  } else result = bigClausenReduced(ce, n, t, twoPi, working);
+  if (result === undefined) return undefined;
+  // The value must not have cancelled to below the digits carried.
+  const floor = new BigDecimal(`1e-${CLAUSEN_CANCELLATION_DIGITS}`).mul(
+    result.scale
+  );
+  if (result.value.abs().lt(floor)) return undefined;
+  return result.value.toPrecision(digits);
 }

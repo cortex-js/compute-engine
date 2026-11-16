@@ -430,7 +430,7 @@ export class MachineNumericValue extends NumericValue {
     if (
       Number.isFinite(this.decimal) &&
       Number.isFinite(this.im) &&
-      hasExactPartOutsideDoubleRange(other)
+      hasExactPartOutsideDoubleRange(other, prec)
     )
       return this.clone(
         bigComplexProduct(
@@ -499,7 +499,7 @@ export class MachineNumericValue extends NumericValue {
     if (
       Number.isFinite(a) &&
       Number.isFinite(b) &&
-      hasExactPartOutsideDoubleRange(other)
+      hasExactPartOutsideDoubleRange(other, prec)
     )
       return this.clone(
         bigComplexQuotient(
@@ -846,7 +846,7 @@ export class MachineNumericValue extends NumericValue {
     return this._makeExact(Math.round(this.decimal));
   }
 
-  eq(other: number | NumericValue): boolean {
+  eq(other: number | NumericValue, prec?: number): boolean {
     if (this.isNaN) return false;
     // Compare with `===`, not subtraction: `Infinity - Infinity` is `NaN`, so
     // a subtraction-based check made `Infinity.eq(Infinity)` false (and
@@ -857,12 +857,12 @@ export class MachineNumericValue extends NumericValue {
     // from the exact value: its double `im` is `0` for `10^{-800}i`, and
     // comparing it here would make an inexact `0` equal to that value from
     // this side only. Delegating keeps `eq` symmetric.
-    if (other instanceof ExactNumericValue) return other.eq(this);
+    if (other instanceof ExactNumericValue) return other.eq(this, prec);
     // A big-decimal operand (the only other lane with a `bignumRe`) compares
     // the pair itself, with its parts as big decimals: comparing its double
     // projections here would make `1 + (1 + 10^{-20})i` equal to `1 + i`
     // from this side only. Delegating keeps `eq` symmetric.
-    if (other.bignumRe !== undefined) return other.eq(this);
+    if (other.bignumRe !== undefined) return other.eq(this, prec);
     if (other.isNaN) return false;
     if (!Number.isFinite(this.im)) return !Number.isFinite(other.im);
     return this.decimal === other.re && this.im === other.im;
@@ -873,36 +873,38 @@ export class MachineNumericValue extends NumericValue {
   // within an ulp of this value, and the exact lane compares such a pair
   // exactly where `this.decimal < other.re` read a projection. This keeps
   // `a.lt(b)` and `b.gt(a)` in agreement across the two lanes.
-  lt(other: number | NumericValue): boolean | undefined {
+  lt(other: number | NumericValue, prec?: number): boolean | undefined {
     // Complex values are unordered: any non-real operand → indeterminate
     if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal < other;
     if (other.isComplex) return undefined;
-    if (other instanceof ExactNumericValue) return other.gt(this.decimal);
+    if (other instanceof ExactNumericValue) return other.gt(this.decimal, prec);
     return this.decimal < other.re;
   }
 
-  lte(other: number | NumericValue): boolean | undefined {
+  lte(other: number | NumericValue, prec?: number): boolean | undefined {
     if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal <= other;
     if (other.isComplex) return undefined;
-    if (other instanceof ExactNumericValue) return other.gte(this.decimal);
+    if (other instanceof ExactNumericValue)
+      return other.gte(this.decimal, prec);
     return this.decimal <= other.re;
   }
 
-  gt(other: number | NumericValue): boolean | undefined {
+  gt(other: number | NumericValue, prec?: number): boolean | undefined {
     if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal > other;
     if (other.isComplex) return undefined;
-    if (other instanceof ExactNumericValue) return other.lt(this.decimal);
+    if (other instanceof ExactNumericValue) return other.lt(this.decimal, prec);
     return this.decimal > other.re;
   }
 
-  gte(other: number | NumericValue): boolean | undefined {
+  gte(other: number | NumericValue, prec?: number): boolean | undefined {
     if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal >= other;
     if (other.isComplex) return undefined;
-    if (other instanceof ExactNumericValue) return other.lte(this.decimal);
+    if (other instanceof ExactNumericValue)
+      return other.lte(this.decimal, prec);
     return this.decimal >= other.re;
   }
 }

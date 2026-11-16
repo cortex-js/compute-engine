@@ -624,7 +624,13 @@ export function compileSlice(
   const { rows, syntax } = tables(options);
   const printed =
     options.mode === 'interval'
-      ? printInterval(p, rows, syntax, options.iterationBudget)
+      ? printInterval(
+          p,
+          rows,
+          syntax,
+          expr.engine.precision,
+          options.iterationBudget
+        )
       : options.target === 'javascript'
         ? printJavaScript(
             p,

@@ -725,14 +725,10 @@ export class BigDecimal {
   floor(): BigDecimal {
     const exp = this.exponent;
     if (exp >= 0) return this; // integer (also handles zero since exp=0)
-    // exp < 0 and finite → has fractional part
-    if (Number.isFinite(exp)) {
-      const t = this.trunc();
-      if (this.significand < 0n) return t.sub(fromRaw(1n, 0));
-      return t;
-    }
     // NaN or Infinity — return as-is (NaN→NaN, ±Inf→±Inf)
-    return this;
+    if (!Number.isFinite(exp)) return this;
+    const [q, r] = splitAtPoint(this);
+    return fromRaw(r < 0n ? q - 1n : q, 0);
   }
 
   /**
@@ -743,14 +739,10 @@ export class BigDecimal {
   ceil(): BigDecimal {
     const exp = this.exponent;
     if (exp >= 0) return this; // integer (also handles zero since exp=0)
-    // exp < 0 and finite → has fractional part
-    if (Number.isFinite(exp)) {
-      const t = this.trunc();
-      if (this.significand > 0n) return t.add(fromRaw(1n, 0));
-      return t;
-    }
     // NaN or Infinity — return as-is
-    return this;
+    if (!Number.isFinite(exp)) return this;
+    const [q, r] = splitAtPoint(this);
+    return fromRaw(r > 0n ? q + 1n : q, 0);
   }
 
   /**
@@ -761,14 +753,15 @@ export class BigDecimal {
   round(): BigDecimal {
     const exp = this.exponent;
     if (exp >= 0) return this; // integer (also handles zero since exp=0)
-    // exp < 0 and finite → has fractional part
-    if (Number.isFinite(exp)) {
-      const half = fromRaw(5n, -1); // 0.5
-      if (this.significand > 0n) return this.add(half).trunc();
-      return this.sub(half).trunc();
-    }
     // NaN or Infinity — return as-is
-    return this;
+    if (!Number.isFinite(exp)) return this;
+    const [q, r, unit] = splitAtPoint(this);
+    // |fractional part| ≥ 1/2: one more unit away from zero. Without `unit`,
+    // |this| < 0.1.
+    if (unit === undefined) return fromRaw(0n, 0);
+    const twiceR = r < 0n ? -2n * r : 2n * r;
+    if (twiceR < unit) return fromRaw(q, 0);
+    return fromRaw(this.significand < 0n ? q - 1n : q + 1n, 0);
   }
 
   /**
@@ -779,15 +772,9 @@ export class BigDecimal {
   trunc(): BigDecimal {
     const exp = this.exponent;
     if (exp >= 0) return this; // integer (also handles zero since exp=0)
-    // exp < 0 and finite → truncate fractional digits
-    if (Number.isFinite(exp)) {
-      // BigInt division truncates toward zero, which is exactly what trunc() needs
-      const truncSig = this.significand / pow10(-exp);
-      if (truncSig === 0n) return fromRaw(0n, 0);
-      return fromRaw(truncSig, 0);
-    }
     // NaN or Infinity — return as-is
-    return this;
+    if (!Number.isFinite(exp)) return this;
+    return fromRaw(splitAtPoint(this)[0], 0);
   }
 
   /**
@@ -1015,8 +1002,10 @@ export class BigDecimal {
         ediff >= 0 ? this.significand * pow10(ediff) : this.significand;
       const den =
         ediff >= 0 ? other.significand : other.significand * pow10(-ediff);
-      const q = num / den; // bigint division truncates toward zero
-      return this.sub(fromRaw(q, 0).mul(other));
+      // The remainder num − q·den, with q = trunc(num / den), is `num % den`
+      // (bigint `%` has the sign of the dividend), in units of the smaller
+      // exponent.
+      return fromRaw(num % den, Math.min(thisExp, otherExp));
     }
 
     // Slow path: NaN or Infinity
@@ -1545,6 +1534,22 @@ export function fromRaw(sig: bigint, exp: number): BigDecimal {
   (bd as { significand: bigint }).significand = normSig;
   (bd as { exponent: number }).exponent = normExp;
   return bd;
+}
+
+/**
+ * The integer part `q` (truncated toward zero) and the fractional part `r`
+ * of a finite value with a negative exponent, both as bigints: the value is
+ * `q + r / unit`, and `r` has the sign of the value. When all the digits of
+ * the value are past the decimal point and at least one zero follows the
+ * point (`|x| < 0.1`), `q` is `0n`, `r` is the significand and `unit` is
+ * `undefined` (it would be `10^(−exponent)`, which can be too large for a
+ * bigint). Exact, and independent of any working precision.
+ */
+function splitAtPoint(x: BigDecimal): [bigint, bigint, bigint | undefined] {
+  const shift = -x.exponent;
+  if (shift > x._digitCount()) return [0n, x.significand, undefined];
+  const unit = pow10(shift);
+  return [x.significand / unit, x.significand % unit, unit];
 }
 
 /**

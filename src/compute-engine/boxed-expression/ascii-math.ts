@@ -1202,7 +1202,7 @@ export function toAsciiMath(
       // Round real values only; leave complex values to their default form.
       if (!num.isComplex)
         return serializeAsciiNumber(
-          num.bignumRe ?? num.re,
+          num.bignumReAt(expr.engine.precision) ?? num.re,
           expr.isExact,
           options.digits
         );

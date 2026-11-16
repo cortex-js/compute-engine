@@ -6281,7 +6281,10 @@ function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {
   // Imaginary Part
   //
   const imaginary = ce.number(
-    ce._numericValue({ re: 0, im: value.bignumIm ?? value.im })
+    ce._numericValue({
+      re: 0,
+      im: value.bignumImAt(ce.precision) ?? value.im,
+    })
   );
   if (terms.length === 0) return imaginary;
 

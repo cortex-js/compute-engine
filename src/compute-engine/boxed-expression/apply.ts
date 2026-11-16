@@ -192,7 +192,9 @@ export function complexNumericValueRoute(
   for (const op of ops) {
     if (!isNumber(op)) return undefined;
     const nv = op.numericValue;
-    const value = (typeof nv === 'number' ? ce._numericValue(nv) : nv).N();
+    const value = (typeof nv === 'number' ? ce._numericValue(nv) : nv).N(
+      ce.precision
+    );
     if (value instanceof MachineNumericValue) return undefined;
     // `N()` keeps an exact integer (and `0`, `1`, `-1`) exact, and the
     // methods of an exact value compute a complex operand in doubles
@@ -201,8 +203,8 @@ export function complexNumericValueRoute(
     // the inexact factory of the engine, from its big-decimal parts.
     values.push(
       ce._inexactNumericValue({
-        re: value.bignumRe ?? value.re,
-        im: value.bignumIm ?? value.im,
+        re: value.bignumReAt(ce.precision) ?? value.re,
+        im: value.bignumImAt(ce.precision) ?? value.im,
       })
     );
   }

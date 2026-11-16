@@ -41,7 +41,6 @@ export class EngineNumericConfiguration {
     if (precision === 'machine') precision = Math.floor(MACHINE_PRECISION);
 
     this._precision = precision;
-    BigDecimal.precision = precision;
     this._angularUnit = options?.angularUnit ?? 'rad';
 
     // Initialized before setTolerance() so fallback paths can use them.
@@ -70,7 +69,6 @@ export class EngineNumericConfiguration {
       throw Error('Expected "machine" or a positive number');
 
     this._precision = Math.max(precision, MACHINE_PRECISION);
-    BigDecimal.precision = this._precision;
 
     // In `'auto'` mode the tolerance follows the precision. An explicit
     // tolerance survives a precision change: `ce.tolerance = 1e-30` followed
@@ -80,8 +78,10 @@ export class EngineNumericConfiguration {
   }
 
   /**
-   * Run `fn` with the precision of the engine and the precision of the big
-   * decimals set to `digits`, then restore both, also when `fn` throws.
+   * Run `fn` with the precision of the engine set to `digits`, then restore
+   * it, also when `fn` throws. The engine passes its precision to every
+   * operation of `BigDecimal` that rounds, so `BigDecimal.precision` is
+   * neither read nor written.
    *
    * Unlike `setPrecision`, this does not recompute an `'auto'` tolerance:
    * inside `fn` the tolerance is the one of the outer precision. The
@@ -99,16 +99,13 @@ export class EngineNumericConfiguration {
    */
   withTransientPrecision<T>(digits: number, fn: () => T): T {
     const precision = this._precision;
-    const bigDecimalPrecision = BigDecimal.precision;
     this._precision = digits;
-    BigDecimal.precision = digits;
     this._transientPrecisionDepth += 1;
     try {
       return fn();
     } finally {
       this._transientPrecisionDepth -= 1;
       this._precision = precision;
-      BigDecimal.precision = bigDecimalPrecision;
     }
   }
 
@@ -248,7 +245,7 @@ export class EngineNumericConfiguration {
   }
 
   get bignumPi(): BigDecimal {
-    return BigDecimal.PI;
+    return BigDecimal.pi(this._precision);
   }
 
   get bignumNegativeOne(): BigDecimal {

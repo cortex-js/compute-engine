@@ -46,12 +46,14 @@ import type { NumericValue } from '../../numeric-value/types.js';
 import { BigNumericValue } from '../../numeric-value/big-numeric-value.js';
 import { ExactNumericValue } from '../../numeric-value/exact-numeric-value.js';
 import { MachineNumericValue } from '../../numeric-value/machine-numeric-value.js';
-import { BigDecimal } from '../../../big-decimal/index.js';
 import {
   exactDoubleValue,
   exactValueDoubleRoundings,
 } from '../../numeric-value/exact-integer-value.js';
-import { realPowerBranchTerms } from '../../numerics/real-power.js';
+import {
+  realPowerBranchTerms,
+  realPowerReconstructionDigits,
+} from '../../numerics/real-power.js';
 import {
   freeBinding,
   isDictionary,
@@ -939,7 +941,11 @@ export function lower(
                 : undefined;
         const terms =
           float !== undefined && Number.isFinite(float) && !Number.isInteger(float)
-            ? (realPowerBranchTerms(undefined, float) ?? null)
+            ? (realPowerBranchTerms(
+                undefined,
+                float,
+                realPowerReconstructionDigits(e.engine.precision)
+              ) ?? null)
             : undefined;
         const odd = terms != null && terms[1] % 2 !== 0;
         const pq =
@@ -1317,10 +1323,8 @@ export function lower(
         // `N()` computes in big decimals of more digits than the 17 of a
         // double, so that its value read as a double is within 1 ulp: the
         // engine's precision decides big decimals against doubles
-        // (`bignumPreferred()`), and the process-global
-        // `BigDecimal.precision`, which another engine can have changed,
-        // sizes them (the note in `numerics/real-power.ts`).
-        const big = ce.precision >= 18 && BigDecimal.precision >= 18;
+        // (`bignumPreferred()`) and sizes them.
+        const big = ce.precision >= 18;
         exact =
           typeof nv === 'number'
             ? big && Number.isSafeInteger(nv)

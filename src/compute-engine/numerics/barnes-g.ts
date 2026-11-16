@@ -156,38 +156,35 @@ const MAX_BIG_SHIFT = 1000;
 const ASYMPTOTIC_PER_DIGIT = 2;
 
 /**
- * G(x) to the working precision (`BigDecimal.precision`), undefined at the
- * zeros of G and where x is more than `MAX_BIG_SHIFT` from 1.
+ * G(x) to `prec` digits, undefined at the zeros of G and where x is more
+ * than `MAX_BIG_SHIFT` from 1.
  */
 export function bigBarnesG(
   ce: ComputeEngine,
-  x: BigDecimal
+  x: BigDecimal,
+  prec: number
 ): BigDecimal | undefined {
   if (!x.isFinite()) return undefined;
   if (x.isInteger() && !x.isPositive()) return undefined;
   const m = Math.round(x.toNumber() - 1);
   if (Math.abs(m) > MAX_BIG_SHIFT) return undefined;
-  const digits = BigDecimal.precision;
+  const digits = prec;
   const M = Math.max(m, ASYMPTOTIC_PER_DIGIT * digits + 20);
   // A(M + w) and A(M) are about M² ln M and cancel to their difference; the
   // 2M rounded products each add a unit in the last place.
   const lost = Math.ceil(
     Math.log10(M * M * Math.log(M) + 1) + Math.log10(4 * M)
   );
-  BigDecimal.precision = digits + GUARD_DIGITS + lost;
-  try {
-    return walk(ce, x.sub(m + 1), m, M)?.toPrecision(digits);
-  } finally {
-    BigDecimal.precision = digits;
-  }
+  const working = digits + GUARD_DIGITS + lost;
+  return walk(ce, x.sub(m + 1, working), m, M, working)?.toPrecision(digits);
 }
 
 /** Passes `bigLogBarnesG` makes, each with more digits, before it declines. */
 const LOG_PASSES = 3;
 
 /**
- * ln G(x) for a real x > 0 to the working precision (`BigDecimal.precision`),
- * undefined where x is more than `MAX_BIG_SHIFT` from 1.
+ * ln G(x) for a real x > 0 to `prec` digits, undefined where x is more than
+ * `MAX_BIG_SHIFT` from 1.
  *
  * The walk of `bigBarnesG` is kept in the log domain: ln G(x) is
  * ln(G(M + 1) / Π Γ(j + w)) + A(M + w) − A(M), formed at the working
@@ -200,13 +197,14 @@ const LOG_PASSES = 3;
  */
 export function bigLogBarnesG(
   ce: ComputeEngine,
-  x: BigDecimal
+  x: BigDecimal,
+  prec: number
 ): BigDecimal | undefined {
   if (!x.isFinite() || !x.isPositive()) return undefined;
   if (x.eq(1) || x.eq(2)) return BigDecimal.ZERO; // G(1) = G(2) = 1
   const m = Math.round(x.toNumber() - 1);
   if (Math.abs(m) > MAX_BIG_SHIFT) return undefined;
-  const digits = BigDecimal.precision;
+  const digits = prec;
   const M = Math.max(m, ASYMPTOTIC_PER_DIGIT * digits + 20);
   // As in `bigBarnesG`: A(M + w), A(M) and the logarithm of the products are
   // about M² ln M, and the 2M rounded products each add a unit in the last place.
@@ -216,13 +214,8 @@ export function bigLogBarnesG(
   let extra = 0;
   for (let pass = 0; pass < LOG_PASSES; pass++) {
     const resolved = digits + GUARD_DIGITS + extra; // absolute digits of the pass
-    BigDecimal.precision = resolved + lost;
-    let r: BigDecimal | undefined;
-    try {
-      r = walk(ce, x.sub(m + 1), m, M, true);
-    } finally {
-      BigDecimal.precision = digits;
-    }
+    const working = resolved + lost;
+    const r = walk(ce, x.sub(m + 1, working), m, M, working, true);
     if (r === undefined) return undefined;
     const size = r.isZero() ? -Infinity : log10Abs(r);
     if (size >= -extra) return r.toPrecision(digits);
@@ -243,18 +236,18 @@ function log10Abs(x: BigDecimal): number {
 function asymptoticBig(
   ce: ComputeEngine,
   z: BigDecimal,
-  lnTwoPi: BigDecimal
+  lnTwoPi: BigDecimal,
+  working: number
 ): BigDecimal | undefined {
-  const working = BigDecimal.precision;
   const z2 = z.mul(z);
   let r = z2
-    .div(2)
-    .sub(BigDecimal.ONE.div(12))
-    .mul(z.ln())
-    .sub(z2.mul(3).div(4))
-    .add(z.mul(lnTwoPi).div(2));
+    .div(2, working)
+    .sub(BigDecimal.ONE.div(12, working), working)
+    .mul(z.ln(working))
+    .sub(z2.mul(3).div(4, working), working)
+    .add(z.mul(lnTwoPi).div(2, working), working);
   const tolerance = new BigDecimal(`1e-${working}`);
-  const inv2 = BigDecimal.ONE.div(z2);
+  const inv2 = BigDecimal.ONE.div(z2, working);
   let p = inv2; // z^{−2k}
   // B₂ₖ₊₂ / (4k(k+1) z^{2k}) for k ≥ 1; table[k] is B₂ₖ₊₂. The Bernoulli
   // table costs more than quadratically in its length, so it is built only
@@ -283,10 +276,10 @@ function asymptoticBig(
     const [num, den] = table[k];
     const term = new BigDecimal(num)
       .mul(p)
-      .div(new BigDecimal(den * BigInt(4 * k * (k + 1))));
+      .div(new BigDecimal(den * BigInt(4 * k * (k + 1))), working);
     const size = term.abs();
     if (previous !== undefined && size.gt(previous)) return undefined; // the series turned first
-    r = r.add(term);
+    r = r.add(term, working);
     if (size.lt(tolerance)) return r;
     previous = size;
     p = p.mul(inv2).toPrecision(working);
@@ -303,14 +296,14 @@ function walk(
   w: BigDecimal,
   m: number,
   M: number,
+  working: number,
   log = false
 ): BigDecimal | undefined {
-  const working = BigDecimal.precision;
   const round = (v: BigDecimal) => v.toPrecision(working);
-  const lnTwoPi = BigDecimal.PI.mul(2).ln();
+  const lnTwoPi = BigDecimal.pi(working).mul(2).ln(working);
 
-  const high = asymptoticBig(ce, w.add(M), lnTwoPi);
-  const low = asymptoticBig(ce, new BigDecimal(M), lnTwoPi);
+  const high = asymptoticBig(ce, w.add(M, working), lnTwoPi, working);
+  const low = asymptoticBig(ce, new BigDecimal(M), lnTwoPi, working);
   if (high === undefined || low === undefined) return undefined;
 
   // G(M + 1) = Π_{k=1}^{M−1} k!
@@ -321,22 +314,23 @@ function walk(
     factorial = round(factorial.mul(k));
     g = round(g.mul(factorial));
   }
-  if (!log) g = round(g.mul(high.sub(low).exp())); // G(M + 1 + w)
+  if (!log) g = round(g.mul(high.sub(low, working).exp(working))); // G(M + 1 + w)
 
   // Divide by Γ(j + w) for j = m + 1 … M.
-  const gamma1 = bigGamma(ce, w.add(1)); // Γ(1 + w)
+  const onePlusW = w.add(1, working);
+  const gamma1 = bigGamma(ce, onePlusW, working); // Γ(1 + w)
   let gamma = gamma1;
   for (let j = 1; j <= M; j++) {
     if ((j & 0xff) === 0) checkDeadline(ce._deadlineFrame);
-    if (j >= m + 1) g = round(g.div(gamma));
-    gamma = round(gamma.mul(w.add(j))); // Γ(j + 1 + w)
+    if (j >= m + 1) g = round(g.div(gamma, working));
+    gamma = round(gamma.mul(w.add(j, working))); // Γ(j + 1 + w)
   }
   gamma = gamma1;
   for (let j = 0; j >= m + 1; j--) {
     if ((-j & 0xff) === 0) checkDeadline(ce._deadlineFrame);
-    gamma = round(gamma.div(w.add(j))); // Γ(j + w) = Γ(j + 1 + w) / (j + w)
-    g = round(g.div(gamma));
+    gamma = round(gamma.div(w.add(j, working), working)); // Γ(j + w) = Γ(j + 1 + w) / (j + w)
+    g = round(g.div(gamma, working));
   }
   // With `log`, g is G(M + 1) / Π Γ(j + w), which is G(x)·exp(A(M) − A(M + w)).
-  return log ? g.ln().add(high.sub(low)) : g;
+  return log ? g.ln(working).add(high.sub(low, working), working) : g;
 }

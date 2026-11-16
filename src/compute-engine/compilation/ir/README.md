@@ -714,10 +714,9 @@ double; the factor of an angular unit takes two. A closed node is the value of
 `evaluate()` when it is an exact number that is a double, or a safe integer
 computed in big decimals (`Mod(1, 1/10)` is 0, `Floor(100π)` is 314); else
 the value of `N()` with one ulp (`Sin(1)`), when `N()` computes in big
-decimals of more than the 17 digits of a double (the engine's precision and
-the process-global `BigDecimal.precision` both at least 18); else, at
-machine precision, the node is lowered as written and the kernels enclose
-it at run time.
+decimals of more than the 17 digits of a double (the engine's precision at
+least 18); else, at machine precision, the node is lowered as written and
+the kernels enclose it at run time.
 
 `Power(x, p/q)` with a literal rational exponent, `q > 1`, is lowered as
 `Root(x, q)^p`, for any sign of `p`: `x^(2/3)` over `[-8, -1]` is `[1, 4]`.
@@ -745,8 +744,8 @@ exponent known at run time is `_IA.powReal(x, e, digits)`, which applies
 the same reading when `e` is a point that is not an integer (and keeps the
 last reading, so a plot with one exponent reads it once), and is
 `_IA.powInterval` otherwise; `digits` is `realPowerReconstructionDigits()`
-when the code is printed, written in the code, so that stored code reads
-the exponent as the engine that compiled it.
+of the engine's precision when the code is printed, written in the code, so
+that stored code reads the exponent as the engine that compiled it.
 
 Values computed once (`computedOnce()` of `print-interval.ts`). A value
 that depends on no input, parameter, loop index or draw is computed when

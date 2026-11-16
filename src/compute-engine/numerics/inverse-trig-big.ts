@@ -23,7 +23,7 @@ import {
 // subnormal, so `arcsin(10⁴⁰⁰)` was `NaN` and `arcsec(10⁻³²⁰)` had 5 correct
 // digits. The functions here take the argument as big decimals.
 //
-// - A real argument gives a value at the working precision of `BigDecimal`,
+// - A real argument gives a value at the working precision `prec`,
 //   from the real big-decimal functions and the identities of each head on
 //   its branch cut. The side of each cut is the side the double kernels take
 //   at the largest and smallest normal doubles (`arcsin(10³⁰⁰)` is
@@ -70,59 +70,59 @@ const value = (re: BigDecimal, im = BigDecimal.ZERO): BigComplexValue => ({
 });
 
 /**
- * The value of `head` at a real `x` with `|x| ≠ 1`, at the working precision
- * of `BigDecimal`. The callers pass an `x` outside the range of a double, an
+ * The value of `head` at a real `x` with `|x| ≠ 1`, at `prec` digits. The callers pass an `x` outside the range of a double, an
  * `x` at which the value is not real, or an `x` next to ±1 read with the
  * digits that hold |x| ∓ 1 (the big-decimal functions then keep the digits
  * of the value, which depends on |x| ∓ 1 there).
  */
 export function realInverseTrig(
   head: InverseTrigHead,
-  x: BigDecimal
+  x: BigDecimal,
+  prec: number
 ): BigComplexValue {
   const sign = x.isNegative() ? -1 : 1;
   const ax = x.abs();
   const outside = ax.gt(BigDecimal.ONE);
-  const pi = BigDecimal.PI;
-  const halfPi = pi.div(BigDecimal.TWO);
+  const pi = BigDecimal.pi(prec);
+  const halfPi = pi.div(BigDecimal.TWO, prec);
   switch (head) {
     // |x| > 1: arcsin x = sign(x)·(π/2 − i·arcosh|x|).
     case 'Arcsin':
       return outside
-        ? value(halfPi.mul(sign), ax.acosh().mul(-sign))
-        : value(x.asin());
+        ? value(halfPi.mul(sign), ax.acosh(prec).mul(-sign))
+        : value(x.asin(prec));
     // |x| > 1: arccos x = i·arcosh x for x > 1, π − i·arcosh|x| for x < −1.
     case 'Arccos':
-      if (!outside) return value(x.acos());
+      if (!outside) return value(x.acos(prec));
       return sign > 0
-        ? value(BigDecimal.ZERO, ax.acosh())
-        : value(pi, ax.acosh().neg());
+        ? value(BigDecimal.ZERO, ax.acosh(prec))
+        : value(pi, ax.acosh(prec).neg());
     case 'Arctan':
-      return value(x.atan());
+      return value(x.atan(prec));
     // The real kernel is atan2(1, x): the value is in (0, π).
     case 'Arccot':
-      return value(BigDecimal.atan2(BigDecimal.ONE, x));
+      return value(BigDecimal.atan2(BigDecimal.ONE, x, prec));
     case 'Arsinh':
-      return value(x.asinh());
+      return value(x.asinh(prec));
     // x < −1: arcosh x = arcosh|x| + iπ. |x| < 1: arcosh x = i·arccos x.
     case 'Arcosh':
-      if (!outside) return value(BigDecimal.ZERO, x.acos());
-      return value(ax.acosh(), sign > 0 ? BigDecimal.ZERO : pi);
+      if (!outside) return value(BigDecimal.ZERO, x.acos(prec));
+      return value(ax.acosh(prec), sign > 0 ? BigDecimal.ZERO : pi);
     // |x| > 1: artanh x = artanh(1/x) − sign(x)·iπ/2.
     case 'Artanh':
       return outside
-        ? value(x.inv().atanh(), halfPi.mul(-sign))
-        : value(x.atanh());
+        ? value(x.inv(prec).atanh(prec), halfPi.mul(-sign))
+        : value(x.atanh(prec));
     case 'Arccsc':
-      return realInverseTrig('Arcsin', x.inv());
+      return realInverseTrig('Arcsin', x.inv(prec), prec);
     case 'Arcsec':
-      return realInverseTrig('Arccos', x.inv());
+      return realInverseTrig('Arccos', x.inv(prec), prec);
     case 'Arcsch':
-      return realInverseTrig('Arsinh', x.inv());
+      return realInverseTrig('Arsinh', x.inv(prec), prec);
     case 'Arsech':
-      return realInverseTrig('Arcosh', x.inv());
+      return realInverseTrig('Arcosh', x.inv(prec), prec);
     case 'Arcoth':
-      return realInverseTrig('Artanh', x.inv());
+      return realInverseTrig('Artanh', x.inv(prec), prec);
   }
 }
 
@@ -246,7 +246,8 @@ function kernelValue(
 function scalePart(
   v1: number,
   v4: number,
-  factor: BigDecimal | undefined
+  factor: BigDecimal | undefined,
+  prec: number
 ): BigDecimal | undefined {
   if (factor === undefined) return new BigDecimal(v1);
   if (Math.abs(v1) < DEPENDENT_PART && Math.abs(v4) < DEPENDENT_PART) {
@@ -255,7 +256,7 @@ function scalePart(
     const growth = v4 / v1;
     if (Math.abs(growth - 4) < 0.01) return new BigDecimal(v1).mul(factor);
     if (Math.abs(growth - 2) < 0.01)
-      return new BigDecimal(v1).mul(factor.sqrt());
+      return new BigDecimal(v1).mul(factor.sqrt(prec));
     return undefined;
   }
   const change = v4 - v1;
@@ -267,13 +268,17 @@ function scalePart(
   if (k === 0 || Math.abs(k) > 4 || Math.abs(halves - k) > 1e-6)
     return undefined;
   // The slope along ln δ is (v4 − v1)/ln 4 = k/2, exactly.
-  return new BigDecimal(v1).add(factor.ln().mul(k).div(BigDecimal.TWO));
+  return new BigDecimal(v1).add(
+    factor.ln(prec).mul(k).div(BigDecimal.TWO, prec),
+    prec
+  );
 }
 
 /**
  * The value of `head` at the complex `re + i·im`, a part of which is outside
- * the range of a double, with the digits of a double. `undefined` when a
- * kernel value does not have the expected form.
+ * the range of a double, with the digits of a double (the big-decimal
+ * parts at `prec` digits). `undefined` when a kernel value does not have the
+ * expected form.
  *
  * Let M be the larger of |re| and |im|.
  *
@@ -303,7 +308,8 @@ function scalePart(
 export function complexInverseTrig(
   head: InverseTrigHead,
   re: BigDecimal,
-  im: BigDecimal
+  im: BigDecimal,
+  prec: number
 ): BigComplexValue | null | undefined {
   const ar = re.abs();
   const ai = im.abs();
@@ -311,11 +317,11 @@ export function complexInverseTrig(
   const m = realLarger ? ar : ai;
   if (m.isZero()) return undefined;
   const smaller = realLarger ? ai : ar;
-  const ratio = smaller.div(m);
+  const ratio = smaller.div(m, prec);
   // The factor by which the small part was raised, when it was.
   const raised =
     !smaller.isZero() && ratio.lt(new BigDecimal(SMALLEST_PART_RATIO))
-      ? ratio.div(new BigDecimal(SMALLEST_PART_RATIO))
+      ? ratio.div(new BigDecimal(SMALLEST_PART_RATIO), prec)
       : undefined;
   const smallSign = (realLarger ? im : re).isNegative() ? -1 : 1;
   const small = raised ? smallSign * SMALLEST_PART_RATIO : undefined;
@@ -344,7 +350,7 @@ export function complexInverseTrig(
     let shift = 0;
     let step = 0;
     if ((realLarger ? BRANCH_POINTS_AT_ONE : BRANCH_POINTS_AT_I).has(head)) {
-      const distance = m.sub(BigDecimal.ONE);
+      const distance = m.sub(BigDecimal.ONE, prec);
       const exact = distance.toNumber();
       const given = Math.abs(big) - 1;
       const error = exact - given;
@@ -395,16 +401,17 @@ export function complexInverseTrig(
     if (v1 === undefined || v4 === undefined) return undefined;
     // The true small part over the one the kernel was given.
     const factor = smaller.div(
-      new BigDecimal(SMALLEST_PART_RATIO * Math.abs(big))
+      new BigDecimal(SMALLEST_PART_RATIO * Math.abs(big)),
+      prec
     );
-    const r = scalePart(v1.re, v4.re, factor);
-    const i = scalePart(v1.im, v4.im, factor);
+    const r = scalePart(v1.re, v4.re, factor, prec);
+    const i = scalePart(v1.im, v4.im, factor, prec);
     return r === undefined || i === undefined ? undefined : value(r, i);
   }
 
   const u: [number, number] = realLarger
-    ? [re.isNegative() ? -1 : 1, small ?? im.div(m).toNumber()]
-    : [small ?? re.div(m).toNumber(), im.isNegative() ? -1 : 1];
+    ? [re.isNegative() ? -1 : 1, small ?? im.div(m, prec).toNumber()]
+    : [small ?? re.div(m, prec).toNumber(), im.isNegative() ? -1 : 1];
   const at = (t: number, k = 1): Complex | undefined =>
     realLarger
       ? kernelValue(head, u[0] * t, k * u[1] * t)
@@ -421,11 +428,11 @@ export function complexInverseTrig(
     // A part that depends on a raised small part is scaled back to it.
     const f4 = raised ? at(t, 4) : f1;
     if (f4 === undefined) return undefined;
-    const kr = scalePart(f1.re, f4.re, raised);
-    const ki = scalePart(f1.im, f4.im, raised);
+    const kr = scalePart(f1.re, f4.re, raised, prec);
+    const ki = scalePart(f1.im, f4.im, raised, prec);
     if (kr === undefined || ki === undefined) return undefined;
-    const log = m.ln().sub(new BigDecimal(t).ln());
-    return value(kr.add(log.mul(b[0])), ki.add(log.mul(b[1])));
+    const log = m.ln(prec).sub(new BigDecimal(t).ln(prec), prec);
+    return value(kr.add(log.mul(b[0]), prec), ki.add(log.mul(b[1]), prec));
   }
 
   // w = 1/(t·u) at infinity, t·u at 0.
@@ -447,14 +454,14 @@ export function complexInverseTrig(
   let wr = re;
   let wi = im;
   if (large) {
-    const d = re.mul(re).add(im.mul(im));
-    wr = re.div(d);
-    wi = im.neg().div(d);
+    const d = re.mul(re).add(im.mul(im), prec);
+    wr = re.div(d, prec);
+    wi = im.neg().div(d, prec);
   }
-  const halfPi = BigDecimal.PI.div(BigDecimal.TWO);
+  const halfPi = BigDecimal.pi(prec).div(BigDecimal.TWO, prec);
   // C·w, with C = c[0] + i·c[1] one of 1, −1, i, −i.
   return value(
-    halfPi.mul(kr).add(wr.mul(c[0]).sub(wi.mul(c[1]))),
-    halfPi.mul(ki).add(wi.mul(c[0]).add(wr.mul(c[1])))
+    halfPi.mul(kr).add(wr.mul(c[0]).sub(wi.mul(c[1]), prec), prec),
+    halfPi.mul(ki).add(wi.mul(c[0]).add(wr.mul(c[1]), prec), prec)
   );
 }

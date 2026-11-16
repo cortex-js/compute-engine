@@ -38,11 +38,11 @@ export function asFloat(x: Expression): Expression {
   if (nv.isComplexInfinity) return x;
   // `N()` gives a float for a rational or a radical, and keeps an integer
   // exact, so its parts are read and rebuilt with the inexact factory.
-  const value = nv.N();
+  const value = nv.N(ce.precision);
   return ce.number(
     ce._inexactNumericValue({
-      re: value.bignumRe ?? value.re,
-      im: value.bignumIm ?? value.im,
+      re: value.bignumReAt(ce.precision) ?? value.re,
+      im: value.bignumImAt(ce.precision) ?? value.im,
     })
   );
 }

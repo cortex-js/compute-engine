@@ -303,6 +303,9 @@ function sumExcludesZero(
     const q = part[1];
     lcm = (lcm / gcdBig(lcm, q)) * q;
   }
+  // The precision sets only the gap limits of `add()`: in the range of
+  // `exactlySummable()` every sum below is exact at any precision.
+  const prec = terms.length > 0 ? terms[0].engine.precision : 0;
   let lo = BigDecimal.ZERO;
   let hi = BigDecimal.ZERO;
   for (const [p, q, [termLo, termHi]] of parts) {
@@ -311,11 +314,11 @@ function sumExcludesZero(
     const b = termHi.mul(k);
     if (!exactlySummable(a) || !exactlySummable(b)) return undefined;
     if (p >= 0n) {
-      lo = lo.add(a);
-      hi = hi.add(b);
+      lo = lo.add(a, prec);
+      hi = hi.add(b, prec);
     } else {
-      lo = lo.add(b);
-      hi = hi.add(a);
+      lo = lo.add(b, prec);
+      hi = hi.add(a, prec);
     }
   }
   return excludesZero([lo, hi]);

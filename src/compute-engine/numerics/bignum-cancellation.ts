@@ -36,9 +36,9 @@ export function magnitude(x: BigDecimal): number {
 }
 
 /**
- * `run(working)` evaluated at `BigDecimal.precision` plus guard digits, which
- * it must read from `BigDecimal.precision`; it returns a value with the
- * largest magnitude in its computation, or `undefined` when it declines.
+ * `run(working)` evaluated at `prec` plus guard digits, the working precision
+ * it is given and computes at; it returns a value with the largest magnitude
+ * in its computation, or `undefined` when it declines.
  *
  * The digits lost are `log₁₀(peak / |value|)`. If the working precision
  * covers them with `CANCELLATION_MARGIN_DIGITS` to spare, the value is
@@ -46,30 +46,26 @@ export function magnitude(x: BigDecimal): number {
  * the digits it lost added, up to `CANCELLATION_MAX_EXTRA_DIGITS` and
  * `CANCELLATION_MAX_RUNS` runs; a value that is exactly zero at a working
  * precision has lost more digits than were carried and is run again with
- * double the guard. `BigDecimal.precision` is restored.
+ * double the guard.
  */
 export function bigWithCancellation(
-  run: (working: number) => Scaled | undefined
+  run: (working: number) => Scaled | undefined,
+  prec: number
 ): BigDecimal | undefined {
-  const digits = BigDecimal.precision;
+  const digits = prec;
   let extra = CANCELLATION_GUARD_DIGITS;
-  try {
-    for (let attempt = 0; attempt < CANCELLATION_MAX_RUNS; attempt++) {
-      BigDecimal.precision = digits + extra;
-      const result = run(digits + extra);
-      if (result === undefined || !result.value.isFinite()) return undefined;
-      const lost = result.value.isZero()
-        ? extra * 2
-        : Math.max(0, magnitude(result.peak) - magnitude(result.value) + 1);
-      if (!result.value.isZero() && lost + CANCELLATION_MARGIN_DIGITS <= extra)
-        return result.value.toPrecision(digits);
-      extra = Math.max(extra * 2, lost + CANCELLATION_GUARD_DIGITS);
-      if (extra > CANCELLATION_MAX_EXTRA_DIGITS) return undefined;
-    }
-    return undefined;
-  } finally {
-    BigDecimal.precision = digits;
+  for (let attempt = 0; attempt < CANCELLATION_MAX_RUNS; attempt++) {
+    const result = run(digits + extra);
+    if (result === undefined || !result.value.isFinite()) return undefined;
+    const lost = result.value.isZero()
+      ? extra * 2
+      : Math.max(0, magnitude(result.peak) - magnitude(result.value) + 1);
+    if (!result.value.isZero() && lost + CANCELLATION_MARGIN_DIGITS <= extra)
+      return result.value.toPrecision(digits);
+    extra = Math.max(extra * 2, lost + CANCELLATION_GUARD_DIGITS);
+    if (extra > CANCELLATION_MAX_EXTRA_DIGITS) return undefined;
   }
+  return undefined;
 }
 
 /** Consecutive terms below the tolerance that end `sumByRatio`. */
@@ -77,7 +73,7 @@ const RATIO_SERIES_CONSECUTIVE = 2;
 
 /**
  * Σ term_k for `term_{k+1} = term_k · ratio(k)` from `first` (the term of
- * index `from`), at `BigDecimal.precision`, with the largest term. The caller
+ * index `from`), at `prec` digits, with the largest term. The caller
  * guarantees that `|ratio(k)|` does not increase for k ≥ `from`; then once the
  * next ratio is at most ½ the tail is at most the term, so the sum ends after
  * `RATIO_SERIES_CONSECUTIVE` terms in a row at most 10^−precision times the
@@ -88,9 +84,10 @@ export function sumByRatio(
   from: number,
   ratio: (k: number) => BigDecimal,
   maxTerms: number,
+  prec: number,
   checkTime?: () => void
 ): Scaled | undefined {
-  const tol = new BigDecimal(`1e-${BigDecimal.precision}`);
+  const tol = new BigDecimal(`1e-${prec}`);
   let term = first;
   let sum = first;
   let peak = first.abs();
@@ -101,8 +98,8 @@ export function sumByRatio(
     if (next.lte(BigDecimal.HALF) && term.abs().lte(tol.mul(peak))) {
       if (++small >= RATIO_SERIES_CONSECUTIVE) return { value: sum, peak };
     } else small = 0;
-    term = term.mulBounded(ratio(k));
-    sum = sum.add(term);
+    term = term.mulBounded(ratio(k), prec);
+    sum = sum.add(term, prec);
     if (term.abs().gt(peak)) peak = term.abs();
   }
   return undefined;

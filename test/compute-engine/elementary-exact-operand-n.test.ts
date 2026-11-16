@@ -179,7 +179,7 @@ describe('AN ELEMENTARY FUNCTION OF AN EXACT OPERAND UNDER N() IS CORRECTLY ROUN
   test('a float operand is read as it is', () => {
     // The float `0.3` is the value of the operand: its digits are not
     // read again.
-    expect(n(['Sin', 0.3])).toBe(ce.number(ce.bignum('0.3').sin()).toString());
+    expect(n(['Sin', 0.3])).toBe(ce.number(ce.bignum('0.3').sin(ce.precision)).toString());
   });
 
   test('evaluate() keeps an exact operand symbolic', () => {
@@ -205,7 +205,7 @@ describe('AN ELEMENTARY FUNCTION OF AN EXACT OPERAND UNDER N() IS CORRECTLY ROUN
       ce.popScope();
     }
     expect(n(['Power', 'ExponentialE', 2])).toBe(
-      ce.number(ce.bignum(2).exp()).toString()
+      ce.number(ce.bignum(2).exp(ce.precision)).toString()
     );
   });
 

@@ -16,7 +16,10 @@ import {
   isFunction,
 } from '../boxed-expression/type-guards.js';
 import { asRational } from '../boxed-expression/numerics.js';
-import { realPowerBranchTerms } from '../boxed-expression/arithmetic-power.js';
+import {
+  realPowerBranchTerms,
+  realPowerReconstructionDigits,
+} from '../boxed-expression/arithmetic-power.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import {
   couldBeCollectionParticipant,
@@ -241,7 +244,11 @@ export function negativeBaseFloatPower(
     if (literal.isComplex) return undefined;
     const value = literal.re;
     if (!Number.isFinite(value) || Number.isInteger(value)) return undefined;
-    const terms = realPowerBranchTerms(undefined, value);
+    const terms = realPowerBranchTerms(
+      undefined,
+      value,
+      realPowerReconstructionDigits(exponent.engine.precision)
+    );
     if (terms === undefined || terms[1] % 2 === 0) return undefined;
     return { value, oddNumerator: terms[0] % 2 !== 0, terms };
   }
@@ -696,7 +703,11 @@ export function realRootDegreeTerms(
   if (!Number.isFinite(d) || Number.isInteger(d)) return undefined;
   const exact = degree.isExact ? asRational(degree) : undefined;
   if (degree.isExact && exact === undefined) return undefined;
-  const terms = realPowerBranchTerms(exact, d);
+  const terms = realPowerBranchTerms(
+    exact,
+    d,
+    realPowerReconstructionDigits(degree.engine.precision)
+  );
   if (terms === undefined) return undefined;
   const [a, b] = terms;
   if (a % 2 === 0) return undefined;

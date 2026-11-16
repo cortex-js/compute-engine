@@ -17,13 +17,19 @@ export function lcm(a: BigNum, b: BigNum): BigNum {
   return a.mul(b).div(gcd(a, b)).abs();
 }
 
-export function* factorial2(n: BigNum): Generator<BigNum, BigNum> {
+/** The double factorial of the integer `n`. Every step is exact: `prec`,
+ * the precision of the engine (default `BigDecimal.precision`), only bounds
+ * the gap of the subtraction, so the result does not depend on it. */
+export function* factorial2(
+  n: BigNum,
+  prec?: number
+): Generator<BigNum, BigNum> {
   if (!n.isInteger() || n.isNegative()) return BigDecimal.NAN;
   if (n.lt(1)) return BigDecimal.ONE;
 
   let result = n;
   while (n.gt(2)) {
-    n = n.sub(2);
+    n = n.sub(2, prec);
     result = result.mul(n);
     yield result;
   }
@@ -109,17 +115,21 @@ export function isExactJsonNumber(
  * The difference with the truncated value is exact (`BigDecimal.sub()` does
  * not round), so a tie is found exactly. `BigDecimal.round()` always rounds
  * a tie away from zero, so it is not used for `Round`. A NaN or an infinity
- * is returned unchanged.
+ * is returned unchanged. `prec` is the working precision of the gap limits
+ * of `BigDecimal.sub()` and `add()`.
  */
 export function bigRoundToInteger(
   x: BigDecimal,
-  ties: RoundingTies
+  ties: RoundingTies,
+  prec: number
 ): BigDecimal {
   if (!x.isFinite() || x.isInteger()) return x;
   const t = x.trunc();
-  const c = x.sub(t).abs().cmp(BigDecimal.HALF);
+  const c = x.sub(t, prec).abs().cmp(BigDecimal.HALF);
   const negative = x.isNegative();
-  const away = negative ? t.sub(BigDecimal.ONE) : t.add(BigDecimal.ONE);
+  const away = negative
+    ? t.sub(BigDecimal.ONE, prec)
+    : t.add(BigDecimal.ONE, prec);
   if (c < 0) return t;
   if (c > 0) return away;
   return tieRoundsAway(ties, negative, t.toBigInt() % 2n === 0n) ? away : t;

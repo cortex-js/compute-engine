@@ -341,8 +341,10 @@ export function canonicalAdd(
       if (isNumber(op) && !isExactComplexLiteral(op)) {
         const im = imaginaryLiteralPart(op);
         if (im !== undefined) {
-          if (typeof imSum !== 'number') imSum = imSum.addBounded(im);
-          else if (typeof im !== 'number') imSum = im.addBounded(imSum);
+          if (typeof imSum !== 'number')
+            imSum = imSum.addBounded(im, ce.precision);
+          else if (typeof im !== 'number')
+            imSum = im.addBounded(imSum, ce.precision);
           else imSum += im;
           hasIm = true;
         }
@@ -372,10 +374,10 @@ export function canonicalAdd(
               // is kept as a big decimal: its double would round it.
               if (
                 typeof nv !== 'number' &&
-                nv.bignumRe !== undefined &&
+                nv.bignumReAt(ce.precision) !== undefined &&
                 !(nv.isExact && Number.isSafeInteger(nv.re))
               ) {
-                realVal = nv.bignumRe;
+                realVal = nv.bignumReAt(ce.precision)!;
                 realFound = true;
                 continue;
               }
@@ -1441,7 +1443,7 @@ export class Terms {
     if (isFunction(term, 'Add')) {
       for (const x of term.ops) {
         const [c, t] = exactSplit(this.engine, x);
-        this._add(coef.mul(c), t);
+        this._add(coef.mul(c, this.engine.precision), t);
       }
       return;
     }
@@ -1520,7 +1522,9 @@ export class Terms {
           else numericValues.push(term.numericValue);
         } else rest.push(term);
       } else {
-        const sum = coef.reduce((acc, x) => acc.add(x)).N();
+        const sum = coef
+          .reduce((acc, x) => acc.add(x, ce.precision))
+          .N(ce.precision);
         // A sum of coefficients with a float in it is a float coefficient:
         // `0.5x + 0.5x` is `1.0·x`, and `0.5x - 0.5x` is the float `0`
         const exactCoef = coef.every((x) => x.isExact);
@@ -1533,8 +1537,8 @@ export class Terms {
         }
 
         const termN = termsAreNumeric ? term : term.N();
-        if (sum.eq(1) && exactCoef) rest.push(termN);
-        else if (sum.eq(-1) && exactCoef) rest.push(termN.neg());
+        if (sum.eq(1, ce.precision) && exactCoef) rest.push(termN);
+        else if (sum.eq(-1, ce.precision) && exactCoef) rest.push(termN.neg());
         else rest.push(termN.mul(ce.expr(sum)));
       }
     }
@@ -1579,8 +1583,8 @@ export class Terms {
             zeroTimesList(ce, sum, term) ??
             (sum.isExact ? ce.Zero : ce.expr(sum))
           );
-        if (sum.eq(1) && sum.isExact) return term;
-        if (sum.eq(-1) && sum.isExact) return term.neg();
+        if (sum.eq(1, ce.precision) && sum.isExact) return term;
+        if (sum.eq(-1, ce.precision) && sum.isExact) return term.neg();
         if (term.isSame(1)) return ce.expr(sum);
 
         // The original canonical product has this same exact coefficient

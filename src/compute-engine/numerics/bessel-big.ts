@@ -10,7 +10,7 @@ import {
 
 /**
  * Arbitrary-precision Bessel functions J, Y, I and K of a real order ν and a
- * real argument x, at `BigDecimal.precision` digits.
+ * real argument x, at the digits asked for (`prec`).
  *
  * - Power series about x = 0 (DLMF 10.2.2, 10.25.2) for J and I:
  *   `(x/2)^ν Σ (±x²/4)^k / (k! Γ(ν+k+1))`. The ratio of two terms decreases
@@ -58,16 +58,16 @@ const BESSEL_OPERAND_DIGITS = 30;
 
 const HALF = BigDecimal.HALF;
 
-/** The operand as a big decimal at the working precision (a rational is divided there). */
-function toBig(x: HurwitzOperand): BigDecimal {
+/** The operand as a big decimal at `prec` digits (a rational is divided there). */
+function toBig(x: HurwitzOperand, prec: number): BigDecimal {
   return x instanceof BigDecimal
     ? x
-    : new BigDecimal(x[0]).div(new BigDecimal(x[1]));
+    : new BigDecimal(x[0]).div(new BigDecimal(x[1]), prec);
 }
 
-/** 10^−working, the relative tolerance of a sum. */
-function tolerance(): BigDecimal {
-  return new BigDecimal(`1e-${BigDecimal.precision}`);
+/** 10^−prec, the relative tolerance of a sum. */
+function tolerance(prec: number): BigDecimal {
+  return new BigDecimal(`1e-${prec}`);
 }
 
 function bigInt(n: number): BigDecimal {
@@ -82,23 +82,23 @@ function factorial(n: number): BigDecimal {
 }
 
 /** 1/Γ(ν + 1). */
-function reciprocalGammaPlusOne(ce: ComputeEngine, nu: BigDecimal): BigDecimal {
+function reciprocalGammaPlusOne(
+  ce: ComputeEngine,
+  nu: BigDecimal,
+  prec: number
+): BigDecimal {
   if (nu.isInteger() && !nu.isNegative())
-    return BigDecimal.ONE.div(factorial(nu.toNumber()));
-  return BigDecimal.ONE.div(bigGamma(ce, nu.add(BigDecimal.ONE)));
+    return BigDecimal.ONE.div(factorial(nu.toNumber()), prec);
+  const z = nu.add(BigDecimal.ONE, prec);
+  return BigDecimal.ONE.div(bigGamma(ce, z, prec), prec);
 }
 
 /** base^ν for base > 0, with the digits that the exponent's size costs. */
-function power(base: BigDecimal, nu: BigDecimal): BigDecimal {
-  if (nu.isInteger()) return base.pow(nu);
-  const saved = BigDecimal.precision;
-  const y0 = base.ln().mul(nu);
-  BigDecimal.precision = saved + Math.max(0, magnitude(y0) + 2);
-  try {
-    return base.ln().mul(nu).exp().toPrecision(saved);
-  } finally {
-    BigDecimal.precision = saved;
-  }
+function power(base: BigDecimal, nu: BigDecimal, prec: number): BigDecimal {
+  if (nu.isInteger()) return base.pow(nu, prec);
+  const y0 = base.ln(prec).mul(nu);
+  const raised = prec + Math.max(0, magnitude(y0) + 2);
+  return base.ln(raised).mul(nu).exp(raised).toPrecision(prec);
 }
 
 /**
@@ -111,23 +111,24 @@ function powerSeries(
   ce: ComputeEngine,
   nu: BigDecimal,
   q: BigDecimal,
-  sign: 1 | -1
+  sign: 1 | -1,
+  prec: number
 ): Scaled | undefined {
-  const tol = tolerance();
+  const tol = tolerance(prec);
   const signedQ = sign === 1 ? q : q.neg();
-  let term = reciprocalGammaPlusOne(ce, nu);
+  let term = reciprocalGammaPlusOne(ce, nu, prec);
   let sum = term;
   let peak = term.abs();
   let small = 0;
   for (let k = 0; k < BESSEL_BIG_MAX_TERMS; k++) {
     checkDeadlineEvery(ce._deadlineFrame, 0x3f);
-    const d = nu.add(k + 1);
-    const ratio = signedQ.div(d.mul(k + 1));
-    term = term.mulBounded(ratio);
-    sum = sum.add(term);
+    const d = nu.add(k + 1, prec);
+    const ratio = signedQ.div(d.mul(k + 1), prec);
+    term = term.mulBounded(ratio, prec);
+    sum = sum.add(term, prec);
     const size = term.abs();
     if (size.gt(peak)) peak = size;
-    const next = signedQ.div(nu.add(k + 2).mul(k + 2)).abs();
+    const next = signedQ.div(nu.add(k + 2, prec).mul(k + 2), prec).abs();
     if (
       d.isPositive() &&
       next.lte(HALF) &&
@@ -144,12 +145,19 @@ function besselIJSeries(
   ce: ComputeEngine,
   kind: 'I' | 'J',
   nu: BigDecimal,
-  x: BigDecimal
+  x: BigDecimal,
+  prec: number
 ): Scaled | undefined {
-  const half = x.div(2);
-  const series = powerSeries(ce, nu, half.mul(half), kind === 'I' ? 1 : -1);
+  const half = x.div(2, prec);
+  const series = powerSeries(
+    ce,
+    nu,
+    half.mul(half),
+    kind === 'I' ? 1 : -1,
+    prec
+  );
   if (series === undefined) return undefined;
-  const scale = power(half, nu);
+  const scale = power(half, nu, prec);
   return { value: series.value.mul(scale), peak: series.peak.mul(scale) };
 }
 
@@ -168,10 +176,11 @@ function besselIntegerOrderKY(
   ce: ComputeEngine,
   kind: 'K' | 'Y',
   n: number,
-  x: BigDecimal
+  x: BigDecimal,
+  prec: number
 ): Scaled | undefined {
-  const tol = tolerance();
-  const h = x.div(2);
+  const tol = tolerance(prec);
+  const h = x.div(2, prec);
   const q = h.mul(h);
   const s: 1 | -1 = kind === 'K' ? 1 : -1;
   const sq = s === 1 ? q : q.neg();
@@ -186,31 +195,33 @@ function besselIntegerOrderKY(
   for (let k = 0; k < n; k++) {
     if (k > 0) {
       factorialK = factorialK.mul(k);
-      upper = upper.div(n - k);
+      upper = upper.div(n - k, prec);
     }
-    finite = finite.add(upper.div(factorialK).mul(qPower));
-    qPower = qPower.mulBounded(q).mul(-s);
+    finite = finite.add(upper.div(factorialK, prec).mul(qPower), prec);
+    qPower = qPower.mulBounded(q, prec).mul(-s);
   }
 
   // S₁ and S₂ with their terms t_k = (sq)^k / (k! (n+k)!)
-  let term = BigDecimal.ONE.div(factorial(n));
+  let term = BigDecimal.ONE.div(factorial(n), prec);
   let harmonicK = BigDecimal.ZERO;
   let harmonicNK = BigDecimal.ZERO;
   for (let j = 1; j <= n; j++)
-    harmonicNK = harmonicNK.add(BigDecimal.ONE.div(j));
-  const twoGamma = BigDecimal.EULER_GAMMA.mul(2);
+    harmonicNK = harmonicNK.add(BigDecimal.ONE.div(j, prec), prec);
+  const twoGamma = BigDecimal.eulerGamma(prec).mul(2);
   let s1 = BigDecimal.ZERO;
   let s2 = BigDecimal.ZERO;
   let peak = BigDecimal.ZERO;
   let small = 0;
   for (let k = 0; k < BESSEL_BIG_MAX_TERMS; k++) {
     checkDeadlineEvery(ce._deadlineFrame, 0x3f);
-    const weighted = term.mul(harmonicK.add(harmonicNK).sub(twoGamma));
-    s1 = s1.add(term);
-    s2 = s2.add(weighted);
+    const weighted = term.mul(
+      harmonicK.add(harmonicNK, prec).sub(twoGamma, prec)
+    );
+    s1 = s1.add(term, prec);
+    s2 = s2.add(weighted, prec);
     for (const t of [term, weighted]) if (t.abs().gt(peak)) peak = t.abs();
     // ratio of the next term: sq / ((k+1)(n+k+1)), at most ½ from here on
-    const next = sq.div(bigInt((k + 1) * (n + k + 1))).abs();
+    const next = sq.div(bigInt((k + 1) * (n + k + 1)), prec).abs();
     if (
       next.lte(HALF) &&
       weighted.abs().lte(tol.mul(peak)) &&
@@ -219,42 +230,38 @@ function besselIntegerOrderKY(
       if (++small >= BESSEL_BIG_CONSECUTIVE) break;
     } else small = 0;
     if (k === BESSEL_BIG_MAX_TERMS - 1) return undefined;
-    term = term.mul(sq).div((k + 1) * (n + k + 1));
-    harmonicK = harmonicK.add(BigDecimal.ONE.div(k + 1));
-    harmonicNK = harmonicNK.add(BigDecimal.ONE.div(n + k + 1));
+    term = term.mul(sq).div((k + 1) * (n + k + 1), prec);
+    harmonicK = harmonicK.add(BigDecimal.ONE.div(k + 1, prec), prec);
+    harmonicNK = harmonicNK.add(BigDecimal.ONE.div(n + k + 1, prec), prec);
   }
 
-  const hn = power(h, bigInt(n));
-  const lnH = h.ln();
+  const hn = power(h, bigInt(n), prec);
+  const lnH = h.ln(prec);
   const parity = n % 2 === 0 ? 1 : -1;
+  const pi = BigDecimal.pi(prec);
   const parts: BigDecimal[] =
     kind === 'K'
       ? [
-          finite.div(hn).div(2),
+          finite.div(hn, prec).div(2, prec),
           lnH.mul(hn).mul(s1).mul(-parity),
-          hn.mul(s2).mul(parity).div(2),
+          hn.mul(s2).mul(parity).div(2, prec),
         ]
       : [
-          finite.div(hn).div(BigDecimal.PI).neg(),
-          lnH.mul(hn).mul(s1).mul(2).div(BigDecimal.PI),
-          hn.mul(s2).div(BigDecimal.PI).neg(),
+          finite.div(hn, prec).div(pi, prec).neg(),
+          lnH.mul(hn).mul(s1).mul(2).div(pi, prec),
+          hn.mul(s2).div(pi, prec).neg(),
         ];
   let largest = hn.mul(peak);
   const lnPeak = lnH.abs().gt(BigDecimal.ONE) ? lnH.abs() : BigDecimal.ONE;
   largest = largest.mul(lnPeak);
   for (const part of parts) if (part.abs().gt(largest)) largest = part.abs();
-  return { value: parts.reduce((a, b) => a.add(b)), peak: largest };
+  return { value: parts.reduce((a, b) => a.add(b, prec)), peak: largest };
 }
 
 /** sin(νπ) for a non-integer ν, with the digits that reducing a large ν costs. */
-function sinPi(nu: BigDecimal): BigDecimal {
-  const saved = BigDecimal.precision;
-  BigDecimal.precision = saved + Math.max(0, magnitude(nu) + 2);
-  try {
-    return nu.mul(BigDecimal.PI).sin().toPrecision(saved);
-  } finally {
-    BigDecimal.precision = saved;
-  }
+function sinPi(nu: BigDecimal, prec: number): BigDecimal {
+  const raised = prec + Math.max(0, magnitude(nu) + 2);
+  return nu.mul(BigDecimal.pi(raised)).sin(raised).toPrecision(prec);
 }
 
 /** Y_ν or K_ν for a non-integer ν and x > 0 from the series of J_{±ν} or I_{±ν}. */
@@ -262,24 +269,29 @@ function besselNonIntegerKY(
   ce: ComputeEngine,
   kind: 'K' | 'Y',
   nu: BigDecimal,
-  x: BigDecimal
+  x: BigDecimal,
+  prec: number
 ): Scaled | undefined {
   const base = kind === 'K' ? 'I' : 'J';
-  const plus = besselIJSeries(ce, base, nu, x);
-  const minus = besselIJSeries(ce, base, nu.neg(), x);
+  const plus = besselIJSeries(ce, base, nu, x, prec);
+  const minus = besselIJSeries(ce, base, nu.neg(), x, prec);
   if (plus === undefined || minus === undefined) return undefined;
-  const sin = sinPi(nu);
-  const piNu = nu.mul(BigDecimal.PI);
-  const peak = plus.peak.add(minus.peak);
+  const sin = sinPi(nu, prec);
+  const pi = BigDecimal.pi(prec);
+  const piNu = nu.mul(pi);
+  const peak = plus.peak.add(minus.peak, prec);
   if (kind === 'K') {
-    const k = minus.value.sub(plus.value).mul(BigDecimal.PI).div(sin.mul(2));
+    const k = minus.value.sub(plus.value, prec).mul(pi).div(sin.mul(2), prec);
     return {
       value: k,
-      peak: peak.mul(BigDecimal.PI).div(sin.abs().mul(2)),
+      peak: peak.mul(pi).div(sin.abs().mul(2), prec),
     };
   }
-  const y = plus.value.mul(piNu.cos()).sub(minus.value).div(sin);
-  return { value: y, peak: peak.div(sin.abs()) };
+  const y = plus.value
+    .mul(piNu.cos(prec))
+    .sub(minus.value, prec)
+    .div(sin, prec);
+  return { value: y, peak: peak.div(sin.abs(), prec) };
 }
 
 /**
@@ -294,9 +306,10 @@ function hankel(
   ce: ComputeEngine,
   kind: 'J' | 'Y' | 'K',
   nu: BigDecimal,
-  x: BigDecimal
+  x: BigDecimal,
+  prec: number
 ): Scaled | undefined {
-  const tol = tolerance();
+  const tol = tolerance(prec);
   const mu = nu.mul(nu).mul(4);
   const startCheck = Math.ceil(nu.abs().toNumber()) + 1;
   const eightX = x.mul(8);
@@ -309,7 +322,7 @@ function hankel(
   for (let k = 1; k < BESSEL_BIG_MAX_TERMS; k++) {
     checkDeadlineEvery(ce._deadlineFrame, 0x3f);
     const odd = bigInt(2 * k - 1);
-    term = term.mul(mu.sub(odd.mul(odd))).div(eightX.mul(k));
+    term = term.mul(mu.sub(odd.mul(odd), prec)).div(eightX.mul(k), prec);
     const size = term.abs();
     if (size.gt(peak)) peak = size;
     const converged = size.lte(tol.mul(peak)) && size.lte(previous);
@@ -321,41 +334,45 @@ function hankel(
       // starts the divergent part of the expansion
       if (k >= startCheck && size.gt(previous)) return undefined;
     }
-    if (kind === 'K') p = p.add(term);
-    else if (k % 2 === 0) p = (k / 2) % 2 === 0 ? p.add(term) : p.sub(term);
-    else qSum = ((k - 1) / 2) % 2 === 0 ? qSum.add(term) : qSum.sub(term);
+    if (kind === 'K') p = p.add(term, prec);
+    else if (k % 2 === 0)
+      p = (k / 2) % 2 === 0 ? p.add(term, prec) : p.sub(term, prec);
+    else
+      qSum =
+        ((k - 1) / 2) % 2 === 0 ? qSum.add(term, prec) : qSum.sub(term, prec);
     previous = size;
     if (k === BESSEL_BIG_MAX_TERMS - 1) return undefined;
   }
   if (small < BESSEL_BIG_CONSECUTIVE) return undefined;
 
   if (kind === 'K') {
-    const prefactor = BigDecimal.PI.div(x.mul(2)).sqrt().mul(x.neg().exp());
+    const prefactor = BigDecimal.pi(prec)
+      .div(x.mul(2), prec)
+      .sqrt(prec)
+      .mul(x.neg().exp(prec));
     return { value: prefactor.mul(p), peak: prefactor.mul(peak) };
   }
   // χ = x − (ν/2 + 1/4)π, reduced at the digits that x costs
-  const saved = BigDecimal.precision;
-  BigDecimal.precision = saved + Math.max(0, magnitude(x) + 2);
-  let cos: BigDecimal;
-  let sin: BigDecimal;
-  try {
-    const chi = x.sub(nu.div(2).add(0.25).mul(BigDecimal.PI));
-    cos = chi.cos().toPrecision(saved);
-    sin = chi.sin().toPrecision(saved);
-  } finally {
-    BigDecimal.precision = saved;
-  }
-  const amplitude = BigDecimal.TWO.div(BigDecimal.PI.mul(x)).sqrt();
+  const raised = prec + Math.max(0, magnitude(x) + 2);
+  const chi = x.sub(
+    nu.div(2, raised).add(0.25, raised).mul(BigDecimal.pi(raised)),
+    raised
+  );
+  const cos = chi.cos(raised).toPrecision(prec);
+  const sin = chi.sin(raised).toPrecision(prec);
+  const amplitude = BigDecimal.TWO.div(BigDecimal.pi(prec).mul(x), prec).sqrt(
+    prec
+  );
   const value =
     kind === 'J'
-      ? p.mul(cos).sub(qSum.mul(sin))
-      : p.mul(sin).add(qSum.mul(cos));
+      ? p.mul(cos).sub(qSum.mul(sin), prec)
+      : p.mul(sin).add(qSum.mul(cos), prec);
   return { value: amplitude.mul(value), peak: amplitude.mul(peak) };
 }
 
 /**
- * The Bessel function `kind` of order `order` at `x`, at `BigDecimal.precision`
- * digits, or `undefined` when the kernel declines: x = 0 (the caller's exact
+ * The Bessel function `kind` of order `order` at `x`, at `prec` digits, or
+ * `undefined` when the kernel declines: x = 0 (the caller's exact
  * values), a negative x for Y and K or for J and I of a non-integer order
  * (the value is complex), the order or the argument past the caps above, or
  * the digits not reached.
@@ -364,20 +381,15 @@ export function bigBessel(
   ce: ComputeEngine,
   kind: BesselKind,
   order: HurwitzOperand,
-  argument: HurwitzOperand
+  argument: HurwitzOperand,
+  prec: number
 ): BigDecimal | undefined {
-  const digits = BigDecimal.precision;
+  const digits = prec;
   // The operands are read at a working precision so that an exact rational
   // keeps all its digits.
-  BigDecimal.precision = digits + BESSEL_OPERAND_DIGITS;
-  let nu: BigDecimal;
-  let x: BigDecimal;
-  try {
-    nu = toBig(order).toPrecision(digits + BESSEL_OPERAND_DIGITS);
-    x = toBig(argument).toPrecision(digits + BESSEL_OPERAND_DIGITS);
-  } finally {
-    BigDecimal.precision = digits;
-  }
+  const operandDigits = digits + BESSEL_OPERAND_DIGITS;
+  const nu = toBig(order, operandDigits).toPrecision(operandDigits);
+  const x = toBig(argument, operandDigits).toPrecision(operandDigits);
   if (!nu.isFinite() || !x.isFinite() || x.isZero()) return undefined;
   if (nu.abs().gt(BESSEL_BIG_MAX_ORDER)) return undefined;
   const integer = nu.isInteger();
@@ -399,17 +411,26 @@ export function bigBessel(
     absX.gte(BESSEL_HANKEL_MIN_ARGUMENT) &&
     (kind === 'J' || kind === 'Y' || kind === 'K')
   )
-    value = bigWithCancellation(() => hankel(ce, kind, order0, absX));
+    value = bigWithCancellation(
+      (working) => hankel(ce, kind, order0, absX, working),
+      digits
+    );
   if (value === undefined && absX.lte(BESSEL_BIG_MAX_SERIES_ARGUMENT)) {
     if (kind === 'I' || kind === 'J')
-      value = bigWithCancellation(() => besselIJSeries(ce, kind, order0, absX));
+      value = bigWithCancellation(
+        (working) => besselIJSeries(ce, kind, order0, absX, working),
+        digits
+      );
     else if (integer)
-      value = bigWithCancellation(() =>
-        besselIntegerOrderKY(ce, kind, order0.toNumber(), absX)
+      value = bigWithCancellation(
+        (working) =>
+          besselIntegerOrderKY(ce, kind, order0.toNumber(), absX, working),
+        digits
       );
     else
-      value = bigWithCancellation(() =>
-        besselNonIntegerKY(ce, kind, order0, absX)
+      value = bigWithCancellation(
+        (working) => besselNonIntegerKY(ce, kind, order0, absX, working),
+        digits
       );
   }
   return value === undefined ? undefined : negate ? value.neg() : value;

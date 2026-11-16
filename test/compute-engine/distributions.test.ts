@@ -219,7 +219,7 @@ describe('regularized incomplete gamma/beta kernels', () => {
       test('P(3,1) series branch', () => {
         expect(
           bigRelErr(
-            bigGammaP(ce, B('3'), B('1')),
+            bigGammaP(ce, B('3'), B('1'), BigDecimal.precision),
             '0.080301397071394196011190574596347831385472172420580413730407995'
           )
         ).toBeLessThan(1e-48);
@@ -228,7 +228,7 @@ describe('regularized incomplete gamma/beta kernels', () => {
       test('Q(3,10) continued-fraction branch', () => {
         expect(
           bigRelErr(
-            bigGammaQ(ce, B('3'), B('10')),
+            bigGammaQ(ce, B('3'), B('10'), BigDecimal.precision),
             '0.0027693957155115759436710824491935872245130034208604631248033496'
           )
         ).toBeLessThan(1e-48);
@@ -237,7 +237,7 @@ describe('regularized incomplete gamma/beta kernels', () => {
       test('P(0.5, 2) half-integer', () => {
         expect(
           bigRelErr(
-            bigGammaP(ce, B('0.5'), B('2')),
+            bigGammaP(ce, B('0.5'), B('2'), BigDecimal.precision),
             '0.954499736103641585599434725666933125056447552596643132032668'
           )
         ).toBeLessThan(1e-48);
@@ -246,7 +246,7 @@ describe('regularized incomplete gamma/beta kernels', () => {
       test('P(100,100) large argument', () => {
         expect(
           bigRelErr(
-            bigGammaP(ce, B('100'), B('100')),
+            bigGammaP(ce, B('100'), B('100'), BigDecimal.precision),
             '0.51329879827914866485731425656402916347092514992794507395962821'
           )
         ).toBeLessThan(1e-48);
@@ -255,7 +255,13 @@ describe('regularized incomplete gamma/beta kernels', () => {
       test('I_0.3(2,3) direct branch', () => {
         expect(
           bigRelErr(
-            bigBetaRegularized(ce, B('0.3'), B('2'), B('3')),
+            bigBetaRegularized(
+              ce,
+              B('0.3'),
+              B('2'),
+              B('3'),
+              BigDecimal.precision
+            ),
             '0.34830000000000000000000000000000000000000000000000000000000003'
           )
         ).toBeLessThan(1e-48);
@@ -264,7 +270,13 @@ describe('regularized incomplete gamma/beta kernels', () => {
       test('I_0.6(2,3) symmetry branch', () => {
         expect(
           bigRelErr(
-            bigBetaRegularized(ce, B('0.6'), B('2'), B('3')),
+            bigBetaRegularized(
+              ce,
+              B('0.6'),
+              B('2'),
+              B('3'),
+              BigDecimal.precision
+            ),
             '0.82080000000000000000000000000000000000000000000000000000000005'
           )
         ).toBeLessThan(1e-48);
@@ -273,7 +285,13 @@ describe('regularized incomplete gamma/beta kernels', () => {
       test('I_0.3(0.5,0.5) arcsine', () => {
         expect(
           bigRelErr(
-            bigBetaRegularized(ce, B('0.3'), B('0.5'), B('0.5')),
+            bigBetaRegularized(
+              ce,
+              B('0.3'),
+              B('0.5'),
+              B('0.5'),
+              BigDecimal.precision
+            ),
             '0.36901011956554538275543055877873651465472430538798006067044338'
           )
         ).toBeLessThan(1e-48);
@@ -282,7 +300,13 @@ describe('regularized incomplete gamma/beta kernels', () => {
       test('I_0.4(100,100) large parameters', () => {
         expect(
           bigRelErr(
-            bigBetaRegularized(ce, B('0.4'), B('100'), B('100')),
+            bigBetaRegularized(
+              ce,
+              B('0.4'),
+              B('100'),
+              B('100'),
+              BigDecimal.precision
+            ),
             '0.002160094938055144472032463246962837390046068972996652296746663'
           )
         ).toBeLessThan(1e-48);
@@ -298,7 +322,7 @@ describe('regularized incomplete gamma/beta kernels', () => {
       test('P(3,1)', () => {
         expect(
           bigRelErr(
-            bigGammaP(ce, B('3'), B('1')),
+            bigGammaP(ce, B('3'), B('1'), BigDecimal.precision),
             '0.080301397071394196011190574596347831385472172420580413730407995756346260637750491607131814135200890633431686807890011979382560518024677478433366026264753042269514081556654712378402522187135959137530700053288810105'
           )
         ).toBeLessThan(1e-197);
@@ -307,7 +331,7 @@ describe('regularized incomplete gamma/beta kernels', () => {
       test('Q(3,10)', () => {
         expect(
           bigRelErr(
-            bigGammaQ(ce, B('3'), B('10')),
+            bigGammaQ(ce, B('3'), B('10'), BigDecimal.precision),
             '0.0027693957155115759436710824491935872245130034208604631248033496447109647184724391808040252773028147216241913604708477380696571461519157437190681842102742886212204454622374492021810446296088179465410795850088854383'
           )
         ).toBeLessThan(1e-197);
@@ -316,7 +340,7 @@ describe('regularized incomplete gamma/beta kernels', () => {
       test('P(0.5, 2)', () => {
         expect(
           bigRelErr(
-            bigGammaP(ce, B('0.5'), B('2')),
+            bigGammaP(ce, B('0.5'), B('2'), BigDecimal.precision),
             '0.954499736103641585599434725666933125056447552596643132032667999739047419294448503303461695848420770154976925636115409175104155957095571425952408638944835043393175406461528619918753177595069872605295863277453195'
           )
         ).toBeLessThan(1e-197);
@@ -325,7 +349,7 @@ describe('regularized incomplete gamma/beta kernels', () => {
       test('P(100,100)', () => {
         expect(
           bigRelErr(
-            bigGammaP(ce, B('100'), B('100')),
+            bigGammaP(ce, B('100'), B('100'), BigDecimal.precision),
             '0.51329879827914866485731425656402916347092514992794507395962820895714163586078377811246212485160014343612125460624022991523405575984575952899146058562603507420250386181639273709723365110122853180385214908074836176'
           )
         ).toBeLessThan(1e-197);
@@ -334,7 +358,13 @@ describe('regularized incomplete gamma/beta kernels', () => {
       test('I_0.3(0.5,0.5)', () => {
         expect(
           bigRelErr(
-            bigBetaRegularized(ce, B('0.3'), B('0.5'), B('0.5')),
+            bigBetaRegularized(
+              ce,
+              B('0.3'),
+              B('0.5'),
+              B('0.5'),
+              BigDecimal.precision
+            ),
             '0.36901011956554538275543055877873651465472430538798006067044339803172287280223375502188522835979933952187592862577019687251436662736618937727918664151552636372196514003902602192104321574552112810557277164979750014'
           )
         ).toBeLessThan(1e-197);
@@ -343,7 +373,13 @@ describe('regularized incomplete gamma/beta kernels', () => {
       test('I_0.4(100,100)', () => {
         expect(
           bigRelErr(
-            bigBetaRegularized(ce, B('0.4'), B('100'), B('100')),
+            bigBetaRegularized(
+              ce,
+              B('0.4'),
+              B('100'),
+              B('100'),
+              BigDecimal.precision
+            ),
             '0.0021600949380551444720324632469628373900460689729966522967466661985293896437484794778819431104526698065556954104911455611308078470609185901775744602142472385544426326124861159877637580945499357184000000000000000037'
           )
         ).toBeLessThan(1e-197);
@@ -359,7 +395,9 @@ describe('regularized incomplete gamma/beta kernels', () => {
           ['0.5', '2'],
           ['100', '100'],
         ] as [string, string][]) {
-          const sum = bigGammaP(ce, B(a), B(x)).add(bigGammaQ(ce, B(a), B(x)));
+          const sum = bigGammaP(ce, B(a), B(x), BigDecimal.precision).add(
+            bigGammaQ(ce, B(a), B(x), BigDecimal.precision)
+          );
           expect(bigRelErr(sum, '1')).toBeLessThan(1e-48);
         }
       });
@@ -371,8 +409,20 @@ describe('regularized incomplete gamma/beta kernels', () => {
           ['0.6', '2', '3'],
           ['0.3', '0.5', '0.5'],
         ] as [string, string, string][]) {
-          const sum = bigBetaRegularized(ce, B(x), B(a), B(b)).add(
-            bigBetaRegularized(ce, B('1').sub(B(x)), B(b), B(a))
+          const sum = bigBetaRegularized(
+            ce,
+            B(x),
+            B(a),
+            B(b),
+            BigDecimal.precision
+          ).add(
+            bigBetaRegularized(
+              ce,
+              B('1').sub(B(x)),
+              B(b),
+              B(a),
+              BigDecimal.precision
+            )
           );
           expect(bigRelErr(sum, '1')).toBeLessThan(1e-48);
         }
@@ -380,26 +430,60 @@ describe('regularized incomplete gamma/beta kernels', () => {
 
       test('domain errors → NaN BigNum', () => {
         BigDecimal.precision = 50;
-        expect(bigGammaP(ce, B('0'), B('1')).isNaN()).toBe(true);
-        expect(bigGammaP(ce, B('3'), B('-1')).isNaN()).toBe(true);
-        expect(bigGammaQ(ce, B('-2'), B('1')).isNaN()).toBe(true);
-        expect(bigBetaRegularized(ce, B('0.5'), B('0'), B('3')).isNaN()).toBe(
-          true
-        );
-        expect(bigBetaRegularized(ce, B('1.5'), B('2'), B('2.5')).isNaN()).toBe(
-          true
-        );
+        expect(
+          bigGammaP(ce, B('0'), B('1'), BigDecimal.precision).isNaN()
+        ).toBe(true);
+        expect(
+          bigGammaP(ce, B('3'), B('-1'), BigDecimal.precision).isNaN()
+        ).toBe(true);
+        expect(
+          bigGammaQ(ce, B('-2'), B('1'), BigDecimal.precision).isNaN()
+        ).toBe(true);
+        expect(
+          bigBetaRegularized(
+            ce,
+            B('0.5'),
+            B('0'),
+            B('3'),
+            BigDecimal.precision
+          ).isNaN()
+        ).toBe(true);
+        expect(
+          bigBetaRegularized(
+            ce,
+            B('1.5'),
+            B('2'),
+            B('2.5'),
+            BigDecimal.precision
+          ).isNaN()
+        ).toBe(true);
       });
 
       test('endpoints', () => {
         BigDecimal.precision = 50;
-        expect(bigGammaP(ce, B('3'), B('0')).isZero()).toBe(true);
-        expect(bigGammaQ(ce, B('3'), B('0')).eq(BigDecimal.ONE)).toBe(true);
-        expect(bigBetaRegularized(ce, B('0'), B('2'), B('3')).isZero()).toBe(
-          true
-        );
         expect(
-          bigBetaRegularized(ce, B('1'), B('2'), B('3')).eq(BigDecimal.ONE)
+          bigGammaP(ce, B('3'), B('0'), BigDecimal.precision).isZero()
+        ).toBe(true);
+        expect(
+          bigGammaQ(ce, B('3'), B('0'), BigDecimal.precision).eq(BigDecimal.ONE)
+        ).toBe(true);
+        expect(
+          bigBetaRegularized(
+            ce,
+            B('0'),
+            B('2'),
+            B('3'),
+            BigDecimal.precision
+          ).isZero()
+        ).toBe(true);
+        expect(
+          bigBetaRegularized(
+            ce,
+            B('1'),
+            B('2'),
+            B('3'),
+            BigDecimal.precision
+          ).eq(BigDecimal.ONE)
         ).toBe(true);
       });
     });

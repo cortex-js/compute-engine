@@ -1032,14 +1032,17 @@ export function canonicalAngle(
   // has no exact reduction and takes the float route below.
   let k2: NumericValue;
   if (k instanceof ExactNumericValue && !k.isComplex && k.radical === 1) {
-    const half = k.div(2);
+    const half = k.div(2, ce.precision);
     // The sign is read from the exact value: the double of a rational whose
     // denominator overflows (`−1/10³¹⁰`) is `−0`, which is not negative.
     const whole = k.sgn() === -1 ? half.ceil() : half.floor();
-    k2 = k.sub(whole.mul(2));
-  } else k2 = ce._numericValue(k.bignumRe ? k.bignumRe.mod(2) : k.re % 2);
+    k2 = k.sub(whole.mul(2, ce.precision), ce.precision);
+  } else {
+    const bigK = k.bignumReAt(ce.precision);
+    k2 = ce._numericValue(bigK ? bigK.mod(2) : k.re % 2);
+  }
   const piMulK2N = ce.Pi.mul(k2).N();
-  return ce.number(t.add(numericValue(piMulK2N) ?? 0));
+  return ce.number(t.add(numericValue(piMulK2N) ?? 0, ce.precision));
 }
 
 /**
@@ -1121,7 +1124,7 @@ function imaginaryPart(x: Expression): Expression {
   // double `im` of `1152921504606846977.5` is `1152921504606846976`, which
   // loses the parity of the half-turns in `e^{1152921504606846977.5·iπ}`.
   const nv = isNumber(x) ? x.numericValue : undefined;
-  const big = typeof nv === 'object' ? nv.bignumIm : undefined;
+  const big = typeof nv === 'object' ? nv.bignumImAt(ce.precision) : undefined;
   if (big !== undefined) return ce.number(ce._numericValue(big));
   // The imaginary part of a float is a float, even when its value is an
   // integer: the imaginary part of the real float `0.0` is the float `0`,
@@ -1190,19 +1193,19 @@ export function getPiTerm(
   if (isFunction(expr, 'Add') && expr.nops === 2) {
     const [k1, t1] = getPiTerm(expr.op1);
     const [k2, t2] = getPiTerm(expr.op2);
-    return [k1.add(k2), t1.add(t2)];
+    return [k1.add(k2, ce.precision), t1.add(t2, ce.precision)];
   }
 
   if (isFunction(expr, 'Multiply') && expr.nops === 2) {
     if (isNumber(expr.op1)) {
       const [k, t] = getPiTerm(expr.op2);
       const n = expr.op1.numericValue;
-      return [k.mul(n), t.mul(n)];
+      return [k.mul(n, ce.precision), t.mul(n, ce.precision)];
     }
     if (isNumber(expr.op2)) {
       const [k, t] = getPiTerm(expr.op1);
       const n = expr.op2.numericValue;
-      return [k.mul(n), t.mul(n)];
+      return [k.mul(n, ce.precision), t.mul(n, ce.precision)];
     }
   }
 
@@ -1210,7 +1213,7 @@ export function getPiTerm(
     if (isNumber(expr.op2)) {
       const [k1, t1] = getPiTerm(expr.op1);
       const d = expr.op2.numericValue;
-      return [k1.div(d), t1.div(d)];
+      return [k1.div(d, ce.precision), t1.div(d, ce.precision)];
     }
   }
 
@@ -2269,6 +2272,6 @@ export function roundedToWorkingPrecision(x: Expression): Expression {
   if (!isNumber(x)) return x;
   const value = x.numericValue;
   if (typeof value === 'number') return x;
-  const rounded = value.roundToPrecision(2 * BigDecimal.precision);
+  const rounded = value.roundToPrecision(2 * x.engine.precision);
   return rounded === value ? x : x.engine.number(rounded);
 }

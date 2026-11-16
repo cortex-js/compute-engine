@@ -393,6 +393,7 @@ export function printInterval(
   p: Program,
   rows: readonly OperatorRow[],
   syntax: Syntax,
+  precision: number,
   iterationBudget?: number
 ): IntervalPrinted {
   const limit = Math.min(Math.floor(iterationBudget ?? Infinity), 2 ** 32);
@@ -407,10 +408,10 @@ export function printInterval(
           `  _IA.countLoopPass(${Math.floor(iterationBudget!)});`,
         ]
       : loopOpen(limit)(k, lo, hi, passes);
-  // The digits of the reading of a run-time float exponent, fixed now: the
-  // runtime has its own number library, whose precision says nothing about
-  // the engine's (`CompilationResult.reconstructionDigits`).
-  const pow = `_IA.powReal($0, $1, ${realPowerReconstructionDigits()})`;
+  // The digits of the reading of a run-time float exponent, fixed now from
+  // `precision`, the precision of the engine: the runtime has its own number
+  // library (`CompilationResult.reconstructionDigits`).
+  const pow = `_IA.powReal($0, $1, ${realPowerReconstructionDigits(precision)})`;
   const q = subtractions(p);
   const plan = computedOnce(q, rows);
   const printed = printProgram(

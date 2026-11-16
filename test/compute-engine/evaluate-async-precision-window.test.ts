@@ -11,6 +11,9 @@ import { BigDecimal } from '../../src/big-decimal';
 // evaluation raises it when it starts and restores it when it returns
 // (`runWithEvaluationEffects`).
 
+// No engine writes `BigDecimal.precision` (CE-1362, stage 3).
+const LIBRARY_PRECISION = BigDecimal.precision;
+
 const SLOW_SUM = [
   'Sum',
   ['Divide', 1, ['Power', 'k', 2]],
@@ -37,10 +40,11 @@ describe('N(x, p) above the precision of the engine, and a goal, yield under eva
     expect(yielded).toBe(true);
     if (process.env.CE_PERF === '1')
       expect(Date.now() - start).toBeLessThan(1500);
-    // The precision of the engine and of the big decimals is restored, also
-    // when the evaluation is aborted, and no request of digits is left.
+    // The precision of the engine is restored, also when the evaluation is
+    // aborted, `BigDecimal.precision` is not written, and no request of
+    // digits is left.
     expect(ce.precision).toBe(21);
-    expect(BigDecimal.precision).toBe(21);
+    expect(BigDecimal.precision).toBe(LIBRARY_PRECISION);
     expect((ce as any)._requestedPrecision).toBeUndefined();
   };
 
@@ -119,7 +123,7 @@ describe('the asynchronous windows give the value of the synchronous handler', (
     await ce.box(['N', 'Pi', 60]).evaluateAsync();
     expect(ce.box('Pi').N().toString()).toBe('3.14159265358979323846');
     expect(ce.precision).toBe(21);
-    expect(BigDecimal.precision).toBe(21);
+    expect(BigDecimal.precision).toBe(LIBRARY_PRECISION);
   });
 });
 
@@ -155,7 +159,7 @@ describe('windows of different precisions interleave on one engine', () => {
     // Nothing of a window is left on the engine while the evaluations are
     // suspended.
     expect(ce.precision).toBe(21);
-    expect(BigDecimal.precision).toBe(21);
+    expect(BigDecimal.precision).toBe(LIBRARY_PRECISION);
     expect((ce as any)._requestedPrecision).toBeUndefined();
     release();
     const [ra, rb, rc] = await Promise.all([a, b, c]);
@@ -166,7 +170,7 @@ describe('windows of different precisions interleave on one engine', () => {
     expect(rb.toString()).toBe('1.202055516583591200766103');
     expect(rc.toString()).toBe('1.08232323217178205298');
     expect(ce.precision).toBe(21);
-    expect(BigDecimal.precision).toBe(21);
+    expect(BigDecimal.precision).toBe(LIBRARY_PRECISION);
     expect((ce as any)._requestedPrecision).toBeUndefined();
   });
 
@@ -383,7 +387,7 @@ describe('the asynchronous windows agree with the synchronous route: second revi
         .evaluateAsync({ signal: ac.signal })
     ).rejects.toMatchObject({ name: 'CancellationError' });
     expect(ce.precision).toBe(21);
-    expect(BigDecimal.precision).toBe(21);
+    expect(BigDecimal.precision).toBe(LIBRARY_PRECISION);
   });
 
   test('the plain form evaluates an asynchronous-only application in order with its siblings', async () => {

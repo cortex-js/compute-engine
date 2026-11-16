@@ -450,6 +450,7 @@ interface PureEngineViewMirror {
   type(type: Type | TypeString | BoxedType): BoxedType;
   readonly _typeResolver: import('../common/type/types.js').TypeResolver;
   readonly tolerance: number;
+  readonly precision: number;
   readonly strict: boolean;
   readonly _protocolRegistry: Readonly<Record<string, object>>;
   lookupDefinition(id: string):
@@ -1280,9 +1281,10 @@ export interface Expression {
    * Used when coercing a `Expression` to a `String`.
    *
    * For arbitrary-precision numbers (`BigNumericValue`), the output is
-   * rounded to `BigDecimal.precision` significant digits. Digits beyond the
-   * working precision are noise from precision-bounded operations (division,
-   * transcendentals) and are not displayed. Machine-precision numbers use
+   * rounded to the precision of the engine (`ce.precision`) in significant
+   * digits. Digits beyond the working precision are noise from
+   * precision-bounded operations (division, transcendentals) and are not
+   * displayed. Machine-precision numbers use
    * their native `Number.toString()`.
    *
    * @category Primitive Methods

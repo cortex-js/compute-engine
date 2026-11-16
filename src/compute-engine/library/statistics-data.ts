@@ -143,7 +143,7 @@ export function isComplexDatum(v: Expression): boolean {
   const n = v.numericValue;
   if (typeof n === 'number') return false;
   if (n.isComplex) return hasFiniteImaginaryPart(n);
-  return n.isExact && n.bignumIm?.isZero() === false;
+  return n.isExact && n.bignumImAt(v.engine.precision)?.isZero() === false;
 }
 
 /**

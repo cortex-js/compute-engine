@@ -583,9 +583,9 @@ export function same(
     if (aNaN || bNaN) return aNaN && bNaN;
     if (typeof av === 'number') {
       if (typeof bv === 'number') return av === bv;
-      return bv.eq(av);
+      return bv.eq(av, b.engine.precision);
     }
-    return av.eq(bv);
+    return av.eq(bv, a.engine.precision);
   }
 
   //
@@ -1417,14 +1417,15 @@ function cmpWithTolerance(
         return av < b ? '<' : '>';
       }
       if (av.isNaN || Number.isNaN(b)) return undefined;
-      if (av.eq(b)) return '=';
-      const lt = av.lt(b);
+      if (av.eq(b, a.engine.precision)) return '=';
+      const lt = av.lt(b, a.engine.precision);
       if (lt === undefined) return undefined;
       // Tolerance-aware equality, consistent with the machine path above and
       // the symbol branches below: values within tolerance must not be ordered
       // strictly, or `isEqual` and `isGreater`/`isLess` would both be true
       // (CM-P1-4).
-      if (isZeroWithin(av.sub(a.engine._numericValue(b)))) return '=';
+      if (isZeroWithin(av.sub(a.engine._numericValue(b), a.engine.precision)))
+        return '=';
       return lt ? '<' : '>';
     }
 
@@ -1512,20 +1513,21 @@ function cmpWithTolerance(
       if (Number.isNaN(av)) return undefined;
       // Exact equality first: `Infinity - Infinity` is NaN, so the tolerance
       // check below cannot detect equal infinities.
-      if (bv.eq(av)) return '=';
-      const gt = bv.lt(av); // is `bv < av`? undefined when unordered (complex)
+      if (bv.eq(av, a.engine.precision)) return '=';
+      const gt = bv.lt(av, a.engine.precision); // is `bv < av`? undefined when unordered (complex)
       if (gt === undefined) return undefined;
       // Tolerance-aware equality, consistent with the machine and symbol
       // branches of cmp(): values within tolerance must not be ordered
       // strictly, or `isEqual` and `isLess` would both be true (CM-P1-4).
-      if (isZeroWithin(bv.sub(a.engine._numericValue(av)))) return '=';
+      if (isZeroWithin(bv.sub(a.engine._numericValue(av), a.engine.precision)))
+        return '=';
       return gt ? '>' : '<';
     }
     if (av.isNaN) return undefined;
-    if (av.eq(bv)) return '=';
-    const lt = av.lt(bv);
+    if (av.eq(bv, a.engine.precision)) return '=';
+    const lt = av.lt(bv, a.engine.precision);
     if (lt === undefined) return undefined;
-    if (isZeroWithin(av.sub(bv))) return '=';
+    if (isZeroWithin(av.sub(bv, a.engine.precision))) return '=';
     return lt ? '<' : '>';
   }
 
@@ -1951,7 +1953,7 @@ function orderAtRaisedPrecision(
 ): -1 | 0 | 1 | undefined {
   const ce = a.engine;
   const precision = ce.precision;
-  const raised = raisedPrecision(Math.min(precision, BigDecimal.precision));
+  const raised = raisedPrecision(precision);
   if (raised <= precision) return undefined;
   const atRaisedPrecision = <T>(fn: () => T): T =>
     ce._withTransientPrecision(raised, () => {
@@ -2156,7 +2158,7 @@ export function refineExactConstants<T>(
             if (!v.isFinite())
               return { bounded: false, measured: false, result: undefined };
             const e = errorBound(a.logError);
-            enclosures.push([v.sub(e), v.add(e)]);
+            enclosures.push([v.sub(e, digits), v.add(e, digits)]);
           }
           if (first) {
             // The number of integer digits of the largest end.
@@ -2175,7 +2177,7 @@ export function refineExactConstants<T>(
           const narrowAtLimit: NarrowAtLimit = (lo, hi, scale) =>
             atLimit &&
             hi
-              .sub(lo)
+              .sub(lo, digits)
               .lte(scale === undefined ? narrowWidth : narrowWidth.mul(scale));
           return {
             bounded: true,
@@ -2392,8 +2394,9 @@ export function exactConstantValue(x: Expression): BigDecimal | undefined {
   if (u === undefined) return undefined;
   if (isExactRealLiteral(u)) return bigDecimalOf(u.N());
   return refineExactConstants([u], ([[lo, hi]], narrowAtLimit) => {
-    const middle = lo.add(hi).div(2);
-    if (!middle.isZero() && hi.sub(lo).lte(middle.abs().mul(relative)))
+    const prec = x.engine.precision;
+    const middle = lo.add(hi, prec).div(2, prec);
+    if (!middle.isZero() && hi.sub(lo, prec).lte(middle.abs().mul(relative)))
       return middle;
     if (!lo.isPositive() && !hi.isNegative() && narrowAtLimit(lo, hi))
       return BigDecimal.ZERO;
@@ -2425,7 +2428,7 @@ function isWithinTolerance(a: Expression, b: Expression): boolean {
   if (v.abs().gt(scale)) scale = v.abs();
   if (scale.lt(1)) scale = BigDecimal.ONE;
   return u
-    .sub(v)
+    .sub(v, a.engine.precision)
     .abs()
     .lte(scale.mul(new BigDecimal(a.engine.tolerance)));
 }
@@ -2727,7 +2730,7 @@ function orderFromDifference(
   }
   if (v.isNaN || v.isComplex) return undefined;
   if (tolerance === 0 ? v.isZero : v.isZeroWithTolerance(tolerance)) return '=';
-  return v.lt(0) ? '<' : '>';
+  return v.lt(0, diff.engine.precision) ? '<' : '>';
 }
 
 /**
@@ -2768,7 +2771,10 @@ function orderOfApproximations(
   if (x === undefined) return undefined;
   const y = approximate(b, logUnit);
   if (y === undefined) return undefined;
-  const d = bigDecimalOf(x.value).sub(bigDecimalOf(y.value));
+  const d = bigDecimalOf(x.value).sub(
+    bigDecimalOf(y.value),
+    a.engine.precision
+  );
   if (!d.isFinite() || d.isZero()) return undefined;
   const logError = logAdd(
     logAdd(x.logError, y.logError),
@@ -2781,9 +2787,7 @@ function orderOfApproximations(
 /**
  * The natural logarithm of the relative error allowed for one rounding at
  * the working precision: `ln 10^(2 − digits)`, that is 100 units in the
- * last digit. The number of digits is the lower of the engine precision
- * and the precision of the big decimals: the second one is global to the
- * module, and another engine can change it (see `BigDecimal.precision`).
+ * last digit, at the precision of the engine.
  *
  * It is a logarithm because the unit itself is not a double above 325
  * digits: `10^(2 − 326)` underflows to `0`, which made every leaf exact
@@ -2791,7 +2795,7 @@ function orderOfApproximations(
  * `1`).
  */
 function logRoundingUnit(engine: Expression['engine']): number {
-  const digits = Math.min(engine.precision, BigDecimal.precision);
+  const digits = engine.precision;
   return (2 - Math.max(digits, MACHINE_PRECISION)) * Math.LN10;
 }
 
@@ -2856,7 +2860,7 @@ function bigDecimalOf(v: Expression): BigDecimal {
   if (!isNumber(v)) return BigDecimal.NAN;
   const nv = v.numericValue;
   if (typeof nv === 'number') return new BigDecimal(nv);
-  return nv.bignumRe ?? new BigDecimal(nv.re);
+  return nv.bignumReAt(v.engine.precision) ?? new BigDecimal(nv.re);
 }
 
 /** The sign and `ln` of the magnitude of `v`, when it is a finite real
@@ -2875,7 +2879,7 @@ function realParts(
     };
   }
   if (nv.isNaN) return undefined;
-  const big = nv.bignumRe;
+  const big = nv.bignumReAt(v.engine.precision);
   if (big === undefined) {
     const re = nv.re;
     if (!Number.isFinite(re)) return undefined;
@@ -2969,7 +2973,7 @@ function approximateNode(
   logUnit: number
 ): { approximation: Approximation | undefined; pure: boolean } {
   const ce = x.engine;
-  const key = `${ce.precision}:${BigDecimal.precision}:${ce.angularUnit}:${ce.roundingTies}`;
+  const key = `${ce.precision}:${ce.angularUnit}:${ce.roundingTies}`;
   const known = cacheOff('approx') ? undefined : approximations.get(x);
   const entry = known?.find((k) => k.key === key);
   if (entry !== undefined)

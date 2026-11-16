@@ -250,6 +250,7 @@ import { emptyBigOpValue } from '../symbolic/big-op-identity.js';
 import {
   pow,
   realPowerBranchTerms,
+  realPowerReconstructionDigits,
   root,
 } from '../boxed-expression/arithmetic-power.js';
 import {
@@ -483,7 +484,6 @@ import type { NumericValue } from '../numeric-value/types.js';
 import {
   ExactNumericValue,
   doubleDigits,
-  withDoubleDigits,
 } from '../numeric-value/exact-numeric-value.js';
 import {
   isNumber,
@@ -776,7 +776,7 @@ function roundExactConstant(
         ? v.ceil()
         : mode === 'trunc'
           ? v.trunc()
-          : bigRoundToInteger(v, ties);
+          : bigRoundToInteger(v, ties, x.engine.precision);
   const exact = exactFormOfConstant(x);
   if (exact === undefined) return undefined;
   if (isExactRealLiteral(exact)) return roundExactReal(exact, mode);
@@ -784,9 +784,14 @@ function roundExactConstant(
     const a = round(lo);
     if (a.eq(round(hi))) return a.toBigInt();
     if (!atJumpAtLimit || !narrowAtLimit(lo, hi)) return undefined;
-    const middle = lo.add(hi).div(2);
+    // `x.engine.precision` is the precision that the refinement raised
+    // (`withTransientPrecision`), so the midpoint is computed at it.
+    const prec = x.engine.precision;
+    const middle = lo.add(hi, prec).div(2, prec);
     const jump =
-      mode === 'round' ? middle.floor().add(BigDecimal.HALF) : middle.round();
+      mode === 'round'
+        ? middle.floor().add(BigDecimal.HALF, prec)
+        : middle.round();
     return round(jump).toBigInt();
   });
 }
@@ -2130,7 +2135,10 @@ function oddDenominatorExponent(
  * real value) returns `false`, so the caller keeps its honest `number`
  * hedge rather than over-claiming complex.
  */
-function negativeBaseIsComplexBranch(exp: OperandDescriptor): boolean {
+function negativeBaseIsComplexBranch(
+  exp: OperandDescriptor,
+  precision: number
+): boolean {
   // Membership must be PROVEN either way: an operand whose type decides
   // neither real-ness nor integrality is no proof of the branch.
   if (!isExtendedRealOperand(exp)) return false;
@@ -2162,7 +2170,8 @@ function negativeBaseIsComplexBranch(exp: OperandDescriptor): boolean {
   const re = operandLiteralValueOnTypes(exp);
   const terms = realPowerBranchTerms(
     exact === undefined ? undefined : [exact[0], exact[1]],
-    re ?? NaN
+    re ?? NaN,
+    realPowerReconstructionDigits(precision)
   );
   // No trustworthy rational is a PROOF of the complex branch, not an absence of
   // information — but only once the exponent has a definite value. A known
@@ -5552,14 +5561,13 @@ function bigBesselValue(
   ce: ComputeEngine
 ): Expression | undefined {
   const machine = !bignumPreferred(ce);
-  const saved = BigDecimal.precision;
-  if (machine) BigDecimal.precision = BESSEL_MACHINE_WORKING_DIGITS;
-  let value: BigNum | undefined;
-  try {
-    value = bigBessel(ce, kind, hurwitzOperand(ce, n), hurwitzOperand(ce, x));
-  } finally {
-    BigDecimal.precision = saved;
-  }
+  const value = bigBessel(
+    ce,
+    kind,
+    hurwitzOperand(ce, n),
+    hurwitzOperand(ce, x),
+    machine ? BESSEL_MACHINE_WORKING_DIGITS : ce.precision
+  );
   if (value === undefined) return undefined;
   if (machine)
     return boxComplexKernelResult(ce, { re: value.toNumber(), im: 0 }, [n, x]);
@@ -5717,7 +5725,7 @@ function evaluateAiry(
     isRealLiteral(x) &&
     !Number.isNaN(x.re)
   ) {
-    const value = bigAiry(ce, kind, bigRealOperand(ce, x));
+    const value = bigAiry(ce, kind, bigRealOperand(ce, x), ce.precision);
     return value === undefined ? undefined : boxBignumApprox(ce, value);
   }
   if (isNumber(x) && x.isComplex) {
@@ -6141,7 +6149,7 @@ export function boxExpOfComplexLog(
   if (a > LN_MIN_NORMAL_DOUBLE && a < LN_MAX_DOUBLE) return undefined;
   const error = Number.EPSILON * (1 + Math.hypot(a, b));
   const digits = Math.max(1, Math.min(15, Math.floor(-Math.log10(error))));
-  const modulus = new BigDecimal(a).exp();
+  const modulus = new BigDecimal(a).exp(engine.precision);
   if (modulus.isZero() || !modulus.isFinite()) return null;
   // The error is relative to the modulus, so each part is rounded at the
   // decimal position of the last correct digit of the modulus: a part
@@ -6197,7 +6205,7 @@ function gammaOfRealShifted(x: Expression): Expression | undefined {
     apply(
       x,
       (v) => gamma(1 + v),
-      (v) => bigGamma(ce, v.add(1))
+      (v) => bigGamma(ce, v.add(1, ce.precision), ce.precision)
     ) ??
       // The double kernel gives a float, even when its value is an integer
       ce.number(ce._inexactNumericValue(gamma(1 + x.re)))
@@ -6231,24 +6239,22 @@ function gammaInRange(
 
 /**
  * n!! for an integer n ≥ 0 from Γ, to the working precision
- * (`BigDecimal.precision`): n!! = 2^(n/2)·Γ(n/2 + 1) for an even n, and
+ * (`ce.precision`): n!! = 2^(n/2)·Γ(n/2 + 1) for an even n, and
  * 2^((n+1)/2)·Γ(n/2 + 1)/√π for an odd n (both give 1!! = 1, 3!! = 3,
  * 4!! = 8). For an n too large for the exact product. Ten guard digits
  * cover the rounding of the power of 2 and of the products.
  */
 function bigFactorial2FromGamma(ce: ComputeEngine, n: number): BigDecimal {
-  const digits = BigDecimal.precision;
-  BigDecimal.precision = digits + 10;
-  try {
-    const g = bigGamma(ce, new BigDecimal(n).div(2).add(1));
-    const value =
-      n % 2 === 0
-        ? g.mul(BigDecimal.TWO.pow(n / 2))
-        : g.mul(BigDecimal.TWO.pow((n + 1) / 2)).div(BigDecimal.PI.sqrt());
-    return value.toPrecision(digits);
-  } finally {
-    BigDecimal.precision = digits;
-  }
+  const digits = ce.precision;
+  const prec = digits + 10;
+  const g = bigGamma(ce, new BigDecimal(n).div(2, prec).add(1, prec), prec);
+  const value =
+    n % 2 === 0
+      ? g.mul(BigDecimal.TWO.pow(n / 2, prec))
+      : g
+          .mul(BigDecimal.TWO.pow((n + 1) / 2, prec))
+          .div(BigDecimal.pi(prec).sqrt(prec), prec);
+  return value.toPrecision(digits);
 }
 
 /**
@@ -6285,11 +6291,11 @@ function negativeFactorial2(
       return asFloat(ce.number(sign / factorial2(m - 2)));
     const d = bigFactorial2FromGamma(ce, m - 2);
     return ce.number(
-      ce._numericValue(BigDecimal.ONE.div(sign < 0 ? d.neg() : d))
+      ce._numericValue(BigDecimal.ONE.div(sign < 0 ? d.neg() : d, ce.precision))
     );
   }
   const d = run(
-    bigFactorial2(ce.bignum(m - 2)),
+    bigFactorial2(ce.bignum(m - 2), ce.precision),
     ce._timeRemaining,
     ce._deadlineFrame
   ).toBigInt();
@@ -6537,8 +6543,7 @@ function rationalWorkDigits(
  * `engine` (17 digits at machine precision, enough to round to the nearest
  * double), with `bigDecimalQuotient` (`numerics/special-functions.ts`),
  * which forms the quotient with one bigint division. It reads the engine's
- * precision, not the module-global `BigDecimal.precision`, which the
- * construction of another engine changes.
+ * precision.
  */
 function engineQuotient(
   engine: ComputeEngine,
@@ -6758,7 +6763,8 @@ function evaluateHurwitzZeta(
     const big = bigHurwitzZeta(
       engine,
       hurwitzOperand(engine, s),
-      hurwitzOperand(engine, a)
+      hurwitzOperand(engine, a),
+      engine.precision
     );
     if (big !== undefined) return boxBignumResult(engine, big);
     // The bignum kernel declined. The double kernel's answer is used only
@@ -7055,7 +7061,8 @@ function evaluateGeneralizedZeta(
     const big = bigZetaGeneralized(
       engine,
       hurwitzOperand(engine, s),
-      hurwitzOperand(engine, a)
+      hurwitzOperand(engine, a),
+      engine.precision
     );
     if (big !== undefined) return boxBignumResult(engine, big);
     // As in `evaluateHurwitzZeta`: a non-finite double answer for a finite
@@ -7325,7 +7332,8 @@ function evaluateLerchPhi(
       engine,
       hurwitzOperand(engine, z),
       hurwitzOperand(engine, s),
-      hurwitzOperand(engine, a)
+      hurwitzOperand(engine, a),
+      engine.precision
     );
     if (big !== undefined) return boxBignumApprox(engine, big);
   }
@@ -7373,7 +7381,10 @@ export function bigRealOperand(engine: ComputeEngine, s: Expression): BigNum {
   const operand = hurwitzOperand(engine, s);
   return operand instanceof BigDecimal
     ? operand
-    : new BigDecimal(operand[0]).div(new BigDecimal(operand[1]));
+    : new BigDecimal(operand[0]).div(
+        new BigDecimal(operand[1]),
+        engine.precision
+      );
 }
 
 /** A double-kernel value as a machine number, as `boxComplexResult` boxes it. */
@@ -7432,7 +7443,11 @@ function evaluateDirichletEta(
 
   // A real result carries `ce.precision` digits or the head stays unevaluated.
   if (!s.isComplex && bignumPreferred(engine)) {
-    const big = bigDirichletEta(engine, bigRealOperand(engine, s));
+    const big = bigDirichletEta(
+      engine,
+      bigRealOperand(engine, s),
+      engine.precision
+    );
     return big === undefined ? undefined : boxBignumApprox(engine, big);
   }
 
@@ -7516,7 +7531,11 @@ function evaluateDirichletBeta(
 
   // A real result carries `ce.precision` digits or the head stays unevaluated.
   if (!s.isComplex && bignumPreferred(engine)) {
-    const big = bigDirichletBeta(engine, bigRealOperand(engine, s));
+    const big = bigDirichletBeta(
+      engine,
+      bigRealOperand(engine, s),
+      engine.precision
+    );
     return big === undefined ? undefined : boxBignumApprox(engine, big);
   }
 
@@ -7957,7 +7976,7 @@ function evaluateGamma(
       ? applyN(
           [s, z],
           (s, z) => incompleteGammaUpper(s, z),
-          (s, z) => bigIncompleteGammaUpper(engine, s, z),
+          (s, z) => bigIncompleteGammaUpper(engine, s, z, engine.precision),
           (s, z) => incompleteGammaUpperComplex(s, z)
         )
       : undefined;
@@ -8007,7 +8026,7 @@ function evaluateGamma(
         apply(
           x,
           (x) => gamma(x),
-          (x) => bigGamma(engine, x),
+          (x) => bigGamma(engine, x, engine.precision),
           (x) => gammaComplex(x)
         )
       )
@@ -9313,7 +9332,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             [x],
             ce.number(
               run(
-                bigFactorial2(ce.bignum(n)),
+                bigFactorial2(ce.bignum(n), ce.precision),
                 ce._timeRemaining,
                 ce._deadlineFrame
               )
@@ -9490,7 +9509,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return apply(
           x,
           (x) => x - Math.floor(x),
-          (x) => x.sub(x.floor()),
+          (x) => x.sub(x.floor(), ce.precision),
           (z) => z.sub(z.floor(0))
         );
       },
@@ -9622,7 +9641,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           ? apply(
               x,
               (x) => lnAbsGamma(x),
-              (x) => bigGammaln(engine, x),
+              (x) => bigGammaln(engine, x, engine.precision),
               (x) => logGammaPrincipal(x)
             )
           : undefined;
@@ -9662,7 +9681,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const result = apply(
           x,
           digamma,
-          (x) => bigDigamma(engine, x),
+          (x) => bigDigamma(engine, x, engine.precision),
           (x) => polygammaComplex(0, x)
         );
         // As for `PolyGamma` below: a NaN from the complex kernel is a
@@ -9701,7 +9720,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const result = apply(
           x,
           trigamma,
-          (x) => bigTrigamma(engine, x),
+          (x) => bigTrigamma(engine, x, engine.precision),
           (x) => polygammaComplex(1, x)
         );
         // As for `PolyGamma` below: a NaN from the complex kernel is a
@@ -9808,7 +9827,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           n,
           x,
           (n, x) => polygamma(n, x),
-          (n, x) => bigPolygamma(engine, n, x),
+          (n, x) => bigPolygamma(engine, n, x, engine.precision),
           (n, x) => polygammaComplex(n.re, x)
         );
         // The kernels answer NaN where they cannot give an accurate value:
@@ -9916,7 +9935,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               ? undefined
               : boxComplexResult(engine, z.value, false);
           }
-          return apply(x, zeta, (x) => bigZeta(engine, x), zetaComplex);
+          return apply(
+            x,
+            zeta,
+            (x) => bigZeta(engine, x, engine.precision),
+            zetaComplex
+          );
         }
 
         // Exact values at integer literals (via exact Bernoulli rationals):
@@ -10235,7 +10259,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               a,
               b,
               beta,
-              (a, b) => bigBeta(engine, a, b),
+              (a, b) => bigBeta(engine, a, b, engine.precision),
               (a, b) =>
                 betaComplex(a, typeof b === 'number' ? engine.complex(b, 0) : b)
             )
@@ -10346,7 +10370,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const result = apply(
             x,
             (v) => lambertW(v, branch),
-            (v) => bigLambertW(engine, v, branch),
+            (v) => bigLambertW(engine, v, branch, engine.precision),
             (z) => lambertWComplex(z, branch)
           );
           // A `NaN` from the complex kernel means that its iteration did not
@@ -10585,7 +10609,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // logarithm in the double range.
           {
             const big = bigRealOf(
-              exactValueOutOfDoubleRange(engine, operandOf(expression, 0), z)
+              exactValueOutOfDoubleRange(engine, operandOf(expression, 0), z),
+              engine.precision
             );
             if (big !== undefined) {
               const ln = boxBignumResult(
@@ -10702,7 +10727,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // natural logarithms is computed with big decimals.
           {
             const zBig = bigRealOf(
-              exactValueOutOfDoubleRange(ce, operandOf(expression, 0), ops[0])
+              exactValueOutOfDoubleRange(ce, operandOf(expression, 0), ops[0]),
+              ce.precision
             );
             const bBig =
               ops[1] === undefined
@@ -10712,24 +10738,26 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                       ce,
                       operandOf(expression, 1),
                       ops[1]
-                    )
+                    ),
+                    ce.precision
                   );
             if (zBig !== undefined || bBig !== undefined) {
-              const z = zBig ?? bigRealOf(ops[0]);
+              const z = zBig ?? bigRealOf(ops[0], ce.precision);
               const b =
                 bBig ??
-                (ops[1] === undefined ? new BigDecimal(10) : bigRealOf(ops[1]));
+                (ops[1] === undefined
+                  ? new BigDecimal(10)
+                  : bigRealOf(ops[1], ce.precision));
               if (
                 z !== undefined &&
                 b !== undefined &&
                 z.isPositive() &&
                 b.isPositive() &&
                 !b.eq(1)
-              )
-                return boxBignumResult(
-                  ce,
-                  withDoubleDigits(() => z.ln().div(b.ln()))
-                );
+              ) {
+                const p = doubleDigits(ce.precision);
+                return boxBignumResult(ce, z.ln(p).div(b.ln(p), p));
+              }
             }
           }
           // The exceptional points answer their exact quotient values on the
@@ -10756,7 +10784,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 x.isZero()
                   ? -Infinity
                   : !x.isNegative()
-                    ? BigDecimal.log10(x)
+                    ? BigDecimal.log10(x, ce.precision)
                     : ce.complex(x.toNumber()).log().div(Math.LN10),
               (z) => (z.isZero() ? NaN : z.log().div(Math.LN10))
             );
@@ -10792,7 +10820,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             (z, b) =>
               z.isNegative() || b.isNegative()
                 ? ce.complex(lnOf(z.toNumber())).div(lnOf(b.toNumber()))
-                : z.log(b),
+                : z.log(b, ce.precision),
             (z, b) => z.log().div(typeof b === 'number' ? lnOf(b) : b.log())
           );
         }
@@ -11000,7 +11028,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             // below, or `.sgn` and `.evaluate()` disagree on the same
             // expression (P0-7).
             floorModDouble,
-            (a, b) => a.mod(b).add(b).mod(b)
+            (a, b) => a.mod(b).add(b, n.engine.precision).mod(b)
           );
           return v?.sgn ?? undefined;
         }
@@ -12828,7 +12856,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               // never pays for the extra sign query.)
               if (
                 negativeSign(baseSgn) === true &&
-                negativeBaseIsComplexBranch(exp)
+                negativeBaseIsComplexBranch(exp, context.engine.precision)
               )
                 return BoxedType.forResult(
                   'complex',
@@ -13143,7 +13171,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ops[0],
             ops[1],
             (a, b) => a / b,
-            (a, b) => a.div(b),
+            (a, b) => a.div(b, ce.precision),
             (a, b) => complexDivide(a, b)
           );
         }
@@ -13408,7 +13436,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // radicand has a real root only for an odd integer index.
           if (numericApproximation && isNumber(n) && !n.isComplex) {
             const big = bigRealOf(
-              exactValueOutOfDoubleRange(engine, operandOf(expression, 0), x)
+              exactValueOutOfDoubleRange(engine, operandOf(expression, 0), x),
+              engine.precision
             );
             const k = n.re;
             if (
@@ -13521,7 +13550,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // -2, bignum `.round()` would round it to -3, flipping the result
           // sign). `floor(x + 0.5)` reproduces `Math.round`'s tie-breaking
           // exactly, keeping both lanes in agreement.
-          (a, b) => a.sub(b.mul(a.div(b).add(0.5).floor()))
+          (a, b) => {
+            const prec = engine.precision;
+            return a.sub(b.mul(a.div(b, prec).add(0.5, prec).floor()), prec);
+          }
         );
       },
     },
@@ -13573,7 +13605,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // (`0.50000000000000000001` at 50 digits).
           const big = x.bignumRe;
           if (big !== undefined) {
-            const r = bigRoundToInteger(big, ties);
+            const r = bigRoundToInteger(big, ties, x.engine.precision);
             if (r.isNaN()) return 'unsigned';
             return r.isZero()
               ? 'zero'
@@ -13627,7 +13659,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             v,
             'round',
             (v) => roundToInteger(v, ties),
-            (v) => bigRoundToInteger(v, ties),
+            (v) => bigRoundToInteger(v, ties, ce.precision),
             numericApproximation,
             original
           );
@@ -13983,7 +14015,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // a square root in the double range (`3.16e-201`).
           {
             const big = bigRealOf(
-              exactValueOutOfDoubleRange(engine, operandOf(expression, 0), x)
+              exactValueOutOfDoubleRange(engine, operandOf(expression, 0), x),
+              engine.precision
             );
             if (big !== undefined) {
               const r = big.abs().sqrt(doubleDigits(engine.precision));
@@ -14194,7 +14227,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       value: (engine) =>
         boxBignumResult(
           engine,
-          bignumPreferred(engine) ? BigDecimal.ONE.exp() : Math.exp(1)
+          bignumPreferred(engine)
+            ? BigDecimal.ONE.exp(engine.precision)
+            : Math.exp(1)
         ),
     },
 
@@ -14373,7 +14408,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         boxBignumResult(
           engine,
           bignumPreferred(engine)
-            ? BigDecimal.EULER_GAMMA
+            ? BigDecimal.eulerGamma(engine.precision)
             : 0.5772156649015328606
         ),
     },
@@ -17216,7 +17251,7 @@ function evaluateAbs(
       // exact when the root has an exact form (`|√2·(1000+1000i)|` is 2000,
       // `|√3·(1+2i)|` is `√15`).
       if (num.isExact) {
-        const modulus = num.abs();
+        const modulus = num.abs(ce.precision);
         if (modulus.isExact)
           return numericApproximation
             ? ce.number(modulus).N()
@@ -17239,7 +17274,7 @@ function evaluateAbs(
       // float.
       if (num.isExact && !numericApproximation) return undefined;
     }
-    return ce.number(num.abs());
+    return ce.number(num.abs(ce.precision));
   }
   if (arg.isNonNegative) return arg;
   if (arg.isNegative) return arg.neg();
@@ -18477,7 +18512,7 @@ function divideFromExactValues(
     values.push(typeof nv === 'number' ? ce._numericValue(nv) : nv);
   }
   if (!rescued) return undefined;
-  return ce.number(values[0].div(values[1])).N();
+  return ce.number(values[0].div(values[1], ce.precision)).N();
 }
 
 /**
@@ -18614,13 +18649,16 @@ function operandOf(
  * The big-decimal value of an exact value keeps a magnitude that its double
  * cannot hold (`10^{400}`). Otherwise, `undefined`.
  */
-function bigRealOf(x: Expression | undefined): BigDecimal | undefined {
+function bigRealOf(
+  x: Expression | undefined,
+  prec: number
+): BigDecimal | undefined {
   if (x === undefined || !isNumber(x)) return undefined;
   const nv = x.numericValue;
   if (typeof nv === 'number')
     return Number.isFinite(nv) ? new BigDecimal(nv) : undefined;
   if (nv.isComplex) return undefined;
-  const big = nv.bignumRe ?? new BigDecimal(nv.re);
+  const big = nv.bignumReAt(prec) ?? new BigDecimal(nv.re);
   return big.isFinite() ? big : undefined;
 }
 
@@ -18634,7 +18672,8 @@ function bigRealOf(x: Expression | undefined): BigDecimal | undefined {
  * `BigDecimal.add()` is exact.
  */
 function floorModFloat(a: Expression, b: Expression): Expression | undefined {
-  return apply2(a, b, floorModDouble, (a, b) => a.mod(b).add(b).mod(b));
+  const prec = a.engine.precision;
+  return apply2(a, b, floorModDouble, (a, b) => a.mod(b).add(b, prec).mod(b));
 }
 
 /**

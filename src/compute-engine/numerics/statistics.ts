@@ -11,15 +11,18 @@ export function mean(values: Iterable<number>): number {
   return sum / count;
 }
 
-export function bigMean(values: Iterable<BigDecimal>): BigDecimal {
+export function bigMean(
+  values: Iterable<BigDecimal>,
+  prec: number
+): BigDecimal {
   let sum = BigDecimal.ZERO;
   let count = 0;
   for (const op of values) {
-    sum = sum.add(op);
+    sum = sum.add(op, prec);
     count++;
   }
   if (count === 0) return BigDecimal.NAN;
-  return sum.div(new BigDecimal(count));
+  return sum.div(new BigDecimal(count), prec);
 }
 
 export function median(values: Iterable<number>): number {
@@ -30,7 +33,10 @@ export function median(values: Iterable<number>): number {
   return sorted[mid];
 }
 
-export function bigMedian(values: Iterable<BigDecimal>): BigDecimal {
+export function bigMedian(
+  values: Iterable<BigDecimal>,
+  prec: number
+): BigDecimal {
   const sorted = [...values].sort((a, b) => a.cmp(b));
   // Median of nothing is NaN — matching `median([])`, whose
   // `sorted[-1] + sorted[0]` arithmetic yields NaN naturally. Without this,
@@ -40,7 +46,7 @@ export function bigMedian(values: Iterable<BigDecimal>): BigDecimal {
   const mid = Math.floor(sorted.length / 2);
 
   if (sorted.length % 2 === 0)
-    return sorted[mid - 1].add(sorted[mid]).div(BigDecimal.TWO);
+    return sorted[mid - 1].add(sorted[mid], prec).div(BigDecimal.TWO, prec);
   return sorted[mid];
 }
 
@@ -112,7 +118,10 @@ function welford(values: Iterable<number>): {
   return { n, m2, scale };
 }
 
-function bigWelford(values: Iterable<BigDecimal>): {
+function bigWelford(
+  values: Iterable<BigDecimal>,
+  prec: number
+): {
   n: number;
   m2: BigDecimal;
 } {
@@ -128,9 +137,9 @@ function bigWelford(values: Iterable<BigDecimal>): {
     if (!x.isFinite()) allEqual = false;
     else if (first === undefined) first = x;
     else if (allEqual && !x.eq(first)) allEqual = false;
-    const before = x.sub(mean);
-    mean = mean.add(before.div(new BigDecimal(n)));
-    m2 = m2.add(before.mul(x.sub(mean)));
+    const before = x.sub(mean, prec);
+    mean = mean.add(before.div(new BigDecimal(n), prec), prec);
+    m2 = m2.add(before.mul(x.sub(mean, prec)), prec);
   }
   // When all the data are equal, every deviation from the mean is zero, so
   // the sum of squared deviations is exactly zero. The update above can give
@@ -160,22 +169,26 @@ function varImpl(
 
 function bigVarImpl(
   values: Iterable<BigDecimal>,
-  population: boolean
+  population: boolean,
+  prec: number
 ): BigDecimal {
-  const { n, m2 } = bigWelford(values);
+  const { n, m2 } = bigWelford(values, prec);
   if (n === 0) return BigDecimal.NAN;
   // The sample variance of one datum is `0/0`, which has no value: `NaN`,
   // as the machine version and the exact route give.
   if (n === 1 && !population) return BigDecimal.NAN;
-  return m2.div(new BigDecimal(population ? n : n - 1));
+  return m2.div(new BigDecimal(population ? n : n - 1), prec);
 }
 
 export function variance(values: Iterable<number>): number {
   return varImpl(values, false);
 }
 
-export function bigVariance(values: Iterable<BigDecimal>): BigDecimal {
-  return bigVarImpl(values, false);
+export function bigVariance(
+  values: Iterable<BigDecimal>,
+  prec: number
+): BigDecimal {
+  return bigVarImpl(values, false, prec);
 }
 
 export function populationVariance(values: Iterable<number>): number {
@@ -183,17 +196,21 @@ export function populationVariance(values: Iterable<number>): number {
 }
 
 export function bigPopulationVariance(
-  values: Iterable<BigDecimal>
+  values: Iterable<BigDecimal>,
+  prec: number
 ): BigDecimal {
-  return bigVarImpl(values, true);
+  return bigVarImpl(values, true, prec);
 }
 
 export function standardDeviation(values: Iterable<number>): number {
   return varImpl(values, false, true);
 }
 
-export function bigStandardDeviation(values: Iterable<BigDecimal>): BigDecimal {
-  return bigVariance(values).sqrt();
+export function bigStandardDeviation(
+  values: Iterable<BigDecimal>,
+  prec: number
+): BigDecimal {
+  return bigVariance(values, prec).sqrt(prec);
 }
 
 export function populationStandardDeviation(values: Iterable<number>): number {
@@ -201,9 +218,10 @@ export function populationStandardDeviation(values: Iterable<number>): number {
 }
 
 export function bigPopulationStandardDeviation(
-  values: Iterable<BigDecimal>
+  values: Iterable<BigDecimal>,
+  prec: number
 ): BigDecimal {
-  return bigPopulationVariance(values).sqrt();
+  return bigPopulationVariance(values, prec).sqrt(prec);
 }
 
 //
@@ -319,7 +337,8 @@ function centralMoments(
  * sums are not scaled.
  */
 function bigCentralMoments(
-  values: Iterable<BigDecimal>
+  values: Iterable<BigDecimal>,
+  prec: number
 ): { n: number; m2: BigDecimal; m3: BigDecimal; m4: BigDecimal } | undefined {
   let n = 0;
   let origin = BigDecimal.ZERO;
@@ -335,22 +354,24 @@ function bigCentralMoments(
     const before = n;
     n += 1;
     const count = new BigDecimal(n);
-    const delta = x.sub(origin).sub(mean);
-    const deltaN = delta.div(count);
+    const delta = x.sub(origin, prec).sub(mean, prec);
+    const deltaN = delta.div(count, prec);
     const deltaN2 = deltaN.mul(deltaN);
     const term = delta.mul(deltaN).mul(before);
-    mean = mean.add(deltaN);
+    mean = mean.add(deltaN, prec);
     // `M4` uses the values of `M2` and `M3` before this update, and `M3`
     // uses the value of `M2` before this update. The coefficient
     // `n² − 3n + 3` is computed as a `BigDecimal`, because in doubles `n²`
     // is not exact when `n` is more than about 9.5·10⁷.
-    const coefficient = count.mul(count).sub(count.mul(3)).add(3);
+    const coefficient = count.mul(count).sub(count.mul(3), prec).add(3, prec);
     m4 = m4
-      .add(term.mul(deltaN2).mul(coefficient))
-      .add(deltaN2.mul(m2).mul(6))
-      .sub(deltaN.mul(m3).mul(4));
-    m3 = m3.add(term.mul(deltaN).mul(n - 2)).sub(deltaN.mul(m2).mul(3));
-    m2 = m2.add(term);
+      .add(term.mul(deltaN2).mul(coefficient), prec)
+      .add(deltaN2.mul(m2).mul(6), prec)
+      .sub(deltaN.mul(m3).mul(4), prec);
+    m3 = m3
+      .add(term.mul(deltaN).mul(n - 2), prec)
+      .sub(deltaN.mul(m2).mul(3), prec);
+    m2 = m2.add(term, prec);
   }
   if (n === 0 || allEqual) return undefined;
   return { n, m2, m3, m4 };
@@ -367,15 +388,18 @@ export function kurtosis(values: Iterable<number>): number {
   return m4 / (m2 * m2);
 }
 
-export function bigKurtosis(values: Iterable<BigDecimal>): BigDecimal {
-  const moments = bigCentralMoments(values);
+export function bigKurtosis(
+  values: Iterable<BigDecimal>,
+  prec: number
+): BigDecimal {
+  const moments = bigCentralMoments(values, prec);
   if (moments === undefined) return BigDecimal.NAN;
   const { n } = moments;
   // Central moments: m2 = (1/n)Σ(x−m)², m4 = (1/n)Σ(x−m)⁴.
-  const m2 = moments.m2.div(n);
-  const m4 = moments.m4.div(n);
+  const m2 = moments.m2.div(n, prec);
+  const m4 = moments.m4.div(n, prec);
   // Non-excess kurtosis β₂ = m4 / m2² (a normal distribution gives 3).
-  return m4.div(m2.mul(m2));
+  return m4.div(m2.mul(m2), prec);
 }
 
 export function skewness(values: Iterable<number>): number {
@@ -389,15 +413,18 @@ export function skewness(values: Iterable<number>): number {
   return m3 / Math.pow(m2, 3 / 2);
 }
 
-export function bigSkewness(values: Iterable<BigDecimal>): BigDecimal {
-  const moments = bigCentralMoments(values);
+export function bigSkewness(
+  values: Iterable<BigDecimal>,
+  prec: number
+): BigDecimal {
+  const moments = bigCentralMoments(values, prec);
   if (moments === undefined) return BigDecimal.NAN;
   const { n } = moments;
   // Central moments: m2 = (1/n)Σ(x−m)², m3 = (1/n)Σ(x−m)³.
-  const m2 = moments.m2.div(n);
-  const m3 = moments.m3.div(n);
+  const m2 = moments.m2.div(n, prec);
+  const m3 = moments.m3.div(n, prec);
   // Moment coefficient of skewness g₁ = m3 / m2^(3/2) = m3 / (m2·√m2).
-  return m3.div(m2.mul(m2.sqrt()));
+  return m3.div(m2.mul(m2.sqrt(prec)), prec);
 }
 
 /**
@@ -431,7 +458,7 @@ export function mode(values: Iterable<number>): number {
  * `mode`: the smallest value among the most frequent ones.
  *
  * Two data count together when they agree within the working precision
- * (`BigDecimal.precision`, p significant digits): when `|a - b|` is less
+ * (`prec`, p significant digits): when `|a - b|` is less
  * than `max(|a|, |b|) · 10^(1-p)`. Two spellings of one real value, such as
  * `ln 6` and `ln 2 + ln 3`, are computed by different operations and can
  * differ by a few units in the last digit; a comparison of the digits would
@@ -439,21 +466,24 @@ export function mode(values: Iterable<number>): number {
  * member, so a chain of values that each differ from the next by less than
  * the tolerance does not merge into one group.
  */
-export function bigMode(values: Iterable<BigDecimal>): BigDecimal {
+export function bigMode(
+  values: Iterable<BigDecimal>,
+  prec: number
+): BigDecimal {
   const sorted = [...values].sort((x, y) => {
     // `NaN` sorts last: `cmp` answers `NaN` for it, which `sort` cannot use.
     if (x.isNaN()) return y.isNaN() ? 0 : 1;
     if (y.isNaN()) return -1;
     return x.cmp(y);
   });
-  const epsilon = new BigDecimal(`1e${1 - BigDecimal.precision}`);
+  const epsilon = new BigDecimal(`1e${1 - prec}`);
   const same = (a: BigDecimal, b: BigDecimal): boolean => {
     if (a.isNaN() || b.isNaN()) return a.isNaN() && b.isNaN();
     // Equal infinities: their difference is `NaN`, not zero.
     if (a.eq(b)) return true;
     if (!a.isFinite() || !b.isFinite()) return false;
     const scale = a.abs().gt(b.abs()) ? a.abs() : b.abs();
-    return a.sub(b).abs().lt(scale.mul(epsilon));
+    return a.sub(b, prec).abs().lt(scale.mul(epsilon));
   };
   let best: { count: number; val: BigDecimal } | undefined;
   let run: { count: number; val: BigDecimal } | undefined;
@@ -494,7 +524,8 @@ export function quartiles(values: Iterable<number>): [number, number, number] {
 }
 
 export function bigQuartiles(
-  values: Iterable<BigDecimal>
+  values: Iterable<BigDecimal>,
+  prec: number
 ): [BigDecimal, BigDecimal, BigDecimal] {
   const sorted = [...values].sort((a, b) => a.cmp(b));
   const n = sorted.length;
@@ -503,9 +534,9 @@ export function bigQuartiles(
   const mid = Math.floor(n / 2);
   const upperStart = mid + (n % 2);
 
-  const q1 = bigMedian(sorted.slice(0, mid));
-  const q2 = bigMedian(sorted);
-  const q3 = bigMedian(sorted.slice(upperStart));
+  const q1 = bigMedian(sorted.slice(0, mid), prec);
+  const q2 = bigMedian(sorted, prec);
+  const q3 = bigMedian(sorted.slice(upperStart), prec);
 
   return [q1, q2, q3];
 }
@@ -597,7 +628,8 @@ function pairedCenteredSums(
 
 function bigPairedCenteredSums(
   xs: readonly BigDecimal[],
-  ys: readonly BigDecimal[]
+  ys: readonly BigDecimal[],
+  prec: number
 ): {
   dx: BigDecimal;
   dy: BigDecimal;
@@ -609,25 +641,25 @@ function bigPairedCenteredSums(
   let mx = BigDecimal.ZERO;
   let my = BigDecimal.ZERO;
   for (let i = 0; i < n; i++) {
-    mx = mx.add(xs[i]);
-    my = my.add(ys[i]);
+    mx = mx.add(xs[i], prec);
+    my = my.add(ys[i], prec);
   }
   const bn = new BigDecimal(n);
-  mx = mx.div(bn);
-  my = my.div(bn);
+  mx = mx.div(bn, prec);
+  my = my.div(bn, prec);
   let dx = BigDecimal.ZERO;
   let dy = BigDecimal.ZERO;
   let dxy = BigDecimal.ZERO;
   let dx2 = BigDecimal.ZERO;
   let dy2 = BigDecimal.ZERO;
   for (let i = 0; i < n; i++) {
-    const a = xs[i].sub(mx);
-    const b = ys[i].sub(my);
-    dx = dx.add(a);
-    dy = dy.add(b);
-    dxy = dxy.add(a.mul(b));
-    dx2 = dx2.add(a.mul(a));
-    dy2 = dy2.add(b.mul(b));
+    const a = xs[i].sub(mx, prec);
+    const b = ys[i].sub(my, prec);
+    dx = dx.add(a, prec);
+    dy = dy.add(b, prec);
+    dxy = dxy.add(a.mul(b), prec);
+    dx2 = dx2.add(a.mul(a), prec);
+    dy2 = dy2.add(b.mul(b), prec);
   }
   return { dx, dy, dxy, dx2, dy2 };
 }
@@ -678,17 +710,18 @@ function scaleByPowerOfTwo(x: number, e: number): number {
 function bigCovImpl(
   xsI: Iterable<BigDecimal>,
   ysI: Iterable<BigDecimal>,
-  population: boolean
+  population: boolean,
+  prec: number
 ): BigDecimal {
   const xs = [...xsI];
   const ys = [...ysI];
   const n = xs.length;
   if (n !== ys.length || n < 2) return BigDecimal.NAN;
-  const { dx, dy, dxy } = bigPairedCenteredSums(xs, ys);
+  const { dx, dy, dxy } = bigPairedCenteredSums(xs, ys, prec);
   const bn = new BigDecimal(n);
   return dxy
-    .sub(dx.mul(dy).div(bn))
-    .div(new BigDecimal(population ? n : n - 1));
+    .sub(dx.mul(dy).div(bn, prec), prec)
+    .div(new BigDecimal(population ? n : n - 1), prec);
 }
 
 export function covariance(xs: Iterable<number>, ys: Iterable<number>): number {
@@ -697,9 +730,10 @@ export function covariance(xs: Iterable<number>, ys: Iterable<number>): number {
 
 export function bigCovariance(
   xs: Iterable<BigDecimal>,
-  ys: Iterable<BigDecimal>
+  ys: Iterable<BigDecimal>,
+  prec: number
 ): BigDecimal {
-  return bigCovImpl(xs, ys, false);
+  return bigCovImpl(xs, ys, false, prec);
 }
 
 export function populationCovariance(
@@ -711,9 +745,10 @@ export function populationCovariance(
 
 export function bigPopulationCovariance(
   xs: Iterable<BigDecimal>,
-  ys: Iterable<BigDecimal>
+  ys: Iterable<BigDecimal>,
+  prec: number
 ): BigDecimal {
-  return bigCovImpl(xs, ys, true);
+  return bigCovImpl(xs, ys, true, prec);
 }
 
 /**
@@ -748,20 +783,21 @@ export function correlation(
 
 export function bigCorrelation(
   xsI: Iterable<BigDecimal>,
-  ysI: Iterable<BigDecimal>
+  ysI: Iterable<BigDecimal>,
+  prec: number
 ): BigDecimal {
   const xs = [...xsI];
   const ys = [...ysI];
   const n = xs.length;
   if (n !== ys.length || n < 2) return BigDecimal.NAN;
-  const { dx, dy, dxy, dx2, dy2 } = bigPairedCenteredSums(xs, ys);
+  const { dx, dy, dxy, dx2, dy2 } = bigPairedCenteredSums(xs, ys, prec);
   const bn = new BigDecimal(n);
-  const cov = dxy.sub(dx.mul(dy).div(bn));
-  const vx = dx2.sub(dx.mul(dx).div(bn));
-  const vy = dy2.sub(dy.mul(dy).div(bn));
+  const cov = dxy.sub(dx.mul(dy).div(bn, prec), prec);
+  const vx = dx2.sub(dx.mul(dx).div(bn, prec), prec);
+  const vy = dy2.sub(dy.mul(dy).div(bn, prec), prec);
   // As in `correlation`: a non-positive centered square is a constant column.
   if (!vx.gt(BigDecimal.ZERO) || !vy.gt(BigDecimal.ZERO)) return BigDecimal.NAN;
-  const r = cov.div(vx.mul(vy).sqrt());
+  const r = cov.div(vx.mul(vy).sqrt(prec), prec);
   if (r.gt(BigDecimal.ONE)) return BigDecimal.ONE;
   if (r.lt(BigDecimal.ONE.neg())) return BigDecimal.ONE.neg();
   return r;
@@ -776,8 +812,9 @@ export function interquartileRange(values: Iterable<number>): number {
 }
 
 export function bigInterquartileRange(
-  values: Iterable<BigDecimal>
+  values: Iterable<BigDecimal>,
+  prec: number
 ): BigDecimal {
-  const [q1, , q3] = bigQuartiles(values);
-  return q3.sub(q1);
+  const [q1, , q3] = bigQuartiles(values, prec);
+  return q3.sub(q1, prec);
 }

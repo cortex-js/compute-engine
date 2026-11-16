@@ -267,15 +267,32 @@ export function compileWithIrProfile(
       throw decline(`the vars entry of ${name} is not a source text`);
     vars[name] = text;
   }
+  // The code reads the exponent of a negative base to the digits of the
+  // engine when it is compiled: in the folds and the constants computed
+  // while compiling, in each call of `run()`, and in a loaded copy
+  // (`load()`), so that the three agree.
+  const reconstructionDigits = realPowerReconstructionDigits(
+    expr.engine.precision
+  );
+  const inDigits = <T>(g: () => T): T => {
+    const previous = setReconstructionDigits(reconstructionDigits);
+    try {
+      return g();
+    } finally {
+      setReconstructionDigits(previous);
+    }
+  };
   let slice: JavaScriptResult & { warnings: Warning[]; program: Program };
   try {
-    slice = compileSlice(expr, {
-      target: 'javascript',
-      ...sliceOptions(options),
-      mode,
-      iterationBudget: options?.iterationBudget,
-      vars,
-    });
+    slice = inDigits(() =>
+      compileSlice(expr, {
+        target: 'javascript',
+        ...sliceOptions(options),
+        mode,
+        iterationBudget: options?.iterationBudget,
+        vars,
+      })
+    );
   } catch (e) {
     throw sliceError(e);
   }
@@ -342,13 +359,17 @@ export function compileWithIrProfile(
     0;
   const run = literal
     ? (...args: unknown[]) =>
-        normalizeRunResult(
-          f(...(unchecked ? args : checkEntry(entryPlan, args)))
+        inDigits(() =>
+          normalizeRunResult(
+            f(...(unchecked ? args : checkEntry(entryPlan, args)))
+          )
         )
     : unchecked
-      ? (vars: unknown) => normalizeRunResult(f(vars))
+      ? (vars: unknown) => inDigits(() => normalizeRunResult(f(vars)))
       : (vars: unknown) =>
-          normalizeRunResult(f(checkEntry(entryPlan, [vars])[0]));
+          inDigits(() =>
+            normalizeRunResult(f(checkEntry(entryPlan, [vars])[0]))
+          );
 
   const warnings: CompileDiagnostic[] = slice.warnings.map((w) => ({
     code: w.code,
@@ -378,7 +399,7 @@ export function compileWithIrProfile(
     // evaluates them once (`StoredJavaScript.preambleOnce`).
     preamble: once,
     ...(once === '' ? {} : { preambleOnce: once }),
-    reconstructionDigits: realPowerReconstructionDigits(),
+    reconstructionDigits,
     calling: literal ? 'lambda' : 'expression',
     entryPlan: storeEntryPlan(entryPlan),
     run: run as CompilationResult<'javascript'>['run'],

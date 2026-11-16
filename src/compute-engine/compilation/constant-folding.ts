@@ -14,7 +14,10 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { BaseCompiler } from './base-compiler.js';
 import { asRational } from '../boxed-expression/numerics.js';
-import { negativeBaseRealPowFromRational } from '../numerics/real-power.js';
+import {
+  negativeBaseRealPowFromRational,
+  realPowerReconstructionDigits,
+} from '../numerics/real-power.js';
 import {
   factorial,
   tanWithPole,
@@ -179,12 +182,14 @@ export function tryGetConstant(expr: Expression): number | undefined {
 export function negativeBaseRealPow(
   base: number,
   exp: Expression | null | undefined,
-  expValue: number
+  expValue: number,
+  precision: number
 ): number | undefined {
   return negativeBaseRealPowFromRational(
     base,
     exp ? asRational(exp) : undefined,
-    expValue
+    expValue,
+    realPowerReconstructionDigits(precision)
   );
 }
 

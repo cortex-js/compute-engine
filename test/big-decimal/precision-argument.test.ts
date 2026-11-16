@@ -191,3 +191,75 @@ describe('BigDecimal precision argument', () => {
     );
   });
 });
+
+describe('BigDecimal floor, ceil, round, trunc and mod', () => {
+  // [value, floor, ceil, round, trunc]
+  const ROUNDING: [string, string, string, string, string][] = [
+    ['2.5', '2', '3', '3', '2'],
+    ['-2.5', '-3', '-2', '-3', '-2'],
+    ['0.5', '0', '1', '1', '0'],
+    ['-0.5', '-1', '0', '-1', '0'],
+    ['2.4999999999999999999999', '2', '3', '2', '2'],
+    ['-7.5000000000000000000001', '-8', '-7', '-8', '-7'],
+    ['0.1', '0', '1', '0', '0'],
+    ['-0.09', '-1', '0', '0', '0'],
+    ['1e-30', '0', '1', '0', '0'],
+    ['-1e-30', '-1', '0', '0', '0'],
+    // The fractional part starts far past the digits: no 10^(2·10⁶) is built.
+    ['1e-2000000', '0', '1', '0', '0'],
+    ['-3e-2000000', '-1', '0', '0', '0'],
+    [
+      '123456789012345678901234567890.5',
+      '123456789012345678901234567890',
+      '123456789012345678901234567891',
+      '123456789012345678901234567891',
+      '123456789012345678901234567890',
+    ],
+    ['1e2000000', '1e+2000000', '1e+2000000', '1e+2000000', '1e+2000000'],
+    ['-17', '-17', '-17', '-17', '-17'],
+    ['0', '0', '0', '0', '0'],
+  ];
+
+  test.each(ROUNDING)(
+    '%s: floor %s, ceil %s, round %s, trunc %s, without the static',
+    (v, floor, ceil, round, trunc) => {
+      const x = bd(v);
+      withoutStatic(() => {
+        expect(x.floor().eq(bd(floor))).toBe(true);
+        expect(x.ceil().eq(bd(ceil))).toBe(true);
+        expect(x.round().eq(bd(round))).toBe(true);
+        expect(x.trunc().eq(bd(trunc))).toBe(true);
+      });
+    }
+  );
+
+  test('NaN and infinities are kept', () => {
+    withoutStatic(() => {
+      for (const m of ['floor', 'ceil', 'round', 'trunc'] as const) {
+        expect(BigDecimal.NAN[m]().isNaN()).toBe(true);
+        expect(
+          BigDecimal.POSITIVE_INFINITY[m]().eq(BigDecimal.POSITIVE_INFINITY)
+        ).toBe(true);
+        expect(
+          BigDecimal.NEGATIVE_INFINITY[m]().eq(BigDecimal.NEGATIVE_INFINITY)
+        ).toBe(true);
+      }
+    });
+  });
+
+  // [dividend, divisor, remainder]: the sign of the dividend.
+  const MOD: [string, string, string][] = [
+    ['7.5', '2', '1.5'],
+    ['-7.5', '2', '-1.5'],
+    ['7.5', '-2', '1.5'],
+    ['1e60', '3', '1'],
+    ['1e-20', '3', '1e-20'],
+    ['5.5', '0.0003', '0.0001'],
+    ['12345678901234567890', '1e-15', '0'],
+    ['0', '7', '0'],
+  ];
+
+  test.each(MOD)('%s mod %s is %s, without the static', (a, b, r) => {
+    expect(withoutStatic(() => bd(a).mod(bd(b))).eq(bd(r))).toBe(true);
+  });
+});

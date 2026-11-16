@@ -2,7 +2,6 @@ import type { ComputeEngine } from '../index.js';
 import type { Expression } from '../types.js';
 import type { EffectHandlers } from '../types-effects.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
-import { BigDecimal } from '../../big-decimal/index.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import { isFunction, isNumber, isString } from '../boxed-expression/type-guards.js';
@@ -228,7 +227,6 @@ interface CachedResult {
   binding: Binding;
   numericApproximation: boolean;
   precision: number;
-  workingPrecision: number;
   requestedPrecision: number | undefined;
   tolerance: number;
   roundingTies: ComputeEngine['roundingTies'];
@@ -285,7 +283,7 @@ export class BatchInstance {
     const cacheable = binding.cacheable && !engine._atTransientConfiguration;
     const cached = this.cached;
     if (cacheable && cached && cached.binding === binding && cached.numericApproximation === numericApproximation &&
-      cached.precision === engine.precision && cached.workingPrecision === BigDecimal.precision &&
+      cached.precision === engine.precision &&
       cached.requestedPrecision === engine._requestedPrecision && cached.tolerance === engine.tolerance &&
       cached.roundingTies === engine.roundingTies && cached.angularUnit === engine.angularUnit &&
       cached.strict === engine.strict && cached.effects === engine.effects)
@@ -298,7 +296,7 @@ export class BatchInstance {
       // write clears the one record; captured definitions and audited handlers
       // are immutable and cannot read host bindings or invoke host effects.
       if (cacheable && value.isValid && (isNumber(value) || isString(value))) this.cached = {
-        binding, numericApproximation, precision: engine.precision, workingPrecision: BigDecimal.precision,
+        binding, numericApproximation, precision: engine.precision,
         requestedPrecision: engine._requestedPrecision, tolerance: engine.tolerance, roundingTies: engine.roundingTies,
         angularUnit: engine.angularUnit, strict: engine.strict, effects: engine.effects, value,
       };

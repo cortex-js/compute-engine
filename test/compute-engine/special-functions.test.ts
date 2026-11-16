@@ -485,10 +485,16 @@ describe('BETA FUNCTION AT A POLE OF Γ(a + b)', () => {
     expect(beta(-1, -1)).toBeNaN();
     const big = new ComputeEngine();
     const bd = (x: number) => new BigDecimal(x);
-    expect(bigBeta(big, bd(-0.5), bd(-0.5)).isZero()).toBe(true);
-    expect(bigBeta(big, bd(-3), bd(2)).toNumber()).toBeCloseTo(1 / 6, 15);
-    expect(bigBeta(big, bd(3), bd(-3)).toNumber()).toBeCloseTo(-1 / 3, 15);
-    expect(bigBeta(big, bd(-1), bd(2)).isNaN()).toBe(true);
+    expect(bigBeta(big, bd(-0.5), bd(-0.5), big.precision).isZero()).toBe(true);
+    expect(bigBeta(big, bd(-3), bd(2), big.precision).toNumber()).toBeCloseTo(
+      1 / 6,
+      15
+    );
+    expect(bigBeta(big, bd(3), bd(-3), big.precision).toNumber()).toBeCloseTo(
+      -1 / 3,
+      15
+    );
+    expect(bigBeta(big, bd(-1), bd(2), big.precision).isNaN()).toBe(true);
   });
 
   test('compiled Beta at the pole of Γ(a + b)', () => {
@@ -2760,7 +2766,10 @@ describe('GAUSS HYPERGEOMETRIC ₂F₁: CANCELLATION AND SLOW CONVERGENCE', () =
     ce.precision = savedPrecision;
     const v = ce.expr(['Hypergeometric2F1', ...args] as any).N().toString();
     expect(digits(v).substring(0, 18)).toBe(digits(ref).substring(0, 18));
-    expect(v.split('e')[1]).toBe(ref.split('e')[1]);
+    // The exponent of the value: at a precision of 100 digits or more,
+    // 1.1001…e+99 is written without one.
+    const exponent = (x: string) => Number(x).toExponential().split('e')[1];
+    expect(exponent(v)).toBe(exponent(ref));
   });
 
   test.each(cases)('50-digit ₂F₁(%j)', (args, ref) => {
@@ -3498,10 +3507,10 @@ describe('THE ERROR FUNCTIONS APPLY TO EACH ELEMENT OF A LIST', () => {
 
 describe('bigGamma past the exponent range (CE-180.3)', () => {
   test('a result smaller than the smallest number is NaN, not 0', () => {
-    const v = bigGamma(ce, new BigDecimal('-1000000000000000.5'));
+    const v = bigGamma(ce, new BigDecimal('-1000000000000000.5'), ce.precision);
     expect(v.isNaN()).toBe(true);
     // Just inside the range, the value is still computed.
-    const w = bigGamma(ce, new BigDecimal('-100000000000000.5'));
+    const w = bigGamma(ce, new BigDecimal('-100000000000000.5'), ce.precision);
     expect(w.isNaN()).toBe(false);
     expect(w.isZero()).toBe(false);
   });

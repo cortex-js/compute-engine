@@ -45,10 +45,7 @@ import {
   directedReciprocal,
 } from './rounding.js';
 import { prodExact } from '../numerics/interval-arithmetic.js';
-import {
-  realPowerBranchTerms,
-  realPowerReconstructionDigits,
-} from '../numerics/real-power.js';
+import { realPowerBranchTerms } from '../numerics/real-power.js';
 import {
   binomial as scalarBinomial,
   gamma as scalarGamma,
@@ -2441,7 +2438,7 @@ export const nthRootInterval = liftJump(nthRootIntervalRaw);
  * `x^y` with a point exponent that is not an integer read as the
  * interpreter reads a float exponent (`realPowerBranchTerms()` of
  * `numerics/real-power.ts`, to `digits` significant digits, clamped to
- * [15, 17]; by default the digits of the global working precision): a
+ * [15, 17]; by default 17, the digits of a double): a
  * rational `p/q` of odd denominator is the real root `±|x|^y` with the
  * double `y`, negative when `p` is odd (`powRealBranch`: `x^0.2` at -8 is
  * -1.5157…, `0.2` read as `1/5`), and any other point (`1.5`, an irrational) has no real value over a negative
@@ -2470,7 +2467,10 @@ function powRealRaw(
     const d =
       digits !== undefined && Number.isFinite(digits)
         ? Math.max(15, Math.min(17, Math.trunc(digits)))
-        : realPowerReconstructionDigits();
+        : // A call with no digits (not from compiled code) has no engine
+          // that rounded the exponent: it is read to the 17 digits of a
+          // double.
+          17;
     if (e.lo !== lastRead.e || d !== lastRead.digits) {
       const terms = realPowerBranchTerms(undefined, e.lo, d);
       lastRead.e = e.lo;

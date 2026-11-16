@@ -309,7 +309,7 @@ export class ExactNumericValue extends NumericValue {
   // repeated-conversion overhead. The field-immutability precondition is
   // now compiler-enforced (`rational`/`radical` are `readonly` as of
   // 2026-07-18), but a memo has a SECOND staleness axis: the result depends
-  // on the process-global `BigDecimal.precision` (computed at
+  // on the working precision (computed at
   // `max(current, 25)` digits, see `_bignumComponent`). A naive lazy cache
   // would serve a low-precision value after `ce.precision` is raised — or
   // cache an inflated value if first accessed inside a guard-digits window.
@@ -989,7 +989,7 @@ export class ExactNumericValue extends NumericValue {
         (this.isComplex || other.isComplex) &&
         Number.isFinite(other.re) &&
         Number.isFinite(other.im) &&
-        hasExactPartOutsideDoubleRange(this)
+        hasExactPartOutsideDoubleRange(this, prec)
       )
         return this.factory(
           bigComplexQuotient(
@@ -1533,7 +1533,7 @@ export class ExactNumericValue extends NumericValue {
     return this.clone(Math.round(this.re));
   }
 
-  eq(other: number | NumericValue): boolean {
+  eq(other: number | NumericValue, prec?: number): boolean {
     if (typeof other === 'number')
       return (
         !this.isComplex &&
@@ -1580,9 +1580,11 @@ export class ExactNumericValue extends NumericValue {
       if (!this.isComplex) return true;
       return sameAsDouble(false, false, this.im, other.im);
     }
-    if (!this.bignumRe.eq(other.bignumRe)) return false;
+    // The working precision is read only here, where it is used.
+    prec ??= BigDecimal.precision;
+    if (!this._re(prec).eq(other.bignumRe)) return false;
     if (!this.isComplex) return true;
-    return this.bignumIm.eq(other.bignumIm ?? other.im);
+    return this._im(prec).eq(other.bignumIm ?? other.im);
   }
 
   /**
@@ -1607,7 +1609,10 @@ export class ExactNumericValue extends NumericValue {
    * inexact on one side already, and the bignum projection keeps the
    * exponent range the double projection loses.
    */
-  private _order(other: number | NumericValue): -1 | 0 | 1 | undefined {
+  private _order(
+    other: number | NumericValue,
+    prec: number | undefined
+  ): -1 | 0 | 1 | undefined {
     if (this.isComplex) return undefined;
     // Whether THIS value is infinite is read from the stored encoding
     // (`[±Infinity, 1]`), never from the projection `this.re`: a finite
@@ -1632,7 +1637,10 @@ export class ExactNumericValue extends NumericValue {
       const otherRe = other.re;
       return (
         orderFromProjections(this.re, otherRe) ??
-        orderBignum(this.bignumRe, other.bignumRe ?? otherRe)
+        orderBignum(
+          this._re(prec ?? BigDecimal.precision),
+          other.bignumRe ?? otherRe
+        )
       );
     }
     if (Number.isNaN(other)) return undefined;
@@ -1640,37 +1648,38 @@ export class ExactNumericValue extends NumericValue {
       return orderAgainstInfinite(infinite ? this.re : undefined, other);
     if (Number.isSafeInteger(other)) return orderExactVsInteger(this, other);
     return (
-      orderFromProjections(this.re, other) ?? orderBignum(this.bignumRe, other)
+      orderFromProjections(this.re, other) ??
+      orderBignum(this._re(prec ?? BigDecimal.precision), other)
     );
   }
 
-  lt(other: number | NumericValue): boolean | undefined {
+  lt(other: number | NumericValue, prec?: number): boolean | undefined {
     // Complex values are unordered: any non-real operand → indeterminate.
     // A NaN operand is unordered too: every comparison with it is `false`,
     // as in IEEE 754 and the inexact lanes.
     if (this.isNaN) return false;
-    const o = this._order(other);
+    const o = this._order(other, prec);
     if (o === undefined) return this._unorderedAnswer(other);
     return o < 0;
   }
 
-  lte(other: number | NumericValue): boolean | undefined {
+  lte(other: number | NumericValue, prec?: number): boolean | undefined {
     if (this.isNaN) return false;
-    const o = this._order(other);
+    const o = this._order(other, prec);
     if (o === undefined) return this._unorderedAnswer(other);
     return o <= 0;
   }
 
-  gt(other: number | NumericValue): boolean | undefined {
+  gt(other: number | NumericValue, prec?: number): boolean | undefined {
     if (this.isNaN) return false;
-    const o = this._order(other);
+    const o = this._order(other, prec);
     if (o === undefined) return this._unorderedAnswer(other);
     return o > 0;
   }
 
-  gte(other: number | NumericValue): boolean | undefined {
+  gte(other: number | NumericValue, prec?: number): boolean | undefined {
     if (this.isNaN) return false;
-    const o = this._order(other);
+    const o = this._order(other, prec);
     if (o === undefined) return this._unorderedAnswer(other);
     return o >= 0;
   }
@@ -1694,7 +1703,7 @@ export class ExactNumericValue extends NumericValue {
   static sum(
     values: NumericValue[],
     factory: NumericValueFactory,
-    prec: number = BigDecimal.precision
+    prec: number
   ): NumericValue[] {
     if (values.length === 1) return values;
 
@@ -2306,7 +2315,10 @@ function integerNthRoot(v: number | bigint, n: number): number | bigint | null {
  * float, although the result can be in the double range: `10^{309} / 10.0i`
  * is `-1e308i`, not `~oo`.
  */
-export function hasExactPartOutsideDoubleRange(v: NumericValue): boolean {
+export function hasExactPartOutsideDoubleRange(
+  v: NumericValue,
+  prec: number
+): boolean {
   if (!(v instanceof ExactNumericValue)) return false;
   if (
     v.isNaN ||
@@ -2331,7 +2343,9 @@ export function hasExactPartOutsideDoubleRange(v: NumericValue): boolean {
     return false;
   const outside = (big: BigDecimal) =>
     !big.isZero() && isOutsideNormalDoubleRange(big.toNumber());
-  return outside(v.bignumRe) || (v.isComplex && outside(v.bignumIm));
+  return (
+    outside(v.bignumReAt(prec)) || (v.isComplex && outside(v.bignumImAt(prec)))
+  );
 }
 
 /**
@@ -2344,7 +2358,7 @@ export function bigComplexProduct(
   q: BigDecimal,
   c: BigDecimal,
   d: BigDecimal,
-  prec: number = BigDecimal.precision
+  prec: number
 ): { re: BigDecimal; im: BigDecimal } {
   const digits = doubleDigits(prec);
   return {
@@ -2363,7 +2377,7 @@ export function bigComplexQuotient(
   q: BigDecimal,
   c: BigDecimal,
   d: BigDecimal,
-  prec: number = BigDecimal.precision
+  prec: number
 ): { re: BigDecimal; im: BigDecimal } {
   const digits = doubleDigits(prec);
   const denominator = () => c.mul(c).add(d.mul(d), digits);
@@ -2385,17 +2399,4 @@ export function bigComplexQuotient(
  */
 export function doubleDigits(prec: number): number {
   return prec === MACHINE_PRECISION ? 25 : prec;
-}
-
-/** Evaluate `f` with the digits of `doubleDigits(BigDecimal.precision)`
- * (see `doubleDigits()`). */
-export function withDoubleDigits(f: () => BigDecimal): BigDecimal {
-  const saved = BigDecimal.precision;
-  if (saved !== MACHINE_PRECISION) return f();
-  BigDecimal.precision = 25;
-  try {
-    return f();
-  } finally {
-    BigDecimal.precision = saved;
-  }
 }

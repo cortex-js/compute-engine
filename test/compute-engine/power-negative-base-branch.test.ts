@@ -1,7 +1,10 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { BigDecimal } from '../../src/big-decimal';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { realPowerBranchTerms } from '../../src/compute-engine/boxed-expression/arithmetic-power';
+import {
+  realPowerBranchTerms,
+  realPowerReconstructionDigits,
+} from '../../src/compute-engine/boxed-expression/arithmetic-power';
 import { isFunction } from '../../src/compute-engine/boxed-expression/type-guards';
 
 /**
@@ -46,40 +49,52 @@ function isRealBranch(t: [number, number] | undefined): boolean {
 }
 
 /**
- * `realPowerBranchTerms` sizes its reconstruction window from the
- * PROCESS-GLOBAL `BigDecimal.precision` — the precision that actually rounded
- * the double — so exercising it at a given precision means writing that global,
- * not passing an argument. (It took an engine `precision` parameter once; that
- * was the bug — see the "creation order" suite at the bottom of this file.)
+ * `realPowerBranchTerms` sizes its reconstruction window from `digits`, the
+ * precision of the engine that rounded the double, clamped by
+ * `realPowerReconstructionDigits()`. `branchTerms()` passes the precision of
+ * the default engine, and `atPrecision()` sets another one for the time of
+ * `fn`.
  */
+let branchPrecision = ce.precision;
 function atPrecision<T>(digits: number, fn: () => T): T {
-  const saved = BigDecimal.precision;
-  BigDecimal.precision = digits;
+  const saved = branchPrecision;
+  branchPrecision = digits;
   try {
     return fn();
   } finally {
-    BigDecimal.precision = saved;
+    branchPrecision = saved;
   }
+}
+
+function branchTerms(
+  exact: Parameters<typeof realPowerBranchTerms>[0],
+  value: number
+): [number, number] | undefined {
+  return realPowerBranchTerms(
+    exact,
+    value,
+    realPowerReconstructionDigits(branchPrecision)
+  );
 }
 
 describe('NEGATIVE BASE: exact-rational branch decision', () => {
   describe('realPowerBranchTerms', () => {
     it('uses the EXACT rational when one is available', () => {
-      expect(realPowerBranchTerms([100, 3], 100 / 3)).toEqual([100, 3]);
-      expect(realPowerBranchTerms([2, 3], 2 / 3)).toEqual([2, 3]);
+      expect(branchTerms([100, 3], 100 / 3)).toEqual([100, 3]);
+      expect(branchTerms([2, 3], 2 / 3)).toEqual([2, 3]);
       // Reduced, not as-written.
-      expect(realPowerBranchTerms([200, 6], 100 / 3)).toEqual([100, 3]);
+      expect(branchTerms([200, 6], 100 / 3)).toEqual([100, 3]);
       // An even denominator stays even.
-      expect(realPowerBranchTerms([3, 2], 1.5)).toEqual([3, 2]);
+      expect(branchTerms([3, 2], 1.5)).toEqual([3, 2]);
     });
 
     it('recovers the rational a double was rounded from', () => {
       // Without the ulp-scale tolerance this is the dyadic
       // 4691249611844267/140737488355328 — an EVEN denominator.
-      expect(realPowerBranchTerms(undefined, 100 / 3)).toEqual([100, 3]);
-      expect(realPowerBranchTerms(undefined, -100 / 3)).toEqual([-100, 3]);
-      expect(realPowerBranchTerms(undefined, 1000 / 7)).toEqual([1000, 7]);
-      expect(realPowerBranchTerms(undefined, 2 / 3)).toEqual([2, 3]);
+      expect(branchTerms(undefined, 100 / 3)).toEqual([100, 3]);
+      expect(branchTerms(undefined, -100 / 3)).toEqual([-100, 3]);
+      expect(branchTerms(undefined, 1000 / 7)).toEqual([1000, 7]);
+      expect(branchTerms(undefined, 2 / 3)).toEqual([2, 3]);
     });
 
     it('does NOT snap a genuine decimal to a nearby small rational', () => {
@@ -87,17 +102,17 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
       // terms have a ~1e10 denominator, which the coincidence budget declines
       // outright — `undefined` and an even denominator are the same answer to
       // the caller: the principal complex value.)
-      expect(isRealBranch(realPowerBranchTerms(undefined, 0.3333333333))).toBe(
+      expect(isRealBranch(branchTerms(undefined, 0.3333333333))).toBe(
         false
       );
-      expect(realPowerBranchTerms(undefined, 0.3)).toEqual([3, 10]);
-      expect(realPowerBranchTerms(undefined, 0.25)).toEqual([1, 4]);
+      expect(branchTerms(undefined, 0.3)).toEqual([3, 10]);
+      expect(branchTerms(undefined, 0.25)).toEqual([1, 4]);
       // ...not even at machine precision, where the tolerance is widest.
       atPrecision(15, () => {
         expect(
-          isRealBranch(realPowerBranchTerms(undefined, 0.3333333333))
+          isRealBranch(branchTerms(undefined, 0.3333333333))
         ).toBe(false);
-        expect(realPowerBranchTerms(undefined, 0.3)).toEqual([3, 10]);
+        expect(branchTerms(undefined, 0.3)).toEqual([3, 10]);
       });
     });
 
@@ -137,7 +152,7 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
       for (const [label, v] of irrationals)
         for (const digits of [15, 16, 17])
           atPrecision(digits, () => {
-            const t = realPowerBranchTerms(undefined, v);
+            const t = branchTerms(undefined, v);
             if (isRealBranch(t))
               snapped.push(`${label} @${digits}: ${JSON.stringify(t)}`);
           });
@@ -150,20 +165,20 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
       // a 1%-wide window, which snaps anything to a small rational. The window
       // is clamped at 15 digits, so the branch cannot depend on it.
       const at3 = atPrecision(3, () =>
-        realPowerBranchTerms(undefined, 1.234567)
+        branchTerms(undefined, 1.234567)
       );
       const at15 = atPrecision(15, () =>
-        realPowerBranchTerms(undefined, 1.234567)
+        branchTerms(undefined, 1.234567)
       );
       expect(at3).toEqual(at15);
       expect(isRealBranch(at3)).toBe(false);
       expect(
         isRealBranch(
-          atPrecision(3, () => realPowerBranchTerms(undefined, Math.PI))
+          atPrecision(3, () => branchTerms(undefined, Math.PI))
         )
       ).toBe(false);
       expect(
-        atPrecision(3, () => realPowerBranchTerms(undefined, 100 / 3))
+        atPrecision(3, () => branchTerms(undefined, 100 / 3))
       ).toEqual([100, 3]);
     });
 
@@ -178,22 +193,22 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
       const machine100over3 = 33.3333333333333;
       expect(machine100over3).not.toBe(100 / 3);
       expect(
-        atPrecision(17, () => realPowerBranchTerms(undefined, machine100over3))
+        atPrecision(17, () => branchTerms(undefined, machine100over3))
       ).toBeUndefined();
       atPrecision(15, () => {
-        expect(realPowerBranchTerms(undefined, machine100over3)).toEqual([
+        expect(branchTerms(undefined, machine100over3)).toEqual([
           100, 3,
         ]);
         // Large terms: 1000001/3 numericizes to 333333.666666667, 2.9e-10 from
         // its exact value — past the 1e-12 absolute bound this gate used to
         // carry, and well inside the 3.3e-9 precision-scaled tolerance that
         // replaced it.
-        expect(realPowerBranchTerms(undefined, 333333.666666667)).toEqual([
+        expect(branchTerms(undefined, 333333.666666667)).toEqual([
           1000001, 3,
         ]);
         // An EVEN denominator must survive the wider tolerance: 7/6 numericizes
         // to 1.16666666666667 and must stay on the complex branch.
-        expect(realPowerBranchTerms(undefined, 1.16666666666667)).toEqual([
+        expect(branchTerms(undefined, 1.16666666666667)).toEqual([
           7, 6,
         ]);
       });
@@ -217,7 +232,7 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
       // Admitted through the old 1e-12 floor; its own tolerance is ~2.2e-17.
       expect(
         atPrecision(17, () =>
-          realPowerBranchTerms(undefined, 0.02490069718328337)
+          branchTerms(undefined, 0.02490069718328337)
         )
       ).toBeUndefined();
       // The floor was never load-bearing for a genuine rounding: a p/q rounded
@@ -226,14 +241,14 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
       // reconstruction — the rows above still resolve.
       expect(
         atPrecision(16, () =>
-          realPowerBranchTerms(undefined, 11.44444444444444)
+          branchTerms(undefined, 11.44444444444444)
         )
       ).toEqual([103, 9]);
     });
 
     it('declines a non-finite value with no exact rational', () => {
-      expect(realPowerBranchTerms(undefined, NaN)).toBeUndefined();
-      expect(realPowerBranchTerms(undefined, Infinity)).toBeUndefined();
+      expect(branchTerms(undefined, NaN)).toBeUndefined();
+      expect(branchTerms(undefined, Infinity)).toBeUndefined();
     });
   });
 
@@ -411,14 +426,12 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
  * lane about both the branch and the sign: `(-2)^(100/3)` was negative at
  * machine precision and positive at bignum precision.
  *
- * `ce.precision` is written here, and `BigDecimal.precision` is process-global,
- * so this block owns its engines and never touches the shared bignum `ce`
- * above. (Jest gives each test FILE its own module registry, so the global does
- * not leak to other suites.)
+ * `ce.precision` is written here, so this block owns its engines and never
+ * touches the shared bignum `ce` above.
  */
 describe('NEGATIVE BASE: machine lane agrees with the bignum lane', () => {
-  // `ce.precision = 'machine'` writes the process-global `BigDecimal.precision`
-  // (to 15). Restore it so later suites in this process are unaffected.
+  // No engine writes `BigDecimal.precision`; it is restored in case a test
+  // does.
   let savedPrecision: number;
   beforeAll(() => {
     savedPrecision = BigDecimal.precision;
@@ -556,17 +569,12 @@ describe('NEGATIVE BASE: machine lane agrees with the bignum lane', () => {
 });
 
 /**
- * `BigDecimal.precision` is PROCESS-GLOBAL and every engine construction writes
- * it, so an engine's own `precision` is not what rounds its numbers — the most
- * recently constructed engine's is. Sizing the reconstruction window off
- * `ce.precision` therefore computed a 17-digit tolerance for a double that had
- * been rounded at 15, missed the reconstruction, and put `(-2)^(100/3)` back on
- * the COMPLEX branch — the exact bug this helper exists to fix, resurrected by
- * nothing but the order the engines were created in.
- *
- * The window is now sized from the global, which is both the value that
- * actually governed the rounding and the only one there is — so same-moment
- * lanes agree by construction.
+ * Each engine computes at its own precision, and no engine writes the
+ * process-global `BigDecimal.precision`. The reconstruction window is sized
+ * from the precision of the engine that asks, which is the one that rounded
+ * its numbers: a 17-digit tolerance for a double rounded at 15 would miss the
+ * reconstruction and put `(-2)^(100/3)` back on the COMPLEX branch. The order
+ * in which the engines are created does not change the branch.
  */
 describe('NEGATIVE BASE: engine CREATION ORDER does not move the branch', () => {
   let savedPrecision: number;
@@ -581,11 +589,10 @@ describe('NEGATIVE BASE: engine CREATION ORDER does not move the branch', () => 
 
   it('a default engine created BEFORE a machine engine still resolves the real branch', () => {
     const bignum = new ComputeEngine();
-    // Constructing this one rewrites the global to 15 under `bignum`'s feet.
     const machine = new ComputeEngine();
     machine.precision = 'machine';
     expect(bignum.precision).toBe(21);
-    expect(BigDecimal.precision).toBe(15);
+    expect(BigDecimal.precision).toBe(savedPrecision);
 
     for (const engine of [bignum, machine]) {
       const n = engine.box(['Power', -2, ['Rational', 100, 3]]).N();
@@ -599,7 +606,7 @@ describe('NEGATIVE BASE: engine CREATION ORDER does not move the branch', () => 
     const machine = new ComputeEngine();
     machine.precision = 'machine';
     const bignum = new ComputeEngine();
-    expect(BigDecimal.precision).toBe(21);
+    expect(BigDecimal.precision).toBe(savedPrecision);
 
     for (const engine of [bignum, machine]) {
       const n = engine.box(['Power', -2, ['Rational', 100, 3]]).N();
@@ -883,7 +890,7 @@ describe('NEGATIVE BASE: exact terms beyond the safe-integer range', () => {
 
   it('decides parity on the exact terms, not on their narrowing', () => {
     for (const [label, p, q] of rows) {
-      const t = realPowerBranchTerms([p, q], Number(p) / Number(q));
+      const t = branchTerms([p, q], Number(p) / Number(q));
       expect(t).toBeDefined();
       expect(`${label}: p odd? ${t![0] % 2 !== 0}`).toBe(
         `${label}: p odd? ${p % 2n !== 0n}`

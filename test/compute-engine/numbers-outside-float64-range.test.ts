@@ -450,17 +450,21 @@ describe('MACHINE FUNCTIONS AND SUMS OF EXACT VALUES OUTSIDE THE FLOAT64 RANGE',
   test('an engine below machine precision keeps its coarse precision', () => {
     // The quotient is computed at the 3 digits of the engine, not at the 25
     // digits that the machine precision uses to get a correct double.
-    // Constructing an engine writes the module-global `BigDecimal.precision`,
-    // so it is restored: the later blocks use the shared engine.
-    const saved = BigDecimal.precision;
-    try {
-      const p3 = new ComputeEngine({ precision: 3 });
-      const q = p3.parse('\\frac{1}{7\\cdot 10^{400}}').evaluate().numericValue;
-      if (typeof q !== 'object') throw new Error('expected an exact value');
-      expect(q.div(p3._numericValue(1e-300)).re).toBe(1.43e-101);
-    } finally {
-      BigDecimal.precision = saved;
-    }
+    const p3 = new ComputeEngine({ precision: 3 });
+    const q = p3.parse('\\frac{1}{7\\cdot 10^{400}}').evaluate().numericValue;
+    if (typeof q !== 'object') throw new Error('expected an exact value');
+    expect(q.div(p3._numericValue(1e-300), p3.precision).re).toBe(1.43e-101);
+    // The same quotient through the engine.
+    expect(
+      p3
+        .box([
+          'Divide',
+          p3.parse('\\frac{1}{7\\cdot 10^{400}}'),
+          p3.number(1e-300),
+        ])
+        .N()
+        .toString()
+    ).toBe('1.43e-101');
   });
 });
 
@@ -723,7 +727,11 @@ describe('COMPLEX RESULTS WITH A SMALL MODULUS', () => {
       expect(e.parse('i^2').N().toString()).toBe('-1');
       expect(e.parse('\\sqrt{-4}').N().toString()).toBe('2i');
       expect(e.parse('(2i)^2').N().toString()).toBe('-4');
-      expectComplex(e._numericValue({ re: 0, im: 1.5 }).pow(3), 0, -3.375);
+      expectComplex(
+        e._numericValue({ re: 0, im: 1.5 }).pow(3, e.precision),
+        0,
+        -3.375
+      );
       // π at the working precision of the engine, a float. At the default
       // precision the big-decimal kernel removes a part below
       // 10^(2−precision) times the modulus, and `e^{iπ}` is `-1`. At machine
@@ -732,7 +740,7 @@ describe('COMPLEX RESULTS WITH A SMALL MODULUS', () => {
       // before it becomes a float, and is `-1`).
       const pi = e.symbol('Pi').N();
       expectComplex(
-        e._numericValue({ re: 0, im: pi.bignumRe ?? pi.re }).exp(),
+        e._numericValue({ re: 0, im: pi.bignumRe ?? pi.re }).exp(e.precision),
         -1,
         engineName === 'machine precision' ? Math.sin(Math.PI) : 0
       );
@@ -745,7 +753,7 @@ describe('COMPLEX RESULTS WITH A SMALL MODULUS', () => {
     // reads the decimal and computes sin(3.141592653589793) =
     // 2.38462643383279502884·10^{-16} (Python `mpmath`).
     test('e^{i·3.141592653589793}', () => {
-      const r = e._numericValue({ re: 0, im: Math.PI }).exp();
+      const r = e._numericValue({ re: 0, im: Math.PI }).exp(e.precision);
       if (engineName === 'machine precision')
         expectComplex(r, -1, Math.sin(Math.PI));
       else expectComplex(r, -1, 2.384626433832795e-16);
@@ -753,37 +761,37 @@ describe('COMPLEX RESULTS WITH A SMALL MODULUS', () => {
 
     test('the numeric-value kernels keep a small result', () => {
       const nv = (re: number, im: number) => e._numericValue({ re, im });
-      expectComplex(nv(0, 1e-10).pow(2), -1e-20, 0);
-      expectComplex(nv(0, 1e-6).pow(3), 0, -1e-18);
+      expectComplex(nv(0, 1e-10).pow(2, e.precision), -1e-20, 0);
+      expectComplex(nv(0, 1e-6).pow(3, e.precision), 0, -1e-18);
       // (10^{-10}i)^{2+0.5i} = e^{(2+0.5i)(ln 10^{-10} + iπ/2)}
       const lnMod = Math.log(1e-10);
       const mag = Math.exp(2 * lnMod - 0.5 * (Math.PI / 2));
       const arg = 2 * (Math.PI / 2) + 0.5 * lnMod;
       expectComplex(
-        nv(0, 1e-10).pow({ re: 2, im: 0.5 }),
+        nv(0, 1e-10).pow({ re: 2, im: 0.5 }, e.precision),
         mag * Math.cos(arg),
         mag * Math.sin(arg)
       );
       // ∛(10^{-30}i) = 10^{-10}·e^{iπ/6}
       expectComplex(
-        nv(0, 1e-30).root(3),
+        nv(0, 1e-30).root(3, e.precision),
         1e-10 * Math.cos(Math.PI / 6),
         1e-10 * Math.sin(Math.PI / 6)
       );
       // ∛(8i) = 2·e^{iπ/6}. The machine kernel read only the real part.
       expectComplex(
-        nv(0, 8).root(3),
+        nv(0, 8).root(3, e.precision),
         2 * Math.cos(Math.PI / 6),
         2 * Math.sin(Math.PI / 6)
       );
       expectComplex(
-        nv(0, 1e-30).sqrt(),
+        nv(0, 1e-30).sqrt(e.precision),
         Math.SQRT1_2 * 1e-15,
         Math.SQRT1_2 * 1e-15
       );
       // e^{-40+i} = e^{-40}·(cos 1 + i·sin 1)
       expectComplex(
-        nv(-40, 1).exp(),
+        nv(-40, 1).exp(e.precision),
         Math.exp(-40) * Math.cos(1),
         Math.exp(-40) * Math.sin(1)
       );
@@ -793,11 +801,11 @@ describe('COMPLEX RESULTS WITH A SMALL MODULUS', () => {
       // √(1 + εi) = 1 + (ε/2)i to first order; the second-order term is
       // below the double precision for ε = 10^{-10}.
       const nv = (re: number, im: number) => e._numericValue({ re, im });
-      expectComplex(nv(1, 1e-10).sqrt(), 1, 5e-11);
-      expectComplex(nv(-1, 1e-10).sqrt(), 5e-11, 1);
-      expectComplex(nv(-1, -1e-10).sqrt(), 5e-11, -1);
-      expectComplex(nv(3, -4).sqrt(), 2, -1);
-      expectComplex(nv(-3, 4).sqrt(), 1, 2);
+      expectComplex(nv(1, 1e-10).sqrt(e.precision), 1, 5e-11);
+      expectComplex(nv(-1, 1e-10).sqrt(e.precision), 5e-11, 1);
+      expectComplex(nv(-1, -1e-10).sqrt(e.precision), 5e-11, -1);
+      expectComplex(nv(3, -4).sqrt(e.precision), 2, -1);
+      expectComplex(nv(-3, 4).sqrt(e.precision), 1, 2);
     });
 
     test('a complex power that the complex kernel cannot compute', () => {
@@ -1076,7 +1084,8 @@ describe('EXACT IMAGINARY PART OUTSIDE THE FLOAT64 RANGE', () => {
     const half = ce._numericValue({ rational: [1, 2] });
     const [gauss] = ExactNumericValue.sum(
       [half, ce._numericValue({ re: 0, im: 3 })],
-      (x) => ce._numericValue(x)
+      (x) => ce._numericValue(x),
+      ce.precision
     ).filter((x) => !x.isZero);
     expect(gauss.isExact).toBe(false);
     expect(gauss.toString()).toBe('(0.5 + 3i)');
@@ -1084,8 +1093,10 @@ describe('EXACT IMAGINARY PART OUTSIDE THE FLOAT64 RANGE', () => {
     const tinyRe = ce._numericValue({ re: ce.bignum('1e-800'), im: 3 });
     expect(isGaussianInteger(tinyRe)).toBe(false);
     expect(isGaussianInteger(ce._numericValue({ re: 0, im: 3 }))).toBe(true);
-    const sums = ExactNumericValue.sum([half, tinyRe], (x) =>
-      ce._numericValue(x)
+    const sums = ExactNumericValue.sum(
+      [half, tinyRe],
+      (x) => ce._numericValue(x),
+      ce.precision
     );
     expect(sums).toHaveLength(1);
     expect(sums[0].isExact).toBe(false);

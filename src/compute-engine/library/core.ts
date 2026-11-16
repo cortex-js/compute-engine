@@ -13766,7 +13766,8 @@ function valuesAgree(a: Expression, b: Expression, goal: NumericGoal): boolean {
       if (relative.gt(tolerance)) tolerance = relative;
     }
     return (
-      bRe.sub(aRe).abs().lte(tolerance) && bIm.sub(aIm).abs().lte(tolerance)
+      bRe.sub(aRe, ce.precision).abs().lte(tolerance) &&
+      bIm.sub(aIm, ce.precision).abs().lte(tolerance)
     );
   }
   if (isNumber(a) || isNumber(b)) return false;

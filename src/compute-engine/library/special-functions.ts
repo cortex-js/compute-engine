@@ -346,7 +346,10 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           ? applyN(
               [z],
               (x) => (x > 0 ? gammaln(x) : NaN),
-              (x) => (x.isPositive() ? bigGammaln(engine, x) : BigDecimal.NAN),
+              (x) =>
+                x.isPositive()
+                  ? bigGammaln(engine, x, engine.precision)
+                  : BigDecimal.NAN,
               logGammaComplex
             )
           : undefined;
@@ -386,7 +389,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (!shouldNumericize(numericApproximation, z)) return undefined;
         // A real value carries `ce.precision` digits or the head stays unevaluated.
         if (isNumber(z) && !z.isComplex && bignumPreferred(engine)) {
-          const big = bigBarnesG(engine, bigRealOperand(engine, z));
+          const big = bigBarnesG(
+            engine,
+            bigRealOperand(engine, z),
+            engine.precision
+          );
           return big === undefined ? undefined : boxBignumApprox(engine, big);
         }
         if (isNumber(z) && z.isComplex) {
@@ -445,7 +452,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (isNumber(z) && !z.isComplex && bignumPreferred(engine)) {
           const x = bigRealOperand(engine, z);
           if (x.isPositive()) {
-            const big = bigLogBarnesG(engine, x);
+            const big = bigLogBarnesG(engine, x, engine.precision);
             return big === undefined ? undefined : boxBignumApprox(engine, big);
           }
         }
@@ -508,7 +515,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           ? applyN(
               [m],
               ellipticK,
-              (m) => bigEllipticK(engine, m),
+              (m) => bigEllipticK(engine, m, engine.precision),
               ellipticKComplex
             )
           : undefined;
@@ -562,7 +569,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
             ? applyN(
                 [phi, m],
                 ellipticEIncomplete,
-                (phi, m) => bigEllipticEIncomplete(engine, phi, m),
+                (phi, m) =>
+                  bigEllipticEIncomplete(engine, phi, m, engine.precision),
                 ellipticEIncompleteComplex
               )
             : undefined;
@@ -587,7 +595,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           ? applyN(
               [m],
               ellipticE,
-              (m) => bigEllipticE(engine, m),
+              (m) => bigEllipticE(engine, m, engine.precision),
               ellipticEComplex
             )
           : undefined;
@@ -629,7 +637,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           ? applyN(
               [phi, m],
               ellipticF,
-              (phi, m) => bigEllipticF(engine, phi, m),
+              (phi, m) => bigEllipticF(engine, phi, m, engine.precision),
               ellipticFComplex
             )
           : undefined;
@@ -671,7 +679,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
             ? applyN(
                 [n, phi, m],
                 ellipticPiIncomplete,
-                (n, phi, m) => bigEllipticPiIncomplete(engine, n, phi, m),
+                (n, phi, m) =>
+                  bigEllipticPiIncomplete(engine, n, phi, m, engine.precision),
                 ellipticPiIncompleteComplex
               )
             : undefined;
@@ -682,7 +691,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           ? applyN(
               ops,
               ellipticPiComplete,
-              (n, m) => bigEllipticPiComplete(engine, n, m),
+              (n, m) => bigEllipticPiComplete(engine, n, m, engine.precision),
               ellipticPiCompleteComplex
             )
           : undefined;
@@ -721,7 +730,12 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const infinite = agmValueAtInfinity(args[0], args[1], engine);
         if (infinite !== undefined) return infinite;
         if (!shouldNumericize(numericApproximation, ...ops)) return undefined;
-        return applyN(args, agm, bigAgm, agmComplex);
+        return applyN(
+          args,
+          agm,
+          (a, b) => bigAgm(a, b, engine.precision),
+          agmComplex
+        );
       }),
     },
 
@@ -780,7 +794,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           ? applyN(
               ops,
               hypergeometric2F1,
-              (a, b, c, z) => bigHypergeometric2F1(engine, a, b, c, z),
+              (a, b, c, z) =>
+                bigHypergeometric2F1(engine, a, b, c, z, engine.precision),
               (a, b, c, z) => hypergeometric2F1Complex(a, b, c, z)
             )
           : undefined;
@@ -914,7 +929,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           const big = bigPolyLog(
             engine,
             hurwitzOperand(engine, s),
-            hurwitzOperand(engine, z)
+            hurwitzOperand(engine, z),
+            engine.precision
           );
           if (big !== undefined) return boxBignumApprox(engine, big);
         }
@@ -1117,7 +1133,12 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (!shouldNumericize(numericApproximation, n, theta)) return undefined;
         // A real value carries `ce.precision` digits or the head stays unevaluated.
         if (isNumber(theta) && !theta.isComplex && bignumPreferred(engine)) {
-          const big = bigClausen(engine, order, bigRealOperand(engine, theta));
+          const big = bigClausen(
+            engine,
+            order,
+            bigRealOperand(engine, theta),
+            engine.precision
+          );
           return big === undefined ? undefined : boxBignumApprox(engine, big);
         }
         return applyN([n, theta], clausen);
@@ -1165,7 +1186,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           ? applyN(
               ops,
               hypergeometric1F1,
-              (a, b, z) => bigHypergeometric1F1(engine, a, b, z),
+              (a, b, z) =>
+                bigHypergeometric1F1(engine, a, b, z, engine.precision),
               hypergeometric1F1Complex
             )
           : undefined;
@@ -1258,11 +1280,12 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           const nv = tau.numericValue;
           const value = (
             typeof nv === 'number' ? engine._numericValue(nv) : nv
-          ).N();
+          ).N(engine.precision);
           const big = bigDedekindEta(
             engine,
-            value.bignumRe ?? engine.bignum(value.re),
-            value.bignumIm ?? engine.bignum(value.im)
+            value.bignumReAt(engine.precision) ?? engine.bignum(value.re),
+            value.bignumImAt(engine.precision) ?? engine.bignum(value.im),
+            engine.precision
           );
           if (big === undefined) return undefined;
           return engine.number(engine._inexactNumericValue(big));
@@ -1375,7 +1398,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         // the head stays unevaluated; complex arguments use the E₁-based
         // double kernel.
         if (bignumPreferred(ce) && !x.isComplex && !Number.isNaN(x.re)) {
-          const value = bigExpIntegralEi(ce, bigRealOperand(ce, x));
+          const value = bigExpIntegralEi(
+            ce,
+            bigRealOperand(ce, x),
+            ce.precision
+          );
           return value === undefined ? undefined : boxBignumApprox(ce, value);
         }
         // Real args use the machine kernel; complex args the E₁-based kernel.
@@ -1454,7 +1481,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (x.isSame(1)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         if (bignumPreferred(ce) && !Number.isNaN(x.re)) {
-          const value = bigLogIntegral(ce, bigRealOperand(ce, x));
+          const value = bigLogIntegral(ce, bigRealOperand(ce, x), ce.precision);
           return value === undefined ? undefined : boxBignumApprox(ce, value);
         }
         return applyN([x], logIntegral);

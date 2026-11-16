@@ -19,7 +19,6 @@ import {
 import {
   type Ball,
   add,
-  atDigits,
   certify,
   div,
   exact,
@@ -344,15 +343,14 @@ export function bigStieltjesGamma(
       0,
       (n + 1) * Math.log10(Math.log(xd)) - Math.log10(n + 1)
     );
-    const r = atDigits(target + Math.ceil(cancelled) + small, () =>
-      certify(() => {
-        const ball = Array.isArray(a)
-          ? rational(a[0], a[1])
-          : exact(a as BigDecimal);
-        if (!lower(ball).isPositive()) return undefined;
-        return eulerMaclaurin(n, ball, terms, tolerance, frame);
-      })
-    );
+    const working = target + Math.ceil(cancelled) + small;
+    const r = certify(() => {
+      const ball = Array.isArray(a)
+        ? rational(a[0], a[1], working)
+        : exact(a as BigDecimal);
+      if (!lower(ball, working).isPositive()) return undefined;
+      return eulerMaclaurin(n, ball, terms, working, tolerance, frame);
+    });
     // The ball's midpoint carries the working digits; past `digits` they are
     // not certified, so they are rounded off.
     if (r !== undefined && wideEnough(r, digits))
@@ -382,26 +380,40 @@ function eulerMaclaurin(
   n: number,
   a: Ball,
   terms: number,
+  working: number,
   tolerance?: number,
   frame?: DeadlineFrame
 ): Ball | undefined {
-  const working = BigDecimal.precision;
   let sum = exact(0);
   for (let k = 0; k < terms; k++) {
     if ((k & 0x3f) === 0) checkDeadline(frame);
-    const x = add(a, exact(k));
-    sum = add(sum, div(powInt(ln(x), n), x));
+    const x = add(a, exact(k), working);
+    sum = add(
+      sum,
+      div(powInt(ln(x, working), n, working), x, working),
+      working
+    );
   }
-  const x = add(a, exact(terms));
-  const L = ln(x);
-  sum = add(sum, div(powInt(L, n), mul(x, exact(2))));
-  sum = sub(sum, div(powInt(L, n + 1), exact(n + 1)));
+  const x = add(a, exact(terms), working);
+  const L = ln(x, working);
+  sum = add(
+    sum,
+    div(powInt(L, n, working), mul(x, exact(2), working), working),
+    working
+  );
+  sum = sub(
+    sum,
+    div(powInt(L, n + 1, working), exact(n + 1), working),
+    working
+  );
   // L^{n−i} for i = 0 … n, and n!/(n−i)!.
-  const powers = Array.from({ length: n + 1 }, (_, i) => powInt(L, n - i));
+  const powers = Array.from({ length: n + 1 }, (_, i) =>
+    powInt(L, n - i, working)
+  );
   const falling: bigint[] = [1n];
   for (let i = 1; i <= n; i++)
     falling.push(falling[i - 1]! * BigInt(n - i + 1));
-  const xInv2 = div(exact(1), mul(x, x));
+  const xInv2 = div(exact(1), mul(x, x, working), working);
   let xPower = xInv2; // x^{−1−m}, from m = 1
   let poly: bigint[] = [-1n, 1n]; // Π_{j=1}^{m} (t − j), from m = 1
   let factorial = 1n; // (2j)!
@@ -417,28 +429,40 @@ function eulerMaclaurin(
     for (let i = 0; i <= Math.min(2 * j - 1, n); i++) {
       const c = poly[i]! * falling[i]!;
       if (c !== 0n)
-        derivative = add(derivative, mul(powers[i]!, exact(new BigDecimal(c))));
+        derivative = add(
+          derivative,
+          mul(powers[i]!, exact(new BigDecimal(c)), working),
+          working
+        );
     }
     const [bn, bd] = bernoulliRational(2 * j);
-    const term = mul(mul(derivative, xPower), rational(bn, bd * factorial));
+    const term = mul(
+      mul(derivative, xPower, working),
+      rational(bn, bd * factorial, working),
+      working
+    );
     const size = log10Abs(term.mid);
     if (size > previous) return undefined; // past the smallest term, short of the target
-    sum = sub(sum, term);
+    sum = sub(sum, term, working);
     // m → m + 1: P₂ⱼ's polynomial, for the remainder after j pairs.
     const even = timesLinear(poly, BigInt(2 * j));
     if (size < threshold) {
       const bound = remainderBound(n, x, L, even, falling, 2 * j);
-      return { mid: sum.mid, rad: sum.rad.add(bound) };
+      return { mid: sum.mid, rad: sum.rad.add(bound, working) };
     }
     previous = size;
     // m → m + 2: multiply by (t − (m+1))(t − (m+2)), and x^{−1−m} by x^{−2}.
     poly = timesLinear(even, BigInt(2 * j + 1));
-    xPower = mul(xPower, xInv2);
+    xPower = mul(xPower, xInv2, working);
   }
 }
 
+/** Digits the remainder bound is computed at: a bound needs to be safe, not precise. */
+const REMAINDER_DIGITS = 20;
+
 /** 4/(2π)^p · Σᵢ |cᵢ| ∫ₓ^∞ t^{−1−p} lnⁿ⁻ⁱ(t) dt, cᵢ = poly[i]·n!/(n−i)! the
- * coefficients of P_p, rounded up. x > 1, so ln t > 0 throughout. */
+ * coefficients of P_p, rounded up, at `REMAINDER_DIGITS`. x > 1, so ln t > 0
+ * throughout. */
 function remainderBound(
   n: number,
   x: Ball,
@@ -447,30 +471,34 @@ function remainderBound(
   falling: readonly bigint[],
   p: number
 ): BigDecimal {
-  return atDigits(20, () => {
-    const xp = div(exact(1), powInt(x, p)); // x^{−p}
-    let total = exact(0);
-    for (let i = 0; i <= Math.min(p, n); i++) {
-      const c = poly[i]! * falling[i]!;
-      if (c === 0n) continue;
-      const k = n - i;
-      let integral = exact(0);
-      let ratio = 1n; // k!/r!, from r = k down
-      for (let r = k; r >= 0; r--) {
-        if (r < k) ratio *= BigInt(r + 1);
-        const denominator = BigInt(p) ** BigInt(k - r + 1);
-        integral = add(
-          integral,
-          mul(powInt(L, r), rational(ratio, denominator))
-        );
-      }
-      total = add(total, mul(exact(new BigDecimal(c < 0n ? -c : c)), integral));
+  const prec = REMAINDER_DIGITS;
+  const xp = div(exact(1), powInt(x, p, prec), prec); // x^{−p}
+  let total = exact(0);
+  for (let i = 0; i <= Math.min(p, n); i++) {
+    const c = poly[i]! * falling[i]!;
+    if (c === 0n) continue;
+    const k = n - i;
+    let integral = exact(0);
+    let ratio = 1n; // k!/r!, from r = k down
+    for (let r = k; r >= 0; r--) {
+      if (r < k) ratio *= BigInt(r + 1);
+      const denominator = BigInt(p) ** BigInt(k - r + 1);
+      integral = add(
+        integral,
+        mul(powInt(L, r, prec), rational(ratio, denominator, prec), prec),
+        prec
+      );
     }
-    const scale = exact(
-      new BigDecimal(4).divToward(TWO_PI_BELOW.pow(p), 'ceiling')
+    total = add(
+      total,
+      mul(exact(new BigDecimal(c < 0n ? -c : c)), integral, prec),
+      prec
     );
-    return upper(mul(mul(scale, xp), total));
-  });
+  }
+  const scale = exact(
+    new BigDecimal(4).divToward(TWO_PI_BELOW.pow(p, prec), 'ceiling', prec)
+  );
+  return upper(mul(mul(scale, xp, prec), total, prec), prec);
 }
 
 /** log10 |x|, or −∞ for 0. */

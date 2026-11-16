@@ -8201,7 +8201,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       if (Number.isNaN(r)) {
         if (resultIsComplexValued('Power', args))
           return complexPowLiteral(bConst, eConst);
-        const real = negativeBaseRealPow(bConst, exp, eConst);
+        const real = negativeBaseRealPow(
+          bConst,
+          exp,
+          eConst,
+          base.engine.precision
+        );
         if (real !== undefined) return String(real);
         return NO_REAL_VALUE_FOLD;
       }
@@ -12577,7 +12582,9 @@ function compileToTarget(
             strings: new Map(),
           }
         : undefined;
-    const reconstructionDigits = realPowerReconstructionDigits();
+    const reconstructionDigits = realPowerReconstructionDigits(
+      expr.engine.precision
+    );
     const fn = new ComputeEngineFunctionLiteral(
       expr.engine,
       body,
@@ -12729,7 +12736,9 @@ function compileToTarget(
     ? varsEntryPlan(expr.engine as ComputeEngine, target.varsObjectRefs, mode)
     : undefined;
   const broadcastOutputs = broadcastStrideOfType(expr.type.type);
-  const reconstructionDigits = realPowerReconstructionDigits();
+  const reconstructionDigits = realPowerReconstructionDigits(
+    expr.engine.precision
+  );
   const statementBody = javascriptStatements(target)?.functionBody(js);
   const fn = new ComputeEngineFunction(
     expr.engine,

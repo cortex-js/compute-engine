@@ -3225,7 +3225,7 @@ export class BoxedFunction
           // is above 10⁶ (`√1009·√1013`). Keep the operand as a separate
           // factor then, as `canonicalMultiply` does, so the coefficient
           // stays exact.
-          const product = coef.mul(c);
+          const product = coef.mul(c, ce.precision);
           if (coef.isExact && c.isExact && !product.isExact && !product.isNaN) {
             rest.push(arg);
             continue;
@@ -3252,7 +3252,7 @@ export class BoxedFunction
       // `(1/0)·a` gave the coefficient `+∞`, so `a/0 + 1` became
       // `+∞·a + 1` when it was added.
       if (coef2.isZero) return [ce._numericValue(1), this];
-      const coef = coef1.div(coef2);
+      const coef = coef1.div(coef2, ce.precision);
       if (denom.isSame(1)) return [coef, numer];
       return [coef, ce.function('Divide', [numer, denom])];
     }
@@ -3271,7 +3271,10 @@ export class BoxedFunction
       // to Sqrt), so only an integer exponent is extractable here.
       const exponent = asSmallInteger(expr.op2);
       if (exponent !== null)
-        return [coef.pow(exponent), ce.function('Power', [base, expr.op2])];
+        return [
+          coef.pow(exponent, ce.precision),
+          ce.function('Power', [base, expr.op2]),
+        ];
 
       return [ce._numericValue(1), this];
     }
@@ -3281,7 +3284,7 @@ export class BoxedFunction
       // @fastpasth
       if (rest.isSame(1) || rest.isSame(0)) {
         if (coef.isOne || coef.isZero) return [coef, rest];
-        const root = coef.sqrt();
+        const root = coef.sqrt(ce.precision);
         // The square root of an exact value that is not a perfect square is
         // a big float. Such a float reports `isExact` when its value at the
         // working precision is an integer: `√(1 + 10^-30)` at 21 digits is
@@ -3299,7 +3302,10 @@ export class BoxedFunction
       // constant imaginary phase, but the true value is region-dependent
       // (±i·√|k|·√|u| across u = 0). Fold the sign into the radicand
       // instead: √(k·u) = √|k|·√(−u).
-      const root = coef.sgn() === -1 ? coef.neg().sqrt() : coef.sqrt();
+      const root =
+        coef.sgn() === -1
+          ? coef.neg().sqrt(ce.precision)
+          : coef.sqrt(ce.precision);
       // Same rule as above: an inexact root of an exact coefficient is not
       // extracted (it would strand a float beside the symbolic remainder).
       if (
@@ -3339,7 +3345,7 @@ export class BoxedFunction
       // whenever the coefficient we would extract is inexact but the radicand
       // was exact. (A genuinely inexact radicand — a float — may still
       // numericize, since there is no exactness to preserve.)
-      const root = coef.root(exp);
+      const root = coef.root(exp, ce.precision);
       if (
         !(root instanceof ExactNumericValue) &&
         (!rest.isSame(1) || coef instanceof ExactNumericValue)
@@ -3359,7 +3365,7 @@ export class BoxedFunction
       // for each of its terms at each evaluation.
       if (coef.isOne && rest === expr.op1 && expr.isCanonical)
         return [coef, expr];
-      return [coef.abs(), ce.function('Abs', [rest])];
+      return [coef.abs(ce.precision), ce.function('Abs', [rest])];
     }
     console.assert(expr.operator !== 'Complex');
 
@@ -4433,7 +4439,7 @@ export class BoxedFunction
         if (v.isOne) return this.engine.One;
         if (v.isZero) return this.engine.Zero;
         if (e !== undefined) {
-          const r = v.root(e);
+          const r = v.root(e, this.engine.precision);
           if (r.isExact) return this.engine.number(r);
         }
       }

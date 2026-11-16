@@ -326,7 +326,12 @@ describe('GammaRegularized(a, z) where Γ(a, z) and Γ(a) are out of range', () 
   test('bigGammaP(1e15, 2.1e15) is 1 (1 − Q, Q tiny)', () => {
     const ce = new ComputeEngine();
     ce.precision = 50;
-    const p = bigGammaP(ce, new BigDecimal('1e15'), new BigDecimal('2.1e15'));
+    const p = bigGammaP(
+      ce,
+      new BigDecimal('1e15'),
+      new BigDecimal('2.1e15'),
+      ce.precision
+    );
     expect(p.toString()).toBe('1');
   });
 });

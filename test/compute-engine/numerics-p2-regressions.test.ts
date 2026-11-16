@@ -342,7 +342,7 @@ describe('P2 #21 — rational×radical materialization is rounded to precision',
         rational: [7, 3],
         radical: 3,
       });
-      const s = inner.bignumRe.toString();
+      const s = inner.bignumReAt(ce.precision).toString();
       const sigDigits = s.replace(/[^0-9]/g, '').replace(/^0+/, '').length;
       // Was ~199 digits with only ~103 correct.
       expect(sigDigits).toBeLessThanOrEqual(100);

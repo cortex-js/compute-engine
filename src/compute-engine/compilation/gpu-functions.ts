@@ -1997,7 +1997,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       if (Number.isNaN(r)) {
         if (gpuResultIsComplexValued('Power', args))
           return gpuComplexPowLiteral(bConst, eConst, target);
-        const real = negativeBaseRealPow(bConst, exp, eConst);
+        const real = negativeBaseRealPow(
+          bConst,
+          exp,
+          eConst,
+          base.engine.precision
+        );
         if (real !== undefined) return formatFloat(real, target.language);
       }
       return formatFloat(r, target.language);

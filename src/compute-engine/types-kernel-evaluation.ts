@@ -192,7 +192,7 @@ export type EvaluateOptions = {
    * digits is above the precision of the engine, or for a goal
    * `N(x, [p, a])`), and the digits `requested` by the call, which the
    * handlers receive as `options.precision`. Both are one value for the
-   * whole engine or module (`BigDecimal.precision`,
+   * whole engine (`ce.precision`,
    * `ce._requestedPrecision`), so neither can stay set across an `await`:
    * another evaluation would compute at the raised precision or read the
    * other call's digits, and the restores would race. Instead the window

@@ -2610,7 +2610,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const k = toBigint(n);
         if (k === null || k < 1n) return ce.False;
         const D = 8n * k + 1n;
-        const sqrt = BigInt(ce.bignum(D).sqrt().toFixed(0));
+        const sqrt = BigInt(ce.bignum(D).sqrt(ce.precision).toFixed(0));
         return ce.symbol(
           sqrt * sqrt === D && (sqrt - 1n) % 2n === 0n ? 'True' : 'False'
         );
@@ -2629,7 +2629,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (!isNumber(n)) return undefined;
         const k = toBigint(n);
         if (k === null || k < 0n) return ce.False;
-        const sqrt = BigInt(ce.bignum(k).sqrt().toFixed(0));
+        const sqrt = BigInt(ce.bignum(k).sqrt(ce.precision).toFixed(0));
         return ce.symbol(sqrt * sqrt === k ? 'True' : 'False');
       },
     },
@@ -2654,7 +2654,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const est = BigInt(
           ce
             .bignum(target / 2n)
-            .cbrt()
+            .cbrt(ce.precision)
             .toFixed(0)
         );
         for (let m = est - 2n; m <= est + 2n; m++) {
@@ -2679,7 +2679,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (k === null || k < 1n) return ce.False;
         if ((k - 1n) % 4n !== 0n) return ce.False;
         const t = (k - 1n) / 4n;
-        const sqrt = BigInt(ce.bignum(t).sqrt().toFixed(0));
+        const sqrt = BigInt(ce.bignum(t).sqrt(ce.precision).toFixed(0));
         return ce.symbol(sqrt * sqrt * 4n + 1n === k ? 'True' : 'False');
       },
     },
@@ -3205,7 +3205,7 @@ function evaluateDirichletL(
   const chi = realCharacterValues(k, j);
   if (chi !== undefined && !s.isComplex && bignumPreferred(ce)) {
     if (s.isSame(1)) return dirichletLAtOne(ce, k, chi);
-    const big = bigDirichletL(ce, bigRealOperand(ce, s), k, chi);
+    const big = bigDirichletL(ce, bigRealOperand(ce, s), k, chi, ce.precision);
     return big === undefined ? undefined : boxBignumApprox(ce, big);
   }
 
@@ -3264,32 +3264,26 @@ function dirichletLRealS(
     DIRICHLET_L_MACHINE_DIGITS +
     Math.ceil((Math.abs(s.toNumber()) + 1) * Math.log10(k));
   if (!(working <= DIRICHLET_L_MACHINE_MAX_DIGITS)) return undefined;
-  const saved = BigDecimal.precision;
-  BigDecimal.precision = working;
-  try {
-    const twoPi = BigDecimal.PI.mul(2);
-    let re = BigDecimal.ZERO;
-    let im = BigDecimal.ZERO;
-    for (let r = 1; r <= k; r++) {
-      if ((r & 0xff) === 0) checkDeadline(ce._deadlineFrame);
-      const q = dirichletCharacterExponent(k, j, r);
-      if (q === undefined) continue;
-      let zeta: BigNum | undefined;
-      try {
-        zeta = bigHurwitzZeta(ce, s, [BigInt(r), BigInt(k)]);
-      } catch {
-        zeta = undefined;
-      }
-      if (zeta === undefined) return undefined;
-      const angle = twoPi.mul(q[0]).div(q[1]);
-      re = re.add(zeta.mul(angle.cos()));
-      im = im.add(zeta.mul(angle.sin()));
+  const twoPi = BigDecimal.pi(working).mul(2);
+  let re = BigDecimal.ZERO;
+  let im = BigDecimal.ZERO;
+  for (let r = 1; r <= k; r++) {
+    if ((r & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+    const q = dirichletCharacterExponent(k, j, r);
+    if (q === undefined) continue;
+    let zeta: BigNum | undefined;
+    try {
+      zeta = bigHurwitzZeta(ce, s, [BigInt(r), BigInt(k)], working);
+    } catch {
+      zeta = undefined;
     }
-    const scale = new BigDecimal(k).pow(s.neg()); // k^(−s)
-    return { re: scale.mul(re).toNumber(), im: scale.mul(im).toNumber() };
-  } finally {
-    BigDecimal.precision = saved;
+    if (zeta === undefined) return undefined;
+    const angle = twoPi.mul(q[0]).div(q[1], working);
+    re = re.add(zeta.mul(angle.cos(working)), working);
+    im = im.add(zeta.mul(angle.sin(working)), working);
   }
+  const scale = new BigDecimal(k).pow(s.neg(), working); // k^(−s)
+  return { re: scale.mul(re).toNumber(), im: scale.mul(im).toNumber() };
 }
 
 /**

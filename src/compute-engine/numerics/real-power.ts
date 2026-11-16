@@ -1,4 +1,3 @@
-import { BigDecimal } from '../../big-decimal/index.js';
 import { rationalize, reducedRational } from './rationals.js';
 import type { Rational } from './types.js';
 
@@ -69,21 +68,17 @@ function parityFaithful(n: bigint): number {
  * compiled constant fold, which shares this helper — deciding the same branch
  * for the same node.
  *
- * The window is scaled to `BigDecimal.precision` — the PROCESS-GLOBAL working
- * precision, which is the value that actually governed the rounding, NOT the
- * `precision` of whichever engine happens to be asking. The two diverge,
- * because constructing any engine writes the global: create a default engine
- * and THEN a machine one, and the first still reports `precision` 21 while its
- * `.N()` now rounds at 15. Sizing the window off the engine then computed a
- * 17-digit tolerance for a 15-digit double, lost the reconstruction, and
- * resurrected the exact bug this helper exists to fix — with the outcome
- * depending on engine CREATION ORDER. Reading the global also makes every lane
- * of the interpreter agree by construction, since there is only one of it.
- *
- * `digits`, when given, replaces the global precision. Compiled JavaScript
- * gives the number of digits recorded when the code was generated
- * (`CompilationResult.reconstructionDigits`), so that the value of the compiled
- * code does not change when the precision changes after the compilation.
+ * The window is scaled to `digits`, the working precision of the engine
+ * that rounded the double (`realPowerReconstructionDigits()` clamps it).
+ * Every engine computes at its own precision, so the engine that asks is the
+ * one whose precision governed the rounding: the window does not depend on
+ * another engine made or configured since. Sizing a 17-digit tolerance for a
+ * 15-digit double loses the reconstruction and brings back the bug this
+ * helper exists to fix. Compiled JavaScript gives the number of digits of the
+ * engine when the code was generated
+ * (`CompilationResult.reconstructionDigits`), so that the value of the
+ * compiled code does not change when the precision changes after the
+ * compilation.
  *
  * Precision matters because numericizing an exact rational rounds to that many
  * digits BEFORE the double is formed: at precision 15, `100/3` becomes
@@ -136,7 +131,7 @@ function parityFaithful(n: bigint): number {
 export function realPowerBranchTerms(
   exact: Rational | undefined,
   value: number,
-  digits: number = realPowerReconstructionDigits()
+  digits: number
 ): [p: number, q: number] | undefined {
   if (exact !== undefined) {
     const [rp, rq] = reducedRational(exact);
@@ -147,16 +142,8 @@ export function realPowerBranchTerms(
   }
 
   if (!Number.isFinite(value)) return undefined;
-  // The GLOBAL working precision is what rounded `value`, so it — not any
-  // engine's `precision` — sizes the window, unless the caller gives `digits`.
-  // See the note above.
-  //
-  // A double never carries more than 17 significant digits, and the branch
-  // decision must not depend on a precision configured BELOW machine
-  // precision: `new ComputeEngine({ precision: 3 })` writes a global of 3,
-  // bypassing the MACHINE_PRECISION floor that `setPrecision` applies, and a
-  // 1%-wide window snaps essentially any float to a small rational. Clamp to
-  // [15, 17] regardless.
+  // `digits` is the working precision that rounded `value`, clamped by the
+  // caller (`realPowerReconstructionDigits()`). See the note above.
   const tol = Math.max(
     Number.MIN_VALUE,
     Math.abs(value) * 4 * Number.EPSILON,
@@ -192,15 +179,16 @@ export function realPowerBranchTerms(
 
 /**
  * The number of significant digits that `realPowerBranchTerms` reads a float
- * exponent to: the global working precision (`BigDecimal.precision`), which
- * is what rounded the exponent, clamped to [15, 17] (a double never carries
- * more than 17 significant digits, and a precision configured below machine
- * precision must not widen the window). A compiled JavaScript result carries
- * it as `reconstructionDigits`: the runtime has its own `BigDecimal`, whose
- * precision says nothing about the engine's.
+ * exponent to: `precision`, the working precision of the engine that rounded
+ * the exponent, clamped to [15, 17]. A double never carries more than 17
+ * significant digits, and a precision configured below machine precision
+ * must not widen the window: `new ComputeEngine({ precision: 3 })` keeps a
+ * precision of 3, below the `MACHINE_PRECISION` floor that `setPrecision`
+ * applies, and a 1%-wide window snaps essentially any float to a small
+ * rational. A compiled JavaScript result carries the digits of the engine
+ * at compile time as `reconstructionDigits`.
  */
-export function realPowerReconstructionDigits(): number {
-  const precision = BigDecimal.precision;
+export function realPowerReconstructionDigits(precision: number): number {
   return Number.isFinite(precision)
     ? Math.max(15, Math.min(17, Math.trunc(precision)))
     : 17;
@@ -237,7 +225,7 @@ export function negativeBaseRealPowFromRational(
   base: number,
   exact: Rational | null | undefined,
   expValue: number,
-  digits?: number
+  digits: number
 ): number | undefined {
   if (!(base < 0) || !Number.isFinite(base)) return undefined;
   if (!Number.isFinite(expValue) || Number.isInteger(expValue))

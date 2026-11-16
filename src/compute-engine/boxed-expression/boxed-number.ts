@@ -180,15 +180,16 @@ const COMPLEX_INFINITY_TYPE: Type = Object.freeze({
 function literalEnclosureType(
   v: NumericValue,
   tier: 'integer' | 'rational' | 'real',
-  sign: 'positive' | 'negative'
+  sign: 'positive' | 'negative',
+  prec: number
 ): Type | undefined {
   const re = v.re;
   if (!Number.isFinite(re) || re === 0 || Math.abs(re) < MIN_NORMAL_DOUBLE)
-    return computeLiteralEnclosureType(v, tier, sign);
+    return computeLiteralEnclosureType(v, tier, sign, prec);
   const memo = ENCLOSURE_MEMOS[tier][sign];
   const known = memo.get(re);
   if (known !== undefined) return known ?? undefined;
-  const result = computeLiteralEnclosureType(v, tier, sign);
+  const result = computeLiteralEnclosureType(v, tier, sign, prec);
   if (memo.size >= ENCLOSURE_MEMO_MAX_SIZE) memo.clear();
   memo.set(re, result ?? null);
   return result;
@@ -214,7 +215,8 @@ const ENCLOSURE_MEMOS: Record<
 function computeLiteralEnclosureType(
   v: NumericValue,
   tier: 'integer' | 'rational' | 'real',
-  sign: 'positive' | 'negative'
+  sign: 'positive' | 'negative',
+  prec: number
 ): Type | undefined {
   // The enclosure is two significant digits wide behind a relative padding
   // of 10⁻⁶ (`ENCLOSURE_PADDING`), so the machine projection `re` — within a
@@ -256,7 +258,7 @@ function computeLiteralEnclosureType(
     lower = roundSignificantToward(lo, ENCLOSURE_DIGITS, 'floor');
     upper = roundSignificantToward(hi, ENCLOSURE_DIGITS, 'ceiling');
   } else {
-    const d = v.bignumRe;
+    const d = v.bignumReAt(prec);
     // Defensive, currently unreachable: every NumericValue kind that can
     // reach the non-machine-exact fallback defines `bignumRe` (Exact and
     // Big values always do; a Machine value without one is always
@@ -264,8 +266,10 @@ function computeLiteralEnclosureType(
     if (d === undefined) return undefined;
     if (!d.isFinite() || d.isZero()) return undefined;
     const pad = d.abs().mul(ENCLOSURE_PADDING);
-    const loDec = d.sub(pad).toPrecisionToward(ENCLOSURE_DIGITS, 'floor');
-    const hiDec = d.add(pad).toPrecisionToward(ENCLOSURE_DIGITS, 'ceiling');
+    const loDec = d.sub(pad, prec).toPrecisionToward(ENCLOSURE_DIGITS, 'floor');
+    const hiDec = d
+      .add(pad, prec)
+      .toPrecisionToward(ENCLOSURE_DIGITS, 'ceiling');
     // Project each decimal bound onto a double. `toNumber()` rounds to
     // nearest, which can land INSIDE the interval — but for a NORMAL double
     // at most ~10⁻¹⁶ relative away, while the padding keeps each decimal
@@ -1188,7 +1192,7 @@ export class BoxedNumber
           ev.radical === 1 &&
           (Math.abs(re) < 2 ** 53
             ? rationalEqualsDecimal(ev.rational, re)
-            : v.bignumRe === undefined);
+            : !(v instanceof ExactNumericValue) && v.bignumRe === undefined);
       } else {
         const big = v.bignumRe;
         if (big === undefined) {
@@ -1224,7 +1228,7 @@ export class BoxedNumber
     // here — an exact zero is machine-representable.
     const s = this.sgn;
     if (s !== 'positive' && s !== 'negative') return undefined;
-    const enclosure = literalEnclosureType(v, tier, s);
+    const enclosure = literalEnclosureType(v, tier, s, this.engine.precision);
     if (enclosure !== undefined) return enclosure;
     return s === 'positive' ? positiveRangeType(tier) : negativeRangeType(tier);
   }
@@ -1547,7 +1551,7 @@ export class BoxedNumber
         otherValue = other.numericValue;
       if (otherValue !== undefined) {
         const tol = tolerance ?? this.engine.tolerance;
-        const d = this._value.sub(otherValue);
+        const d = this._value.sub(otherValue, this.engine.precision);
         const re = d.re;
         // The double of an exact rational divides the double of its
         // numerator by the double of its denominator. When both are above
@@ -1556,13 +1560,13 @@ export class BoxedNumber
         // The big-decimal values do not have this limit.
         const reWithin = Number.isFinite(re)
           ? Math.abs(re) <= tol
-          : !!d.bignumRe?.abs().lte(tol);
+          : !!d.bignumReAt(this.engine.precision)?.abs().lte(tol);
         if (!reWithin) return false;
         if (!d.isComplex) return true;
         // The imaginary part of a complex difference is read from its big
         // decimal: its double is `0` for `10^{-800}` (which is within the
         // tolerance, as it must be) and `Infinity` for `10^{800}`.
-        const bigIm = d.bignumIm;
+        const bigIm = d.bignumImAt(this.engine.precision);
         return bigIm !== undefined
           ? bigIm.abs().lte(tol)
           : Math.abs(d.im) <= tol;
@@ -1600,7 +1604,7 @@ export class BoxedNumber
     const tol = tolerance ?? this.engine.tolerance;
     return (
       Math.abs(this.re - nOther.re) <= tol &&
-      imaginaryPartsWithin(this, nOther, tol)
+      imaginaryPartsWithin(this, nOther, tol, this.engine.precision)
     );
   }
 
@@ -1621,7 +1625,7 @@ export class BoxedNumber
       // `Rational(1,2).isSame(0.5)` matches `.isSame(ce.number(0.5))` (#15).
       // The fast integer path of `NumericValue.eq(number)` is tried first so
       // hot `.isSame(0)`/`.isSame(1)` checks allocate nothing.
-      if (v.eq(other)) return true;
+      if (v.eq(other, this.engine.precision)) return true;
       // The fallback below boxes `other` into a `NumericValue` (a BigDecimal
       // round-trip at default precision) purely to catch a *non-integer exact*
       // value — a rational or radical whose `eq(number)` overload
@@ -1650,7 +1654,10 @@ export class BoxedNumber
     }
     if (typeof other === 'bigint') {
       if (typeof this._value === 'number') return bigint(this._value) === other;
-      return this._value.eq(this.engine._numericValue(other));
+      return this._value.eq(
+        this.engine._numericValue(other),
+        this.engine.precision
+      );
     }
     if (typeof other === 'boolean' || typeof other === 'string') return false;
     return same(this, other);
@@ -1822,13 +1829,14 @@ function imaginaryPartWithin(x: ImaginaryPartOperand, tol: number): boolean {
 function imaginaryPartsWithin(
   a: ImaginaryPartOperand,
   b: ImaginaryPartOperand,
-  tol: number
+  tol: number,
+  prec: number
 ): boolean {
   if (!a.isComplex && !b.isComplex) return true;
   const x = a.bignumIm;
   const y = b.bignumIm;
   if (x === undefined || y === undefined) return Math.abs(a.im - b.im) <= tol;
-  return x.sub(y).abs().lte(tol);
+  return x.sub(y, prec).abs().lte(tol);
 }
 
 /**
@@ -1846,12 +1854,15 @@ function imaginaryPartsWithin(
  * A complex with an infinite imaginary part is complex infinity (`~oo`),
  * whatever its real part: this function does not change it.
  */
-function infiniteRealPart(value: NumericValue): number | undefined {
+function infiniteRealPart(
+  value: NumericValue,
+  prec: number
+): number | undefined {
   if (!value.isComplex || value.isComplexInfinity) return undefined;
   if (Number.isNaN(value.im)) return undefined;
   // Read the real part from its big decimal when it has one: the double is
   // `Infinity` for the finite `10^{800}`.
-  const bignumRe = value.bignumRe;
+  const bignumRe = value.bignumReAt(prec);
   if (bignumRe !== undefined) {
     if (bignumRe.isFinite() || bignumRe.isNaN()) return undefined;
     return bignumRe.isPositive() ? +Infinity : -Infinity;
@@ -1878,7 +1889,8 @@ export function canonicalNumber(
   // If the value is already a NumericValue, we're done, except for a complex
   // value with an infinite real part and a finite imaginary part (see
   // `infiniteRealPart()`)
-  if (value instanceof NumericValue) return infiniteRealPart(value) ?? value;
+  if (value instanceof NumericValue)
+    return infiniteRealPart(value, ce.precision) ?? value;
 
   // If the value is a machine number, check if it's a small integer
   // or a non-finite value

@@ -241,9 +241,10 @@ function compareWithUnit(a: Expression, n: -1 | 0 | 1): -1 | 0 | 1 | undefined {
       return v < n ? -1 : v > n ? 1 : 0;
     }
     if (v.isComplex || v.isNaN) return undefined;
-    if (v.gt(n) === true) return 1;
-    if (v.lt(n) === true) return -1;
-    return v.eq(n) ? 0 : undefined;
+    const prec = a.engine.precision;
+    if (v.gt(n, prec) === true) return 1;
+    if (v.lt(n, prec) === true) return -1;
+    return v.eq(n, prec) ? 0 : undefined;
   }
   if (a.isGreater(n) === true) return 1;
   if (a.isLess(n) === true) return -1;
@@ -1055,7 +1056,7 @@ function exactIntegerPow(x: Expression, e: number): Expression | undefined {
     if (!Number.isFinite(magLog10) || Math.abs(magLog10) > MAX_EXACT_POW_DIGITS)
       return undefined;
 
-    const v = exact.pow(e);
+    const v = exact.pow(e, ce.precision);
     // `pow` falls back to the float lane when the result leaves the exact
     // representable set — keep the power symbolic in that case. A float
     // result whose value is an integer reports `isExact` too, so the test is
@@ -1100,7 +1101,7 @@ function exactIntegerPow(x: Expression, e: number): Expression | undefined {
 
   // Radical base: `ExactNumericValue.pow` is exact here, and the guard above
   // bounds the exponent so the internal computation can't explode.
-  return ce.number(exact.pow(e));
+  return ce.number(exact.pow(e, ce.precision));
 }
 
 /**
@@ -1352,7 +1353,8 @@ function exactEulerN(raw: Expression): Expression | undefined {
   const e = euler.numericValue;
   return ce.number(
     (typeof m === 'number' ? ce._inexactNumericValue(m) : m).mul(
-      typeof e === 'number' ? ce._inexactNumericValue(e) : e
+      typeof e === 'number' ? ce._inexactNumericValue(e) : e,
+      ce.precision
     )
   );
 }
@@ -1397,7 +1399,7 @@ function complexPowN(
   const viaNumericValue = complexNumericValueRoute(
     ce,
     [x, typeof exp === 'number' ? ce.number(exp) : exp],
-    (base, exponent) => base.pow(exponent)
+    (base, exponent) => base.pow(exponent, ce.precision)
   );
   if (viaNumericValue !== undefined) return viaNumericValue;
   let z: { re: number; im: number } = complexPow(
@@ -1639,7 +1641,11 @@ export function pow(
             (typeof exp === 'number' ? undefined : asRational(exp)))
           : undefined;
         const terms = negativeBase
-          ? realPowerBranchTerms(exact, eVal!)
+          ? realPowerBranchTerms(
+              exact,
+              eVal!,
+              realPowerReconstructionDigits(ce.precision)
+            )
           : undefined;
         // Integer-ness is a property of the exponent, not of the double it
         // numericized to: at precision 3 `6000001/2000000` numericizes to
@@ -1935,15 +1941,17 @@ export function pow(
       // logarithm per call. (Real exponents take the direct path; a general
       // complex exponent keeps the e.pow(x) path, unchanged.)
       if (typeof exp === 'number') {
-        return ce.number(ce._numericValue(exp).exp());
+        return ce.number(ce._numericValue(exp).exp(ce.precision));
       } else if (isNumber(exp)) {
         const xv = ce._numericValue(exp.numericValue);
         // A complex exponent above machine precision uses the big-decimal
         // `exp` too: `e` pre-rounded to the working precision and raised to
         // `z` loses a digit (`e^{1+2i}` at 50 digits was one unit off).
-        if (!xv.isComplex || bignumPreferred(ce)) return ce.number(xv.exp());
+        if (!xv.isComplex || bignumPreferred(ce))
+          return ce.number(xv.exp(ce.precision));
         const eNv = numericValue(ce.E.N());
-        if (eNv !== undefined) return ce.number(ce._numericValue(eNv).pow(xv));
+        if (eNv !== undefined)
+          return ce.number(ce._numericValue(eNv).pow(xv, ce.precision));
       }
     }
   }
@@ -2115,12 +2123,12 @@ export function pow(
         apply(
           x,
           (x) => Math.pow(x, e as number),
-          (x) => x.pow(e as number),
+          (x) => x.pow(e as number, ce.precision),
           (x) => x.pow(e as number)
         ) ?? ce._fn('Power', [x, ce.expr(exp)])
       );
     } else {
-      return ce.number(n!.pow(e!));
+      return ce.number(n!.pow(e!, ce.precision));
     }
   }
 

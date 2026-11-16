@@ -122,8 +122,7 @@ function expectSymbolCellValues(
 }
 
 describe('big-float broadcast: the values are the element-by-element values', () => {
-  // The precision of the big decimals is global (`BigDecimal.precision`), and
-  // the last engine made sets it, so each test makes its own engine.
+  // Each test makes its own engine at the precision it tests.
   for (const precision of [21, 50]) {
     describe(`precision ${precision}`, () => {
       const cases: [
@@ -214,6 +213,31 @@ describe('big-float broadcast: the values are the element-by-element values', ()
     );
     expectCellValues(ce, 'Add', [a, ce.number(2)]);
     expectCellValues(ce, 'Negate', [a]);
+  });
+
+  // The broadcast rounds at the precision of the engine, not at the default
+  // precision of `BigDecimal` (50).
+  test('elements at precision 300', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 300;
+    const third = ce.box(['Divide', 1, 3]).N();
+    const a = ce.function(
+      'List',
+      VALUES_A.map((v) => ce.box(['Add', third, v]).N())
+    );
+    // A product with a symbol that holds the list is a broadcast over the
+    // elements (see the next test).
+    ce.declare('A', { value: a });
+    ce.declare('T', { value: third });
+    expectSymbolCellValues(ce, [ce.symbol('A'), ce.symbol('T')], [a, third]);
+    const product = ce
+      .function('Multiply', [ce.symbol('A'), ce.symbol('T')])
+      .evaluate();
+    expect(
+      JSON.stringify(elementsOf(product)[1].json).replace(/[^0-9]/g, '').length
+    ).toBeGreaterThan(250);
+    expectCellValues(ce, 'Multiply', [a, third]);
+    expectCellValues(ce, 'Add', [a, third]);
   });
 
   // A sum keeps the digits of its operands, past twice the working precision.

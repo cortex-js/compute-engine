@@ -97,7 +97,7 @@ describe('powReal', () => {
       2 ** 53, 2 ** 53 + 2, 1e308, 1e-308];
     for (const e of edges) {
       // The reading ends: terms or none.
-      const terms = realPowerBranchTerms(undefined, e);
+      const terms = realPowerBranchTerms(undefined, e, 17);
       expect(terms === undefined || terms.length === 2).toBe(true);
       for (const b of [I(-8, -1), I(-2, 3), I(0.5, 4)]) {
         const r = IA.powReal(b, I(e, e), 17);
