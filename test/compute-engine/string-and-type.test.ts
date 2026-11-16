@@ -463,6 +463,41 @@ describe('IntegerString prints an integer past 2^53 exactly', () => {
     expect(r.string).toBeUndefined();
     expect(JSON.stringify(r.json)).toContain('out-of-range');
   });
+
+  test('a base too large for a small integer is out of range', () => {
+    const r = ce.box(['IntegerString', 5, { num: '1e30' }]).evaluate();
+    expect(JSON.stringify(r.json)).toContain('out-of-range');
+  });
+});
+
+describe('IntegerString of a symbol stays unevaluated (CE-1295)', () => {
+  // An operand with no known integer value stays unevaluated.
+  const ce = new ComputeEngine();
+
+  test('the integer operand', () => {
+    const r = ce.box(['IntegerString', 'n']).evaluate();
+    expect(r.json).toEqual(['IntegerString', 'n']);
+  });
+
+  test('the base operand', () => {
+    const r = ce.box(['IntegerString', 5, 'b']).evaluate();
+    expect(r.json).toEqual(['IntegerString', 5, 'b']);
+  });
+
+  test('a symbol with an integer value is evaluated', () => {
+    const ce = new ComputeEngine();
+    ce.assign('m', 255);
+    ce.assign('c', 16);
+    expect(ce.box(['IntegerString', 'm', 'c']).evaluate().string).toBe('ff');
+  });
+
+  test('a symbol with a value that is not an integer is a type error', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.assign('x', 2.5);
+    const r = ce.box(['IntegerString', 'x']).evaluate();
+    expect(JSON.stringify(r.json)).toContain('incompatible-type');
+  });
 });
 
 describe('DigitsFrom reads an integer past 2^53 exactly', () => {

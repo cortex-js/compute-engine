@@ -66,6 +66,12 @@
 
 ### Bug Fixes
 
+- **`IntegerString(n)` of a symbol with no value stays unevaluated.** It was
+  the error `incompatible-type` with the same type, `integer`, given as the
+  expected type and as the actual type. The same applies to the base:
+  `IntegerString(5, b)` stays unevaluated. A value that is not an integer is
+  still a type error. A base that is an integer too large for a small integer
+  (`IntegerString(5, 10^30)`) is now `out-of-range`, as a base above 36 is.
 - **`EulerE(n, z)` of a complex `z` has a value**
   ([#598](https://github.com/cortex-js/compute-engine/issues/598)). It stayed
   unevaluated. `EulerE(3, 1+2i)` is now the exact `-25/4 - 8i`, and a complex

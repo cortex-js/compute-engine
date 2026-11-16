@@ -12466,13 +12466,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       ],
       evaluate: (ops, { engine }) => {
         const ce = engine;
+        // An operand that is not a known integer value (a symbol of type
+        // `integer` with no value) stays unevaluated: only a value that is
+        // not an integer is a type error.
         const op1 = ops[0];
-        if (!op1.isInteger) return ce.typeError('integer', op1.type, op1);
+        if (op1.isInteger === false)
+          return ce.typeError('integer', op1.type, op1);
 
         // The exact integer, as `Factorial` and `GCD` read it: a double
         // prints `IntegerString(30!)` as "2.65e+32" and loses digits past 2^53.
         const val = asBigint(op1);
-        if (val === null) return ce.typeError('integer', op1.type, op1);
+        if (val === null) return undefined;
 
         // The sign is preserved (`IntegerString(-42)` is `"-42"`), so
         // `DigitsFrom(IntegerString(n))` round-trips for negative integers.
@@ -12480,12 +12484,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (sym(op2) === 'Nothing') return ce.string(val.toString());
         const lengthOp = ops[2];
 
+        // As for `n`: a value that is not an integer is a type error, and
+        // a base with no known value stays unevaluated.
+        if (op2.isInteger === false)
+          return ce.typeError('integer', op2.type, op2);
         const base = asSmallInteger(op2);
-        if (base === null) return ce.typeError('integer', op2.type, op2);
+        if (base === null && !isNumber(op2)) return undefined;
 
-        if (base < 2 || base > 36)
+        // An integer literal too large for a small integer is out of
+        // range, as a base above 36 is.
+        if (base === null || base < 2 || base > 36)
           return ce.error(
-            ['out-of-range', '2', '36', base.toString()],
+            ['out-of-range', '2', '36', op2.toString()],
             op2.toString()
           );
 
