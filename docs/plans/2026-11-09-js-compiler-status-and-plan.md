@@ -2290,6 +2290,48 @@ input read by the body takes the type of the body's occurrence, an inlined
 function leaves `symbolDeps`). It is redone as a pass that copies the
 callee's region.
 
+Landed after the simplification pass (2026-11-15, late evening; main
+`a930c4e08c5a88bd8e6f67d66f0398e320bb332f`, `ir/` 9,768 lines):
+
+| Commit | What |
+| --- | --- |
+| `887bc8ab3` (`ce-interval`) | the interval library keeps one frozen error per message for an undecided value (a box the program does not decide: 1.18 µs to 0.42) |
+| `85752a2d0` (`ce-interval`) | the interval mode admits `Loop`, with a count of passes |
+| `dca1d85d2` (G22, CE-1354) | derivatives: the engine's symbolic derivative lowered on every target, and on JavaScript the existing compiler's numeric derivative (`_SYS.nd`) for `D(f, x)` with no closed form; a coordinate of a literal list of points as the list of the coordinates. Tycho's twelve lost programs compile; 12 corpus programs newly compile, 31 change their text |
+| `a930c4e08` (G21) | the inlining pass (`inline` in `ir/passes.ts`, `PassOptions.inline`: `'loop'` on JavaScript and GLSL, `'repeated'` in the interval mode) and the removal of functions that no call reaches. Voronoi on JavaScript: 38 µs per call to 5.7 to 6.0 (existing 6.0 to 6.4); on the interval seam 5.60 to 3.00 times the existing target. 142 corpus programs change their text, code size +0.34% |
+
+Both of mine were measured on one tree (main `85752a2d0` plus both): the
+full suite with the profile on and with the shadow measure green (2,055
+suites, 85,698 tests); programs that the existing compiler declines and the
+profile admits: public 78 and glsl 67 unchanged, interval 41 to 42,
+implicit integrand 0 to 5 (`∫ D(x³, x) dx`, whose integrand now compiles).
+The reviews of G22 found six wrong values in the first two rounds, all in the
+closed form taken from the engine at compile time: a stored value read where
+the program reads an input (`vars`, a variable of `D`), and a name of a
+function's body captured by an index, a parameter or a local at the site.
+The rule that came out of it, for any lowering that substitutes an
+expression the engine computed (the next one is a name whose value is an
+expression): run the engine with the values of the `vars` names hidden, and
+decline when the substituted expression reads a name that the walk binds at
+the site other than as an input and that came from a value the node reaches.
+The build for Tycho is
+`_TASKS/2026-11-15-tycho-builds/cortex-js-compute-engine-0.193.0-tycho.a930c4e08.tgz`
+(announced in `issues/CE-1354.md`, set `fixed`).
+
+Queue from here. Speed: the written-out sums on JavaScript (`unrollSums`,
+after a look at the four programs it slows), the closed form of an integral
+on JavaScript (G20), colour constants computed once, no tick for a counted
+loop of a constant number of passes; what is left of voronoi on the interval
+seam (3.0; `ce-interval` looks first). Breadth: `Break` and `Continue` as a
+carried flag (mine); lists through user functions (`ce-interval`, diagnosis
+`_TASKS/2026-11-15-interval-mode/breadth-diagnosis-lists.md`): a name whose
+value is an expression lowered where it is read (also the largest decline
+class on JavaScript and GLSL: 138 and 60 programs with the colour form), a
+list argument of a function of scalars as a build of calls, and a result with
+untyped elements taking the shape of the lowered body, which is within R2 of
+"Shapes are settled at compile time" (a function is compiled once for each
+argument shape that the program gives it).
+
 Found after the review, to settle before the default:
 
 - A hang, with the switch `CE_JS_PROFILE_PUBLIC=ir`:
