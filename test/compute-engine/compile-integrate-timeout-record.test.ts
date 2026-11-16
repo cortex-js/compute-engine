@@ -259,6 +259,9 @@ describe('A symbolic integration attempt that timed out', () => {
 describe('A symbolic integration attempt that completed', () => {
   test('a closed form is found again, and no record stops it', () => {
     const ce = new ComputeEngine();
+    // The shadow measure (`CE_JS_PROFILE_SHADOW`) searches a second time,
+    // for the profile `ir`.
+    ce._jsProfileShadow = false;
     const latex = String.raw`\int_{0}^{x}\! t^2\, \mathrm{d}t`;
     const first = compiled(ce, latex);
     expect(first.searches).toBe(1);

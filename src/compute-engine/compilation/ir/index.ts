@@ -477,7 +477,7 @@ export function sliceProgram(
     // (`printInterval()`).
     iterationBudget: interval ? undefined : options.iterationBudget,
     runtimeLengths: profile.runtimeLengths,
-    stencil: options.target === 'javascript' && !interval,
+    javascript: options.target === 'javascript' && !interval,
     // Not past the `iterationBudget`: such a loop is NaN, or refuses to
     // start in the interval mode. Not in the complex mode, where a real
     // term of a constant index is in a loop a complex one.
@@ -495,7 +495,7 @@ export function sliceProgram(
     objectVars: Object.keys(options.vars ?? {}).filter((n) =>
       readsVarsObject(options.vars![n])
     ),
-    ...(interval ? { varsTexts: options.vars } : {}),
+    varsTexts: options.vars,
   });
   verify(p, rows);
   // The interval mode draws nothing: a frame has no warning.

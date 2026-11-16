@@ -171,6 +171,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `z = 1e-8 + 2e-8i` gives `1.8014e7 − 3.6029e7i`; the interpreter gives
   `2e7 − 4e7i` (relative error 8e-8 at `|z|` about 1e-5, 5e-12 at 1e-3,
   below 2e-15 from 0.03 up).
+- `javascript`, also the profile `ir`, `x`, `s: real`: the closed form of a
+  definite integral is the difference of the antiderivative at its bounds in
+  doubles, so its error is absolute (about one ulp of the larger term):
+  `(1/(s√(2π)))·Integrate(e^(−Z²/(2s²)), Limits(Z, −∞, x))` at `s = 1` gives
+  `7.0866e-16` at `x = −8` and `0` at `x = −9`; the interpreter gives
+  `6.2210e-16` and `1.1286e-19`.
 - `javascript`, profile `ir` (crafted), `x: real`: `Zeta(x)` at
   `x = -171.5` gives `Infinity` (the machine kernel overflows below about
   `-171`); the interpreter at the default precision gives `4.739e172`.

@@ -15,7 +15,7 @@ import {
 } from '../interval/integrate.js';
 import {
   closedFormIntegral,
-  resetSharedCompilationBudgets,
+  withCompilationBudgets,
 } from './compile-integrals.js';
 
 /**
@@ -150,25 +150,26 @@ export function intervalQuadratureRefusal(size: {
 const NUMERIC_INTEGRALS: ReadonlySet<string> = new Set(['NIntegrate']);
 
 /**
- * The closed form of the integral of the operands `args`, for the interval
- * mode of the IR pipeline, by the rule of the existing interval target
+ * The closed form of the integral of the operands `args`, for the IR
+ * pipeline (the interval mode and JavaScript), by the rule of the existing
+ * targets
  * (`closedFormIntegral()`: the engine's antiderivative under the budgets of
  * the compilation, and no fold of a `vars` name that holds an engine value
  * or whose text is not a plain read). `vars`: the `vars` texts of the
- * mode, each a read of the inputs object. With an angular unit other than
+ * compilation. With an angular unit other than
  * radians there is none: `closedFormIntegral()` reads operands written in
  * radians (the existing target rewrites its tree at its entry), and the
  * lowering scales the trigonometric functions of the closed form again.
  * There is none either when the operands reach an `NIntegrate`, directly
  * or through a definition.
  *
- * This and `resetIntervalClosedFormBudgets()` are the IR pipeline's one
+ * This and `withIntegralClosedFormBudgets()` are the IR pipeline's one
  * dependency on the shared layer of the old compilers
  * (`compile-integrals.ts`, `CompilerState`), which moves here when that
  * layer is deleted (`docs/plans/2026-11-15-ir-interval-mode.md`, section
  * 13).
  */
-export function intervalClosedForm(
+export function integralClosedForm(
   args: ReadonlyArray<Expression>,
   vars: Readonly<Record<string, string>>
 ): Expression | undefined {
@@ -185,6 +186,6 @@ export function intervalClosedForm(
   });
 }
 
-/** A fresh antiderivative budget for one compilation of the mode
- *  (`resetSharedCompilationBudgets()`). */
-export const resetIntervalClosedFormBudgets = resetSharedCompilationBudgets;
+/** A compilation of the IR pipeline, with the antiderivative budget of the
+ *  outermost compilation in progress (`withCompilationBudgets()`). */
+export const withIntegralClosedFormBudgets = withCompilationBudgets;

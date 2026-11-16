@@ -548,6 +548,10 @@ export class CompilerState {
    *  see {@link ANTIDERIVATIVE_COMPILATION_STEPS}. Module state is safe:
    *  compilation is synchronous and single-threaded. */
   static antiderivativeStepsLeft = ANTIDERIVATIVE_COMPILATION_STEPS;
+  /** The number of compilations of the IR pipeline in progress
+   *  (`withCompilationBudgets()`): while one runs, a compilation that starts
+   *  consumes its antiderivative pool. */
+  static _irCompileDepth = 0;
   static nextDefinitionId = 1;
   /** How many antiderivative-first attempts have RUN, as opposed to being
    *  skipped. Read by tests, before and after a compilation. */

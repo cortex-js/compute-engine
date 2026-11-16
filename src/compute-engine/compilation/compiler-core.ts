@@ -1391,8 +1391,9 @@ function resetOutermostCompilation(expr: Expression): void {
   // drained the pool left every later direct-target compilation skipping
   // symbolic closed forms permanently. Nested compilations (depth > 0)
   // deliberately consume the OUTER pool, so the aggregate stays bounded
-  // by one pool per outermost entry.
-  resetSharedCompilationBudgets();
+  // by one pool per outermost entry. A compilation of the IR pipeline in
+  // progress holds the pool too (`withCompilationBudgets()`).
+  if (CompilerState._irCompileDepth === 0) resetSharedCompilationBudgets();
 }
 
 /**

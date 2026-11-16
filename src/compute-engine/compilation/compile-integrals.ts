@@ -149,6 +149,23 @@ export function resetSharedCompilationBudgets(): void {
 }
 
 /**
+ * `f()`, a compilation of the IR pipeline, with a fresh antiderivative pool
+ * when no compilation of either kind is in progress; a compilation that
+ * starts inside it (of the IR pipeline, or of the existing compilers at
+ * their depth 0) consumes its pool.
+ */
+export function withCompilationBudgets<T>(f: () => T): T {
+  if (CompilerState._compileDepth === 0 && CompilerState._irCompileDepth === 0)
+    resetSharedCompilationBudgets();
+  CompilerState._irCompileDepth += 1;
+  try {
+    return f();
+  } finally {
+    CompilerState._irCompileDepth -= 1;
+  }
+}
+
+/**
  * The integrals whose antiderivative-first attempt TIMED OUT, per engine,
  * and the engine state they timed out in.
  *

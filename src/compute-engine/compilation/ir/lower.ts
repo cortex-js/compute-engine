@@ -113,7 +113,7 @@ import {
 import { toBigint } from '../../boxed-expression/numerics.js';
 import { listLowering, literalList, parameterName } from './lower-lists.js';
 import {
-  intervalClosedForm,
+  integralClosedForm,
   intervalQuadratureRefusal,
   intervalQuadratureSize,
 } from '../interval-quadrature.js';
@@ -211,8 +211,8 @@ export type LowerOptions = {
   /** The names of `vars` whose text reads the inputs object
    *  (`readsVarsObject()`): a function body reads one as an input. */
   readonly objectVars?: readonly string[];
-  /** The interval mode: the text of each `vars` name, for the closed form
-   *  of an integral (`intervalClosedForm()`). */
+  /** The text of each `vars` name, for the closed form of an integral
+   *  (`integralClosedForm()`). */
   readonly varsTexts?: Readonly<Record<string, string>>;
   /** `false` (GLSL): a list parameter of a user function of no stated
    *  length takes the stated length of its argument at the first call. */
@@ -221,9 +221,10 @@ export type LowerOptions = {
    *  is written out, its body lowered once per index (`aggregate()` of
    *  `lower-lists.ts`). Default 0: none. */
   readonly unrollSums?: number;
-  /** The numeric derivative of a derivative with no closed form
-   *  (JavaScript, not the interval mode). */
-  readonly stencil?: boolean;
+  /** JavaScript, not the interval mode: the numeric derivative of a
+   *  derivative with no closed form, and the closed form of a definite
+   *  integral in place of the quadrature. */
+  readonly javascript?: boolean;
 };
 
 /** The IR operation of the read of the `vars` name of index `k` on the
@@ -1076,7 +1077,7 @@ export function lower(
         const c = closedForm(e, () => derivativeClosedForm('D', e.ops));
         if (c !== undefined) return value(c, want);
         const name = e.nops === 2 && isSymbol(x) ? x.symbol : '';
-        if (!options.stencil || !name || body.isPure !== true)
+        if (!options.javascript || !name || body.isPure !== true)
           decline(e, NO_CLOSED_FORM);
         if (!lookup(name) && !ce.lookupDefinition(name))
           decline(x, `the variable ${name} of a derivative is not declared`);
@@ -1367,7 +1368,10 @@ export function lower(
    *  the existing targets; `undefined` when there is none; a decline under
    *  an angular unit other than radians (the walk converts the units
    *  itself), when `e` or it has more than `CLOSED_SIZE` nodes, and when it
-   *  reads a name that the walk would read in another binding (`foreign()`). */
+   *  reads a name that the walk would read in another binding (`foreign()`).
+   *  An accepted closed form keeps the names that it absorbed as
+   *  dependencies of the code (`symbolDeps`): each name of `e` or of a value
+   *  that `e` reaches that holds a value, and each user function it reaches. */
   const closedForm = (e: Fn, ask: () => Expression | undefined) => {
     // `withVarsValuesHidden()` hides no value of a constant or of a name
     // whose type is inferred from its value.
@@ -1388,7 +1392,68 @@ export function lower(
     const c = withVarsValuesHidden(e, vars && Object.fromEntries(vars), ask);
     if (c !== undefined && (facts(c).size > CLOSED_SIZE || foreign(e, c)))
       decline(e, NO_CLOSED_FORM);
+    // The names of the node not bound in the walk or by `e`, the names of the
+    // values that it reaches (which their definitions bind), its functions.
+    const fns = new Set<string>();
+    const own = e.ops
+      .slice(1)
+      .map((x) => (isFunction(x, 'Limits') ? x.ops[0] : x));
+    const names = [...facts(e).names].filter(
+      (n) => !lookup(n) && !own.some((x) => isSymbol(x, n))
+    );
+    if (c !== undefined)
+      for (const n of [...names, ...calledNames(e, fns), ...fns])
+        if (
+          !options.vars?.includes(n) &&
+          (fns.has(n) || held(n)?.value !== undefined) &&
+          held(n)?.library !== true
+        )
+          b.captures.add(n);
     return c;
+  };
+  /** The factors of `x`: through a `Multiply`, a `Negate`, a `Sqrt`, a
+   *  `Root` and a `Power` of a number exponent. */
+  const factors = (x: Expression): Expression[] =>
+    isFunction(x) && ['Multiply', 'Negate', 'Sqrt'].includes(x.operator)
+      ? x.ops.flatMap(factors)
+      : isFunction(x, 'Root') || (isFunction(x, 'Power') && isNumber(x.ops[1]))
+        ? factors(x.ops[0])
+        : [x];
+  /** The factors of the divisors in `x` (the denominator of a `Divide`, the
+   *  base of a `Power` of a negative exponent) and of the value that a name
+   *  of one holds; also those of the body of each user function that `x`
+   *  calls that read none of its parameters. `always`: only the divisors
+   *  that every evaluation of `x` divides by (none in an arm of an `If` or
+   *  a `Which`, no base of a `Power` whose exponent is not a number). */
+  const divisors = (
+    x: Expression,
+    always = false,
+    out: Expression[] = [],
+    seen = new Set<object>()
+  ): Expression[] => {
+    if (!isFunction(x) || seen.has(x)) return out;
+    if (always && (x.operator === 'If' || x.operator === 'Which')) return out;
+    seen.add(x);
+    const user = userBinding(x as never)?.literal;
+    if (isFunction(user, 'Function')) {
+      const ps = user.ops.slice(1).map(parameterName);
+      for (const f of divisors(user.ops[0], always, [], seen))
+        if (![...facts(f).names].some((n) => ps.includes(n))) out.push(f);
+    }
+    const [p, q] = x.ops;
+    const d =
+      x.operator === 'Divide'
+        ? q
+        : x.operator === 'Power' &&
+            ((!always && isFunction(q, 'Negate')) || (isNumber(q) && q.re < 0))
+          ? p
+          : undefined;
+    for (const f of d === undefined ? [] : factors(d)) {
+      const v = isSymbol(f) ? f.valueDefinition?.value : undefined;
+      out.push(f, ...(v === undefined ? [] : factors(v)));
+    }
+    x.ops.forEach((op) => divisors(op, always, out, seen));
+    return out;
   };
   /** `c` reads a name, not its own parameter, that the walk binds other than
    *  as an input (an index, a local, a parameter) and that `e` does not
@@ -1407,25 +1472,27 @@ export function lower(
   };
   /** The names read by the values that `x` reaches: the body of each user
    *  function that it calls or names (other than its parameters) and each
-   *  expression that a name of it holds, through other such values. */
+   *  expression that a name of it holds, through other such values. `fns`:
+   *  the names of the user functions reached. */
   const calledNames = (
     x: Expression,
+    fns = new Set<string>(),
     out = new Set<string>(),
     seen = new Set<object>()
   ) => {
     if (seen.has(x) || !(isFunction(x) || isSymbol(x))) return out;
     seen.add(x);
-    const v =
-      userBinding(x as never)?.literal ??
-      (isSymbol(x) ? x.valueDefinition?.value : undefined);
+    const user = userBinding(x as never)?.literal;
+    if (user !== undefined) fns.add(isSymbol(x) ? x.symbol : x.operator);
+    const v = user ?? (isSymbol(x) ? x.valueDefinition?.value : undefined);
     if (v !== undefined && !seen.has(v)) {
       seen.add(v);
       const [body, ...ps] = isFunction(v, 'Function') ? v.ops : [v];
       const params = ps.map(parameterName);
       for (const n of facts(body).names) if (!params.includes(n)) out.add(n);
-      calledNames(body, out, seen);
+      calledNames(body, fns, out, seen);
     }
-    if (isFunction(x)) x.ops.forEach((op) => calledNames(op, out, seen));
+    if (isFunction(x)) x.ops.forEach((op) => calledNames(op, fns, out, seen));
     return out;
   };
 
@@ -2182,16 +2249,25 @@ export function lower(
   /** The interval mode: the pieces of the integral being lowered, and the
    *  function whose body holds it. */
   let quadrature: { n: number; fn?: string } | undefined;
-  /** The interval mode: the region of the closed form `c` of an integral,
-   *  or `undefined` when the lowering declines it, when it is not real,
-   *  and when it holds a loop or a call, whose function would stay defined
-   *  after the region is discarded. Its only effects are reads of `vars`
-   *  entries, which in the mode read the inputs object: they are not
-   *  counted. */
-  const closedRegion = (c: Expression | undefined): Region | undefined => {
-    if (c === undefined || facts(c).loop || !facts(c).slice) return undefined;
-    const r = trial(() => scalar(c), true);
-    return r && isSubLane(type(r.yields[0]).lane, 'real') ? r : undefined;
+  /** The region of the closed form that `ask()` gives for an integral, or
+   *  `undefined` when there is none, when `ask()` or the lowering declines,
+   *  when it is not real, and when it holds a loop or a call, whose function
+   *  would stay defined after the region is discarded. Its only effects are
+   *  reads of `vars` entries, which in the interval mode read the inputs
+   *  object: they are not counted there; `effects` is their number. */
+  const closedRegion = (ask: () => Expression | undefined) => {
+    let effects = 0;
+    const r = trial(() => {
+      const c = ask();
+      if (c === undefined || facts(c).loop || !facts(c).slice) return undefined;
+      const before = b.effects;
+      const v = scalar(c);
+      effects = b.effects - before;
+      return v;
+    }, true);
+    return r && isSubLane(type(r.yields[0]).lane, 'real')
+      ? Object.assign(r, { effects })
+      : undefined;
   };
   /** The region of the value that `f` lowers, which is not emitted, or
    *  `undefined` when `f` gives no value or declines; `b.effects` is
@@ -2254,7 +2330,7 @@ export function lower(
           (limits.nops < 3 ||
             limits.ops.slice(1).some((x) => isSymbol(x, 'Nothing')))))
     ) {
-      const c = intervalClosedForm(e.ops, options.varsTexts ?? {});
+      const c = integralClosedForm(e.ops, options.varsTexts ?? {});
       if (c === undefined)
         decline(
           e,
@@ -2284,6 +2360,62 @@ export function lower(
         : undefined;
     if (name === undefined || name === 'Nothing')
       decline(e, 'an integrand that is not a function of one variable');
+    // The routine binds the parameter of a literal, the interpreter the name
+    // of the `Limits`.
+    const variable = isFunction(limits, 'Limits') ? limits.ops[0] : undefined;
+    if (
+      literal &&
+      isSymbol(variable) &&
+      variable.symbol !== 'Nothing' &&
+      variable.symbol !== name
+    )
+      decline(
+        e,
+        'an integrand whose parameter is not the variable of the integral'
+      );
+    // JavaScript: the closed form that the engine gives at compile time, as
+    // on the existing compiler, with the guards of `closedForm()`; with none,
+    // a guard that fails or a closed form that does not lower, the
+    // quadrature. Not with a draw, which the engine would read once, and
+    // not for an indefinite integral, a function of its variable. Not when
+    // the closed form reads the variable that no bound reads (its value
+    // outside), or divides by a name that no divisor of `e` reads: it is
+    // NaN or loses its digits where the divisor is 0 or near it
+    // (`∫₀ˣ cos(a·t) dt` is `sin(a·x)/a`).
+    if (
+      options.javascript &&
+      e.operator === 'Integrate' &&
+      e.isPure &&
+      !bounds.some((x) => isSymbol(x, 'Nothing'))
+    ) {
+      const [vars, captures] = [options.varsTexts ?? {}, [...b.captures]];
+      const c = closedRegion(() => {
+        const c = closedForm(e, () => integralClosedForm(e.ops, vars));
+        const own = (x: Expression) => facts(x).names.has(name);
+        const allowed = divisors(e, true);
+        // A factor of a number in effect: its names are library constants.
+        const fixed = (f: Expression) =>
+          [...facts(f).names].every((n) => !lookup(n) && held(n)?.library);
+        const nan = (x: Expression): boolean =>
+          isNumber(x) ? x.isNaN === true : isFunction(x) && x.ops.some(nan);
+        return c === undefined ||
+          nan(c) ||
+          (own(c) && !bounds.some(own)) ||
+          divisors(c).some(
+            (f) => !fixed(f) && !allowed.some((g) => g.isSame(f))
+          )
+          ? undefined
+          : c;
+      });
+      if (c !== undefined) {
+        const effects = b.effects;
+        c.body.forEach((i) => b.emit(i));
+        b.effects = effects + c.effects;
+        return c.yields[0];
+      }
+      b.captures.clear();
+      captures.forEach((n) => b.captures.add(n));
+    }
     // The interval mode: the pieces of the partition, measured by the
     // outermost integral of a body (`intervalQuadratureSize()`) and taken
     // by every integral in its bounds and its integrand.
@@ -2325,7 +2457,7 @@ export function lower(
     // finds no pole (`print-interval.ts`); otherwise the enclosure.
     const closed =
       interval && e.operator === 'Integrate'
-        ? closedRegion(intervalClosedForm(e.ops, options.varsTexts ?? {}))
+        ? closedRegion(() => integralClosedForm(e.ops, options.varsTexts ?? {}))
         : undefined;
     const [out] = region(
       'integrate',

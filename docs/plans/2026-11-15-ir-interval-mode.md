@@ -1103,7 +1103,7 @@ the existing target, and without it a Gaussian from `-oo` to `x` was
 `entire` on 12 of 12 boxes and `∫ 0.1·√(t² + 1) dt` wider by a width ratio
 of about 5,000. With it, 7 of the 8 are equal on all 12 boxes. The closed
 form calls `closedFormIntegral()` of the shared layer through
-`intervalClosedForm()` (section 13 records the move that the deletion of
+`integralClosedForm()` (section 13 records the move that the deletion of
 that layer needs). It is not used with an angular unit other than radians,
 nor when the operands reach an `NIntegrate`, directly or through a
 definition; one that the lowering declines (`FresnelS`, `SinIntegral`: no

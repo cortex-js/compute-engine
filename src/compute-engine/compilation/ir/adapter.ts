@@ -38,6 +38,7 @@ import {
 } from '../run-async.js';
 import { broadcastStrideOfType } from '../compiler-type-facts.js';
 import { readsVarsObject } from '../vars-inputs.js';
+import { withIntegralClosedFormBudgets } from '../interval-quadrature.js';
 import { realPowerReconstructionDigits } from '../../numerics/real-power.js';
 import { ALL_PASSES } from './passes.js';
 import { throwUntypedInputs } from '../compile-admission.js';
@@ -241,9 +242,17 @@ export function sliceError(e: unknown): unknown {
  * The compilation of `expr` with the profile `'ir'`: a successful result,
  * or a throw of a `CompileDeclineError` (`'outside-profile'` for a decline,
  * `'compile-error'` for an internal error of the slice), or of a
- * cancellation.
+ * cancellation. The closed forms of its integrals take the antiderivative
+ * budget of the outermost compilation in progress.
  */
 export function compileWithIrProfile(
+  expr: Expression,
+  options: IrOptions | undefined
+): CompilationResult<'javascript'> {
+  return withIntegralClosedFormBudgets(() => compileIr(expr, options));
+}
+
+function compileIr(
   expr: Expression,
   options: IrOptions | undefined
 ): CompilationResult<'javascript'> {
