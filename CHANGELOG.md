@@ -54,6 +54,13 @@
 
 ### Bug Fixes
 
+- **`.N()` of a divergent infinite sum whose terms overflow in doubles
+  returns.** `\sum_{k=0}^{\infty} \frac{k + k!}{k!}`, whose terms tend to 1,
+  did not return in minutes: each term computed the exact `k!` up to
+  `k = 32768`. Such a sum now stays unevaluated after about 0.2 s. The walk
+  also stops at once when a term is not a finite number (a pole, such as
+  the term at `k = 0` of `\sum_{k=0}^{\infty} \frac{(k+1)!}{k! k^2}`), and
+  the sum stays unevaluated, as before.
 - **The LaTeX of a derivative of negative order reads back as the same
   expression.** `["Derivative", "f", -1]` gave `f^{(-1)}`, which reads back
   as `1/f` when `f` is not declared a function; it now gives

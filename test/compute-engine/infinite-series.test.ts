@@ -810,3 +810,84 @@ describe('the compiled walk of a numeric infinite sum (CE-326)', () => {
     expect(Math.abs(value.re - -0.16184106258611754)).toBeLessThan(1e-10);
   });
 });
+
+describe('the interpreter walk of a divergent infinite sum declines (CE-1301)', () => {
+  // Each term `(k + k!)/k!` tends to 1, so the sum has no finite value. The
+  // compiled walk overflows at `k = 171`, and the interpreter walk computed
+  // the exact `k!` of each term up to `k = 2¹⁵`: `.N()` did not end in
+  // minutes. It now stops after 512 steps, when the largest term of each
+  // doubling window falls more slowly than about 1/k, at a steady rate
+  // (`seemsDivergent` in `library/utils.ts`).
+  test('terms that tend to 1', () => {
+    const sum = ce.box([
+      'Sum',
+      ['Divide', ['Add', 'k', ['Factorial', 'k']], ['Factorial', 'k']],
+      ['Limits', 'k', 0, 'PositiveInfinity'],
+    ]);
+    expect(sum.N().operator).toBe('Sum');
+  });
+
+  test('terms that alternate and do not tend to 0', () => {
+    const sum = ce.box([
+      'Sum',
+      [
+        'Multiply',
+        ['Power', -1, 'k'],
+        ['Divide', ['Add', 'k', ['Factorial', 'k']], ['Factorial', 'k']],
+      ],
+      ['Limits', 'k', 0, 'PositiveInfinity'],
+    ]);
+    expect(sum.N().operator).toBe('Sum');
+  });
+
+  test('terms like 1/k', () => {
+    const sum = ce.box([
+      'Sum',
+      [
+        'Divide',
+        ['Factorial', ['Add', 'k', 1]],
+        ['Multiply', ['Factorial', 'k'], ['Power', 'k', 2]],
+      ],
+      ['Limits', 'k', 1, 'PositiveInfinity'],
+    ]);
+    expect(sum.N().operator).toBe('Sum');
+  });
+
+  test('a term at a pole stops the walk', () => {
+    // The term at `k = 0` divides by 0, and the partial sums are not
+    // finite numbers from there.
+    const sum = ce.box([
+      'Sum',
+      [
+        'Divide',
+        ['Factorial', ['Add', 'k', 1]],
+        ['Multiply', ['Factorial', 'k'], ['Power', 'k', 2]],
+      ],
+      ['Limits', 'k', 0, 'PositiveInfinity'],
+    ]);
+    expect(sum.N().operator).toBe('Sum');
+  });
+
+  test('a convergent series whose compiled terms overflow keeps its value', () => {
+    // Σ k!/k^k = 1.8798538621752585 (mpmath); `k^k` overflows in doubles at
+    // `k = 144`.
+    const value = ce.parse('\\sum_{k=1}^{\\infty} \\frac{k!}{k^k}').N();
+    expect(isNumber(value)).toBe(true);
+    expect(Math.abs(value.re - 1.8798538621752585)).toBeLessThan(1e-10);
+  });
+
+  test('a convergent series whose terms rise past k = 128 keeps its value', () => {
+    // Σ k²·0.99^k = 0.99·1.99/0.01³ = 1970100. The terms rise up to
+    // k = 199. The term at k = 0 is 0, so at machine precision the
+    // interpreter walk gives the value; above it, it does too.
+    const sum = ce.parse('\\sum_{k=0}^{\\infty} k^2 \\cdot 0.99^k');
+    const precision = ce.precision;
+    try {
+      ce.precision = 'machine';
+      expect(Math.abs(sum.N().re / 1970100 - 1)).toBeLessThan(1e-9);
+    } finally {
+      ce.precision = precision;
+    }
+    expect(Math.abs(sum.N().re / 1970100 - 1)).toBeLessThan(1e-9);
+  });
+});

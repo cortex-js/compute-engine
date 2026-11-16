@@ -3275,6 +3275,9 @@ function fittedExponentExtrapolation(x: readonly number[]): number | undefined {
  * The compiled body is used only when the body has no other free variable
  * and no side effect, as in `divergentInfiniteSum()`, and applies no
  * function of `JUMP_FUNCTIONS` (`jump-functions.ts`). (CE-326.)
+ * The interpreter walk stops from 512 steps when the series seems not to
+ * converge (`seemsDivergent()`), or at once when a partial sum is not a
+ * finite number. (CE-1301.)
  */
 export function acceleratedInfiniteSum(
   body: Expression | undefined,
@@ -3340,6 +3343,77 @@ type FastWalkReport = { unreliable: boolean; miss: number };
  * slower interpreter walk.
  */
 const NEAR_MISS_FACTOR = 1e6;
+
+/**
+ * The number of steps from which the interpreter walk of
+ * `extrapolatedInfiniteSum()` tests at each power of two that the series
+ * converges (`seemsDivergent()`). A term of the interpreter can cost more as
+ * the index grows: the exact `k!` of `(k + k!)/k!` has about 130,000
+ * digits at `k = 2¹⁵`, and a walk of that divergent series to `MAX_TERMS`
+ * did not end in minutes. The compiled walk overflows at `k = 171` and
+ * gives the series to the interpreter walk. With the test, the interpreter
+ * walk declines after 512 steps. (CE-1301.)
+ */
+const DIVERGENCE_TEST_FROM = 512;
+
+/**
+ * What the interpreter walk of `extrapolatedInfiniteSum()` records for
+ * window `m`, the steps after `2^(m−1)` up to `2^m`: `max[m]` is the largest
+ * absolute value of a step of the window, `sign[m]` the sign of every step
+ * of the window (0 when the signs differ or a step is 0), and `index[m]` the
+ * index of the series at the first step of the window whose absolute value
+ * is `max[m]` (`j` on the doubly-infinite walk; `NaN` when every step of the
+ * window is 0 or not a number).
+ */
+type WindowRecord = { max: number[]; sign: number[]; index: number[] };
+
+/**
+ * True when the series of `record` seems to have no sum after window `m`.
+ *
+ * The slope of window `t` is `ln(max[t]/max[t − 1]) / ln(|index[t]| /
+ * |index[t − 1]|)`: for terms like `c·k^p`, it is near `p`. The test is true
+ * when the slopes of windows `m − 2`, `m − 1` and `m` differ by at most 0.05,
+ * and each is at least −0.05, or each is at least −1.05 and every step of
+ * the three windows has the same sign. Then the terms do not tend to 0
+ * (`Σ (k + k!)/k!`, `Σ (−1)^k`), or they are of one sign and fall about as
+ * fast as `c/k` or slower (`Σ 1/k`, `Σ (k + 1)/k²`, whose slope is
+ * `−1 − 1/(k + 1)`), and the series diverges, if the slopes stay as they
+ * are. The margin of 0.05 below −1 declines `Σ 1/k^p` for `1 < p ≤ 1.05`,
+ * which converges too slowly for the walk to give its value anyway.
+ *
+ * The test reads only finitely many terms, so it can be true for a series
+ * that converges. That is a decline, never a wrong value. Terms that rise and
+ * then fall, as those of `Σ k²·0.99^k` do, have slopes that change from one
+ * window to the next, and do not fail the test; terms like `k²·r^k` with `r`
+ * nearer to 1 than about 0.9999 do, from 512 steps. The slopes of an
+ * alternating series whose terms tend to 0, such as `Σ (−1)^k/√k` or
+ * `Σ (−1)^k/ln(k)`, are below −0.05. A window whose largest step is 0 or
+ * not a number, or whose indexes do not grow by a factor of at least 1.01
+ * in absolute value, gives no slope, and the test is false.
+ */
+function seemsDivergent(record: WindowRecord, m: number): boolean {
+  const { max, sign, index } = record;
+  const slopes: number[] = [];
+  for (let t = m - 2; t <= m; t++) {
+    const a = Math.abs(index[t - 1]);
+    const b = Math.abs(index[t]);
+    if (
+      !(a > 0 && b >= 1.01 * a) ||
+      Math.sign(index[t]) !== Math.sign(index[t - 1])
+    )
+      return false;
+    if (!(max[t - 1] > 0 && max[t] > 0)) return false;
+    const slope = Math.log(max[t] / max[t - 1]) / Math.log(b / a);
+    if (!Number.isFinite(slope)) return false;
+    slopes.push(slope);
+  }
+  const low = Math.min(...slopes);
+  if (Math.max(...slopes) - low > 0.05) return false;
+  if (low >= -0.05) return true;
+  if (low < -1.05) return false;
+  const s = sign[m];
+  return s !== 0 && sign[m - 1] === s && sign[m - 2] === s;
+}
 
 /** The smallest positive normal double, `2^−1022`. */
 const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
@@ -3438,7 +3512,17 @@ function extrapolatedInfiniteSum(
   // The partial sums after 2ᵏ and 2ᵏ + 1 steps, for the fitted-exponent
   // extrapolation that runs when the two acceptances below fail.
   const tailSamples = new DoublingSamples();
+  // The windows of the interpreter walk, for its divergence test
+  // (`seemsDivergent`), and the largest step and the sign of the steps of
+  // the current window (`NaN` before its first step).
+  const windows: WindowRecord = { max: [], sign: [], index: [] };
+  let windowMax = 0;
+  let windowMaxIndex = NaN;
+  let windowSign = NaN;
+  // Set when the walk stops before its end, and the sum declines.
+  let declined = false;
   const partialSum = (x: number): number => {
+    if (declined) return NaN;
     let j = Math.round(x);
     if (j < 0) return 0;
     if (j > MAX_TERMS) {
@@ -3452,11 +3536,43 @@ function extrapolatedInfiniteSum(
       absAccum = 0;
     }
     for (let i = cachedJ + 1; i <= j; i++) {
-      cachedSum += termAt(i);
+      const step = termAt(i);
+      cachedSum += step;
       tailSamples.record(i, cachedSum);
       // The walk to `MAX_TERMS` honors the engine deadline (the extrapolation
       // does through its `deadline` option, this loop must on its own).
       if ((i & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+      // A partial sum that is not a finite number stays so, and every
+      // acceptance below then declines: the walk stops. A term at a pole
+      // (`(k + 1)!/(k!·k²)` at `k = 0`) made the interpreter walk run to
+      // `MAX_TERMS` before it declined.
+      if (!Number.isFinite(cachedSum)) {
+        declined = true;
+        return NaN;
+      }
+      // The interpreter walk stops when the series does not converge
+      // (`DIVERGENCE_TEST_FROM`).
+      if (compiled === undefined) {
+        if (Math.abs(step) > windowMax) {
+          windowMax = Math.abs(step);
+          windowMaxIndex = doubly ? i : termIndexAt(i);
+        }
+        const s = Math.sign(step);
+        windowSign = Number.isNaN(windowSign) || windowSign === s ? s : 0;
+        if (i >= 1 && (i & (i - 1)) === 0) {
+          const m = 31 - Math.clz32(i);
+          windows.max[m] = windowMax;
+          windows.sign[m] = windowSign;
+          windows.index[m] = windowMaxIndex;
+          windowMax = 0;
+          windowMaxIndex = NaN;
+          windowSign = NaN;
+          if (i >= DIVERGENCE_TEST_FROM && seemsDivergent(windows, m)) {
+            declined = true;
+            return NaN;
+          }
+        }
+      }
     }
     cachedJ = j;
     return cachedSum;
@@ -3473,6 +3589,7 @@ function extrapolatedInfiniteSum(
     maxeval: 64,
     deadline: ce._deadline,
   });
+  if (declined) return undefined;
 
   // On the symmetric doubly-infinite walk the ± pairing cancels
   // STRUCTURALLY, so a divergent series can present perfectly settled
