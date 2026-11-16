@@ -2351,12 +2351,75 @@ express, the form to consider is a typed operator row (a signature, an effect
 class and the name of a host function per target), which keeps the passes and
 the interval mode sound.
 
-Queue from here. Speed: the written-out sums on JavaScript (`unrollSums`,
-after a look at the four programs it slows), the closed form of an integral
-on JavaScript (G20), colour constants computed once, no tick for a counted
-loop of a constant number of passes; what is left of voronoi on the interval
-seam (3.0; `ce-interval` looks first). Breadth: `Break` and `Continue` as a
-carried flag (mine); lists through user functions (`ce-interval`, diagnosis
+Landed on 2026-11-16 (main `0203570bf85ed5b4218905ceef268c92e085eca7`,
+`ir/` 10,297 lines):
+
+| Commit | What | Corpus |
+| --- | --- | --- |
+| `e18d04999` (`ce-interval`, A) | a name whose value is an expression is lowered as that expression | JavaScript +54, GLSL +58, interval +19 |
+| `5e286aa36` (`ce-interval`, E) | a list argument of a user function of scalars is the function mapped over the list | JavaScript +17, GLSL +5, interval +14 |
+| `87f8cf3e7` (`ce-interval`) | the inlining budget goes with the site rule: 1,000 for `'loop'`, 4,000 for `'repeated'` | voronoi on the interval seam 2.83 to 0.72 times the existing target |
+| `15f8c6ca4` (`ce-interval`, D) | a function result with elements of no stated type takes the shape of its lowered body | JavaScript +16, GLSL +6, interval +15 |
+| `69c88b4e2` (G23) | `Break` and `Continue` in a `Loop`; no per-pass count when the passes cannot reach the budget | 8 programs (5 JavaScript at 0.83 to 1.02, 3 GLSL); burning-ship 1.2 to 1.8 down to 0.87 and 0.83 |
+| `fe117a62f` (`ce-interval`) | a recursive function with no declared result (the guess `real`, checked); recursion in the interval mode; `cse` merges equal calls of a function on a cycle | JavaScript +19, interval +19 |
+| `0203570bf` (G20) | on JavaScript an integral takes the engine's closed form, with guards on divisors | 8 programs, 230 to 25,000 times slower before, 0.48 to 0.99 after (implementer's timing) |
+
+User decisions of 2026-11-16, in the user's words: on native Desmos-style
+operators, above; on the accuracy of a closed form of an integral: "I'm OK
+with the larger relative error" (the error is absolute, about one unit in the
+last place of the larger antiderivative term; `∫ sin` from 0 to 1e-4 is 5.2e-9
+off in relative terms, the Gaussian distribution function at x = −9 gives 0
+for 1.13e-19; the existing compiler gives the same). To `ce-interval`,
+relayed by it: "Yes, agreed" to recursion in the interval mode in a bounded
+form (decision 6 of its design note reversed).
+
+Reviews: Codex has been out on a usage limit since the morning of
+2026-11-16 (until 2026-11-18). G20 and G23 had Codex's first round and two
+and three rounds of the Claude reviewer; their second Codex round is owed,
+and `ce-interval`'s D, recursion and later batches have one reviewer, with
+the Codex review recorded as owed by its session. The Claude rounds found,
+before landing: in G23 a count of passes dropped for a `Loop` that runs once
+per element; in G20 three ways a closed form with a divisor on a parameter is
+NaN or wrong where the integral is ordinary.
+
+The replay on `0203570bf` (three shards in parallel on a loaded machine, so
+the times are indicative): JavaScript 9,128 of the 9,474 programs the existing
+compiler compiles (96.3%; 95.2% on `641dbcc11`), GLSL 3,776 of 3,837 (98.4%;
+96.5%), 12,904 of 13,311 together (96.9%); 32 programs compile only with the
+profile; no internal error. Values, JavaScript: 8,933 same; 5 finite
+differences, none a defect of the profile (the four known ones and
+`neyret/h3k6mi4qfo` #7, a comparison at a boundary where the profile equals
+the interpreter and the existing compiler does not); 21 shape and 8 throws as
+before (lists of two lengths in the sample; a `Range` whose bound is NaN).
+Time per call: median 0.75 of the existing compiler; 185 programs above 1.5,
+15 above 3, 2 above 10 (both `neyret/vwbagbcerj`, a `Sum` of reads
+`At(h, Max(…))`, at 34 and 31 times: not looked at yet). Of the 185: 59 hold
+a colour (`AsOklab` of a name whose colour is now computed at each call: the
+open item "colour constants once"), 22 a sum, 1 an integral. Largest decline
+causes left, JavaScript: `Hsv` of a list 61, a list where a scalar is required
+57, an index that can be out of range (lists of booleans, complex, lists) 39,
+a list or tuple argument of `Apply` 29, `Repeat` 23, `Multiply` of a list of
+points and another shape 10, `Equal` of a list 10; GLSL: loops that can run
+more passes than the budget 36, a `vars` entry 15.
+
+Tycho has not yet run the current pipeline in place: its CE-1354 instrument
+ran on `fc5c8958b`, and the IR arm of row MK ran 0.192.0 with a decline going
+to the interpreter. The hook for a trial: compile with
+`{ ...options, profile: 'ir', fallback: false }` in a `try`, and on a throw
+compile as before. A joint build is planned from the head that has
+`ce-interval`'s next three batches (direct recursion that reads an input, its
+integral fixes on top of G20, the constant length of a function's result);
+whether to ask Tycho for one run or only announce the build is the user's
+choice.
+
+Queue from here (the items of this paragraph that the table above lists are
+done). Speed: colour constants computed once (59 programs), the two
+`vwbagbcerj` programs, the written-out sums on JavaScript (`unrollSums`,
+after a look at the four programs it slows), a build of a small constant
+length written out as a list of scalars outside GLSL (`ce-interval` measures
+4, 8, 16 on its seam first). Breadth: `Hsv` of a list (61), `Map` of several
+lists and `ListFrom` (the workaround forms of CE-1365), `Repeat` (23); lists
+through user functions (`ce-interval`, diagnosis
 `_TASKS/2026-11-15-interval-mode/breadth-diagnosis-lists.md`): a name whose
 value is an expression lowered where it is read (also the largest decline
 class on JavaScript and GLSL: 138 and 60 programs with the colour form), a
