@@ -8534,7 +8534,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             if (def && isValueDef(def)) isFirstValue(def.value, false);
           }
           if (declaresType || value === undefined) return;
-          if (isSymbol(symbolExpr) && value.type.matches('function')) {
+          if (isSymbol(symbolExpr) &&
+              ((isFunction(value, 'Function') && value.isValid) || value.type.matches('function'))) {
             typeFunctionTarget(ce, symbolExpr.symbol);
             return;
           }

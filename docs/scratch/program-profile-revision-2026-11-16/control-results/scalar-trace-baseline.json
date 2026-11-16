@@ -1,0 +1,129 @@
+{
+  "request": {
+    "root": "/private/tmp/program-only-accepted-baseline-20261115",
+    "workload": "scalar",
+    "mode": "scalar-trace"
+  },
+  "node": "v26.13.0",
+  "v8": "14.6.202.34-node.40",
+  "execArgv": [
+    "--trace-opt",
+    "--trace-deopt"
+  ],
+  "precision": 21,
+  "jit": "auto",
+  "controls": {
+    "program": {
+      "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+      "result": 10,
+      "checkDiagnostics": 0
+    }
+  },
+  "scalar": [
+    {
+      "id": "empty",
+      "n": 5000000,
+      "warmupCalls": 2000000,
+      "samples": [
+        {
+          "ms": 1.5013329999999883,
+          "nsPerCall": 0.30026659999999766,
+          "checksum": 7500000
+        },
+        {
+          "ms": 1.5045000000000073,
+          "nsPerCall": 0.30090000000000144,
+          "checksum": 7500000
+        }
+      ]
+    },
+    {
+      "id": "directNumber",
+      "n": 5000000,
+      "warmupCalls": 2000000,
+      "samples": [
+        {
+          "ms": 1.5376249999999914,
+          "nsPerCall": 0.30752499999999827,
+          "checksum": 21250000
+        },
+        {
+          "ms": 1.5527090000000214,
+          "nsPerCall": 0.3105418000000043,
+          "checksum": 21250000
+        }
+      ]
+    },
+    {
+      "id": "directBoxed",
+      "n": 5000000,
+      "warmupCalls": 2000000,
+      "samples": [
+        {
+          "ms": 10.429374999999993,
+          "nsPerCall": 2.0858749999999984,
+          "checksum": 21250000
+        },
+        {
+          "ms": 10.398791999999986,
+          "nsPerCall": 2.0797583999999976,
+          "checksum": 21250000
+        }
+      ]
+    },
+    {
+      "id": "cachedMixed",
+      "n": 5000000,
+      "warmupCalls": 2000000,
+      "samples": [
+        {
+          "ms": 10.338166999999999,
+          "nsPerCall": 2.0676333999999996,
+          "checksum": 21250000
+        },
+        {
+          "ms": 10.306125000000009,
+          "nsPerCall": 2.061225000000002,
+          "checksum": 21250000
+        }
+      ]
+    },
+    {
+      "id": "directSingle",
+      "n": 5000000,
+      "warmupCalls": 2000000,
+      "samples": [
+        {
+          "ms": 4.492625000000004,
+          "nsPerCall": 0.8985250000000008,
+          "checksum": 25000000
+        },
+        {
+          "ms": 8.942041000000017,
+          "nsPerCall": 1.7884082000000034,
+          "checksum": 25000000
+        }
+      ]
+    },
+    {
+      "id": "cachedSingle",
+      "n": 5000000,
+      "warmupCalls": 2000000,
+      "samples": [
+        {
+          "ms": 5.341583000000014,
+          "nsPerCall": 1.0683166000000028,
+          "checksum": 25000000
+        },
+        {
+          "ms": 5.301458000000025,
+          "nsPerCall": 1.060291600000005,
+          "checksum": 25000000
+        }
+      ]
+    }
+  ],
+  "scalarSink": 25000000,
+  "diagnosticTimingOnly": true,
+  "status": "ok"
+}

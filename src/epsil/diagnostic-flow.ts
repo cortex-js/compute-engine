@@ -84,8 +84,8 @@ export function diagnosticFlow(ce: ComputeEngine, program: Expression) {
     const binding = readBinding(node);
     const literal = binding !== undefined && isValueDef(binding) ? bindingFact(binding.value) : undefined;
     let args = node.ops.map((op) => fact(op) ?? op);
-    const split = splitNamedArguments(args);
-    if (split && hasNamedArguments(args) && literal !== undefined && isFunction(literal, 'Function')) {
+    if (literal !== undefined && isFunction(literal, 'Function') && hasNamedArguments(args)) {
+      const split = splitNamedArguments(args);
       const normalized = normalizeNamedArguments(ce, split, literal.type.type);
       if (normalized.kind === 'ok') args = normalized.ops.map((op) => ce.box(op));
       else if (normalized.kind === 'error') {
@@ -171,8 +171,10 @@ export function diagnosticFlow(ce: ComputeEngine, program: Expression) {
         else facts.delete(binding);
       }
     }
-    errors.set(statement, output);
-    if (output.length > 0) evidence.set(statement, currentEvidence);
+    if (output.length > 0) {
+      errors.set(statement, output);
+      evidence.set(statement, currentEvidence);
+    }
   }
   return {
     get: (statement: Expression) => errors.get(statement),

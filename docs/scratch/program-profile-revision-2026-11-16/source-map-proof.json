@@ -1,0 +1,646 @@
+[
+  {
+    "arm": "baseline",
+    "command": [
+      "node",
+      "/private/tmp/program-profile-revision-20261116/maps-baseline/scripts/build.mjs"
+    ],
+    "cwd": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+    "environment": {
+      "BUILD": "production"
+    },
+    "exitCode": 0,
+    "seconds": 0.5767219066619873,
+    "originalBuildScriptSha256": "c7f1062c731cf37787c2722143a98e405626d147d310b42189fa0b80279b82a5",
+    "auxiliaryBuildScriptSha256": "cd3230b6c6d54de3438336dce908474a06e80a89c52513c5e9c3149e46ebc448",
+    "change": "sourcemap external and private output paths only; package bytes identical; original outputs never written",
+    "matches": [
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/identities.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/identities.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/identities.js.map",
+        "originalSha256": "d460ad5132288c86a4a6be1c874101e7444e78ab30a8eed879a2ad379673f7d0",
+        "auxiliarySha256": "dccad5c5f482bfc9d394e7820affb8ddda33742b7c8d37709a1d04bf130427a4",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/runtime.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/runtime.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/runtime.js.map",
+        "originalSha256": "b6747e5064e1e291a3012e17d42cecf7c117bbe76d758fca76705f5eda5a9887",
+        "auxiliarySha256": "b6747e5064e1e291a3012e17d42cecf7c117bbe76d758fca76705f5eda5a9887",
+        "equal": true
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/core.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/core.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/core.js.map",
+        "originalSha256": "e54e7dd1228ff964127683c6b7c259ddb216c8a60e2e77d07da294efd3095aac",
+        "auxiliarySha256": "ee49baefc5853f040ebe2026efe16652f57c975587177bdf154010ccd08d476b",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/kernel-worker.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/kernel-worker.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/kernel-worker.js.map",
+        "originalSha256": "4011b85febc955165c81b56fa49f1e5dc83375cd11ee3850cbb283a25fe2b305",
+        "auxiliarySha256": "4011b85febc955165c81b56fa49f1e5dc83375cd11ee3850cbb283a25fe2b305",
+        "equal": true
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/math-json.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/math-json.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/math-json.js.map",
+        "originalSha256": "2598ec21f9a6206f3445e85982a254227b1d48cd67f15d24629a281bf2be3cc8",
+        "auxiliarySha256": "c90a6c76ad4407631d48781265ed86e262595365d5f79b4fdce0c9b40bf21126",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/compute-engine.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/compute-engine.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/compute-engine.js.map",
+        "originalSha256": "ed616e75ebbf0d0bdc0897b0f2cf724bec393da916011bb56c02540a1fb93a66",
+        "auxiliarySha256": "2b2698cd582ab21ba44249eba4057beea8ff1f1696d2ba0da239d96b645f44a3",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/interval.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/interval.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/interval.js.map",
+        "originalSha256": "1853a48176b3dcf3053ec66987b9622df9854642058035b52836844a0fdbc26d",
+        "auxiliarySha256": "6613dc493e581bc5a2408fb34ebe71e60a55b0c43f110c28aea8672b16c74b0c",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/latex-syntax.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/latex-syntax.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/latex-syntax.js.map",
+        "originalSha256": "83c04d9419bd1c7d137e120dbd420049a99cc743a68f870a85ac1cca9d4ebd69",
+        "auxiliarySha256": "ae1cf3f57b0f29f2edf64f69ee3dac0d39d8940f1fd04750803b21598556f0b7",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/numerics.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/numerics.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/numerics.js.map",
+        "originalSha256": "d0e218de89e020df053f34cd46cd4d267fc3c285c668a84232f4ab6bfec79187",
+        "auxiliarySha256": "4e0146c827edf5ac31f66e176e2496fa29bca57d3d058f43d4f16b3b1b5006f7",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/epsil.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/epsil.js.map",
+        "originalSha256": "25c3e36d22119205c6fb39a2b264475787379f88142a6a8a57bb35b51633b90c",
+        "auxiliarySha256": "7c0696be7b2f3cd640e104c15a25d1310eaff015e34b84789fd2ca2967b8d9dd",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/integration-rules.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/integration-rules.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/integration-rules.js.map",
+        "originalSha256": "bec946e5aaad54c8b510f94abec44e23e7637777f0376ebbf2f445efe8c04891",
+        "auxiliarySha256": "5557e65f1343cefb2a97c6d53b957b64d2c41faaa2a5814a01c3bcd91411584b",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/group-theory.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/group-theory.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/group-theory.js.map",
+        "originalSha256": "ca644d9296158e2aef864f939cb965de1bbae2d2ed8b7986fca94e01e4ab59e3",
+        "auxiliarySha256": "7445735e2ceaec78cb4548398613ee5b166306d7a941a891d8797ed7de263d57",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/compile.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/compile.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/compile.js.map",
+        "originalSha256": "77f90fd7113a32ac5d0f1e75a8290f469fefd390f52b8066856fffcbc3bbaf9f",
+        "auxiliarySha256": "f6dd65a1e6dba154908829952eea39f25b1eb5bd1a48cf1ad9191fecadfc5799",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/cli/epsil.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/cli/epsil.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/cli/epsil.js.map",
+        "originalSha256": "d7db4603c239fde1005d4e2cfe5515466850dc282a14d265e64c977571fde783",
+        "auxiliarySha256": "d7db4603c239fde1005d4e2cfe5515466850dc282a14d265e64c977571fde783",
+        "equal": true
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-GFBLKSEE.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-GFBLKSEE.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-GFBLKSEE.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "19681d1bfadb3e79adba4b952bd58e2d279548a3d074e66bd8023f3ea985d3f6",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-26CT3L6S.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-26CT3L6S.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-26CT3L6S.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "fc0a81c528998f73cd1c7f083d5e7cd357692a65fc6e4a8d7ef9426a175f4b84",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-K7E3HMFH.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-K7E3HMFH.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-K7E3HMFH.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "8b4ac013bda375bceaf2d7b889eb68ef11755c4928da65d3bfc7ee60cd819bb8",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-VJMIGGRW.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-VJMIGGRW.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-VJMIGGRW.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "cb1215bd90d8d648179a452ee5b329ec8555edd90dead4fdd07cecd40bede614",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RHO3X7BA.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-RHO3X7BA.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-RHO3X7BA.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "5693b20fa1467d279cea88c705d1249a405ed936337bec816b80cc037b5214d6",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-BVYCNS3V.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-BVYCNS3V.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-BVYCNS3V.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "e5cd7e1e9b12cc55f6601263a190d4bc1b4339fe57e82c121222f064d2bc2e9a",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-WN7OIJDD.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-WN7OIJDD.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-WN7OIJDD.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "65ad3e1d52e11ecea1a273ccdea09f9632e41bb59dc30dd97ab36d98d99e4473",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-QLRRSQ7Q.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-QLRRSQ7Q.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-QLRRSQ7Q.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "750bfbecc713c7512518abd26f1331be570439ae84a8d546824c905870fdd6d4",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-LFWQUTYW.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-LFWQUTYW.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-LFWQUTYW.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "f17de582cdd57b124019584c8dbf7face2c3b4f2156b3b771fa8b8e120008ea3",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-D74HG2FI.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-D74HG2FI.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-D74HG2FI.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "cd03ae9ef59b270f2a1386c900de852432b6c83644ce343e816d1024296c3613",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-IYGKBJED.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-IYGKBJED.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-IYGKBJED.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "46a60b855d7634a78b6b07d0f3c463f6bfded2752e43e78d2d7b8f07a40c9814",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-3SINRKME.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-3SINRKME.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-3SINRKME.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "3fe00c29ad1df708529dacead2822e4835096b3fd8871457183b782419ba3f76",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-UBH43NM5.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-UBH43NM5.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-UBH43NM5.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "12f1bbb0e7514280de926f578a765877e9c30184627b0b613e9a09cf15639541",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-6NCHLEBD.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-6NCHLEBD.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-6NCHLEBD.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "1418619edcc9dc1d3a002fc874f3b290d50a6fab1416019f47514ee447d9a7f6",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-4YZU7KW3.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-4YZU7KW3.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-4YZU7KW3.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "111a546e0ed6c4655510bdd3c26c114e6f6fe738bb1dc9b1dca96c20e423b0a4",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-ISHIQGNS.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-ISHIQGNS.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-ISHIQGNS.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "b7dc3934981b9f63024981ef94ed347e215155b19e56d59b8fd75ff6643cac9b",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-7FX44XML.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-7FX44XML.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-7FX44XML.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "83cd36079012d174cfef70abb180b5dc669712c19837ed1e5ac2c44b96d2d1e2",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RRXLPNPH.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-RRXLPNPH.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-RRXLPNPH.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "9e05ad5bb24d12e0cf661ec607e5b0af646acca595bc208701c1b8f5c66d4901",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-WHQQY7D6.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-WHQQY7D6.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-WHQQY7D6.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "c9409ee090efd73654f4ea09d0ecdcb37339b6e9188967dd470bb073c1c8c267",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-FJ3GKJW3.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-FJ3GKJW3.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-FJ3GKJW3.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "e9ce295adcf515534f45767d896078b1a42b41968454c369a60b8e321f27bb77",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-26FSXFPS.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-26FSXFPS.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-26FSXFPS.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "7afd4aa7e765c5d1f4c881dac1823e1ecba9892e973d0452920f64865c81ad10",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-OTYU5QYA.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-OTYU5QYA.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-OTYU5QYA.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "894eb2a5c384c1b3f5d067fba3c8dff0ca040fcb0c254285f1e1b09ff773c581",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-XLREUWBO.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-XLREUWBO.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-XLREUWBO.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "4d71c13cbaa3bc16b04f62fadd0155212d2b96f3cad10a1b56c1152acb9cf69d",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-VUCDA5RA.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-VUCDA5RA.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-VUCDA5RA.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "0c75aa76f192b0ebf7f10b47adde7c3a82445998a343b569702499210a3dd8e4",
+        "equal": false
+      }
+    ]
+  },
+  {
+    "arm": "candidate",
+    "command": [
+      "node",
+      "/private/tmp/program-profile-revision-20261116/maps-candidate/scripts/build.mjs"
+    ],
+    "cwd": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+    "environment": {
+      "BUILD": "production"
+    },
+    "exitCode": 0,
+    "seconds": 0.5939247608184814,
+    "originalBuildScriptSha256": "c7f1062c731cf37787c2722143a98e405626d147d310b42189fa0b80279b82a5",
+    "auxiliaryBuildScriptSha256": "c70a3fcee37dadb559af1e6a488b13f6ee8d1ea425220e96fc6f232454f3a066",
+    "change": "sourcemap external and private output paths only; package bytes identical; original outputs never written",
+    "matches": [
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/identities.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/identities.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/identities.js.map",
+        "originalSha256": "275f224ee54feb433677e2b5056f8026d0151ebf22c844325a7e2fd28da703e0",
+        "auxiliarySha256": "0de6ed4b51ffe458f210e439899ff7bb657b0f80f28e2edf426214b2c21d4389",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/runtime.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/runtime.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/runtime.js.map",
+        "originalSha256": "b6747e5064e1e291a3012e17d42cecf7c117bbe76d758fca76705f5eda5a9887",
+        "auxiliarySha256": "b6747e5064e1e291a3012e17d42cecf7c117bbe76d758fca76705f5eda5a9887",
+        "equal": true
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/core.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/core.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/core.js.map",
+        "originalSha256": "48e4aef20958bad6c96e67e94b4bdde4c608689fda6dd591f986bd077729b426",
+        "auxiliarySha256": "8e5e0b174eac9f6bafee8227e2a7412475e269b12c5d94860aaa9b1f90b71746",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/kernel-worker.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/kernel-worker.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/kernel-worker.js.map",
+        "originalSha256": "4011b85febc955165c81b56fa49f1e5dc83375cd11ee3850cbb283a25fe2b305",
+        "auxiliarySha256": "4011b85febc955165c81b56fa49f1e5dc83375cd11ee3850cbb283a25fe2b305",
+        "equal": true
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/math-json.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/math-json.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/math-json.js.map",
+        "originalSha256": "2598ec21f9a6206f3445e85982a254227b1d48cd67f15d24629a281bf2be3cc8",
+        "auxiliarySha256": "39407126085d5b298fb539eeb88d39c4add684de191d69e8d9933dee1c4a816e",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/compute-engine.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/compute-engine.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/compute-engine.js.map",
+        "originalSha256": "01343c0ad7006a30fc5a2751125a9ea1d820f28d6906761e6e47eba6cfbcb962",
+        "auxiliarySha256": "f86e61a91fbc5bbbb145618ede1b7896fe55cc93057d1650391ed5c10993a7c2",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/interval.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/interval.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/interval.js.map",
+        "originalSha256": "1853a48176b3dcf3053ec66987b9622df9854642058035b52836844a0fdbc26d",
+        "auxiliarySha256": "a218c2434d34619b2bd99e8806c85cf8350c44b838000a370a7fce210c04d0bb",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/latex-syntax.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/latex-syntax.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/latex-syntax.js.map",
+        "originalSha256": "83c04d9419bd1c7d137e120dbd420049a99cc743a68f870a85ac1cca9d4ebd69",
+        "auxiliarySha256": "2f10819040ed2fe792ce631dead041df0ab0f3f94a8048557dd916dbb21edbb6",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/numerics.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/numerics.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/numerics.js.map",
+        "originalSha256": "d0e218de89e020df053f34cd46cd4d267fc3c285c668a84232f4ab6bfec79187",
+        "auxiliarySha256": "2ac40bc9963f5711bfec6d516cb2d13277d92f12e69d6d3caf7b8f7835f3a508",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/epsil.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/epsil.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/epsil.js.map",
+        "originalSha256": "e0a4f6578a398845e34655b9305ee2a61804df6b11a89ded706e956cb9a13e61",
+        "auxiliarySha256": "b9c319fe28813f9e41f24149ab55f9added9218fb819f15a420c1ce4db00d31f",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/integration-rules.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/integration-rules.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/integration-rules.js.map",
+        "originalSha256": "26be9a32d3f6536c23930d126e34f89eca114ff96d3151f736b6ea3e66e3781c",
+        "auxiliarySha256": "460faabe2488721759b6f620908c412d0d59368ab7e974ada09264a60f7d2293",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/group-theory.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/group-theory.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/group-theory.js.map",
+        "originalSha256": "19297074f4d84ba9683872a48ae21b41f9d6daa762c5127e663d65edb9171eb0",
+        "auxiliarySha256": "58f670e8c6b1cf809fb3a6c5cc15a60f53d9df26c125d2cff98d3bdd07a915bc",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/compile.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/compile.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/compile.js.map",
+        "originalSha256": "bc845481bec50dea76bfb7b2b9e6d8f3098bf99666b467308e6c88751cc6c251",
+        "auxiliarySha256": "33475b1996fdd962af49363a7f59577d72cae5759ff0354fbcb06de0d1d48b80",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/cli/epsil.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/cli/epsil.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/cli/epsil.js.map",
+        "originalSha256": "4518a918c762ff8bffc21bd83f10ffb5447825b0e2e599cdaf42b7c7a4fa2eea",
+        "auxiliarySha256": "4518a918c762ff8bffc21bd83f10ffb5447825b0e2e599cdaf42b7c7a4fa2eea",
+        "equal": true
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-ORPJPOLR.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ORPJPOLR.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ORPJPOLR.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "cd4c76baa761d317f687e629c340bb075bd03741524b90fa369d25ec0301c8b1",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-TEPTGRB5.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-TEPTGRB5.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-TEPTGRB5.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "628b4c360c1a1284ad1320337ae6cd6317f462b9aa541b67bd3711d8fbb38b9f",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-G7K2FGBK.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-G7K2FGBK.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-G7K2FGBK.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "12f1bbb0e7514280de926f578a765877e9c30184627b0b613e9a09cf15639541",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-CHUF2T66.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-CHUF2T66.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-CHUF2T66.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "7a89fdcdf477f670d89e986afdfdb04f4e4c88d7674ede6f490f9f1a887c96fb",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-BW6C3E2P.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-BW6C3E2P.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-BW6C3E2P.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "31087c0e4c1eb63a0186363cf1f9e6cfb18c90fa399da95930ff65d758fc549e",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-SG5UDKJR.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-SG5UDKJR.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-SG5UDKJR.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "46ad98e6c673cf1c5b17a8488abc0277d6f978b8a14a2af64fd2aa89b1cc82c6",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-X3X7IAGA.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-X3X7IAGA.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-X3X7IAGA.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "eb9a138266376356a93e7f73b7081325dfa445f1be4527bae2bc93ade743785b",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-ZBI6BX4U.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZBI6BX4U.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZBI6BX4U.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "268f79b2a57d3be6ddf6ec9fa979c36b7cfb16eaae67e690bdc1c21232c50e41",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-M2UF62S4.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-M2UF62S4.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-M2UF62S4.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "1418619edcc9dc1d3a002fc874f3b290d50a6fab1416019f47514ee447d9a7f6",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-IYZ66ZZT.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-IYZ66ZZT.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-IYZ66ZZT.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "cb1215bd90d8d648179a452ee5b329ec8555edd90dead4fdd07cecd40bede614",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-R4CDAFFN.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-R4CDAFFN.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-R4CDAFFN.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "f773adbe8414a8af1a545a1638974622f357d5bf66846d6dca6809857c901264",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-BWIM422I.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-BWIM422I.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-BWIM422I.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "a3afbb6c0b7979d4cc9787bef462185fc9e6e98fadf2314205c10754919e84bb",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-4T6VNXXN.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-4T6VNXXN.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-4T6VNXXN.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "f0962c52676ce288ef6feca1464fa5ba736f407dae59d0479b9338178c6d1ad4",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-ZEJFRFYS.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZEJFRFYS.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZEJFRFYS.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "65ad3e1d52e11ecea1a273ccdea09f9632e41bb59dc30dd97ab36d98d99e4473",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-ZCRTNPI6.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZCRTNPI6.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZCRTNPI6.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "14ebb937abbd08ac9245f17a6d26464128f8e3480eac7554dff10e1baf68cf6f",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-65LAJMF5.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-65LAJMF5.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-65LAJMF5.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "aeb9960762eb55ac8f837e88f20a99f94f1d3606def2364f85d8ab4d0fb2aa9b",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-ZHKBAEJN.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZHKBAEJN.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZHKBAEJN.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "d4bfb3345e65bfb1831c91267a7693bcd6240ae7e87437e90d2cbb6efa5e2c08",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-Z57FNHQO.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-Z57FNHQO.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-Z57FNHQO.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "e0cee14407ac1dc3d09bfe93cb35cf14952823c59c483d16148574f9541036dc",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-T4CF4I6Y.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-T4CF4I6Y.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-T4CF4I6Y.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "3fe00c29ad1df708529dacead2822e4835096b3fd8871457183b782419ba3f76",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-TMP4WIEM.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-TMP4WIEM.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-TMP4WIEM.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "4caa1c9fe0bcc67b1f74df75b1978dced9c92a707a299861f40ce8d2199a5fe9",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-YIWUDZPU.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-YIWUDZPU.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-YIWUDZPU.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "f0ef54ad12caecb00b03b59969b602f201d183daa9fde4fdab192dfe231c5970",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-VBEYVNA2.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-VBEYVNA2.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-VBEYVNA2.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "734fae3fed6c45426f9cfa08ce2eeb11ac8d561f422fee773a3ae2465e1c11fc",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-YYTGJVZK.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-YYTGJVZK.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-YYTGJVZK.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "419efa3c9556bf5d09b799c4c3f598ca9739408667590bda16394a08ada09adf",
+        "equal": false
+      },
+      {
+        "generated": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-ASOV4ELX.js",
+        "auxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ASOV4ELX.js",
+        "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ASOV4ELX.js.map",
+        "originalSha256": null,
+        "auxiliarySha256": "bc5646edc7e94576d6339efed8691dde79ec30a8e7969cdd32f8046957ef9076",
+        "equal": false
+      }
+    ]
+  }
+]

@@ -1,0 +1,3050 @@
+{
+  "policy": "Only eight-character import chunk hashes restored. Complete restored JavaScript SHA must equal the original runtime SHA. No auxiliary code is executed. Sources/maps refer to identical frozen inputs.",
+  "arms": {
+    "baseline": {
+      "root": "/private/tmp/program-only-accepted-baseline-20261115/ce",
+      "reachable": [
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/compute-engine.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-KUU3JDRS.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-657EQHWB.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-BBAJQVCT.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-JFA6W3PB.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-YFMEVIQO.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-NYD74TAK.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-BH7KDNOD.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-4ULE43MK.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-HH4M7UFJ.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-WXQXMHMR.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-VVMF32NL.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-LOB32OVA.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-HDKJZIBJ.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-GUFMOF5G.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-YKJOBV62.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-43I5MNGX.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-IEYG22UC.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-XWOZSTMP.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-A5C32PMG.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-JANMW4U5.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-PLKWQV4Z.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-URDQU7LE.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RJ7RULGV.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-ED63EIFZ.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js"
+      ],
+      "matched": [
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-43I5MNGX.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-LOB32OVA.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-NYD74TAK.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-XWOZSTMP.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-KUU3JDRS.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-JANMW4U5.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-WXQXMHMR.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-YKJOBV62.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-HH4M7UFJ.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-HDKJZIBJ.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-BH7KDNOD.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-4ULE43MK.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-IEYG22UC.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-YFMEVIQO.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-JFA6W3PB.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-PLKWQV4Z.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-A5C32PMG.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-URDQU7LE.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-VVMF32NL.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-657EQHWB.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-GUFMOF5G.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-ED63EIFZ.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-BBAJQVCT.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RJ7RULGV.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/compute-engine.js",
+        "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js"
+      ],
+      "unmapped": []
+    },
+    "candidate": {
+      "root": "/private/tmp/program-only-accepted-candidate-20261115/ce",
+      "reachable": [
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/compute-engine.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-KUU3JDRS.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-657EQHWB.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-BBAJQVCT.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-JFA6W3PB.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-YFMEVIQO.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-NYD74TAK.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-BH7KDNOD.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-4ULE43MK.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-7JYRHBEG.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-ULT7PQZF.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-VVMF32NL.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-3YABDGG5.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-UC2CCIVN.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-GUFMOF5G.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-YKJOBV62.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-6KHZ6NEP.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-OWCIAFEM.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-XWOZSTMP.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-A5C32PMG.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-JANMW4U5.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-ZH4IO6P6.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-6C5FI6JC.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-IFZXA5AN.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-NYB5G6QR.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/epsil.js"
+      ],
+      "matched": [
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-JFA6W3PB.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-4ULE43MK.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-NYB5G6QR.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-GUFMOF5G.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-3YABDGG5.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-YKJOBV62.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-VVMF32NL.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-657EQHWB.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-KUU3JDRS.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-JANMW4U5.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-BH7KDNOD.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-6C5FI6JC.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-NYD74TAK.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-7JYRHBEG.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-A5C32PMG.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-YFMEVIQO.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-UC2CCIVN.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-IFZXA5AN.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-ULT7PQZF.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-ZH4IO6P6.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-XWOZSTMP.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-6KHZ6NEP.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-BBAJQVCT.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-OWCIAFEM.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/compute-engine.js",
+        "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/epsil.js"
+      ],
+      "unmapped": []
+    }
+  },
+  "mappings": [
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-43I5MNGX.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-43I5MNGX.js",
+      "originalSha256": "57ffd63828e14564b072016cad985efaa87df83ac7a033b738f76661bcc5e92c",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-26CT3L6S.js",
+      "rawAuxiliarySha256": "fc0a81c528998f73cd1c7f083d5e7cd357692a65fc6e4a8d7ef9426a175f4b84",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-26CT3L6S.js",
+      "verifiedAuxiliarySha256": "57ffd63828e14564b072016cad985efaa87df83ac7a033b738f76661bcc5e92c",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-26CT3L6S.js.map",
+      "mapSha256": "a3c51bdf4dfed7b44edb9144a13fad1989dbe0898de023a35727b41bb939e81a",
+      "restorations": [
+        {
+          "first": 58,
+          "last": 66,
+          "value": "D74HG2FI",
+          "specifier": "./chunk-D74HG2FI.js",
+          "restored": "YKJOBV62"
+        },
+        {
+          "first": 123,
+          "last": 131,
+          "value": "VUCDA5RA",
+          "specifier": "./chunk-VUCDA5RA.js",
+          "restored": "GUFMOF5G"
+        },
+        {
+          "first": 203,
+          "last": 211,
+          "value": "26FSXFPS",
+          "specifier": "./chunk-26FSXFPS.js",
+          "restored": "LOB32OVA"
+        },
+        {
+          "first": 320,
+          "last": 328,
+          "value": "UBH43NM5",
+          "specifier": "./chunk-UBH43NM5.js",
+          "restored": "VVMF32NL"
+        },
+        {
+          "first": 1270,
+          "last": 1278,
+          "value": "FJ3GKJW3",
+          "specifier": "./chunk-FJ3GKJW3.js",
+          "restored": "HH4M7UFJ"
+        },
+        {
+          "first": 1343,
+          "last": 1351,
+          "value": "IYGKBJED",
+          "specifier": "./chunk-IYGKBJED.js",
+          "restored": "4ULE43MK"
+        },
+        {
+          "first": 1554,
+          "last": 1562,
+          "value": "3SINRKME",
+          "specifier": "./chunk-3SINRKME.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 1602,
+          "last": 1610,
+          "value": "LFWQUTYW",
+          "specifier": "./chunk-LFWQUTYW.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 1771,
+          "last": 1779,
+          "value": "WN7OIJDD",
+          "specifier": "./chunk-WN7OIJDD.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 2017,
+          "last": 2025,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-LOB32OVA.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-LOB32OVA.js",
+      "originalSha256": "af2b52cad14a030ab94f98715b72e4be43684b08b895622e35c7abe364e6744a",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-26FSXFPS.js",
+      "rawAuxiliarySha256": "7afd4aa7e765c5d1f4c881dac1823e1ecba9892e973d0452920f64865c81ad10",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-26FSXFPS.js",
+      "verifiedAuxiliarySha256": "af2b52cad14a030ab94f98715b72e4be43684b08b895622e35c7abe364e6744a",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-26FSXFPS.js.map",
+      "mapSha256": "ca70caf913ddbcc633fc1315bf71d9d28478c6c63224826cfcb84452f769d249",
+      "restorations": [
+        {
+          "first": 112,
+          "last": 120,
+          "value": "FJ3GKJW3",
+          "specifier": "./chunk-FJ3GKJW3.js",
+          "restored": "HH4M7UFJ"
+        },
+        {
+          "first": 159,
+          "last": 167,
+          "value": "LFWQUTYW",
+          "specifier": "./chunk-LFWQUTYW.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 199,
+          "last": 207,
+          "value": "OTYU5QYA",
+          "specifier": "./chunk-OTYU5QYA.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 239,
+          "last": 247,
+          "value": "WN7OIJDD",
+          "specifier": "./chunk-WN7OIJDD.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 293,
+          "last": 301,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-NYD74TAK.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-NYD74TAK.js",
+      "originalSha256": "3fe00c29ad1df708529dacead2822e4835096b3fd8871457183b782419ba3f76",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-3SINRKME.js",
+      "rawAuxiliarySha256": "3fe00c29ad1df708529dacead2822e4835096b3fd8871457183b782419ba3f76",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-3SINRKME.js",
+      "verifiedAuxiliarySha256": "3fe00c29ad1df708529dacead2822e4835096b3fd8871457183b782419ba3f76",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-3SINRKME.js.map",
+      "mapSha256": "db784e5aad86fd509e4e0f863d4f512010810d6a5a93fc10a3eaf0454735cb91",
+      "restorations": []
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-XWOZSTMP.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-XWOZSTMP.js",
+      "originalSha256": "d77498b274cb71bd7aca7027c0441530c733f5b85f854e03d1b8e7fd5e0184db",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-4YZU7KW3.js",
+      "rawAuxiliarySha256": "111a546e0ed6c4655510bdd3c26c114e6f6fe738bb1dc9b1dca96c20e423b0a4",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-4YZU7KW3.js",
+      "verifiedAuxiliarySha256": "d77498b274cb71bd7aca7027c0441530c733f5b85f854e03d1b8e7fd5e0184db",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-4YZU7KW3.js.map",
+      "mapSha256": "6e0c033024018f47a28beddcc33000191e3a960f167e4245525dc7fe6f6330be",
+      "restorations": [
+        {
+          "first": 212,
+          "last": 220,
+          "value": "WN7OIJDD",
+          "specifier": "./chunk-WN7OIJDD.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 259,
+          "last": 267,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-KUU3JDRS.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-KUU3JDRS.js",
+      "originalSha256": "1418619edcc9dc1d3a002fc874f3b290d50a6fab1416019f47514ee447d9a7f6",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-6NCHLEBD.js",
+      "rawAuxiliarySha256": "1418619edcc9dc1d3a002fc874f3b290d50a6fab1416019f47514ee447d9a7f6",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-6NCHLEBD.js",
+      "verifiedAuxiliarySha256": "1418619edcc9dc1d3a002fc874f3b290d50a6fab1416019f47514ee447d9a7f6",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-6NCHLEBD.js.map",
+      "mapSha256": "4e9d64a3392df50cfa31618dd6426ab0dcdd7a9f50deed35ee41c8f3bac99f55",
+      "restorations": []
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-JANMW4U5.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-JANMW4U5.js",
+      "originalSha256": "f922379542089485fd913d6b9dd29261da52975c281ca2322dbb45c05913b1fc",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-7FX44XML.js",
+      "rawAuxiliarySha256": "83cd36079012d174cfef70abb180b5dc669712c19837ed1e5ac2c44b96d2d1e2",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-7FX44XML.js",
+      "verifiedAuxiliarySha256": "f922379542089485fd913d6b9dd29261da52975c281ca2322dbb45c05913b1fc",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-7FX44XML.js.map",
+      "mapSha256": "18c41f2fe19a4eb475d9c0047f19a964b25d7422f4128b4107119ce89c19ac75",
+      "restorations": [
+        {
+          "first": 116,
+          "last": 124,
+          "value": "4YZU7KW3",
+          "specifier": "./chunk-4YZU7KW3.js",
+          "restored": "XWOZSTMP"
+        },
+        {
+          "first": 165,
+          "last": 173,
+          "value": "D74HG2FI",
+          "specifier": "./chunk-D74HG2FI.js",
+          "restored": "YKJOBV62"
+        },
+        {
+          "first": 253,
+          "last": 261,
+          "value": "ISHIQGNS",
+          "specifier": "./chunk-ISHIQGNS.js",
+          "restored": "BH7KDNOD"
+        },
+        {
+          "first": 373,
+          "last": 381,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-WXQXMHMR.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-WXQXMHMR.js",
+      "originalSha256": "f8e834d04c99e989baa1e04b2349151c19f0e89640ff929714fae2b3d429387e",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-BVYCNS3V.js",
+      "rawAuxiliarySha256": "e5cd7e1e9b12cc55f6601263a190d4bc1b4339fe57e82c121222f064d2bc2e9a",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-BVYCNS3V.js",
+      "verifiedAuxiliarySha256": "f8e834d04c99e989baa1e04b2349151c19f0e89640ff929714fae2b3d429387e",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-BVYCNS3V.js.map",
+      "mapSha256": "5b7cad31f7abf5f9eab38680d059840e7add8a95d274cff94a9dad4cbfbadc4c",
+      "restorations": [
+        {
+          "first": 74,
+          "last": 82,
+          "value": "FJ3GKJW3",
+          "specifier": "./chunk-FJ3GKJW3.js",
+          "restored": "HH4M7UFJ"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-YKJOBV62.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-YKJOBV62.js",
+      "originalSha256": "71d897bb1700d7333eb646e6fd9f8e0c072f3d7c6d28484958f0d91d94608c48",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-D74HG2FI.js",
+      "rawAuxiliarySha256": "cd03ae9ef59b270f2a1386c900de852432b6c83644ce343e816d1024296c3613",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-D74HG2FI.js",
+      "verifiedAuxiliarySha256": "71d897bb1700d7333eb646e6fd9f8e0c072f3d7c6d28484958f0d91d94608c48",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-D74HG2FI.js.map",
+      "mapSha256": "1343a927a1c1f257924a2e98f232d0f3ee432b079a012a03fbbb93e4b8b86829",
+      "restorations": [
+        {
+          "first": 73,
+          "last": 81,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-HH4M7UFJ.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-HH4M7UFJ.js",
+      "originalSha256": "76483856d8e5fcdd0bd97e172f7ac28348ca60a5a61a57f274fc299c3b176cfe",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-FJ3GKJW3.js",
+      "rawAuxiliarySha256": "e9ce295adcf515534f45767d896078b1a42b41968454c369a60b8e321f27bb77",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-FJ3GKJW3.js",
+      "verifiedAuxiliarySha256": "76483856d8e5fcdd0bd97e172f7ac28348ca60a5a61a57f274fc299c3b176cfe",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-FJ3GKJW3.js.map",
+      "mapSha256": "58e2c177cf54e0c27795578058605525cdf85cdb3536b29a9bdc0aa461a82b1c",
+      "restorations": [
+        {
+          "first": 130,
+          "last": 138,
+          "value": "IYGKBJED",
+          "specifier": "./chunk-IYGKBJED.js",
+          "restored": "4ULE43MK"
+        },
+        {
+          "first": 187,
+          "last": 195,
+          "value": "ISHIQGNS",
+          "specifier": "./chunk-ISHIQGNS.js",
+          "restored": "BH7KDNOD"
+        },
+        {
+          "first": 1041,
+          "last": 1049,
+          "value": "3SINRKME",
+          "specifier": "./chunk-3SINRKME.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 1090,
+          "last": 1098,
+          "value": "LFWQUTYW",
+          "specifier": "./chunk-LFWQUTYW.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 1155,
+          "last": 1163,
+          "value": "OTYU5QYA",
+          "specifier": "./chunk-OTYU5QYA.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 1204,
+          "last": 1212,
+          "value": "WN7OIJDD",
+          "specifier": "./chunk-WN7OIJDD.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 1377,
+          "last": 1385,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        },
+        {
+          "first": 1434,
+          "last": 1442,
+          "value": "6NCHLEBD",
+          "specifier": "./chunk-6NCHLEBD.js",
+          "restored": "KUU3JDRS"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-HDKJZIBJ.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-HDKJZIBJ.js",
+      "originalSha256": "c2135ad2e75824780b44edb16adbfbeacc3e20d1a361346df6d60b2b8b1ffc90",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-GFBLKSEE.js",
+      "rawAuxiliarySha256": "19681d1bfadb3e79adba4b952bd58e2d279548a3d074e66bd8023f3ea985d3f6",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-GFBLKSEE.js",
+      "verifiedAuxiliarySha256": "c2135ad2e75824780b44edb16adbfbeacc3e20d1a361346df6d60b2b8b1ffc90",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-GFBLKSEE.js.map",
+      "mapSha256": "0dd19821b9ff979f3b2c3104c7ad50fa621d198a11470ed9658645bcf2090f51",
+      "restorations": [
+        {
+          "first": 66,
+          "last": 74,
+          "value": "26FSXFPS",
+          "specifier": "./chunk-26FSXFPS.js",
+          "restored": "LOB32OVA"
+        },
+        {
+          "first": 1002,
+          "last": 1010,
+          "value": "FJ3GKJW3",
+          "specifier": "./chunk-FJ3GKJW3.js",
+          "restored": "HH4M7UFJ"
+        },
+        {
+          "first": 1066,
+          "last": 1074,
+          "value": "IYGKBJED",
+          "specifier": "./chunk-IYGKBJED.js",
+          "restored": "4ULE43MK"
+        },
+        {
+          "first": 1595,
+          "last": 1603,
+          "value": "3SINRKME",
+          "specifier": "./chunk-3SINRKME.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 1703,
+          "last": 1711,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-BH7KDNOD.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-BH7KDNOD.js",
+      "originalSha256": "903ee39fb0150969a94b80b01334c5df92099cc4e5cb8e5c956f15b1f3a87d09",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-ISHIQGNS.js",
+      "rawAuxiliarySha256": "b7dc3934981b9f63024981ef94ed347e215155b19e56d59b8fd75ff6643cac9b",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-ISHIQGNS.js",
+      "verifiedAuxiliarySha256": "903ee39fb0150969a94b80b01334c5df92099cc4e5cb8e5c956f15b1f3a87d09",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-ISHIQGNS.js.map",
+      "mapSha256": "6e2927b2b863597853df883e726b059057f61c4128e365a40e7ffae9941f1647",
+      "restorations": [
+        {
+          "first": 73,
+          "last": 81,
+          "value": "3SINRKME",
+          "specifier": "./chunk-3SINRKME.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 127,
+          "last": 135,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-4ULE43MK.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-4ULE43MK.js",
+      "originalSha256": "400e797c029b610075ca9805ad706932c5fb9b2c58ae3eff8b96a9605052f4f9",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-IYGKBJED.js",
+      "rawAuxiliarySha256": "46a60b855d7634a78b6b07d0f3c463f6bfded2752e43e78d2d7b8f07a40c9814",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-IYGKBJED.js",
+      "verifiedAuxiliarySha256": "400e797c029b610075ca9805ad706932c5fb9b2c58ae3eff8b96a9605052f4f9",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-IYGKBJED.js.map",
+      "mapSha256": "2da6aa36e1bf21986a6b9d49f53438f72939ede8ec3285d7f5c7178793ca88ca",
+      "restorations": [
+        {
+          "first": 463,
+          "last": 471,
+          "value": "3SINRKME",
+          "specifier": "./chunk-3SINRKME.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 560,
+          "last": 568,
+          "value": "OTYU5QYA",
+          "specifier": "./chunk-OTYU5QYA.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 618,
+          "last": 626,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        },
+        {
+          "first": 849,
+          "last": 857,
+          "value": "6NCHLEBD",
+          "specifier": "./chunk-6NCHLEBD.js",
+          "restored": "KUU3JDRS"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-IEYG22UC.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-IEYG22UC.js",
+      "originalSha256": "15e2c9010afe86d30e1dd1af33010f347d16d3107571fbb1dccc0fb7eab67963",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-K7E3HMFH.js",
+      "rawAuxiliarySha256": "8b4ac013bda375bceaf2d7b889eb68ef11755c4928da65d3bfc7ee60cd819bb8",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-K7E3HMFH.js",
+      "verifiedAuxiliarySha256": "15e2c9010afe86d30e1dd1af33010f347d16d3107571fbb1dccc0fb7eab67963",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-K7E3HMFH.js.map",
+      "mapSha256": "0933fef13fc8ec9fcc97439bd157794cf712a39a34e88d5154ec051c0974bb63",
+      "restorations": [
+        {
+          "first": 101,
+          "last": 109,
+          "value": "26CT3L6S",
+          "specifier": "./chunk-26CT3L6S.js",
+          "restored": "43I5MNGX"
+        },
+        {
+          "first": 166,
+          "last": 174,
+          "value": "FJ3GKJW3",
+          "specifier": "./chunk-FJ3GKJW3.js",
+          "restored": "HH4M7UFJ"
+        },
+        {
+          "first": 206,
+          "last": 214,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-YFMEVIQO.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-YFMEVIQO.js",
+      "originalSha256": "b3c85df0db1b26ae44c0bb43717cb3ab14be8e90892928046b5c2589c269ab0f",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-LFWQUTYW.js",
+      "rawAuxiliarySha256": "f17de582cdd57b124019584c8dbf7face2c3b4f2156b3b771fa8b8e120008ea3",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-LFWQUTYW.js",
+      "verifiedAuxiliarySha256": "b3c85df0db1b26ae44c0bb43717cb3ab14be8e90892928046b5c2589c269ab0f",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-LFWQUTYW.js.map",
+      "mapSha256": "937eef05fe00fc951e2ba50430600227ea0ee6b3cfcfa2ced26c0e0f060b80bc",
+      "restorations": [
+        {
+          "first": 64,
+          "last": 72,
+          "value": "OTYU5QYA",
+          "specifier": "./chunk-OTYU5QYA.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 251,
+          "last": 259,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-JFA6W3PB.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-JFA6W3PB.js",
+      "originalSha256": "1a843903854577ce522d2c32e4c0ba89f57d2951e3f3c59a5689dfc53191c68e",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-OTYU5QYA.js",
+      "rawAuxiliarySha256": "894eb2a5c384c1b3f5d067fba3c8dff0ca040fcb0c254285f1e1b09ff773c581",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-OTYU5QYA.js",
+      "verifiedAuxiliarySha256": "1a843903854577ce522d2c32e4c0ba89f57d2951e3f3c59a5689dfc53191c68e",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-OTYU5QYA.js.map",
+      "mapSha256": "2b06675e2c4833207a0c65b4f9e55e2095626c1b90e6b53c0c9be7c62e61155b",
+      "restorations": [
+        {
+          "first": 65,
+          "last": 73,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        },
+        {
+          "first": 112,
+          "last": 120,
+          "value": "6NCHLEBD",
+          "specifier": "./chunk-6NCHLEBD.js",
+          "restored": "KUU3JDRS"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-PLKWQV4Z.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-PLKWQV4Z.js",
+      "originalSha256": "c97754ac823c959ffa1b84ee9c0a0ce7888b512920f56f66b6b6e96918cab0e1",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-QLRRSQ7Q.js",
+      "rawAuxiliarySha256": "750bfbecc713c7512518abd26f1331be570439ae84a8d546824c905870fdd6d4",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-QLRRSQ7Q.js",
+      "verifiedAuxiliarySha256": "c97754ac823c959ffa1b84ee9c0a0ce7888b512920f56f66b6b6e96918cab0e1",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-QLRRSQ7Q.js.map",
+      "mapSha256": "fc497a60e0655b62ab230c81f71eb265c15197db588388428b5d81fd983a9c4f",
+      "restorations": [
+        {
+          "first": 276,
+          "last": 284,
+          "value": "7FX44XML",
+          "specifier": "./chunk-7FX44XML.js",
+          "restored": "JANMW4U5"
+        },
+        {
+          "first": 658,
+          "last": 666,
+          "value": "RHO3X7BA",
+          "specifier": "./chunk-RHO3X7BA.js",
+          "restored": "A5C32PMG"
+        },
+        {
+          "first": 1464,
+          "last": 1472,
+          "value": "4YZU7KW3",
+          "specifier": "./chunk-4YZU7KW3.js",
+          "restored": "XWOZSTMP"
+        },
+        {
+          "first": 2256,
+          "last": 2264,
+          "value": "26CT3L6S",
+          "specifier": "./chunk-26CT3L6S.js",
+          "restored": "43I5MNGX"
+        },
+        {
+          "first": 2313,
+          "last": 2321,
+          "value": "D74HG2FI",
+          "specifier": "./chunk-D74HG2FI.js",
+          "restored": "YKJOBV62"
+        },
+        {
+          "first": 2364,
+          "last": 2372,
+          "value": "VUCDA5RA",
+          "specifier": "./chunk-VUCDA5RA.js",
+          "restored": "GUFMOF5G"
+        },
+        {
+          "first": 3236,
+          "last": 3244,
+          "value": "GFBLKSEE",
+          "specifier": "./chunk-GFBLKSEE.js",
+          "restored": "HDKJZIBJ"
+        },
+        {
+          "first": 3400,
+          "last": 3408,
+          "value": "26FSXFPS",
+          "specifier": "./chunk-26FSXFPS.js",
+          "restored": "LOB32OVA"
+        },
+        {
+          "first": 3476,
+          "last": 3484,
+          "value": "UBH43NM5",
+          "specifier": "./chunk-UBH43NM5.js",
+          "restored": "VVMF32NL"
+        },
+        {
+          "first": 3613,
+          "last": 3621,
+          "value": "BVYCNS3V",
+          "specifier": "./chunk-BVYCNS3V.js",
+          "restored": "WXQXMHMR"
+        },
+        {
+          "first": 10647,
+          "last": 10655,
+          "value": "FJ3GKJW3",
+          "specifier": "./chunk-FJ3GKJW3.js",
+          "restored": "HH4M7UFJ"
+        },
+        {
+          "first": 10835,
+          "last": 10843,
+          "value": "IYGKBJED",
+          "specifier": "./chunk-IYGKBJED.js",
+          "restored": "4ULE43MK"
+        },
+        {
+          "first": 11013,
+          "last": 11021,
+          "value": "ISHIQGNS",
+          "specifier": "./chunk-ISHIQGNS.js",
+          "restored": "BH7KDNOD"
+        },
+        {
+          "first": 12372,
+          "last": 12380,
+          "value": "3SINRKME",
+          "specifier": "./chunk-3SINRKME.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 12429,
+          "last": 12437,
+          "value": "LFWQUTYW",
+          "specifier": "./chunk-LFWQUTYW.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 12606,
+          "last": 12614,
+          "value": "OTYU5QYA",
+          "specifier": "./chunk-OTYU5QYA.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 13221,
+          "last": 13229,
+          "value": "WN7OIJDD",
+          "specifier": "./chunk-WN7OIJDD.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 13770,
+          "last": 13778,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        },
+        {
+          "first": 13872,
+          "last": 13880,
+          "value": "6NCHLEBD",
+          "specifier": "./chunk-6NCHLEBD.js",
+          "restored": "KUU3JDRS"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-A5C32PMG.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-A5C32PMG.js",
+      "originalSha256": "c580abe2dc58815c3ba1a6b4d51066afa393ad1617c51b5ddd5ce4bfc19ba325",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-RHO3X7BA.js",
+      "rawAuxiliarySha256": "5693b20fa1467d279cea88c705d1249a405ed936337bec816b80cc037b5214d6",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-RHO3X7BA.js",
+      "verifiedAuxiliarySha256": "c580abe2dc58815c3ba1a6b4d51066afa393ad1617c51b5ddd5ce4bfc19ba325",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-RHO3X7BA.js.map",
+      "mapSha256": "1c6aba36fdc89f4beee811176eac5278d5dc297a383c054bee426c58b5618a98",
+      "restorations": [
+        {
+          "first": 66,
+          "last": 74,
+          "value": "LFWQUTYW",
+          "specifier": "./chunk-LFWQUTYW.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 131,
+          "last": 139,
+          "value": "OTYU5QYA",
+          "specifier": "./chunk-OTYU5QYA.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 211,
+          "last": 219,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-URDQU7LE.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-URDQU7LE.js",
+      "originalSha256": "5b8e157ea410703548d3a0f08eafc69c1884d315b08a43a1fd18000ca0027f7c",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-RRXLPNPH.js",
+      "rawAuxiliarySha256": "9e05ad5bb24d12e0cf661ec607e5b0af646acca595bc208701c1b8f5c66d4901",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-RRXLPNPH.js",
+      "verifiedAuxiliarySha256": "5b8e157ea410703548d3a0f08eafc69c1884d315b08a43a1fd18000ca0027f7c",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-RRXLPNPH.js.map",
+      "mapSha256": "d861a2cc569c7f6ff3a5cbbb7f6f06f4d7b276c9d705346b47979e98c4ed0f22",
+      "restorations": [
+        {
+          "first": 1115,
+          "last": 1123,
+          "value": "QLRRSQ7Q",
+          "specifier": "./chunk-QLRRSQ7Q.js",
+          "restored": "PLKWQV4Z"
+        },
+        {
+          "first": 1156,
+          "last": 1164,
+          "value": "7FX44XML",
+          "specifier": "./chunk-7FX44XML.js",
+          "restored": "JANMW4U5"
+        },
+        {
+          "first": 1197,
+          "last": 1205,
+          "value": "BVYCNS3V",
+          "specifier": "./chunk-BVYCNS3V.js",
+          "restored": "WXQXMHMR"
+        },
+        {
+          "first": 1387,
+          "last": 1395,
+          "value": "FJ3GKJW3",
+          "specifier": "./chunk-FJ3GKJW3.js",
+          "restored": "HH4M7UFJ"
+        },
+        {
+          "first": 1533,
+          "last": 1541,
+          "value": "3SINRKME",
+          "specifier": "./chunk-3SINRKME.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 1582,
+          "last": 1590,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-VVMF32NL.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-VVMF32NL.js",
+      "originalSha256": "12f1bbb0e7514280de926f578a765877e9c30184627b0b613e9a09cf15639541",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-UBH43NM5.js",
+      "rawAuxiliarySha256": "12f1bbb0e7514280de926f578a765877e9c30184627b0b613e9a09cf15639541",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-UBH43NM5.js",
+      "verifiedAuxiliarySha256": "12f1bbb0e7514280de926f578a765877e9c30184627b0b613e9a09cf15639541",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-UBH43NM5.js.map",
+      "mapSha256": "8bcfa529201ebe0f5faab696652c4d0153756af5e1104bc5aab4298eeb63ba6b",
+      "restorations": []
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-657EQHWB.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-657EQHWB.js",
+      "originalSha256": "cb1215bd90d8d648179a452ee5b329ec8555edd90dead4fdd07cecd40bede614",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-VJMIGGRW.js",
+      "rawAuxiliarySha256": "cb1215bd90d8d648179a452ee5b329ec8555edd90dead4fdd07cecd40bede614",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-VJMIGGRW.js",
+      "verifiedAuxiliarySha256": "cb1215bd90d8d648179a452ee5b329ec8555edd90dead4fdd07cecd40bede614",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-VJMIGGRW.js.map",
+      "mapSha256": "7891c4889593e9a08b547fabb715939077dd127c1783ea51eebfd4d46abdc0b0",
+      "restorations": []
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-GUFMOF5G.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-GUFMOF5G.js",
+      "originalSha256": "fac650eeee850d8bc6ac9e703004a31b98d0d6a84c9663f610bc86089bf01d8a",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-VUCDA5RA.js",
+      "rawAuxiliarySha256": "0c75aa76f192b0ebf7f10b47adde7c3a82445998a343b569702499210a3dd8e4",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-VUCDA5RA.js",
+      "verifiedAuxiliarySha256": "fac650eeee850d8bc6ac9e703004a31b98d0d6a84c9663f610bc86089bf01d8a",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-VUCDA5RA.js.map",
+      "mapSha256": "bdc9fc1b25bdde3e9d360e558081232acb5ebca616eace1fab3b49d0447e8357",
+      "restorations": [
+        {
+          "first": 132,
+          "last": 140,
+          "value": "UBH43NM5",
+          "specifier": "./chunk-UBH43NM5.js",
+          "restored": "VVMF32NL"
+        },
+        {
+          "first": 212,
+          "last": 220,
+          "value": "LFWQUTYW",
+          "specifier": "./chunk-LFWQUTYW.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 276,
+          "last": 284,
+          "value": "OTYU5QYA",
+          "specifier": "./chunk-OTYU5QYA.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 332,
+          "last": 340,
+          "value": "WN7OIJDD",
+          "specifier": "./chunk-WN7OIJDD.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 388,
+          "last": 396,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-ED63EIFZ.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-ED63EIFZ.js",
+      "originalSha256": "710e6574ae8dddafbd518b22883e1fbf88d3992fd4960f00b305038e789f6b17",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-WHQQY7D6.js",
+      "rawAuxiliarySha256": "c9409ee090efd73654f4ea09d0ecdcb37339b6e9188967dd470bb073c1c8c267",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-WHQQY7D6.js",
+      "verifiedAuxiliarySha256": "710e6574ae8dddafbd518b22883e1fbf88d3992fd4960f00b305038e789f6b17",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-WHQQY7D6.js.map",
+      "mapSha256": "baf067b7a929833c4648e5b1ad117e33c95cd3e34181382e75da7e2991c783dc",
+      "restorations": [
+        {
+          "first": 85,
+          "last": 93,
+          "value": "XLREUWBO",
+          "specifier": "./chunk-XLREUWBO.js",
+          "restored": "RJ7RULGV"
+        },
+        {
+          "first": 125,
+          "last": 133,
+          "value": "RRXLPNPH",
+          "specifier": "./chunk-RRXLPNPH.js",
+          "restored": "URDQU7LE"
+        },
+        {
+          "first": 262,
+          "last": 270,
+          "value": "FJ3GKJW3",
+          "specifier": "./chunk-FJ3GKJW3.js",
+          "restored": "HH4M7UFJ"
+        },
+        {
+          "first": 309,
+          "last": 317,
+          "value": "IYGKBJED",
+          "specifier": "./chunk-IYGKBJED.js",
+          "restored": "4ULE43MK"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-BBAJQVCT.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-BBAJQVCT.js",
+      "originalSha256": "65ad3e1d52e11ecea1a273ccdea09f9632e41bb59dc30dd97ab36d98d99e4473",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-WN7OIJDD.js",
+      "rawAuxiliarySha256": "65ad3e1d52e11ecea1a273ccdea09f9632e41bb59dc30dd97ab36d98d99e4473",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-WN7OIJDD.js",
+      "verifiedAuxiliarySha256": "65ad3e1d52e11ecea1a273ccdea09f9632e41bb59dc30dd97ab36d98d99e4473",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-WN7OIJDD.js.map",
+      "mapSha256": "eaaf4283d94908e898c2639597897ab63fbc863dc418573c3c8dd3365f18926b",
+      "restorations": []
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RJ7RULGV.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RJ7RULGV.js",
+      "originalSha256": "f1b2e6884fbca4260f84dd2dcdb9c4cb9ebf4b82bb792b43a53bad880e6da426",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-XLREUWBO.js",
+      "rawAuxiliarySha256": "4d71c13cbaa3bc16b04f62fadd0155212d2b96f3cad10a1b56c1152acb9cf69d",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/chunks/chunk-XLREUWBO.js",
+      "verifiedAuxiliarySha256": "f1b2e6884fbca4260f84dd2dcdb9c4cb9ebf4b82bb792b43a53bad880e6da426",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/chunks/chunk-XLREUWBO.js.map",
+      "mapSha256": "269264f095dea43bb7148d6c38ec96e6610f4035b163fe08845f5f3526a77d5c",
+      "restorations": [
+        {
+          "first": 1035,
+          "last": 1043,
+          "value": "QLRRSQ7Q",
+          "specifier": "./chunk-QLRRSQ7Q.js",
+          "restored": "PLKWQV4Z"
+        },
+        {
+          "first": 1092,
+          "last": 1100,
+          "value": "RHO3X7BA",
+          "specifier": "./chunk-RHO3X7BA.js",
+          "restored": "A5C32PMG"
+        },
+        {
+          "first": 1141,
+          "last": 1149,
+          "value": "K7E3HMFH",
+          "specifier": "./chunk-K7E3HMFH.js",
+          "restored": "IEYG22UC"
+        },
+        {
+          "first": 1418,
+          "last": 1426,
+          "value": "26CT3L6S",
+          "specifier": "./chunk-26CT3L6S.js",
+          "restored": "43I5MNGX"
+        },
+        {
+          "first": 1459,
+          "last": 1467,
+          "value": "VUCDA5RA",
+          "specifier": "./chunk-VUCDA5RA.js",
+          "restored": "GUFMOF5G"
+        },
+        {
+          "first": 1534,
+          "last": 1542,
+          "value": "GFBLKSEE",
+          "specifier": "./chunk-GFBLKSEE.js",
+          "restored": "HDKJZIBJ"
+        },
+        {
+          "first": 1598,
+          "last": 1606,
+          "value": "26FSXFPS",
+          "specifier": "./chunk-26FSXFPS.js",
+          "restored": "LOB32OVA"
+        },
+        {
+          "first": 3078,
+          "last": 3086,
+          "value": "FJ3GKJW3",
+          "specifier": "./chunk-FJ3GKJW3.js",
+          "restored": "HH4M7UFJ"
+        },
+        {
+          "first": 3198,
+          "last": 3206,
+          "value": "IYGKBJED",
+          "specifier": "./chunk-IYGKBJED.js",
+          "restored": "4ULE43MK"
+        },
+        {
+          "first": 3255,
+          "last": 3263,
+          "value": "ISHIQGNS",
+          "specifier": "./chunk-ISHIQGNS.js",
+          "restored": "BH7KDNOD"
+        },
+        {
+          "first": 3528,
+          "last": 3536,
+          "value": "3SINRKME",
+          "specifier": "./chunk-3SINRKME.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 3583,
+          "last": 3591,
+          "value": "LFWQUTYW",
+          "specifier": "./chunk-LFWQUTYW.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 3672,
+          "last": 3680,
+          "value": "OTYU5QYA",
+          "specifier": "./chunk-OTYU5QYA.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 3713,
+          "last": 3721,
+          "value": "WN7OIJDD",
+          "specifier": "./chunk-WN7OIJDD.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 3940,
+          "last": 3948,
+          "value": "VJMIGGRW",
+          "specifier": "./chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        },
+        {
+          "first": 3989,
+          "last": 3997,
+          "value": "6NCHLEBD",
+          "specifier": "./chunk-6NCHLEBD.js",
+          "restored": "KUU3JDRS"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/compute-engine.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/compute-engine.js",
+      "originalSha256": "ed616e75ebbf0d0bdc0897b0f2cf724bec393da916011bb56c02540a1fb93a66",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/compute-engine.js",
+      "rawAuxiliarySha256": "2b2698cd582ab21ba44249eba4057beea8ff1f1696d2ba0da239d96b645f44a3",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/compute-engine.js",
+      "verifiedAuxiliarySha256": "ed616e75ebbf0d0bdc0897b0f2cf724bec393da916011bb56c02540a1fb93a66",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/compute-engine.js.map",
+      "mapSha256": "469ed1890831a1ffcb6f7b77d3554ca5927ed23eaa3bb8371a82a13b1f487121",
+      "restorations": [
+        {
+          "first": 73,
+          "last": 81,
+          "value": "WHQQY7D6",
+          "specifier": "./chunks/chunk-WHQQY7D6.js",
+          "restored": "ED63EIFZ"
+        },
+        {
+          "first": 222,
+          "last": 230,
+          "value": "XLREUWBO",
+          "specifier": "./chunks/chunk-XLREUWBO.js",
+          "restored": "RJ7RULGV"
+        },
+        {
+          "first": 278,
+          "last": 286,
+          "value": "RRXLPNPH",
+          "specifier": "./chunks/chunk-RRXLPNPH.js",
+          "restored": "URDQU7LE"
+        },
+        {
+          "first": 366,
+          "last": 374,
+          "value": "QLRRSQ7Q",
+          "specifier": "./chunks/chunk-QLRRSQ7Q.js",
+          "restored": "PLKWQV4Z"
+        },
+        {
+          "first": 413,
+          "last": 421,
+          "value": "7FX44XML",
+          "specifier": "./chunks/chunk-7FX44XML.js",
+          "restored": "JANMW4U5"
+        },
+        {
+          "first": 448,
+          "last": 456,
+          "value": "RHO3X7BA",
+          "specifier": "./chunks/chunk-RHO3X7BA.js",
+          "restored": "A5C32PMG"
+        },
+        {
+          "first": 483,
+          "last": 491,
+          "value": "4YZU7KW3",
+          "specifier": "./chunks/chunk-4YZU7KW3.js",
+          "restored": "XWOZSTMP"
+        },
+        {
+          "first": 518,
+          "last": 526,
+          "value": "K7E3HMFH",
+          "specifier": "./chunks/chunk-K7E3HMFH.js",
+          "restored": "IEYG22UC"
+        },
+        {
+          "first": 553,
+          "last": 561,
+          "value": "26CT3L6S",
+          "specifier": "./chunks/chunk-26CT3L6S.js",
+          "restored": "43I5MNGX"
+        },
+        {
+          "first": 588,
+          "last": 596,
+          "value": "D74HG2FI",
+          "specifier": "./chunks/chunk-D74HG2FI.js",
+          "restored": "YKJOBV62"
+        },
+        {
+          "first": 623,
+          "last": 631,
+          "value": "VUCDA5RA",
+          "specifier": "./chunks/chunk-VUCDA5RA.js",
+          "restored": "GUFMOF5G"
+        },
+        {
+          "first": 658,
+          "last": 666,
+          "value": "GFBLKSEE",
+          "specifier": "./chunks/chunk-GFBLKSEE.js",
+          "restored": "HDKJZIBJ"
+        },
+        {
+          "first": 693,
+          "last": 701,
+          "value": "26FSXFPS",
+          "specifier": "./chunks/chunk-26FSXFPS.js",
+          "restored": "LOB32OVA"
+        },
+        {
+          "first": 728,
+          "last": 736,
+          "value": "UBH43NM5",
+          "specifier": "./chunks/chunk-UBH43NM5.js",
+          "restored": "VVMF32NL"
+        },
+        {
+          "first": 763,
+          "last": 771,
+          "value": "BVYCNS3V",
+          "specifier": "./chunks/chunk-BVYCNS3V.js",
+          "restored": "WXQXMHMR"
+        },
+        {
+          "first": 923,
+          "last": 931,
+          "value": "FJ3GKJW3",
+          "specifier": "./chunks/chunk-FJ3GKJW3.js",
+          "restored": "HH4M7UFJ"
+        },
+        {
+          "first": 1096,
+          "last": 1104,
+          "value": "IYGKBJED",
+          "specifier": "./chunks/chunk-IYGKBJED.js",
+          "restored": "4ULE43MK"
+        },
+        {
+          "first": 1131,
+          "last": 1139,
+          "value": "ISHIQGNS",
+          "specifier": "./chunks/chunk-ISHIQGNS.js",
+          "restored": "BH7KDNOD"
+        },
+        {
+          "first": 1166,
+          "last": 1174,
+          "value": "3SINRKME",
+          "specifier": "./chunks/chunk-3SINRKME.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 1201,
+          "last": 1209,
+          "value": "LFWQUTYW",
+          "specifier": "./chunks/chunk-LFWQUTYW.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 1236,
+          "last": 1244,
+          "value": "OTYU5QYA",
+          "specifier": "./chunks/chunk-OTYU5QYA.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 1271,
+          "last": 1279,
+          "value": "WN7OIJDD",
+          "specifier": "./chunks/chunk-WN7OIJDD.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 1325,
+          "last": 1333,
+          "value": "VJMIGGRW",
+          "specifier": "./chunks/chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        },
+        {
+          "first": 1360,
+          "last": 1368,
+          "value": "6NCHLEBD",
+          "specifier": "./chunks/chunk-6NCHLEBD.js",
+          "restored": "KUU3JDRS"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "original": "/private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js",
+      "originalSha256": "25c3e36d22119205c6fb39a2b264475787379f88142a6a8a57bb35b51633b90c",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/epsil.js",
+      "rawAuxiliarySha256": "7c0696be7b2f3cd640e104c15a25d1310eaff015e34b84789fd2ca2967b8d9dd",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-baseline/epsil.js",
+      "verifiedAuxiliarySha256": "25c3e36d22119205c6fb39a2b264475787379f88142a6a8a57bb35b51633b90c",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-baseline/dist/esm-min/epsil.js.map",
+      "mapSha256": "93262577dac3d4f10d04138c3095dc449e2fe1639e9ae1416cda2616c076fde1",
+      "restorations": [
+        {
+          "first": 65,
+          "last": 73,
+          "value": "WHQQY7D6",
+          "specifier": "./chunks/chunk-WHQQY7D6.js",
+          "restored": "ED63EIFZ"
+        },
+        {
+          "first": 100,
+          "last": 108,
+          "value": "XLREUWBO",
+          "specifier": "./chunks/chunk-XLREUWBO.js",
+          "restored": "RJ7RULGV"
+        },
+        {
+          "first": 135,
+          "last": 143,
+          "value": "RRXLPNPH",
+          "specifier": "./chunks/chunk-RRXLPNPH.js",
+          "restored": "URDQU7LE"
+        },
+        {
+          "first": 344,
+          "last": 352,
+          "value": "QLRRSQ7Q",
+          "specifier": "./chunks/chunk-QLRRSQ7Q.js",
+          "restored": "PLKWQV4Z"
+        },
+        {
+          "first": 379,
+          "last": 387,
+          "value": "7FX44XML",
+          "specifier": "./chunks/chunk-7FX44XML.js",
+          "restored": "JANMW4U5"
+        },
+        {
+          "first": 414,
+          "last": 422,
+          "value": "RHO3X7BA",
+          "specifier": "./chunks/chunk-RHO3X7BA.js",
+          "restored": "A5C32PMG"
+        },
+        {
+          "first": 449,
+          "last": 457,
+          "value": "4YZU7KW3",
+          "specifier": "./chunks/chunk-4YZU7KW3.js",
+          "restored": "XWOZSTMP"
+        },
+        {
+          "first": 484,
+          "last": 492,
+          "value": "K7E3HMFH",
+          "specifier": "./chunks/chunk-K7E3HMFH.js",
+          "restored": "IEYG22UC"
+        },
+        {
+          "first": 519,
+          "last": 527,
+          "value": "26CT3L6S",
+          "specifier": "./chunks/chunk-26CT3L6S.js",
+          "restored": "43I5MNGX"
+        },
+        {
+          "first": 554,
+          "last": 562,
+          "value": "D74HG2FI",
+          "specifier": "./chunks/chunk-D74HG2FI.js",
+          "restored": "YKJOBV62"
+        },
+        {
+          "first": 589,
+          "last": 597,
+          "value": "VUCDA5RA",
+          "specifier": "./chunks/chunk-VUCDA5RA.js",
+          "restored": "GUFMOF5G"
+        },
+        {
+          "first": 655,
+          "last": 663,
+          "value": "GFBLKSEE",
+          "specifier": "./chunks/chunk-GFBLKSEE.js",
+          "restored": "HDKJZIBJ"
+        },
+        {
+          "first": 690,
+          "last": 698,
+          "value": "26FSXFPS",
+          "specifier": "./chunks/chunk-26FSXFPS.js",
+          "restored": "LOB32OVA"
+        },
+        {
+          "first": 725,
+          "last": 733,
+          "value": "UBH43NM5",
+          "specifier": "./chunks/chunk-UBH43NM5.js",
+          "restored": "VVMF32NL"
+        },
+        {
+          "first": 760,
+          "last": 768,
+          "value": "BVYCNS3V",
+          "specifier": "./chunks/chunk-BVYCNS3V.js",
+          "restored": "WXQXMHMR"
+        },
+        {
+          "first": 1041,
+          "last": 1049,
+          "value": "FJ3GKJW3",
+          "specifier": "./chunks/chunk-FJ3GKJW3.js",
+          "restored": "HH4M7UFJ"
+        },
+        {
+          "first": 1153,
+          "last": 1161,
+          "value": "IYGKBJED",
+          "specifier": "./chunks/chunk-IYGKBJED.js",
+          "restored": "4ULE43MK"
+        },
+        {
+          "first": 1188,
+          "last": 1196,
+          "value": "ISHIQGNS",
+          "specifier": "./chunks/chunk-ISHIQGNS.js",
+          "restored": "BH7KDNOD"
+        },
+        {
+          "first": 1422,
+          "last": 1430,
+          "value": "3SINRKME",
+          "specifier": "./chunks/chunk-3SINRKME.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 1457,
+          "last": 1465,
+          "value": "LFWQUTYW",
+          "specifier": "./chunks/chunk-LFWQUTYW.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 1492,
+          "last": 1500,
+          "value": "OTYU5QYA",
+          "specifier": "./chunks/chunk-OTYU5QYA.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 1527,
+          "last": 1535,
+          "value": "WN7OIJDD",
+          "specifier": "./chunks/chunk-WN7OIJDD.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 1599,
+          "last": 1607,
+          "value": "VJMIGGRW",
+          "specifier": "./chunks/chunk-VJMIGGRW.js",
+          "restored": "657EQHWB"
+        },
+        {
+          "first": 1753,
+          "last": 1761,
+          "value": "6NCHLEBD",
+          "specifier": "./chunks/chunk-6NCHLEBD.js",
+          "restored": "KUU3JDRS"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-JFA6W3PB.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-JFA6W3PB.js",
+      "originalSha256": "1a843903854577ce522d2c32e4c0ba89f57d2951e3f3c59a5689dfc53191c68e",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-4T6VNXXN.js",
+      "rawAuxiliarySha256": "f0962c52676ce288ef6feca1464fa5ba736f407dae59d0479b9338178c6d1ad4",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-4T6VNXXN.js",
+      "verifiedAuxiliarySha256": "1a843903854577ce522d2c32e4c0ba89f57d2951e3f3c59a5689dfc53191c68e",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-4T6VNXXN.js.map",
+      "mapSha256": "08f6b0eb4cdee541c8f0d7f54c979edebf5a0fd5b2cf7279166403388127af95",
+      "restorations": [
+        {
+          "first": 65,
+          "last": 73,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        },
+        {
+          "first": 112,
+          "last": 120,
+          "value": "M2UF62S4",
+          "specifier": "./chunk-M2UF62S4.js",
+          "restored": "KUU3JDRS"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-4ULE43MK.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-4ULE43MK.js",
+      "originalSha256": "400e797c029b610075ca9805ad706932c5fb9b2c58ae3eff8b96a9605052f4f9",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-65LAJMF5.js",
+      "rawAuxiliarySha256": "aeb9960762eb55ac8f837e88f20a99f94f1d3606def2364f85d8ab4d0fb2aa9b",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-65LAJMF5.js",
+      "verifiedAuxiliarySha256": "400e797c029b610075ca9805ad706932c5fb9b2c58ae3eff8b96a9605052f4f9",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-65LAJMF5.js.map",
+      "mapSha256": "6790f3b337bfb8b77a9d16c5530f05192a086f9e6692896776a391ea15c61345",
+      "restorations": [
+        {
+          "first": 463,
+          "last": 471,
+          "value": "T4CF4I6Y",
+          "specifier": "./chunk-T4CF4I6Y.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 560,
+          "last": 568,
+          "value": "4T6VNXXN",
+          "specifier": "./chunk-4T6VNXXN.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 618,
+          "last": 626,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        },
+        {
+          "first": 849,
+          "last": 857,
+          "value": "M2UF62S4",
+          "specifier": "./chunk-M2UF62S4.js",
+          "restored": "KUU3JDRS"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-NYB5G6QR.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-NYB5G6QR.js",
+      "originalSha256": "65eba523629830ce494eed571149bc8658ae5939956fcfb9a18e6bac830a2117",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ASOV4ELX.js",
+      "rawAuxiliarySha256": "bc5646edc7e94576d6339efed8691dde79ec30a8e7969cdd32f8046957ef9076",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-ASOV4ELX.js",
+      "verifiedAuxiliarySha256": "65eba523629830ce494eed571149bc8658ae5939956fcfb9a18e6bac830a2117",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ASOV4ELX.js.map",
+      "mapSha256": "7b7a3dc5203f375dee13c5284e195f87352b3b038f530e3d0153946713bcece1",
+      "restorations": [
+        {
+          "first": 85,
+          "last": 93,
+          "value": "YIWUDZPU",
+          "specifier": "./chunk-YIWUDZPU.js",
+          "restored": "IFZXA5AN"
+        },
+        {
+          "first": 125,
+          "last": 133,
+          "value": "SG5UDKJR",
+          "specifier": "./chunk-SG5UDKJR.js",
+          "restored": "6C5FI6JC"
+        },
+        {
+          "first": 262,
+          "last": 270,
+          "value": "TEPTGRB5",
+          "specifier": "./chunk-TEPTGRB5.js",
+          "restored": "7JYRHBEG"
+        },
+        {
+          "first": 309,
+          "last": 317,
+          "value": "65LAJMF5",
+          "specifier": "./chunk-65LAJMF5.js",
+          "restored": "4ULE43MK"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-GUFMOF5G.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-GUFMOF5G.js",
+      "originalSha256": "fac650eeee850d8bc6ac9e703004a31b98d0d6a84c9663f610bc86089bf01d8a",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-BW6C3E2P.js",
+      "rawAuxiliarySha256": "31087c0e4c1eb63a0186363cf1f9e6cfb18c90fa399da95930ff65d758fc549e",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-BW6C3E2P.js",
+      "verifiedAuxiliarySha256": "fac650eeee850d8bc6ac9e703004a31b98d0d6a84c9663f610bc86089bf01d8a",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-BW6C3E2P.js.map",
+      "mapSha256": "cb972e42c721759e44f8a73460f2613f75d985fb621dbdfc1beda2c10be7bab3",
+      "restorations": [
+        {
+          "first": 132,
+          "last": 140,
+          "value": "G7K2FGBK",
+          "specifier": "./chunk-G7K2FGBK.js",
+          "restored": "VVMF32NL"
+        },
+        {
+          "first": 212,
+          "last": 220,
+          "value": "VBEYVNA2",
+          "specifier": "./chunk-VBEYVNA2.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 276,
+          "last": 284,
+          "value": "4T6VNXXN",
+          "specifier": "./chunk-4T6VNXXN.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 332,
+          "last": 340,
+          "value": "ZEJFRFYS",
+          "specifier": "./chunk-ZEJFRFYS.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 388,
+          "last": 396,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-3YABDGG5.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-3YABDGG5.js",
+      "originalSha256": "a36af97cdda1291baaf7a5fde02f84760176581af5bbaf19b98572e5c430ecc5",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-BWIM422I.js",
+      "rawAuxiliarySha256": "a3afbb6c0b7979d4cc9787bef462185fc9e6e98fadf2314205c10754919e84bb",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-BWIM422I.js",
+      "verifiedAuxiliarySha256": "a36af97cdda1291baaf7a5fde02f84760176581af5bbaf19b98572e5c430ecc5",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-BWIM422I.js.map",
+      "mapSha256": "99c69901be9b51dd559f1c80d63fef59f13da1c9a1e4b1eaafc23e0dd9e57d0b",
+      "restorations": [
+        {
+          "first": 112,
+          "last": 120,
+          "value": "TEPTGRB5",
+          "specifier": "./chunk-TEPTGRB5.js",
+          "restored": "7JYRHBEG"
+        },
+        {
+          "first": 159,
+          "last": 167,
+          "value": "VBEYVNA2",
+          "specifier": "./chunk-VBEYVNA2.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 199,
+          "last": 207,
+          "value": "4T6VNXXN",
+          "specifier": "./chunk-4T6VNXXN.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 239,
+          "last": 247,
+          "value": "ZEJFRFYS",
+          "specifier": "./chunk-ZEJFRFYS.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 293,
+          "last": 301,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-YKJOBV62.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-YKJOBV62.js",
+      "originalSha256": "71d897bb1700d7333eb646e6fd9f8e0c072f3d7c6d28484958f0d91d94608c48",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-CHUF2T66.js",
+      "rawAuxiliarySha256": "7a89fdcdf477f670d89e986afdfdb04f4e4c88d7674ede6f490f9f1a887c96fb",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-CHUF2T66.js",
+      "verifiedAuxiliarySha256": "71d897bb1700d7333eb646e6fd9f8e0c072f3d7c6d28484958f0d91d94608c48",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-CHUF2T66.js.map",
+      "mapSha256": "4934e0bc6459192c59581cec6d03fd6a45578a6a44f21618dd2f2ae85d86b29c",
+      "restorations": [
+        {
+          "first": 73,
+          "last": 81,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-VVMF32NL.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-VVMF32NL.js",
+      "originalSha256": "12f1bbb0e7514280de926f578a765877e9c30184627b0b613e9a09cf15639541",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-G7K2FGBK.js",
+      "rawAuxiliarySha256": "12f1bbb0e7514280de926f578a765877e9c30184627b0b613e9a09cf15639541",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-G7K2FGBK.js",
+      "verifiedAuxiliarySha256": "12f1bbb0e7514280de926f578a765877e9c30184627b0b613e9a09cf15639541",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-G7K2FGBK.js.map",
+      "mapSha256": "84d5a9765573f15ed89d269bc516314ae2c67f663ffcb38d3d035e0d015a3ad1",
+      "restorations": []
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-657EQHWB.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-657EQHWB.js",
+      "originalSha256": "cb1215bd90d8d648179a452ee5b329ec8555edd90dead4fdd07cecd40bede614",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-IYZ66ZZT.js",
+      "rawAuxiliarySha256": "cb1215bd90d8d648179a452ee5b329ec8555edd90dead4fdd07cecd40bede614",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-IYZ66ZZT.js",
+      "verifiedAuxiliarySha256": "cb1215bd90d8d648179a452ee5b329ec8555edd90dead4fdd07cecd40bede614",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-IYZ66ZZT.js.map",
+      "mapSha256": "40b17b534147d71d828644ac5f8018417ceffde0579218dbb6ea1c14cd2ea81a",
+      "restorations": []
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-KUU3JDRS.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-KUU3JDRS.js",
+      "originalSha256": "1418619edcc9dc1d3a002fc874f3b290d50a6fab1416019f47514ee447d9a7f6",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-M2UF62S4.js",
+      "rawAuxiliarySha256": "1418619edcc9dc1d3a002fc874f3b290d50a6fab1416019f47514ee447d9a7f6",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-M2UF62S4.js",
+      "verifiedAuxiliarySha256": "1418619edcc9dc1d3a002fc874f3b290d50a6fab1416019f47514ee447d9a7f6",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-M2UF62S4.js.map",
+      "mapSha256": "032fb847d0f962afe80698a2078493cbd614d96ec9ad88e1d2de1ec5c0c1cd26",
+      "restorations": []
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-JANMW4U5.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-JANMW4U5.js",
+      "originalSha256": "f922379542089485fd913d6b9dd29261da52975c281ca2322dbb45c05913b1fc",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ORPJPOLR.js",
+      "rawAuxiliarySha256": "cd4c76baa761d317f687e629c340bb075bd03741524b90fa369d25ec0301c8b1",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-ORPJPOLR.js",
+      "verifiedAuxiliarySha256": "f922379542089485fd913d6b9dd29261da52975c281ca2322dbb45c05913b1fc",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ORPJPOLR.js.map",
+      "mapSha256": "b26c73521b8abf37a4369187a1bdfe7290a44052d3631d6f8c6c7126784a5f63",
+      "restorations": [
+        {
+          "first": 116,
+          "last": 124,
+          "value": "ZBI6BX4U",
+          "specifier": "./chunk-ZBI6BX4U.js",
+          "restored": "XWOZSTMP"
+        },
+        {
+          "first": 165,
+          "last": 173,
+          "value": "CHUF2T66",
+          "specifier": "./chunk-CHUF2T66.js",
+          "restored": "YKJOBV62"
+        },
+        {
+          "first": 253,
+          "last": 261,
+          "value": "R4CDAFFN",
+          "specifier": "./chunk-R4CDAFFN.js",
+          "restored": "BH7KDNOD"
+        },
+        {
+          "first": 373,
+          "last": 381,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-BH7KDNOD.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-BH7KDNOD.js",
+      "originalSha256": "903ee39fb0150969a94b80b01334c5df92099cc4e5cb8e5c956f15b1f3a87d09",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-R4CDAFFN.js",
+      "rawAuxiliarySha256": "f773adbe8414a8af1a545a1638974622f357d5bf66846d6dca6809857c901264",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-R4CDAFFN.js",
+      "verifiedAuxiliarySha256": "903ee39fb0150969a94b80b01334c5df92099cc4e5cb8e5c956f15b1f3a87d09",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-R4CDAFFN.js.map",
+      "mapSha256": "d5f14c5120508cc5cda35315c3979bbdfa815473c7d97bec9456f26e2e8ff6ef",
+      "restorations": [
+        {
+          "first": 73,
+          "last": 81,
+          "value": "T4CF4I6Y",
+          "specifier": "./chunk-T4CF4I6Y.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 127,
+          "last": 135,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-6C5FI6JC.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-6C5FI6JC.js",
+      "originalSha256": "50d280ed11875ded1999ae112601aa7a88b86c01f23084cff0bf5fec48301ef8",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-SG5UDKJR.js",
+      "rawAuxiliarySha256": "46ad98e6c673cf1c5b17a8488abc0277d6f978b8a14a2af64fd2aa89b1cc82c6",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-SG5UDKJR.js",
+      "verifiedAuxiliarySha256": "50d280ed11875ded1999ae112601aa7a88b86c01f23084cff0bf5fec48301ef8",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-SG5UDKJR.js.map",
+      "mapSha256": "d98e4d31d2f54e953395e3bb1a0d5c6431a0a7f9592ac1c72a7a15ebd4abb93e",
+      "restorations": [
+        {
+          "first": 1115,
+          "last": 1123,
+          "value": "Z57FNHQO",
+          "specifier": "./chunk-Z57FNHQO.js",
+          "restored": "ZH4IO6P6"
+        },
+        {
+          "first": 1156,
+          "last": 1164,
+          "value": "ORPJPOLR",
+          "specifier": "./chunk-ORPJPOLR.js",
+          "restored": "JANMW4U5"
+        },
+        {
+          "first": 1197,
+          "last": 1205,
+          "value": "YYTGJVZK",
+          "specifier": "./chunk-YYTGJVZK.js",
+          "restored": "ULT7PQZF"
+        },
+        {
+          "first": 1387,
+          "last": 1395,
+          "value": "TEPTGRB5",
+          "specifier": "./chunk-TEPTGRB5.js",
+          "restored": "7JYRHBEG"
+        },
+        {
+          "first": 1533,
+          "last": 1541,
+          "value": "T4CF4I6Y",
+          "specifier": "./chunk-T4CF4I6Y.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 1582,
+          "last": 1590,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-NYD74TAK.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-NYD74TAK.js",
+      "originalSha256": "3fe00c29ad1df708529dacead2822e4835096b3fd8871457183b782419ba3f76",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-T4CF4I6Y.js",
+      "rawAuxiliarySha256": "3fe00c29ad1df708529dacead2822e4835096b3fd8871457183b782419ba3f76",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-T4CF4I6Y.js",
+      "verifiedAuxiliarySha256": "3fe00c29ad1df708529dacead2822e4835096b3fd8871457183b782419ba3f76",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-T4CF4I6Y.js.map",
+      "mapSha256": "8b4ae7c0dd2e9ddcd9f164c775099eed7c879cc0c2bd8f378986600883d64f37",
+      "restorations": []
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-7JYRHBEG.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-7JYRHBEG.js",
+      "originalSha256": "7498c88b0e5a5169fa744cda023671761e988f7b1c065670350427001f48e8f6",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-TEPTGRB5.js",
+      "rawAuxiliarySha256": "628b4c360c1a1284ad1320337ae6cd6317f462b9aa541b67bd3711d8fbb38b9f",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-TEPTGRB5.js",
+      "verifiedAuxiliarySha256": "7498c88b0e5a5169fa744cda023671761e988f7b1c065670350427001f48e8f6",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-TEPTGRB5.js.map",
+      "mapSha256": "9217762ce97c1bd07eab5f69ef3b04a96dbc974e3cd9429371246b1a794042d7",
+      "restorations": [
+        {
+          "first": 130,
+          "last": 138,
+          "value": "65LAJMF5",
+          "specifier": "./chunk-65LAJMF5.js",
+          "restored": "4ULE43MK"
+        },
+        {
+          "first": 187,
+          "last": 195,
+          "value": "R4CDAFFN",
+          "specifier": "./chunk-R4CDAFFN.js",
+          "restored": "BH7KDNOD"
+        },
+        {
+          "first": 1041,
+          "last": 1049,
+          "value": "T4CF4I6Y",
+          "specifier": "./chunk-T4CF4I6Y.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 1090,
+          "last": 1098,
+          "value": "VBEYVNA2",
+          "specifier": "./chunk-VBEYVNA2.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 1155,
+          "last": 1163,
+          "value": "4T6VNXXN",
+          "specifier": "./chunk-4T6VNXXN.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 1204,
+          "last": 1212,
+          "value": "ZEJFRFYS",
+          "specifier": "./chunk-ZEJFRFYS.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 1393,
+          "last": 1401,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        },
+        {
+          "first": 1450,
+          "last": 1458,
+          "value": "M2UF62S4",
+          "specifier": "./chunk-M2UF62S4.js",
+          "restored": "KUU3JDRS"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-A5C32PMG.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-A5C32PMG.js",
+      "originalSha256": "c580abe2dc58815c3ba1a6b4d51066afa393ad1617c51b5ddd5ce4bfc19ba325",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-TMP4WIEM.js",
+      "rawAuxiliarySha256": "4caa1c9fe0bcc67b1f74df75b1978dced9c92a707a299861f40ce8d2199a5fe9",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-TMP4WIEM.js",
+      "verifiedAuxiliarySha256": "c580abe2dc58815c3ba1a6b4d51066afa393ad1617c51b5ddd5ce4bfc19ba325",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-TMP4WIEM.js.map",
+      "mapSha256": "b15d95d904531a90d20d20d4c0d3a8358413b9d82d50871b374f32b1dab6dfd1",
+      "restorations": [
+        {
+          "first": 66,
+          "last": 74,
+          "value": "VBEYVNA2",
+          "specifier": "./chunk-VBEYVNA2.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 131,
+          "last": 139,
+          "value": "4T6VNXXN",
+          "specifier": "./chunk-4T6VNXXN.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 211,
+          "last": 219,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-YFMEVIQO.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-YFMEVIQO.js",
+      "originalSha256": "b3c85df0db1b26ae44c0bb43717cb3ab14be8e90892928046b5c2589c269ab0f",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-VBEYVNA2.js",
+      "rawAuxiliarySha256": "734fae3fed6c45426f9cfa08ce2eeb11ac8d561f422fee773a3ae2465e1c11fc",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-VBEYVNA2.js",
+      "verifiedAuxiliarySha256": "b3c85df0db1b26ae44c0bb43717cb3ab14be8e90892928046b5c2589c269ab0f",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-VBEYVNA2.js.map",
+      "mapSha256": "945ca1e99c7df21db844ccf8965bd3ba5e2949edbd3fe920a6c816f9efa01f98",
+      "restorations": [
+        {
+          "first": 64,
+          "last": 72,
+          "value": "4T6VNXXN",
+          "specifier": "./chunk-4T6VNXXN.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 251,
+          "last": 259,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-UC2CCIVN.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-UC2CCIVN.js",
+      "originalSha256": "b59a666bba20155e2fcb0c8ff6d4a3bc0a123402225b106a59dbcebab87f3edd",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-X3X7IAGA.js",
+      "rawAuxiliarySha256": "eb9a138266376356a93e7f73b7081325dfa445f1be4527bae2bc93ade743785b",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-X3X7IAGA.js",
+      "verifiedAuxiliarySha256": "b59a666bba20155e2fcb0c8ff6d4a3bc0a123402225b106a59dbcebab87f3edd",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-X3X7IAGA.js.map",
+      "mapSha256": "5ae21bb32426f2cc1e7ee0b328d674edc100705351f157df0523ecc83ff939e8",
+      "restorations": [
+        {
+          "first": 66,
+          "last": 74,
+          "value": "BWIM422I",
+          "specifier": "./chunk-BWIM422I.js",
+          "restored": "3YABDGG5"
+        },
+        {
+          "first": 996,
+          "last": 1004,
+          "value": "TEPTGRB5",
+          "specifier": "./chunk-TEPTGRB5.js",
+          "restored": "7JYRHBEG"
+        },
+        {
+          "first": 1060,
+          "last": 1068,
+          "value": "65LAJMF5",
+          "specifier": "./chunk-65LAJMF5.js",
+          "restored": "4ULE43MK"
+        },
+        {
+          "first": 1589,
+          "last": 1597,
+          "value": "T4CF4I6Y",
+          "specifier": "./chunk-T4CF4I6Y.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 1697,
+          "last": 1705,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-IFZXA5AN.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-IFZXA5AN.js",
+      "originalSha256": "395d3dc7f3621540616c8eccf91e56df7374927e5fd27419a46474ae16e92f7f",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-YIWUDZPU.js",
+      "rawAuxiliarySha256": "f0ef54ad12caecb00b03b59969b602f201d183daa9fde4fdab192dfe231c5970",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-YIWUDZPU.js",
+      "verifiedAuxiliarySha256": "395d3dc7f3621540616c8eccf91e56df7374927e5fd27419a46474ae16e92f7f",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-YIWUDZPU.js.map",
+      "mapSha256": "15ba5b951e2719f3a041f7b2b6e0dc4e8c967cc87e97547f1897e122ccc50042",
+      "restorations": [
+        {
+          "first": 1036,
+          "last": 1044,
+          "value": "Z57FNHQO",
+          "specifier": "./chunk-Z57FNHQO.js",
+          "restored": "ZH4IO6P6"
+        },
+        {
+          "first": 1093,
+          "last": 1101,
+          "value": "TMP4WIEM",
+          "specifier": "./chunk-TMP4WIEM.js",
+          "restored": "A5C32PMG"
+        },
+        {
+          "first": 1142,
+          "last": 1150,
+          "value": "ZHKBAEJN",
+          "specifier": "./chunk-ZHKBAEJN.js",
+          "restored": "OWCIAFEM"
+        },
+        {
+          "first": 1419,
+          "last": 1427,
+          "value": "ZCRTNPI6",
+          "specifier": "./chunk-ZCRTNPI6.js",
+          "restored": "6KHZ6NEP"
+        },
+        {
+          "first": 1460,
+          "last": 1468,
+          "value": "BW6C3E2P",
+          "specifier": "./chunk-BW6C3E2P.js",
+          "restored": "GUFMOF5G"
+        },
+        {
+          "first": 1535,
+          "last": 1543,
+          "value": "X3X7IAGA",
+          "specifier": "./chunk-X3X7IAGA.js",
+          "restored": "UC2CCIVN"
+        },
+        {
+          "first": 1599,
+          "last": 1607,
+          "value": "BWIM422I",
+          "specifier": "./chunk-BWIM422I.js",
+          "restored": "3YABDGG5"
+        },
+        {
+          "first": 3079,
+          "last": 3087,
+          "value": "TEPTGRB5",
+          "specifier": "./chunk-TEPTGRB5.js",
+          "restored": "7JYRHBEG"
+        },
+        {
+          "first": 3199,
+          "last": 3207,
+          "value": "65LAJMF5",
+          "specifier": "./chunk-65LAJMF5.js",
+          "restored": "4ULE43MK"
+        },
+        {
+          "first": 3256,
+          "last": 3264,
+          "value": "R4CDAFFN",
+          "specifier": "./chunk-R4CDAFFN.js",
+          "restored": "BH7KDNOD"
+        },
+        {
+          "first": 3529,
+          "last": 3537,
+          "value": "T4CF4I6Y",
+          "specifier": "./chunk-T4CF4I6Y.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 3584,
+          "last": 3592,
+          "value": "VBEYVNA2",
+          "specifier": "./chunk-VBEYVNA2.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 3673,
+          "last": 3681,
+          "value": "4T6VNXXN",
+          "specifier": "./chunk-4T6VNXXN.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 3714,
+          "last": 3722,
+          "value": "ZEJFRFYS",
+          "specifier": "./chunk-ZEJFRFYS.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 3941,
+          "last": 3949,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        },
+        {
+          "first": 3990,
+          "last": 3998,
+          "value": "M2UF62S4",
+          "specifier": "./chunk-M2UF62S4.js",
+          "restored": "KUU3JDRS"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-ULT7PQZF.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-ULT7PQZF.js",
+      "originalSha256": "103f55432f619eb9fcd05e4d2dd7f0656f1b347338187a3d02699818ae0f90ae",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-YYTGJVZK.js",
+      "rawAuxiliarySha256": "419efa3c9556bf5d09b799c4c3f598ca9739408667590bda16394a08ada09adf",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-YYTGJVZK.js",
+      "verifiedAuxiliarySha256": "103f55432f619eb9fcd05e4d2dd7f0656f1b347338187a3d02699818ae0f90ae",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-YYTGJVZK.js.map",
+      "mapSha256": "f369025813313734e29656836acd4f81da7f35368c46efa32e77f2a0dfd64236",
+      "restorations": [
+        {
+          "first": 74,
+          "last": 82,
+          "value": "TEPTGRB5",
+          "specifier": "./chunk-TEPTGRB5.js",
+          "restored": "7JYRHBEG"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-ZH4IO6P6.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-ZH4IO6P6.js",
+      "originalSha256": "d339e1da0eb4df8724051ea3c018a6343d43c4c30ddeaa01439664cfc7572f92",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-Z57FNHQO.js",
+      "rawAuxiliarySha256": "e0cee14407ac1dc3d09bfe93cb35cf14952823c59c483d16148574f9541036dc",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-Z57FNHQO.js",
+      "verifiedAuxiliarySha256": "d339e1da0eb4df8724051ea3c018a6343d43c4c30ddeaa01439664cfc7572f92",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-Z57FNHQO.js.map",
+      "mapSha256": "19956a11c79079964c0c78f415d3f07987b4ffcb6b9cf3261923a62058097c6e",
+      "restorations": [
+        {
+          "first": 276,
+          "last": 284,
+          "value": "ORPJPOLR",
+          "specifier": "./chunk-ORPJPOLR.js",
+          "restored": "JANMW4U5"
+        },
+        {
+          "first": 658,
+          "last": 666,
+          "value": "TMP4WIEM",
+          "specifier": "./chunk-TMP4WIEM.js",
+          "restored": "A5C32PMG"
+        },
+        {
+          "first": 1464,
+          "last": 1472,
+          "value": "ZBI6BX4U",
+          "specifier": "./chunk-ZBI6BX4U.js",
+          "restored": "XWOZSTMP"
+        },
+        {
+          "first": 2256,
+          "last": 2264,
+          "value": "ZCRTNPI6",
+          "specifier": "./chunk-ZCRTNPI6.js",
+          "restored": "6KHZ6NEP"
+        },
+        {
+          "first": 2313,
+          "last": 2321,
+          "value": "CHUF2T66",
+          "specifier": "./chunk-CHUF2T66.js",
+          "restored": "YKJOBV62"
+        },
+        {
+          "first": 2364,
+          "last": 2372,
+          "value": "BW6C3E2P",
+          "specifier": "./chunk-BW6C3E2P.js",
+          "restored": "GUFMOF5G"
+        },
+        {
+          "first": 3236,
+          "last": 3244,
+          "value": "X3X7IAGA",
+          "specifier": "./chunk-X3X7IAGA.js",
+          "restored": "UC2CCIVN"
+        },
+        {
+          "first": 3400,
+          "last": 3408,
+          "value": "BWIM422I",
+          "specifier": "./chunk-BWIM422I.js",
+          "restored": "3YABDGG5"
+        },
+        {
+          "first": 3476,
+          "last": 3484,
+          "value": "G7K2FGBK",
+          "specifier": "./chunk-G7K2FGBK.js",
+          "restored": "VVMF32NL"
+        },
+        {
+          "first": 3613,
+          "last": 3621,
+          "value": "YYTGJVZK",
+          "specifier": "./chunk-YYTGJVZK.js",
+          "restored": "ULT7PQZF"
+        },
+        {
+          "first": 10766,
+          "last": 10774,
+          "value": "TEPTGRB5",
+          "specifier": "./chunk-TEPTGRB5.js",
+          "restored": "7JYRHBEG"
+        },
+        {
+          "first": 10954,
+          "last": 10962,
+          "value": "65LAJMF5",
+          "specifier": "./chunk-65LAJMF5.js",
+          "restored": "4ULE43MK"
+        },
+        {
+          "first": 11132,
+          "last": 11140,
+          "value": "R4CDAFFN",
+          "specifier": "./chunk-R4CDAFFN.js",
+          "restored": "BH7KDNOD"
+        },
+        {
+          "first": 12491,
+          "last": 12499,
+          "value": "T4CF4I6Y",
+          "specifier": "./chunk-T4CF4I6Y.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 12548,
+          "last": 12556,
+          "value": "VBEYVNA2",
+          "specifier": "./chunk-VBEYVNA2.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 12725,
+          "last": 12733,
+          "value": "4T6VNXXN",
+          "specifier": "./chunk-4T6VNXXN.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 13340,
+          "last": 13348,
+          "value": "ZEJFRFYS",
+          "specifier": "./chunk-ZEJFRFYS.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 13889,
+          "last": 13897,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        },
+        {
+          "first": 13991,
+          "last": 13999,
+          "value": "M2UF62S4",
+          "specifier": "./chunk-M2UF62S4.js",
+          "restored": "KUU3JDRS"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-XWOZSTMP.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-XWOZSTMP.js",
+      "originalSha256": "d77498b274cb71bd7aca7027c0441530c733f5b85f854e03d1b8e7fd5e0184db",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZBI6BX4U.js",
+      "rawAuxiliarySha256": "268f79b2a57d3be6ddf6ec9fa979c36b7cfb16eaae67e690bdc1c21232c50e41",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-ZBI6BX4U.js",
+      "verifiedAuxiliarySha256": "d77498b274cb71bd7aca7027c0441530c733f5b85f854e03d1b8e7fd5e0184db",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZBI6BX4U.js.map",
+      "mapSha256": "0d6d53e04547f913f0c937506106c7eb8ec3b5ada8f97043694c4980b1b63dec",
+      "restorations": [
+        {
+          "first": 212,
+          "last": 220,
+          "value": "ZEJFRFYS",
+          "specifier": "./chunk-ZEJFRFYS.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 259,
+          "last": 267,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-6KHZ6NEP.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-6KHZ6NEP.js",
+      "originalSha256": "6509f88e4dbada145d9c3317dc1032db6219639c6ab5eb05af99ee4863b838c3",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZCRTNPI6.js",
+      "rawAuxiliarySha256": "14ebb937abbd08ac9245f17a6d26464128f8e3480eac7554dff10e1baf68cf6f",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-ZCRTNPI6.js",
+      "verifiedAuxiliarySha256": "6509f88e4dbada145d9c3317dc1032db6219639c6ab5eb05af99ee4863b838c3",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZCRTNPI6.js.map",
+      "mapSha256": "26fa413e75794566d050ec394dcccf28cf3eee4d0d36a216919560ad470ba809",
+      "restorations": [
+        {
+          "first": 58,
+          "last": 66,
+          "value": "CHUF2T66",
+          "specifier": "./chunk-CHUF2T66.js",
+          "restored": "YKJOBV62"
+        },
+        {
+          "first": 123,
+          "last": 131,
+          "value": "BW6C3E2P",
+          "specifier": "./chunk-BW6C3E2P.js",
+          "restored": "GUFMOF5G"
+        },
+        {
+          "first": 203,
+          "last": 211,
+          "value": "BWIM422I",
+          "specifier": "./chunk-BWIM422I.js",
+          "restored": "3YABDGG5"
+        },
+        {
+          "first": 320,
+          "last": 328,
+          "value": "G7K2FGBK",
+          "specifier": "./chunk-G7K2FGBK.js",
+          "restored": "VVMF32NL"
+        },
+        {
+          "first": 1270,
+          "last": 1278,
+          "value": "TEPTGRB5",
+          "specifier": "./chunk-TEPTGRB5.js",
+          "restored": "7JYRHBEG"
+        },
+        {
+          "first": 1343,
+          "last": 1351,
+          "value": "65LAJMF5",
+          "specifier": "./chunk-65LAJMF5.js",
+          "restored": "4ULE43MK"
+        },
+        {
+          "first": 1554,
+          "last": 1562,
+          "value": "T4CF4I6Y",
+          "specifier": "./chunk-T4CF4I6Y.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 1602,
+          "last": 1610,
+          "value": "VBEYVNA2",
+          "specifier": "./chunk-VBEYVNA2.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 1771,
+          "last": 1779,
+          "value": "ZEJFRFYS",
+          "specifier": "./chunk-ZEJFRFYS.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 2017,
+          "last": 2025,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-BBAJQVCT.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-BBAJQVCT.js",
+      "originalSha256": "65ad3e1d52e11ecea1a273ccdea09f9632e41bb59dc30dd97ab36d98d99e4473",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZEJFRFYS.js",
+      "rawAuxiliarySha256": "65ad3e1d52e11ecea1a273ccdea09f9632e41bb59dc30dd97ab36d98d99e4473",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-ZEJFRFYS.js",
+      "verifiedAuxiliarySha256": "65ad3e1d52e11ecea1a273ccdea09f9632e41bb59dc30dd97ab36d98d99e4473",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZEJFRFYS.js.map",
+      "mapSha256": "d7f2e7a1c3c671a746fb747b9f431f07054572967509c7c559810827b29cd1de",
+      "restorations": []
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-OWCIAFEM.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/chunks/chunk-OWCIAFEM.js",
+      "originalSha256": "c5728dee69519b094095cc9a751414abe59936ef3e3b27ea88fdbd3d08a47336",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZHKBAEJN.js",
+      "rawAuxiliarySha256": "d4bfb3345e65bfb1831c91267a7693bcd6240ae7e87437e90d2cbb6efa5e2c08",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/chunks/chunk-ZHKBAEJN.js",
+      "verifiedAuxiliarySha256": "c5728dee69519b094095cc9a751414abe59936ef3e3b27ea88fdbd3d08a47336",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/chunks/chunk-ZHKBAEJN.js.map",
+      "mapSha256": "2123496d0b9eb536111136b4a062867137185e75b4358c99f4bf1331d41766e2",
+      "restorations": [
+        {
+          "first": 101,
+          "last": 109,
+          "value": "ZCRTNPI6",
+          "specifier": "./chunk-ZCRTNPI6.js",
+          "restored": "6KHZ6NEP"
+        },
+        {
+          "first": 166,
+          "last": 174,
+          "value": "TEPTGRB5",
+          "specifier": "./chunk-TEPTGRB5.js",
+          "restored": "7JYRHBEG"
+        },
+        {
+          "first": 206,
+          "last": 214,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/compute-engine.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/compute-engine.js",
+      "originalSha256": "01343c0ad7006a30fc5a2751125a9ea1d820f28d6906761e6e47eba6cfbcb962",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/compute-engine.js",
+      "rawAuxiliarySha256": "f86e61a91fbc5bbbb145618ede1b7896fe55cc93057d1650391ed5c10993a7c2",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/compute-engine.js",
+      "verifiedAuxiliarySha256": "01343c0ad7006a30fc5a2751125a9ea1d820f28d6906761e6e47eba6cfbcb962",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/compute-engine.js.map",
+      "mapSha256": "469ed1890831a1ffcb6f7b77d3554ca5927ed23eaa3bb8371a82a13b1f487121",
+      "restorations": [
+        {
+          "first": 73,
+          "last": 81,
+          "value": "ASOV4ELX",
+          "specifier": "./chunks/chunk-ASOV4ELX.js",
+          "restored": "NYB5G6QR"
+        },
+        {
+          "first": 222,
+          "last": 230,
+          "value": "YIWUDZPU",
+          "specifier": "./chunks/chunk-YIWUDZPU.js",
+          "restored": "IFZXA5AN"
+        },
+        {
+          "first": 278,
+          "last": 286,
+          "value": "SG5UDKJR",
+          "specifier": "./chunks/chunk-SG5UDKJR.js",
+          "restored": "6C5FI6JC"
+        },
+        {
+          "first": 366,
+          "last": 374,
+          "value": "Z57FNHQO",
+          "specifier": "./chunks/chunk-Z57FNHQO.js",
+          "restored": "ZH4IO6P6"
+        },
+        {
+          "first": 413,
+          "last": 421,
+          "value": "ORPJPOLR",
+          "specifier": "./chunks/chunk-ORPJPOLR.js",
+          "restored": "JANMW4U5"
+        },
+        {
+          "first": 448,
+          "last": 456,
+          "value": "TMP4WIEM",
+          "specifier": "./chunks/chunk-TMP4WIEM.js",
+          "restored": "A5C32PMG"
+        },
+        {
+          "first": 483,
+          "last": 491,
+          "value": "ZBI6BX4U",
+          "specifier": "./chunks/chunk-ZBI6BX4U.js",
+          "restored": "XWOZSTMP"
+        },
+        {
+          "first": 518,
+          "last": 526,
+          "value": "ZHKBAEJN",
+          "specifier": "./chunks/chunk-ZHKBAEJN.js",
+          "restored": "OWCIAFEM"
+        },
+        {
+          "first": 553,
+          "last": 561,
+          "value": "ZCRTNPI6",
+          "specifier": "./chunks/chunk-ZCRTNPI6.js",
+          "restored": "6KHZ6NEP"
+        },
+        {
+          "first": 588,
+          "last": 596,
+          "value": "CHUF2T66",
+          "specifier": "./chunks/chunk-CHUF2T66.js",
+          "restored": "YKJOBV62"
+        },
+        {
+          "first": 623,
+          "last": 631,
+          "value": "BW6C3E2P",
+          "specifier": "./chunks/chunk-BW6C3E2P.js",
+          "restored": "GUFMOF5G"
+        },
+        {
+          "first": 658,
+          "last": 666,
+          "value": "X3X7IAGA",
+          "specifier": "./chunks/chunk-X3X7IAGA.js",
+          "restored": "UC2CCIVN"
+        },
+        {
+          "first": 693,
+          "last": 701,
+          "value": "BWIM422I",
+          "specifier": "./chunks/chunk-BWIM422I.js",
+          "restored": "3YABDGG5"
+        },
+        {
+          "first": 728,
+          "last": 736,
+          "value": "G7K2FGBK",
+          "specifier": "./chunks/chunk-G7K2FGBK.js",
+          "restored": "VVMF32NL"
+        },
+        {
+          "first": 763,
+          "last": 771,
+          "value": "YYTGJVZK",
+          "specifier": "./chunks/chunk-YYTGJVZK.js",
+          "restored": "ULT7PQZF"
+        },
+        {
+          "first": 923,
+          "last": 931,
+          "value": "TEPTGRB5",
+          "specifier": "./chunks/chunk-TEPTGRB5.js",
+          "restored": "7JYRHBEG"
+        },
+        {
+          "first": 1096,
+          "last": 1104,
+          "value": "65LAJMF5",
+          "specifier": "./chunks/chunk-65LAJMF5.js",
+          "restored": "4ULE43MK"
+        },
+        {
+          "first": 1131,
+          "last": 1139,
+          "value": "R4CDAFFN",
+          "specifier": "./chunks/chunk-R4CDAFFN.js",
+          "restored": "BH7KDNOD"
+        },
+        {
+          "first": 1166,
+          "last": 1174,
+          "value": "T4CF4I6Y",
+          "specifier": "./chunks/chunk-T4CF4I6Y.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 1201,
+          "last": 1209,
+          "value": "VBEYVNA2",
+          "specifier": "./chunks/chunk-VBEYVNA2.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 1236,
+          "last": 1244,
+          "value": "4T6VNXXN",
+          "specifier": "./chunks/chunk-4T6VNXXN.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 1271,
+          "last": 1279,
+          "value": "ZEJFRFYS",
+          "specifier": "./chunks/chunk-ZEJFRFYS.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 1325,
+          "last": 1333,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunks/chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        },
+        {
+          "first": 1360,
+          "last": 1368,
+          "value": "M2UF62S4",
+          "specifier": "./chunks/chunk-M2UF62S4.js",
+          "restored": "KUU3JDRS"
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "original": "/private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/epsil.js",
+      "originalURL": "file:///private/tmp/program-only-accepted-candidate-20261115/ce/dist/esm-min/epsil.js",
+      "originalSha256": "e0a4f6578a398845e34655b9305ee2a61804df6b11a89ded706e956cb9a13e61",
+      "rawAuxiliary": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/epsil.js",
+      "rawAuxiliarySha256": "b9c319fe28813f9e41f24149ab55f9added9218fb819f15a420c1ce4db00d31f",
+      "verifiedAuxiliary": "/private/tmp/program-profile-revision-20261116/verified-candidate/epsil.js",
+      "verifiedAuxiliarySha256": "e0a4f6578a398845e34655b9305ee2a61804df6b11a89ded706e956cb9a13e61",
+      "byteIdenticalAfterRestoration": true,
+      "positionsUnchanged": true,
+      "map": "/private/tmp/program-profile-revision-20261116/maps-candidate/dist/esm-min/epsil.js.map",
+      "mapSha256": "5f2192509296465f3b7f4eea85a1928d59fb7b323a31ba864bde79456b3d7fc9",
+      "restorations": [
+        {
+          "first": 65,
+          "last": 73,
+          "value": "ASOV4ELX",
+          "specifier": "./chunks/chunk-ASOV4ELX.js",
+          "restored": "NYB5G6QR"
+        },
+        {
+          "first": 100,
+          "last": 108,
+          "value": "YIWUDZPU",
+          "specifier": "./chunks/chunk-YIWUDZPU.js",
+          "restored": "IFZXA5AN"
+        },
+        {
+          "first": 135,
+          "last": 143,
+          "value": "SG5UDKJR",
+          "specifier": "./chunks/chunk-SG5UDKJR.js",
+          "restored": "6C5FI6JC"
+        },
+        {
+          "first": 361,
+          "last": 369,
+          "value": "Z57FNHQO",
+          "specifier": "./chunks/chunk-Z57FNHQO.js",
+          "restored": "ZH4IO6P6"
+        },
+        {
+          "first": 396,
+          "last": 404,
+          "value": "ORPJPOLR",
+          "specifier": "./chunks/chunk-ORPJPOLR.js",
+          "restored": "JANMW4U5"
+        },
+        {
+          "first": 431,
+          "last": 439,
+          "value": "TMP4WIEM",
+          "specifier": "./chunks/chunk-TMP4WIEM.js",
+          "restored": "A5C32PMG"
+        },
+        {
+          "first": 466,
+          "last": 474,
+          "value": "ZBI6BX4U",
+          "specifier": "./chunks/chunk-ZBI6BX4U.js",
+          "restored": "XWOZSTMP"
+        },
+        {
+          "first": 501,
+          "last": 509,
+          "value": "ZHKBAEJN",
+          "specifier": "./chunks/chunk-ZHKBAEJN.js",
+          "restored": "OWCIAFEM"
+        },
+        {
+          "first": 536,
+          "last": 544,
+          "value": "ZCRTNPI6",
+          "specifier": "./chunks/chunk-ZCRTNPI6.js",
+          "restored": "6KHZ6NEP"
+        },
+        {
+          "first": 571,
+          "last": 579,
+          "value": "CHUF2T66",
+          "specifier": "./chunks/chunk-CHUF2T66.js",
+          "restored": "YKJOBV62"
+        },
+        {
+          "first": 606,
+          "last": 614,
+          "value": "BW6C3E2P",
+          "specifier": "./chunks/chunk-BW6C3E2P.js",
+          "restored": "GUFMOF5G"
+        },
+        {
+          "first": 681,
+          "last": 689,
+          "value": "X3X7IAGA",
+          "specifier": "./chunks/chunk-X3X7IAGA.js",
+          "restored": "UC2CCIVN"
+        },
+        {
+          "first": 716,
+          "last": 724,
+          "value": "BWIM422I",
+          "specifier": "./chunks/chunk-BWIM422I.js",
+          "restored": "3YABDGG5"
+        },
+        {
+          "first": 751,
+          "last": 759,
+          "value": "G7K2FGBK",
+          "specifier": "./chunks/chunk-G7K2FGBK.js",
+          "restored": "VVMF32NL"
+        },
+        {
+          "first": 786,
+          "last": 794,
+          "value": "YYTGJVZK",
+          "specifier": "./chunks/chunk-YYTGJVZK.js",
+          "restored": "ULT7PQZF"
+        },
+        {
+          "first": 1013,
+          "last": 1021,
+          "value": "TEPTGRB5",
+          "specifier": "./chunks/chunk-TEPTGRB5.js",
+          "restored": "7JYRHBEG"
+        },
+        {
+          "first": 1117,
+          "last": 1125,
+          "value": "65LAJMF5",
+          "specifier": "./chunks/chunk-65LAJMF5.js",
+          "restored": "4ULE43MK"
+        },
+        {
+          "first": 1152,
+          "last": 1160,
+          "value": "R4CDAFFN",
+          "specifier": "./chunks/chunk-R4CDAFFN.js",
+          "restored": "BH7KDNOD"
+        },
+        {
+          "first": 1377,
+          "last": 1385,
+          "value": "T4CF4I6Y",
+          "specifier": "./chunks/chunk-T4CF4I6Y.js",
+          "restored": "NYD74TAK"
+        },
+        {
+          "first": 1412,
+          "last": 1420,
+          "value": "VBEYVNA2",
+          "specifier": "./chunks/chunk-VBEYVNA2.js",
+          "restored": "YFMEVIQO"
+        },
+        {
+          "first": 1447,
+          "last": 1455,
+          "value": "4T6VNXXN",
+          "specifier": "./chunks/chunk-4T6VNXXN.js",
+          "restored": "JFA6W3PB"
+        },
+        {
+          "first": 1482,
+          "last": 1490,
+          "value": "ZEJFRFYS",
+          "specifier": "./chunks/chunk-ZEJFRFYS.js",
+          "restored": "BBAJQVCT"
+        },
+        {
+          "first": 1554,
+          "last": 1562,
+          "value": "IYZ66ZZT",
+          "specifier": "./chunks/chunk-IYZ66ZZT.js",
+          "restored": "657EQHWB"
+        },
+        {
+          "first": 1708,
+          "last": 1716,
+          "value": "M2UF62S4",
+          "specifier": "./chunks/chunk-M2UF62S4.js",
+          "restored": "KUU3JDRS"
+        }
+      ]
+    }
+  ],
+  "unmapped": []
+}

@@ -1,0 +1,118 @@
+[
+  {
+    "name": "timing-box-revision-r3-1",
+    "arm": "revision",
+    "workload": "box",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-box-revision-r3-1",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-box-revision-r3-1.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-box-revision-r3-1.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 3,
+    "seconds": 1.9281888008117676
+  },
+  {
+    "name": "timing-box-accepted-r3-2",
+    "arm": "accepted",
+    "workload": "box",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-box-accepted-r3-2",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-box-accepted-r3-2.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-box-accepted-r3-2.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 1.8686621189117432
+  },
+  {
+    "name": "timing-check-revision-r3-1",
+    "arm": "revision",
+    "workload": "check",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-check-revision-r3-1",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-check-revision-r3-1.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-check-revision-r3-1.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 1.876404047012329
+  },
+  {
+    "name": "timing-check-accepted-r3-2",
+    "arm": "accepted",
+    "workload": "check",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-check-accepted-r3-2",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/ce/node_modules/tsx/dist/loader.mjs",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-check-accepted-r3-2.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-check-accepted-r3-2.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 1.8711228370666504
+  }
+]

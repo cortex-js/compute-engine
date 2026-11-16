@@ -32,6 +32,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Worker threads** | `workers/*.mts` | CE (self, serial vs worker threads) | stdout |
 | **Tycho document open** | `tycho-document-open/evaluate.ts`, `rebind.ts` | CE (self; replays the `evaluate` and `rebind` calls Tycho makes when it opens `art/2ki2hjsouf`, from `2ki2hjsouf.fixture.json.gz`; ROADMAP CE-535, CE-536) | stdout |
 | **Scalar arithmetic profile** | `scalar-arithmetic.mjs` | CE source or production bundle; timings, cache counts, inspector profiles | `scalar-arithmetic-2026-11-03.json`; evaluation-cache architecture §11 |
+| **Program regression diagnostics** | `program-regression-child.mjs`, `program-regression-symbolize.mjs` | Exact frozen production baseline/candidate; focused boxing, checking, real notebook reruns; separate CPU/allocation and calibrated scalar controls | Raw profiles and source-map proof; diagnostic wall times are not benchmark timings |
 | **Stable batch baseline** | `stable-batch.mjs`, `stable-batch-tycho.mjs`, `stable-batch-document.mjs` | Pinned pre-binding/current CE; contract specifications, controls, timings and V8 diagnostics | [Phase 0 report](../docs/plans/2026-11-15-stable-batch-phase0-report.md) |
 | **Stable batch revision diagnostics** | `stable-batch-revision-child.mjs`, `stable-batch-revision-attribution.mjs` | Exact 5,000 warmup / 100,000 execution CPU or allocation calls; separate time and compiler-route controls; mapped self/inclusive rows; warmed fixed-live-document retention (private phase-1 subset) | Raw JSON and inspector profiles; diagnostic processes only |
 | **Caches of evaluated values** | `evaluation-caches.ts` | CE (self; each cache on and off with `CE_CACHE_OFF`) | stdout |
@@ -987,3 +988,30 @@ and temporary scripts), build the recorded source variants, and run
 `configure-profiles.mjs`, `configure-final.mjs` and `final-commands.json` record
 the matched arms and ordering. Do not reuse existing result directories or
 substitute the short historical timing protocol for the revision protocol.
+
+### Program regression diagnostics
+
+`program-regression-child.mjs` reads a request JSON naming an existing frozen
+arm root (`ce/` and `tycho/`), `workload` (`box`, `parse-box`, `check`, or
+`notebook`), `mode` (`controls`, `counts`, `cpu`, `allocation`, `timing`, `scalar`, or
+`scalar-trace`), `warmup`, and `iterations`. It never builds or modifies that arm.
+CPU and allocation use separate processes; ordinary scalar timing has no
+profiler/trace/GC flags. Scalar controls consume and check every batch result,
+calibrate long batches, and include empty-loop/direct-read comparisons.
+The separate `timing` mode calibrates focused workload batches to 100 ms and
+records seven samples, validating results outside each timed batch.
+
+```sh
+CE_ALT_PKG=ARM/ce node --import tsx --import ARM/tycho/scripts/repros/ce-alt-hook.mjs benchmarks/program-regression-child.mjs request.json output.json
+node benchmarks/program-regression-symbolize.mjs profile output.json source-map-proof.json
+```
+
+Take the shared box lock, record exact source/build/dependency hashes, and retain
+raw inspector trees. Source-map attribution is allowed only after the diagnostic
+map's generated JavaScript is verified byte-identical to the executed production
+file; equal-width restoration of generated import chunk hashes must be recorded.
+Auxiliary code is never executed. Ambiguous/unmapped frames stay explicit.
+Inclusive stack rows overlap and must not be summed. Sampling estimates allocation
+bytes, including collected objects; it does not count exact object allocations.
+The real notebook route includes analysis, child execution and publication in a
+persistent scope, excluding graph scheduling and UI rendering.

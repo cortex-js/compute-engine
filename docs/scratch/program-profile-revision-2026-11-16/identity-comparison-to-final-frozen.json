@@ -1,0 +1,14 @@
+{
+  "baseline": {
+    "source": true,
+    "build": true,
+    "dependencies": true,
+    "adapters": true
+  },
+  "candidate": {
+    "source": true,
+    "build": true,
+    "dependencies": true,
+    "adapters": true
+  }
+}

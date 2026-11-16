@@ -1,0 +1,74 @@
+[
+  {
+    "name": "scalar-baseline-5",
+    "arm": "baseline",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/monitor.py",
+      "scalar-baseline-5",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/scalar-baseline-5.request.json",
+      "/private/tmp/program-profile-revision-20261116/scalar-baseline-5.json"
+    ],
+    "driverExit": 0
+  },
+  {
+    "name": "scalar-candidate-6",
+    "arm": "candidate",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/monitor.py",
+      "scalar-candidate-6",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/scalar-candidate-6.request.json",
+      "/private/tmp/program-profile-revision-20261116/scalar-candidate-6.json"
+    ],
+    "driverExit": 3
+  },
+  {
+    "name": "scalar-candidate-7",
+    "arm": "candidate",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/monitor.py",
+      "scalar-candidate-7",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/scalar-candidate-7.request.json",
+      "/private/tmp/program-profile-revision-20261116/scalar-candidate-7.json"
+    ],
+    "driverExit": 3
+  },
+  {
+    "name": "scalar-baseline-8",
+    "arm": "baseline",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/monitor.py",
+      "scalar-baseline-8",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/scalar-baseline-8.request.json",
+      "/private/tmp/program-profile-revision-20261116/scalar-baseline-8.json"
+    ],
+    "driverExit": 0
+  }
+]

@@ -1,0 +1,102 @@
+[
+  {
+    "name": "scalar-baseline-1",
+    "arm": "baseline",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/monitor.py",
+      "scalar-baseline-1",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/scalar-baseline-1.request.json",
+      "/private/tmp/program-profile-revision-20261116/scalar-baseline-1.json"
+    ],
+    "driverExit": 3
+  },
+  {
+    "name": "scalar-candidate-2",
+    "arm": "candidate",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/monitor.py",
+      "scalar-candidate-2",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/scalar-candidate-2.request.json",
+      "/private/tmp/program-profile-revision-20261116/scalar-candidate-2.json"
+    ],
+    "driverExit": 3
+  },
+  {
+    "name": "scalar-candidate-3",
+    "arm": "candidate",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/monitor.py",
+      "scalar-candidate-3",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/scalar-candidate-3.request.json",
+      "/private/tmp/program-profile-revision-20261116/scalar-candidate-3.json"
+    ],
+    "driverExit": 0
+  },
+  {
+    "name": "scalar-baseline-4",
+    "arm": "baseline",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/monitor.py",
+      "scalar-baseline-4",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/scalar-baseline-4.request.json",
+      "/private/tmp/program-profile-revision-20261116/scalar-baseline-4.json"
+    ],
+    "driverExit": 0
+  },
+  {
+    "name": "scalar-trace-baseline",
+    "arm": "baseline",
+    "command": [
+      "node",
+      "--trace-opt",
+      "--trace-deopt",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/scalar-trace-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/scalar-trace-baseline.json"
+    ],
+    "exitCode": 0,
+    "diagnosticTimingOnly": true
+  },
+  {
+    "name": "scalar-trace-candidate",
+    "arm": "candidate",
+    "command": [
+      "node",
+      "--trace-opt",
+      "--trace-deopt",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/scalar-trace-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/scalar-trace-candidate.json"
+    ],
+    "exitCode": 0,
+    "diagnosticTimingOnly": true
+  }
+]

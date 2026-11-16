@@ -1,0 +1,178 @@
+[
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-box-baseline.json.cpuprofile",
+      "/private/tmp/program-profile-revision-20261116/cpu-box-baseline.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.49964213371276855
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-box-candidate.json.cpuprofile",
+      "/private/tmp/program-profile-revision-20261116/cpu-box-candidate.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.6603608131408691
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-box-baseline.json.heapprofile",
+      "/private/tmp/program-profile-revision-20261116/allocation-box-baseline.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.5001599788665771
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-box-candidate.json.heapprofile",
+      "/private/tmp/program-profile-revision-20261116/allocation-box-candidate.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.775752067565918
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-check-baseline.json.cpuprofile",
+      "/private/tmp/program-profile-revision-20261116/cpu-check-baseline.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.7058539390563965
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-check-candidate.json.cpuprofile",
+      "/private/tmp/program-profile-revision-20261116/cpu-check-candidate.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.8283121585845947
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-check-baseline.json.heapprofile",
+      "/private/tmp/program-profile-revision-20261116/allocation-check-baseline.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.7918767929077148
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-check-candidate.json.heapprofile",
+      "/private/tmp/program-profile-revision-20261116/allocation-check-candidate.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 1.0619337558746338
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-notebook-baseline.json.cpuprofile",
+      "/private/tmp/program-profile-revision-20261116/cpu-notebook-baseline.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.6302609443664551
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-notebook-candidate.json.cpuprofile",
+      "/private/tmp/program-profile-revision-20261116/cpu-notebook-candidate.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.746502161026001
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-notebook-baseline.json.heapprofile",
+      "/private/tmp/program-profile-revision-20261116/allocation-notebook-baseline.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.6445338726043701
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-notebook-candidate.json.heapprofile",
+      "/private/tmp/program-profile-revision-20261116/allocation-notebook-candidate.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.846268892288208
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-parse-box-baseline.json.cpuprofile",
+      "/private/tmp/program-profile-revision-20261116/cpu-parse-box-baseline.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.5290858745574951
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-parse-box-candidate.json.cpuprofile",
+      "/private/tmp/program-profile-revision-20261116/cpu-parse-box-candidate.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.6793498992919922
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-parse-box-baseline.json.heapprofile",
+      "/private/tmp/program-profile-revision-20261116/allocation-parse-box-baseline.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.5223069190979004
+  },
+  {
+    "command": [
+      "node",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-symbolize.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-parse-box-candidate.json.heapprofile",
+      "/private/tmp/program-profile-revision-20261116/allocation-parse-box-candidate.attribution.json",
+      "/private/tmp/program-profile-revision-20261116/verified-source-map-proof.json"
+    ],
+    "exitCode": 0,
+    "seconds": 0.7720592021942139
+  }
+]

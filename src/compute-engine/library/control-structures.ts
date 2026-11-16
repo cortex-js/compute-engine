@@ -4346,12 +4346,12 @@ function canonicalSequence(
   if (program) order.sort((a, b) => rank(a) - rank(b) || a - b);
   const ops = order.map((i) => source[i]);
   const head = program ? 'Program' : 'Block';
-  const previousBindings = new Map<string, BoxedDefinition>();
-  const sourceIndex = new Map(source.map((statement, i) => [statement, i]));
-  const constantIndexes = new Map<string, number>();
+  const previousBindings = program ? new Map<string, BoxedDefinition>() : undefined;
+  const sourceIndex = program ? new Map(source.map((statement, i) => [statement, i])) : undefined;
+  const constantIndexes = program ? new Map<string, number>() : undefined;
   let constantDeclarations: ReadonlySet<string> = new Set();
-  const completed = new Map<Expression, Expression>();
-  const early = new Map<Expression, Expression>();
+  const completed = program ? new Map<Expression, Expression>() : undefined;
+  const early = program ? new Map<Expression, Expression>() : undefined;
   const canonicalizeStatement = (op: Expression): Expression => {
     const canonicalize = () => program && isFunction(op) && !op.isCanonical
       ? ce.function(op.operator, op.ops, { metadata: { sourceOffsets: op.sourceOffsets } })
@@ -4362,14 +4362,15 @@ function canonicalSequence(
     if (program) {
       checkDeadline(ce._deadlineFrame);
       ce._epsilDeclarationRoute = ['DeclareType', 'DeclareSumType', 'DeclareProtocol', 'DeclareConformance', 'DefineFunction'].includes(typedStatement(op).operator);
-      const earlier = new Set([...constantIndexes].filter(([, index]) => index < (sourceIndex.get(op) ?? 0)).map(([name]) => name));
-      statement = withEarlierConstantDeclarations(ce, constantDeclarations, earlier, () => withProgramInitializerOuters(previousBindings, () => withProgramStatement(() => withPairedFunctionNames(functions, canonicalize))));
+      const earlier = constantDeclarations.size === 0 ? constantDeclarations
+        : new Set([...constantIndexes!].filter(([, index]) => index < (sourceIndex!.get(op) ?? 0)).map(([name]) => name));
+      statement = withEarlierConstantDeclarations(ce, constantDeclarations, earlier, () => withProgramInitializerOuters(previousBindings!, () => withProgramStatement(() => withPairedFunctionNames(functions, canonicalize))));
     } else statement = canonicalize();
   } catch (error) {
     if (!program || error instanceof CancellationError) {
       if (program && error instanceof CancellationError) {
-        const prefixOrder = order.filter((i) => completed.has(source[i]) || early.has(source[i]));
-        PROGRAM_INTERRUPTS.set(error, { statements: prefixOrder.map((i) => completed.get(source[i]) ?? early.get(source[i])!), order: prefixOrder, index: source.indexOf(op) });
+        const prefixOrder = order.filter((i) => completed!.has(source[i]) || early!.has(source[i]));
+        PROGRAM_INTERRUPTS.set(error, { statements: prefixOrder.map((i) => completed!.get(source[i]) ?? early!.get(source[i])!), order: prefixOrder, index: source.indexOf(op) });
       }
       throw error;
     }
@@ -4379,7 +4380,7 @@ function canonicalSequence(
   };
   if (program) for (const i of order) {
     if (rank(i) !== 0) break;
-    early.set(source[i], canonicalizeStatement(source[i]));
+    early!.set(source[i], canonicalizeStatement(source[i]));
   }
   // An empty block is canonical as it is: its type handler answers `nothing`
   // and its evaluate handler answers `Nothing`. Declining here (`null`) left
@@ -4513,7 +4514,7 @@ function canonicalSequence(
     const target = op.op1;
     const names = isSymbol(target) ? [target.symbol] : isFunction(target, 'Tuple') ? tuplePatternNames(target) : [];
     for (const name of names)
-      if (declaredConstants.has(name)) constantIndexes.set(name, sourceIndex.get(statement)!);
+      if (declaredConstants.has(name)) constantIndexes!.set(name, sourceIndex!.get(statement)!);
   }
   const hoistedNames = declaredNames.filter((name) => (program ? acceptedDeclarations : accepted).has(name));
 
@@ -4547,7 +4548,7 @@ function canonicalSequence(
       markCallableHome(existing, scope);
       return;
     }
-    if (program && existing !== undefined) previousBindings.set(name, existing);
+    if (program && existing !== undefined) previousBindings!.set(name, existing);
     const knownType = declaredTypes.get(name);
     const persistentType = program && knownType !== undefined && !explicitlyDeclared.has(name) && !declaredConstants.has(name)
       ? widenLocalType(ce, knownType) : knownType;
@@ -4621,7 +4622,7 @@ function canonicalSequence(
           const refusal = refused.get(op);
           if (refusal !== undefined && isFunction(refusal)) {
             const result = ce._fn(refusal.operator, refusal.ops, { metadata: { sourceOffsets: op.sourceOffsets } });
-            completed.set(op, result);
+            completed?.set(op, result);
             return result;
           }
           // A bare `N` or `D` statement is a value: when it still names the
@@ -4629,7 +4630,7 @@ function canonicalSequence(
           // literal binds it), it is a variable, as in `x + N`.
           // The repair runs here, once the scope of the block and its locals
           // exist, so that a local `N` stays the local.
-          const statement = early.get(op) ?? canonicalizeStatement(op);
+          const statement = early?.get(op) ?? canonicalizeStatement(op);
           if (program && (isFunction(statement, 'Declare') || isFunction(statement, 'Assign'))) {
             const names = isFunction(statement.op1, 'Tuple') ? tuplePatternNames(statement.op1) : isSymbol(statement.op1) ? [statement.op1.symbol] : [];
             const writes = new Map<string, BoxedDefinition>();
@@ -4641,11 +4642,11 @@ function canonicalSequence(
             if (isFunction(statement, 'Declare')) {
               PROGRAM_WRITES.set(statement.op1, writes);
               noteProgramDeclarationPrevious(statement.op1,
-                new Map([...writes.keys()].map((name) => [name, previousBindings.get(name)])));
+                new Map([...writes.keys()].map((name) => [name, previousBindings!.get(name)])));
             }
           }
           const result = isSymbol(statement) ? canonicalValueOperand(ce, statement) : statement;
-          completed.set(op, result);
+          completed?.set(op, result);
           return result;
         })
       )
@@ -4882,9 +4883,8 @@ export function useBeforeDeclarationCheck(
 
   const none: ReadonlySet<string> = new Set();
   return (statement, i) => {
-    if (!statement.isValid) return undefined;
     const found = findUse(statement, i, none);
-    if (found === undefined) return undefined;
+    if (found === undefined || !statement.isValid) return undefined;
     const code = ce.function(
       'ErrorCode',
       [ce.string('read-before-declaration'), ce.string(found.name)],

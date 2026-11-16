@@ -1,0 +1,1182 @@
+[
+  {
+    "name": "controls-box-accepted",
+    "arm": "accepted",
+    "workload": "box",
+    "mode": "controls",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-box-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-box-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.41071581840515137
+  },
+  {
+    "name": "controls-box-revision",
+    "arm": "revision",
+    "workload": "box",
+    "mode": "controls",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-box-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-box-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.40721988677978516
+  },
+  {
+    "name": "controls-parse-box-accepted",
+    "arm": "accepted",
+    "workload": "parse-box",
+    "mode": "controls",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-parse-box-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-parse-box-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.4563891887664795
+  },
+  {
+    "name": "controls-parse-box-revision",
+    "arm": "revision",
+    "workload": "parse-box",
+    "mode": "controls",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-parse-box-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-parse-box-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.45198798179626465
+  },
+  {
+    "name": "controls-check-accepted",
+    "arm": "accepted",
+    "workload": "check",
+    "mode": "controls",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-check-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-check-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.5598280429840088
+  },
+  {
+    "name": "controls-check-revision",
+    "arm": "revision",
+    "workload": "check",
+    "mode": "controls",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-check-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-check-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.5409438610076904
+  },
+  {
+    "name": "controls-notebook-accepted",
+    "arm": "accepted",
+    "workload": "notebook",
+    "mode": "controls",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-notebook-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-notebook-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.5286798477172852
+  },
+  {
+    "name": "controls-notebook-revision",
+    "arm": "revision",
+    "workload": "notebook",
+    "mode": "controls",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-notebook-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/controls-notebook-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.8273742198944092
+  },
+  {
+    "name": "timing-box-accepted-1",
+    "arm": "accepted",
+    "workload": "box",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-box-accepted-1",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-box-accepted-1.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-box-accepted-1.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 3,
+    "seconds": 0.5631048679351807
+  },
+  {
+    "name": "timing-box-revision-2",
+    "arm": "revision",
+    "workload": "box",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-box-revision-2",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-box-revision-2.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-box-revision-2.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 3,
+    "seconds": 0.5759859085083008
+  },
+  {
+    "name": "timing-box-revision-3",
+    "arm": "revision",
+    "workload": "box",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-box-revision-3",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-box-revision-3.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-box-revision-3.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 3,
+    "seconds": 0.6384561061859131
+  },
+  {
+    "name": "timing-box-accepted-4",
+    "arm": "accepted",
+    "workload": "box",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-box-accepted-4",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-box-accepted-4.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-box-accepted-4.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 3,
+    "seconds": 0.5742149353027344
+  },
+  {
+    "name": "timing-check-accepted-1",
+    "arm": "accepted",
+    "workload": "check",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-check-accepted-1",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-check-accepted-1.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-check-accepted-1.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 3,
+    "seconds": 0.5786252021789551
+  },
+  {
+    "name": "timing-check-revision-2",
+    "arm": "revision",
+    "workload": "check",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-check-revision-2",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-check-revision-2.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-check-revision-2.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 3,
+    "seconds": 0.5723910331726074
+  },
+  {
+    "name": "timing-check-revision-3",
+    "arm": "revision",
+    "workload": "check",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-check-revision-3",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-check-revision-3.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-check-revision-3.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 3,
+    "seconds": 0.5739867687225342
+  },
+  {
+    "name": "timing-check-accepted-4",
+    "arm": "accepted",
+    "workload": "check",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-check-accepted-4",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-check-accepted-4.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-check-accepted-4.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 3,
+    "seconds": 0.5793578624725342
+  },
+  {
+    "name": "timing-notebook-accepted-1",
+    "arm": "accepted",
+    "workload": "notebook",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-notebook-accepted-1",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-notebook-accepted-1.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-notebook-accepted-1.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 3,
+    "seconds": 0.5743401050567627
+  },
+  {
+    "name": "timing-notebook-revision-2",
+    "arm": "revision",
+    "workload": "notebook",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-notebook-revision-2",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-notebook-revision-2.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-notebook-revision-2.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 3,
+    "seconds": 0.5504131317138672
+  },
+  {
+    "name": "timing-notebook-revision-3",
+    "arm": "revision",
+    "workload": "notebook",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-notebook-revision-3",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-notebook-revision-3.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-notebook-revision-3.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 3,
+    "seconds": 0.5806500911712646
+  },
+  {
+    "name": "timing-notebook-accepted-4",
+    "arm": "accepted",
+    "workload": "notebook",
+    "mode": "timing",
+    "command": [
+      "python3",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/monitor.py",
+      "timing-notebook-accepted-4",
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-notebook-accepted-4.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/timing-notebook-accepted-4.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 3,
+    "seconds": 0.5509703159332275
+  },
+  {
+    "name": "cpu-box-accepted",
+    "arm": "accepted",
+    "workload": "box",
+    "mode": "cpu",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-box-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-box-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 2.1453897953033447
+  },
+  {
+    "name": "cpu-box-revision",
+    "arm": "revision",
+    "workload": "box",
+    "mode": "cpu",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-box-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-box-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 2.1573729515075684
+  },
+  {
+    "name": "cpu-parse-box-accepted",
+    "arm": "accepted",
+    "workload": "parse-box",
+    "mode": "cpu",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-parse-box-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-parse-box-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 2.5034921169281006
+  },
+  {
+    "name": "cpu-parse-box-revision",
+    "arm": "revision",
+    "workload": "parse-box",
+    "mode": "cpu",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-parse-box-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-parse-box-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 2.483729124069214
+  },
+  {
+    "name": "cpu-check-accepted",
+    "arm": "accepted",
+    "workload": "check",
+    "mode": "cpu",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-check-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-check-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 3.787714958190918
+  },
+  {
+    "name": "cpu-check-revision",
+    "arm": "revision",
+    "workload": "check",
+    "mode": "cpu",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-check-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-check-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 3.784651041030884
+  },
+  {
+    "name": "cpu-notebook-accepted",
+    "arm": "accepted",
+    "workload": "notebook",
+    "mode": "cpu",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-notebook-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-notebook-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 3.3852508068084717
+  },
+  {
+    "name": "cpu-notebook-revision",
+    "arm": "revision",
+    "workload": "notebook",
+    "mode": "cpu",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-notebook-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-notebook-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 3.4461288452148438
+  },
+  {
+    "name": "allocation-box-accepted",
+    "arm": "accepted",
+    "workload": "box",
+    "mode": "allocation",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-box-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-box-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 2.7440261840820312
+  },
+  {
+    "name": "allocation-box-revision",
+    "arm": "revision",
+    "workload": "box",
+    "mode": "allocation",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-box-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-box-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 2.7794549465179443
+  },
+  {
+    "name": "allocation-parse-box-accepted",
+    "arm": "accepted",
+    "workload": "parse-box",
+    "mode": "allocation",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-parse-box-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-parse-box-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 3.498434066772461
+  },
+  {
+    "name": "allocation-parse-box-revision",
+    "arm": "revision",
+    "workload": "parse-box",
+    "mode": "allocation",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-parse-box-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-parse-box-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 3.40413498878479
+  },
+  {
+    "name": "allocation-check-accepted",
+    "arm": "accepted",
+    "workload": "check",
+    "mode": "allocation",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-check-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-check-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 5.612581729888916
+  },
+  {
+    "name": "allocation-check-revision",
+    "arm": "revision",
+    "workload": "check",
+    "mode": "allocation",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-check-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-check-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 5.412594318389893
+  },
+  {
+    "name": "allocation-notebook-accepted",
+    "arm": "accepted",
+    "workload": "notebook",
+    "mode": "allocation",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-notebook-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-notebook-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 4.782262086868286
+  },
+  {
+    "name": "allocation-notebook-revision",
+    "arm": "revision",
+    "workload": "notebook",
+    "mode": "allocation",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-notebook-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/allocation-notebook-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 4.759715795516968
+  },
+  {
+    "name": "counts-box-accepted",
+    "arm": "accepted",
+    "workload": "box",
+    "mode": "counts",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-box-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-box-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.42883801460266113
+  },
+  {
+    "name": "counts-box-revision",
+    "arm": "revision",
+    "workload": "box",
+    "mode": "counts",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-box-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-box-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.4354832172393799
+  },
+  {
+    "name": "counts-parse-box-accepted",
+    "arm": "accepted",
+    "workload": "parse-box",
+    "mode": "counts",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-parse-box-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-parse-box-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.47728514671325684
+  },
+  {
+    "name": "counts-parse-box-revision",
+    "arm": "revision",
+    "workload": "parse-box",
+    "mode": "counts",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-parse-box-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-parse-box-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.46465420722961426
+  },
+  {
+    "name": "counts-check-accepted",
+    "arm": "accepted",
+    "workload": "check",
+    "mode": "counts",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-check-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-check-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.5686509609222412
+  },
+  {
+    "name": "counts-check-revision",
+    "arm": "revision",
+    "workload": "check",
+    "mode": "counts",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-check-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-check-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.5593061447143555
+  },
+  {
+    "name": "counts-notebook-accepted",
+    "arm": "accepted",
+    "workload": "notebook",
+    "mode": "counts",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-notebook-accepted.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-notebook-accepted.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.5619738101959229
+  },
+  {
+    "name": "counts-notebook-revision",
+    "arm": "revision",
+    "workload": "notebook",
+    "mode": "counts",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-notebook-revision.request.json",
+      "/private/tmp/program-profile-revision-20261116/revision-matrix/counts-notebook-revision.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-profile-revision-20261116/ce"
+    },
+    "cwd": "/Users/arno/dev/compute-engine",
+    "driverExit": 0,
+    "seconds": 0.5795738697052002
+  }
+]

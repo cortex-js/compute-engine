@@ -1,0 +1,29 @@
+{
+  "request": {
+    "root": "/private/tmp/program-only-accepted-candidate-20261115",
+    "workload": "parse-box",
+    "mode": "controls",
+    "warmup": 1000,
+    "iterations": 20000
+  },
+  "node": "v26.13.0",
+  "v8": "14.6.202.34-node.40",
+  "execArgv": [
+    "--import",
+    "tsx",
+    "--import",
+    "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs"
+  ],
+  "precision": 21,
+  "jit": "auto",
+  "controls": {
+    "program": {
+      "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+      "result": 10,
+      "checkDiagnostics": 0
+    }
+  },
+  "warmup": 1000,
+  "iterations": 20000,
+  "status": "ok"
+}

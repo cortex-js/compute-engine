@@ -1,0 +1,4 @@
+2026-11-16T05:54:32,826: [] fchmod(/Users/arno/.local/state/watchman/arno-state, 2700): Operation not permitted
+
+Watchman:  watchman --no-pretty get-sockname returned with exit code=1, signal=null, stderr= 2026-11-16T05:54:32,826: [] fchmod(/Users/arno/.local/state/watchman/arno-state, 2700): Operation not permitted
+

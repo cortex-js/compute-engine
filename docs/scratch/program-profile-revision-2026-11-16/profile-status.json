@@ -1,0 +1,706 @@
+[
+  {
+    "name": "controls-box-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/controls-box-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/controls-box-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.2664949893951416
+  },
+  {
+    "name": "controls-box-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/controls-box-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/controls-box-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.2688157558441162
+  },
+  {
+    "name": "controls-parse-box-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/controls-parse-box-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/controls-parse-box-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.2613718509674072
+  },
+  {
+    "name": "controls-parse-box-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/controls-parse-box-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/controls-parse-box-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.26545095443725586
+  },
+  {
+    "name": "controls-check-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/controls-check-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/controls-check-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.27768802642822266
+  },
+  {
+    "name": "controls-check-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/controls-check-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/controls-check-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.28179001808166504
+  },
+  {
+    "name": "controls-notebook-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/controls-notebook-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/controls-notebook-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.30574917793273926
+  },
+  {
+    "name": "controls-notebook-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/controls-notebook-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/controls-notebook-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.3076059818267822
+  },
+  {
+    "name": "cpu-box-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-box-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/cpu-box-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 1.3487420082092285
+  },
+  {
+    "name": "cpu-box-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-box-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/cpu-box-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 2.1469779014587402
+  },
+  {
+    "name": "cpu-parse-box-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-parse-box-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/cpu-parse-box-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 1.7317543029785156
+  },
+  {
+    "name": "cpu-parse-box-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-parse-box-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/cpu-parse-box-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 2.5069591999053955
+  },
+  {
+    "name": "cpu-check-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-check-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/cpu-check-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 3.4350059032440186
+  },
+  {
+    "name": "cpu-check-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-check-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/cpu-check-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 3.9981799125671387
+  },
+  {
+    "name": "cpu-notebook-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-notebook-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/cpu-notebook-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 2.749790906906128
+  },
+  {
+    "name": "cpu-notebook-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/cpu-notebook-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/cpu-notebook-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 3.350389003753662
+  },
+  {
+    "name": "allocation-box-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-box-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/allocation-box-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 1.6435182094573975
+  },
+  {
+    "name": "allocation-box-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-box-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/allocation-box-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 2.818222999572754
+  },
+  {
+    "name": "allocation-parse-box-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-parse-box-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/allocation-parse-box-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 2.127678871154785
+  },
+  {
+    "name": "allocation-parse-box-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-parse-box-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/allocation-parse-box-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 3.525998830795288
+  },
+  {
+    "name": "allocation-check-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-check-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/allocation-check-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 4.653557062149048
+  },
+  {
+    "name": "allocation-check-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-check-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/allocation-check-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 5.474200010299683
+  },
+  {
+    "name": "allocation-notebook-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-notebook-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/allocation-notebook-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 3.733410120010376
+  },
+  {
+    "name": "allocation-notebook-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/allocation-notebook-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/allocation-notebook-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 4.674673080444336
+  },
+  {
+    "name": "counts-box-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/counts-box-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/counts-box-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.3486032485961914
+  },
+  {
+    "name": "counts-box-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/counts-box-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/counts-box-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.41949915885925293
+  },
+  {
+    "name": "counts-parse-box-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/counts-parse-box-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/counts-parse-box-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.38353991508483887
+  },
+  {
+    "name": "counts-parse-box-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/counts-parse-box-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/counts-parse-box-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.46151232719421387
+  },
+  {
+    "name": "counts-check-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/counts-check-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/counts-check-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.5390348434448242
+  },
+  {
+    "name": "counts-check-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/counts-check-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/counts-check-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.5804538726806641
+  },
+  {
+    "name": "counts-notebook-baseline",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/counts-notebook-baseline.request.json",
+      "/private/tmp/program-profile-revision-20261116/counts-notebook-baseline.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-baseline-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.5003101825714111
+  },
+  {
+    "name": "counts-notebook-candidate",
+    "command": [
+      "timeout",
+      "-k",
+      "10",
+      "120",
+      "node",
+      "--import",
+      "tsx",
+      "--import",
+      "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs",
+      "/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs",
+      "/private/tmp/program-profile-revision-20261116/counts-notebook-candidate.request.json",
+      "/private/tmp/program-profile-revision-20261116/counts-notebook-candidate.json"
+    ],
+    "environment": {
+      "CE_ALT_PKG": "/private/tmp/program-only-accepted-candidate-20261115/ce"
+    },
+    "exitCode": 0,
+    "seconds": 0.5600779056549072
+  }
+]

@@ -1,0 +1,42 @@
+{
+  "before": "c640ffdedf525e356552956e4f1beab75c46e165a96f8dad716f1d3287efc477",
+  "after": "c640ffdedf525e356552956e4f1beab75c46e165a96f8dad716f1d3287efc477",
+  "untorn": true,
+  "checks": [
+    {
+      "name": "targeted",
+      "command": [
+        "node_modules/.bin/jest",
+        "-w",
+        "4",
+        "--watchman=false",
+        "--",
+        "test/epsil/program.test.ts",
+        "test/epsil/check-epsil.test.ts",
+        "test/epsil/function-declaration-hoisting.test.ts",
+        "test/epsil/parameter-default-values.test.ts",
+        "test/epsil/static-lambda-callee-arguments.test.ts",
+        "test/epsil/nested-statement-diagnostics.test.ts",
+        "test/epsil/reordered-call-error-location.test.ts",
+        "test/compute-engine/block-later-declarations.test.ts",
+        "test/compute-engine/block-locals-per-run.test.ts",
+        "test/compute-engine/parameter-default-values.test.ts",
+        "test/compute-engine/compile-caller-cancellation.test.ts"
+      ],
+      "exitCode": 0,
+      "suitesRan": true
+    },
+    {
+      "name": "core",
+      "command": [
+        "npm",
+        "run",
+        "test:core",
+        "--",
+        "--watchman=false"
+      ],
+      "exitCode": 0,
+      "suitesRan": true
+    }
+  ]
+}

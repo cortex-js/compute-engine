@@ -1,0 +1,84 @@
+{
+  "request": {
+    "root": "/private/tmp/program-only-accepted-baseline-20261115",
+    "workload": "notebook",
+    "mode": "counts",
+    "warmup": 1000,
+    "iterations": 20000
+  },
+  "node": "v26.13.0",
+  "v8": "14.6.202.34-node.40",
+  "execArgv": [
+    "--import",
+    "tsx",
+    "--import",
+    "/private/tmp/program-only-accepted-baseline-20261115/tycho/scripts/repros/ce-alt-hook.mjs"
+  ],
+  "precision": 15,
+  "jit": "auto",
+  "controls": {
+    "notebook": {
+      "source": "let a = 3\nlet b = a+1\nb",
+      "rerun": "4",
+      "edit": "5",
+      "route": "real analyze/executeCortexCell/bindCortexPublications; persistent scope",
+      "excludes": [
+        "graph scheduling",
+        "UI"
+      ]
+    }
+  },
+  "warmup": 1000,
+  "iterations": 20000,
+  "counts": {
+    "logicalOperations": 20,
+    "engines": 1,
+    "calls": {
+      "lookupDefinition": 1100,
+      "box": 160,
+      "function": 240,
+      "type": 200,
+      "declare": 40,
+      "assign": 40
+    },
+    "repeatedSameObjectBoxWithinOperation": {
+      "<object>": 60
+    },
+    "examples": [
+      {
+        "head": "<object>",
+        "stack": "Error\n    at t.target.<computed> (/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs:100:183)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94785\n    at L$ (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-HH4M7UFJ.js:10:43471)\n    at Sr (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:67975)\n    at _c (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94768)\n    at _c.next (<anonymous>)\n    at Ta (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:93438)\n    at Ta.next (<anonymous>)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:92442\n    at Kt.withOperation (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RJ7RULGV.js:4:33028)"
+      },
+      {
+        "head": "<object>",
+        "stack": "Error\n    at t.target.<computed> (/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs:100:183)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94785\n    at L$ (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-HH4M7UFJ.js:10:43471)\n    at Sr (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:67975)\n    at _c (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94768)\n    at _c.next (<anonymous>)\n    at Ta (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:93438)\n    at Ta.next (<anonymous>)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:92577\n    at Kt.withOperation (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RJ7RULGV.js:4:33028)"
+      },
+      {
+        "head": "<object>",
+        "stack": "Error\n    at t.target.<computed> (/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs:100:183)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94785\n    at Sr (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:67870)\n    at _c (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94768)\n    at _c.next (<anonymous>)\n    at Ta (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:93438)\n    at Ta.next (<anonymous>)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:92577\n    at Kt.withOperation (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RJ7RULGV.js:4:33028)\n    at t._withProgramEnvironment (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RJ7RULGV.js:4:73610)"
+      },
+      {
+        "head": "<object>",
+        "stack": "Error\n    at t.target.<computed> (/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs:100:183)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94785\n    at L$ (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-HH4M7UFJ.js:10:43471)\n    at Sr (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:67975)\n    at _c (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94768)\n    at _c.next (<anonymous>)\n    at Ta (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:93438)\n    at Ta.next (<anonymous>)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:92442\n    at Kt.withOperation (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RJ7RULGV.js:4:33028)"
+      },
+      {
+        "head": "<object>",
+        "stack": "Error\n    at t.target.<computed> (/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs:100:183)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94785\n    at L$ (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-HH4M7UFJ.js:10:43471)\n    at Sr (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:67975)\n    at _c (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94768)\n    at _c.next (<anonymous>)\n    at Ta (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:93438)\n    at Ta.next (<anonymous>)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:92577\n    at Kt.withOperation (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RJ7RULGV.js:4:33028)"
+      },
+      {
+        "head": "<object>",
+        "stack": "Error\n    at t.target.<computed> (/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs:100:183)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94785\n    at Sr (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:67870)\n    at _c (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94768)\n    at _c.next (<anonymous>)\n    at Ta (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:93438)\n    at Ta.next (<anonymous>)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:92577\n    at Kt.withOperation (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RJ7RULGV.js:4:33028)\n    at t._withProgramEnvironment (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RJ7RULGV.js:4:73610)"
+      },
+      {
+        "head": "<object>",
+        "stack": "Error\n    at t.target.<computed> (/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs:100:183)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94785\n    at L$ (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-HH4M7UFJ.js:10:43471)\n    at Sr (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:67975)\n    at _c (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94768)\n    at _c.next (<anonymous>)\n    at Ta (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:93438)\n    at Ta.next (<anonymous>)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:92442\n    at Kt.withOperation (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RJ7RULGV.js:4:33028)"
+      },
+      {
+        "head": "<object>",
+        "stack": "Error\n    at t.target.<computed> (/Users/arno/dev/compute-engine/benchmarks/program-regression-child.mjs:100:183)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94785\n    at L$ (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-HH4M7UFJ.js:10:43471)\n    at Sr (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:67975)\n    at _c (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:94768)\n    at _c.next (<anonymous>)\n    at Ta (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:93438)\n    at Ta.next (<anonymous>)\n    at file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/epsil.js:24:92577\n    at Kt.withOperation (file:///private/tmp/program-only-accepted-baseline-20261115/ce/dist/esm-min/chunks/chunk-RJ7RULGV.js:4:33028)"
+      }
+    ],
+    "diagnosticOnly": true
+  },
+  "status": "ok"
+}

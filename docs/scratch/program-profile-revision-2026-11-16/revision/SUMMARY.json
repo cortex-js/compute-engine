@@ -1,0 +1,1121 @@
+{
+  "allocation": {
+    "box": {
+      "accepted": {
+        "estimatedBytesPerOperation": 233629.5316,
+        "samplingBytes": 32768,
+        "warmup": 1000,
+        "iterations": 20000
+      },
+      "revision": {
+        "estimatedBytesPerOperation": 228807.2676,
+        "samplingBytes": 32768,
+        "warmup": 1000,
+        "iterations": 20000
+      }
+    },
+    "parse-box": {
+      "accepted": {
+        "estimatedBytesPerOperation": 282554.3204,
+        "samplingBytes": 32768,
+        "warmup": 1000,
+        "iterations": 20000
+      },
+      "revision": {
+        "estimatedBytesPerOperation": 281725.822,
+        "samplingBytes": 32768,
+        "warmup": 1000,
+        "iterations": 20000
+      }
+    },
+    "check": {
+      "accepted": {
+        "estimatedBytesPerOperation": 445763.2468,
+        "samplingBytes": 32768,
+        "warmup": 1000,
+        "iterations": 20000
+      },
+      "revision": {
+        "estimatedBytesPerOperation": 445455.8416,
+        "samplingBytes": 32768,
+        "warmup": 1000,
+        "iterations": 20000
+      }
+    },
+    "notebook": {
+      "accepted": {
+        "estimatedBytesPerOperation": 432489.7132,
+        "samplingBytes": 32768,
+        "warmup": 1000,
+        "iterations": 20000
+      },
+      "revision": {
+        "estimatedBytesPerOperation": 429627.222,
+        "samplingBytes": 32768,
+        "warmup": 1000,
+        "iterations": 20000
+      }
+    }
+  },
+  "timing": {
+    "box": {
+      "accepted": [
+        {
+          "name": "timing-box-accepted-r2-4",
+          "accepted": true,
+          "childExit": 0,
+          "maxLoad": 3.6171875,
+          "rejectedIntervals": [],
+          "iterationsPerSample": 1600,
+          "warmup": 1000,
+          "precision": 21,
+          "jit": "auto",
+          "samplesUs": [
+            81.89356749999995,
+            77.50531249999995,
+            77.52908874999996,
+            83.74242187500002,
+            76.7921356250001,
+            73.53588562499993,
+            73.93914062499988
+          ],
+          "medianUs": 77.50531249999995
+        },
+        {
+          "name": "timing-box-accepted-r3-2",
+          "accepted": true,
+          "childExit": 0,
+          "maxLoad": 3.41064453125,
+          "rejectedIntervals": [],
+          "iterationsPerSample": 1600,
+          "warmup": 1000,
+          "precision": 21,
+          "jit": "auto",
+          "samplesUs": [
+            83.29252625000002,
+            79.0401825,
+            79.28205750000004,
+            85.42760437499993,
+            84.36239624999999,
+            72.53632812500001,
+            73.89864562499994
+          ],
+          "medianUs": 79.28205750000004
+        }
+      ],
+      "revision": [
+        {
+          "name": "timing-box-revision-r2-2",
+          "accepted": true,
+          "childExit": 0,
+          "maxLoad": 3.67138671875,
+          "rejectedIntervals": [],
+          "iterationsPerSample": 1600,
+          "warmup": 1000,
+          "precision": 21,
+          "jit": "auto",
+          "samplesUs": [
+            81.24481750000001,
+            75.77442687500003,
+            81.38072937499992,
+            78.86518250000009,
+            74.07554687499996,
+            70.82479187499999,
+            72.70098937500009
+          ],
+          "medianUs": 75.77442687500003
+        },
+        {
+          "name": "timing-box-revision-r2-3",
+          "accepted": true,
+          "childExit": 0,
+          "maxLoad": 3.6171875,
+          "rejectedIntervals": [],
+          "iterationsPerSample": 1600,
+          "warmup": 1000,
+          "precision": 21,
+          "jit": "auto",
+          "samplesUs": [
+            77.80617187499999,
+            72.80023437499999,
+            77.39367187500001,
+            85.78713562499999,
+            77.5325781250001,
+            74.53026062500001,
+            74.31356750000006
+          ],
+          "medianUs": 77.39367187500001
+        }
+      ],
+      "ratioOfProcessMedians": 0.9769160535698765
+    },
+    "check": {
+      "accepted": [
+        {
+          "name": "timing-check-accepted-r2-4",
+          "accepted": true,
+          "childExit": 0,
+          "maxLoad": 3.5888671875,
+          "rejectedIntervals": [],
+          "iterationsPerSample": 800,
+          "warmup": 1000,
+          "precision": 21,
+          "jit": "auto",
+          "samplesUs": [
+            155.7659375,
+            162.03275999999988,
+            155.7577074999999,
+            150.35338500000023,
+            155.38906249999997,
+            147.38218749999987,
+            145.95624999999984
+          ],
+          "medianUs": 155.38906249999997
+        },
+        {
+          "name": "timing-check-accepted-r3-2",
+          "accepted": true,
+          "childExit": 0,
+          "maxLoad": 3.41064453125,
+          "rejectedIntervals": [],
+          "iterationsPerSample": 800,
+          "warmup": 1000,
+          "precision": 21,
+          "jit": "auto",
+          "samplesUs": [
+            181.76947874999996,
+            160.33750000000012,
+            157.79348999999996,
+            152.60385374999998,
+            146.61411499999986,
+            142.6083862500002,
+            138.74463625000004
+          ],
+          "medianUs": 152.60385374999998
+        }
+      ],
+      "revision": [
+        {
+          "name": "timing-check-revision-r2-2",
+          "accepted": true,
+          "childExit": 0,
+          "maxLoad": 3.7275390625,
+          "rejectedIntervals": [],
+          "iterationsPerSample": 800,
+          "warmup": 1000,
+          "precision": 21,
+          "jit": "auto",
+          "samplesUs": [
+            152.12020749999994,
+            154.21093749999997,
+            156.69260500000007,
+            149.618385,
+            146.28104125000021,
+            135.9434374999998,
+            134.75088499999998
+          ],
+          "medianUs": 149.618385
+        },
+        {
+          "name": "timing-check-revision-r2-3",
+          "accepted": true,
+          "childExit": 0,
+          "maxLoad": 3.7275390625,
+          "rejectedIntervals": [],
+          "iterationsPerSample": 800,
+          "warmup": 1000,
+          "precision": 21,
+          "jit": "auto",
+          "samplesUs": [
+            177.92906249999987,
+            160.35286499999998,
+            154.96437500000013,
+            155.37557375000006,
+            143.7732812499999,
+            146.03458375000002,
+            136.27203125000023
+          ],
+          "medianUs": 154.96437500000013
+        },
+        {
+          "name": "timing-check-revision-r3-1",
+          "accepted": true,
+          "childExit": 0,
+          "maxLoad": 3.41064453125,
+          "rejectedIntervals": [],
+          "iterationsPerSample": 800,
+          "warmup": 1000,
+          "precision": 21,
+          "jit": "auto",
+          "samplesUs": [
+            192.49145874999996,
+            161.00921875000012,
+            159.57484375000007,
+            161.42854124999985,
+            145.3350525000002,
+            141.0844262500001,
+            152.66578124999995
+          ],
+          "medianUs": 159.57484375000007
+        }
+      ],
+      "ratioOfProcessMedians": 1.006285319070225
+    },
+    "notebook": {
+      "accepted": [
+        {
+          "name": "timing-notebook-accepted-r2-1",
+          "accepted": true,
+          "childExit": 0,
+          "maxLoad": 3.5888671875,
+          "rejectedIntervals": [],
+          "iterationsPerSample": 800,
+          "warmup": 1000,
+          "precision": 15,
+          "jit": "auto",
+          "samplesUs": [
+            152.47640625000003,
+            138.00552124999996,
+            141.92239499999985,
+            137.8621874999999,
+            129.81140624999995,
+            122.38828124999998,
+            116.90932250000003
+          ],
+          "medianUs": 137.8621874999999
+        },
+        {
+          "name": "timing-notebook-accepted-r2-4",
+          "accepted": true,
+          "childExit": 0,
+          "maxLoad": 3.46142578125,
+          "rejectedIntervals": [],
+          "iterationsPerSample": 800,
+          "warmup": 1000,
+          "precision": 15,
+          "jit": "auto",
+          "samplesUs": [
+            146.812865,
+            138.12312500000004,
+            136.38536499999987,
+            129.22312500000004,
+            127.97031250000005,
+            121.82874999999996,
+            118.79916625000021
+          ],
+          "medianUs": 129.22312500000004
+        }
+      ],
+      "revision": [
+        {
+          "name": "timing-notebook-revision-r2-2",
+          "accepted": true,
+          "childExit": 0,
+          "maxLoad": 3.5888671875,
+          "rejectedIntervals": [],
+          "iterationsPerSample": 800,
+          "warmup": 1000,
+          "precision": 15,
+          "jit": "auto",
+          "samplesUs": [
+            149.273125,
+            136.89630250000008,
+            137.15604125000013,
+            127.93567625000007,
+            126.62869875000013,
+            120.89932250000004,
+            120.28932374999982
+          ],
+          "medianUs": 127.93567625000007
+        },
+        {
+          "name": "timing-notebook-revision-r2-3",
+          "accepted": true,
+          "childExit": 0,
+          "maxLoad": 3.46142578125,
+          "rejectedIntervals": [],
+          "iterationsPerSample": 800,
+          "warmup": 1000,
+          "precision": 15,
+          "jit": "auto",
+          "samplesUs": [
+            146.2309375000001,
+            135.13150999999993,
+            137.05895749999982,
+            125.6956249999999,
+            129.66973999999993,
+            120.72281250000003,
+            144.2130212500001
+          ],
+          "medianUs": 135.13150999999993
+        }
+      ],
+      "ratioOfProcessMedians": 0.9849556450244716
+    }
+  },
+  "counts": {
+    "box": {
+      "accepted": {
+        "logicalOperations": 20,
+        "engines": 1,
+        "calls": {
+          "box": 20,
+          "type": 520,
+          "function": 201,
+          "lookupDefinition": 571
+        },
+        "repeatedSameObjectBoxWithinOperation": {},
+        "examples": [],
+        "diagnosticOnly": true
+      },
+      "revision": {
+        "logicalOperations": 20,
+        "engines": 1,
+        "calls": {
+          "box": 20,
+          "type": 520,
+          "function": 201,
+          "lookupDefinition": 571
+        },
+        "repeatedSameObjectBoxWithinOperation": {},
+        "examples": [],
+        "diagnosticOnly": true
+      }
+    },
+    "parse-box": {
+      "accepted": {
+        "logicalOperations": 20,
+        "engines": 1,
+        "calls": {
+          "lookupDefinition": 731,
+          "box": 20,
+          "type": 520,
+          "function": 201
+        },
+        "repeatedSameObjectBoxWithinOperation": {},
+        "examples": [],
+        "diagnosticOnly": true
+      },
+      "revision": {
+        "logicalOperations": 20,
+        "engines": 1,
+        "calls": {
+          "lookupDefinition": 731,
+          "box": 20,
+          "type": 520,
+          "function": 201
+        },
+        "repeatedSameObjectBoxWithinOperation": {},
+        "examples": [],
+        "diagnosticOnly": true
+      }
+    },
+    "check": {
+      "accepted": {
+        "logicalOperations": 20,
+        "engines": 1,
+        "calls": {
+          "lookupDefinition": 1000,
+          "box": 20,
+          "type": 520,
+          "function": 360
+        },
+        "repeatedSameObjectBoxWithinOperation": {},
+        "examples": [],
+        "diagnosticOnly": true
+      },
+      "revision": {
+        "logicalOperations": 20,
+        "engines": 1,
+        "calls": {
+          "lookupDefinition": 1000,
+          "box": 20,
+          "type": 520,
+          "function": 360
+        },
+        "repeatedSameObjectBoxWithinOperation": {},
+        "examples": [],
+        "diagnosticOnly": true
+      }
+    },
+    "notebook": {
+      "accepted": {
+        "logicalOperations": 20,
+        "engines": 1,
+        "calls": {
+          "lookupDefinition": 1060,
+          "box": 40,
+          "type": 400,
+          "function": 320,
+          "assign": 40
+        },
+        "repeatedSameObjectBoxWithinOperation": {},
+        "examples": [],
+        "diagnosticOnly": true
+      },
+      "revision": {
+        "logicalOperations": 20,
+        "engines": 1,
+        "calls": {
+          "lookupDefinition": 1060,
+          "box": 40,
+          "type": 400,
+          "function": 320,
+          "assign": 40
+        },
+        "repeatedSameObjectBoxWithinOperation": {},
+        "examples": [],
+        "diagnosticOnly": true
+      }
+    }
+  },
+  "rawCPU": {
+    "box": {
+      "accepted": {
+        "path": "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-box-accepted.json.cpuprofile",
+        "sha256": "39b0ab539cc5630fb49c5960a0979dc6282975e1cb71f1c0acac975c953dacea",
+        "samples": 5474,
+        "diagnosticWallMs": 1665.437042
+      },
+      "revision": {
+        "path": "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-box-revision.json.cpuprofile",
+        "sha256": "f8b3b22e75c4026adb562ea0b7e2f45c2f129c4a7cd592fc9034585f4bb612e1",
+        "samples": 5499,
+        "diagnosticWallMs": 1672.5868340000002
+      }
+    },
+    "parse-box": {
+      "accepted": {
+        "path": "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-parse-box-accepted.json.cpuprofile",
+        "sha256": "e1a80a4388ce535916c464e27e8d2e150347136653d3155bf66e90951e14944f",
+        "samples": 6498,
+        "diagnosticWallMs": 1991.503208
+      },
+      "revision": {
+        "path": "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-parse-box-revision.json.cpuprofile",
+        "sha256": "f6db3564ec79bd121bf4ef104a5e0a2bd6f17f407baf42650cd548f27ef1efe4",
+        "samples": 6446,
+        "diagnosticWallMs": 1975.1240410000003
+      }
+    },
+    "check": {
+      "accepted": {
+        "path": "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-check-accepted.json.cpuprofile",
+        "sha256": "7e454e056ef3484f32507fe0052e2f4da8a3075e2c0986e447e34494c586a63a",
+        "samples": 10033,
+        "diagnosticWallMs": 3092.672541
+      },
+      "revision": {
+        "path": "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-check-revision.json.cpuprofile",
+        "sha256": "1ccae90617318760e324d13c83037ae1b776c30411b9b1653f37c838aacf8668",
+        "samples": 10224,
+        "diagnosticWallMs": 3148.17225
+      }
+    },
+    "notebook": {
+      "accepted": {
+        "path": "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-notebook-accepted.json.cpuprofile",
+        "sha256": "5d88d837c75a74cff39ebb13858955fd7ba885901704c4b217af05adaa573a60",
+        "samples": 8795,
+        "diagnosticWallMs": 2748.6749579999996
+      },
+      "revision": {
+        "path": "/private/tmp/program-profile-revision-20261116/revision-matrix/cpu-notebook-revision.json.cpuprofile",
+        "sha256": "7f4ff9387d55eff59a22523b229afe592696bdc6175cb1be745d7e505cd34ce4",
+        "samples": 9013,
+        "diagnosticWallMs": 2814.219042
+      }
+    }
+  },
+  "controls": {
+    "box-accepted": {
+      "request": {
+        "root": "/private/tmp/program-only-accepted-candidate-20261115",
+        "workload": "box",
+        "mode": "controls",
+        "warmup": 1000,
+        "iterations": 20000
+      },
+      "node": "v26.13.0",
+      "v8": "14.6.202.34-node.40",
+      "execArgv": [
+        "--import",
+        "tsx",
+        "--import",
+        "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs"
+      ],
+      "precision": 21,
+      "jit": "auto",
+      "controls": {
+        "program": {
+          "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+          "result": 10,
+          "checkDiagnostics": 0
+        }
+      },
+      "warmup": 1000,
+      "iterations": 20000,
+      "status": "ok"
+    },
+    "box-revision": {
+      "request": {
+        "root": "/private/tmp/program-only-profile-revision-20261116",
+        "workload": "box",
+        "mode": "controls",
+        "warmup": 1000,
+        "iterations": 20000
+      },
+      "node": "v26.13.0",
+      "v8": "14.6.202.34-node.40",
+      "execArgv": [
+        "--import",
+        "tsx",
+        "--import",
+        "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs"
+      ],
+      "precision": 21,
+      "jit": "auto",
+      "controls": {
+        "program": {
+          "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+          "result": 10,
+          "checkDiagnostics": 0
+        }
+      },
+      "warmup": 1000,
+      "iterations": 20000,
+      "status": "ok"
+    },
+    "parse-box-accepted": {
+      "request": {
+        "root": "/private/tmp/program-only-accepted-candidate-20261115",
+        "workload": "parse-box",
+        "mode": "controls",
+        "warmup": 1000,
+        "iterations": 20000
+      },
+      "node": "v26.13.0",
+      "v8": "14.6.202.34-node.40",
+      "execArgv": [
+        "--import",
+        "tsx",
+        "--import",
+        "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs"
+      ],
+      "precision": 21,
+      "jit": "auto",
+      "controls": {
+        "program": {
+          "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+          "result": 10,
+          "checkDiagnostics": 0
+        }
+      },
+      "warmup": 1000,
+      "iterations": 20000,
+      "status": "ok"
+    },
+    "parse-box-revision": {
+      "request": {
+        "root": "/private/tmp/program-only-profile-revision-20261116",
+        "workload": "parse-box",
+        "mode": "controls",
+        "warmup": 1000,
+        "iterations": 20000
+      },
+      "node": "v26.13.0",
+      "v8": "14.6.202.34-node.40",
+      "execArgv": [
+        "--import",
+        "tsx",
+        "--import",
+        "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs"
+      ],
+      "precision": 21,
+      "jit": "auto",
+      "controls": {
+        "program": {
+          "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+          "result": 10,
+          "checkDiagnostics": 0
+        }
+      },
+      "warmup": 1000,
+      "iterations": 20000,
+      "status": "ok"
+    },
+    "check-accepted": {
+      "request": {
+        "root": "/private/tmp/program-only-accepted-candidate-20261115",
+        "workload": "check",
+        "mode": "controls",
+        "warmup": 1000,
+        "iterations": 20000
+      },
+      "node": "v26.13.0",
+      "v8": "14.6.202.34-node.40",
+      "execArgv": [
+        "--import",
+        "tsx",
+        "--import",
+        "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs"
+      ],
+      "precision": 21,
+      "jit": "auto",
+      "controls": {
+        "program": {
+          "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+          "result": 10,
+          "checkDiagnostics": 0
+        }
+      },
+      "warmup": 1000,
+      "iterations": 20000,
+      "status": "ok"
+    },
+    "check-revision": {
+      "request": {
+        "root": "/private/tmp/program-only-profile-revision-20261116",
+        "workload": "check",
+        "mode": "controls",
+        "warmup": 1000,
+        "iterations": 20000
+      },
+      "node": "v26.13.0",
+      "v8": "14.6.202.34-node.40",
+      "execArgv": [
+        "--import",
+        "tsx",
+        "--import",
+        "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs"
+      ],
+      "precision": 21,
+      "jit": "auto",
+      "controls": {
+        "program": {
+          "source": "function square(x) { x*x }\nlet x = 3\nlet y = square(x)\ny+1",
+          "result": 10,
+          "checkDiagnostics": 0
+        }
+      },
+      "warmup": 1000,
+      "iterations": 20000,
+      "status": "ok"
+    },
+    "notebook-accepted": {
+      "request": {
+        "root": "/private/tmp/program-only-accepted-candidate-20261115",
+        "workload": "notebook",
+        "mode": "controls",
+        "warmup": 1000,
+        "iterations": 20000
+      },
+      "node": "v26.13.0",
+      "v8": "14.6.202.34-node.40",
+      "execArgv": [
+        "--import",
+        "tsx",
+        "--import",
+        "/private/tmp/program-only-accepted-candidate-20261115/tycho/scripts/repros/ce-alt-hook.mjs"
+      ],
+      "precision": 15,
+      "jit": "auto",
+      "controls": {
+        "notebook": {
+          "source": "let a = 3\nlet b = a+1\nb",
+          "rerun": "4",
+          "edit": "5",
+          "route": "real analyze/executeCortexCell/bindCortexPublications; persistent scope",
+          "excludes": [
+            "graph scheduling",
+            "UI"
+          ]
+        }
+      },
+      "warmup": 1000,
+      "iterations": 20000,
+      "status": "ok"
+    },
+    "notebook-revision": {
+      "request": {
+        "root": "/private/tmp/program-only-profile-revision-20261116",
+        "workload": "notebook",
+        "mode": "controls",
+        "warmup": 1000,
+        "iterations": 20000
+      },
+      "node": "v26.13.0",
+      "v8": "14.6.202.34-node.40",
+      "execArgv": [
+        "--import",
+        "tsx",
+        "--import",
+        "/private/tmp/program-only-profile-revision-20261116/tycho/scripts/repros/ce-alt-hook.mjs"
+      ],
+      "precision": 15,
+      "jit": "auto",
+      "controls": {
+        "notebook": {
+          "source": "let a = 3\nlet b = a+1\nb",
+          "rerun": "4",
+          "edit": "5",
+          "route": "real analyze/executeCortexCell/bindCortexPublications; persistent scope",
+          "excludes": [
+            "graph scheduling",
+            "UI"
+          ]
+        }
+      },
+      "warmup": 1000,
+      "iterations": 20000,
+      "status": "ok"
+    }
+  },
+  "rejected": [
+    {
+      "name": "timing-box-accepted-1",
+      "accepted": false,
+      "childExit": 1,
+      "maxLoad": 3.23193359375,
+      "rejectedIntervals": [],
+      "unavailable": "instrument module resolution failed before CE import; not a runtime control failure"
+    },
+    {
+      "name": "timing-box-accepted-4",
+      "accepted": false,
+      "childExit": 1,
+      "maxLoad": 3.212890625,
+      "rejectedIntervals": [],
+      "unavailable": "instrument module resolution failed before CE import; not a runtime control failure"
+    },
+    {
+      "name": "timing-box-accepted-r2-1",
+      "accepted": false,
+      "childExit": 0,
+      "maxLoad": 3.67138671875,
+      "rejectedIntervals": [
+        {
+          "atSeconds": 0.4051389694213867,
+          "load": [
+            3.67138671875,
+            3.6552734375,
+            3.08544921875
+          ],
+          "contenders": [
+            {
+              "pid": 33507,
+              "ppid": 2985,
+              "seconds": 1.03,
+              "cpu": 123.1,
+              "command": "node",
+              "intervalCpu": 125.8827312337725
+            }
+          ],
+          "browserBackground": [
+            {
+              "pid": 9520,
+              "ppid": 96872,
+              "seconds": 669.8,
+              "cpu": 90.0,
+              "command": "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.51/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)",
+              "intervalCpu": 103.66813160427313
+            }
+          ],
+          "rejectedIntervalCommandLines": " 2985 56195 /Users/arno/.codex/packages/app-server-daemon/releases/0.169.0-aarch64-apple-darwin/bin/codex app-server --listen unix:// --analytics-default-enabled -c features.api_key_model_discovery=false -c features.auth_elicitation=true -c features.code_mode_host=true -c features.mcp_oauth_refresh_coordination=false --managed-daemon\n33507  2985 node docs/scratch/program-profile-revision-2026-11-16/revision-ledger.mjs\n"
+        },
+        {
+          "atSeconds": 0.8966019153594971,
+          "load": [
+            3.67138671875,
+            3.6552734375,
+            3.08544921875
+          ],
+          "contenders": [
+            {
+              "pid": 33507,
+              "ppid": 2985,
+              "seconds": 1.62,
+              "cpu": 121.4,
+              "command": "node",
+              "intervalCpu": 120.04974227991919
+            }
+          ],
+          "browserBackground": [
+            {
+              "pid": 9520,
+              "ppid": 96872,
+              "seconds": 670.06,
+              "cpu": 52.4,
+              "command": "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.51/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)",
+              "intervalCpu": 52.90327625894558
+            }
+          ],
+          "rejectedIntervalCommandLines": " 2985 56195 /Users/arno/.codex/packages/app-server-daemon/releases/0.169.0-aarch64-apple-darwin/bin/codex app-server --listen unix:// --analytics-default-enabled -c features.api_key_model_discovery=false -c features.auth_elicitation=true -c features.code_mode_host=true -c features.mcp_oauth_refresh_coordination=false --managed-daemon\n33507  2985 node docs/scratch/program-profile-revision-2026-11-16/revision-ledger.mjs\n"
+        },
+        {
+          "atSeconds": 1.3888089656829834,
+          "load": [
+            3.67138671875,
+            3.6552734375,
+            3.08544921875
+          ],
+          "contenders": [
+            {
+              "pid": 33507,
+              "ppid": 2985,
+              "seconds": 2.05,
+              "cpu": 95.2,
+              "command": "node",
+              "intervalCpu": 87.36160924907452
+            }
+          ],
+          "browserBackground": [
+            {
+              "pid": 9520,
+              "ppid": 96872,
+              "seconds": 670.16,
+              "cpu": 10.5,
+              "command": "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.51/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)",
+              "intervalCpu": 20.316653313742894
+            }
+          ],
+          "rejectedIntervalCommandLines": " 2985 56195 /Users/arno/.codex/packages/app-server-daemon/releases/0.169.0-aarch64-apple-darwin/bin/codex app-server --listen unix:// --analytics-default-enabled -c features.api_key_model_discovery=false -c features.auth_elicitation=true -c features.code_mode_host=true -c features.mcp_oauth_refresh_coordination=false --managed-daemon\n33507  2985 node docs/scratch/program-profile-revision-2026-11-16/revision-ledger.mjs\n"
+        }
+      ],
+      "iterationsPerSample": 1600,
+      "warmup": 1000,
+      "precision": 21,
+      "jit": "auto",
+      "samplesUs": [
+        84.32065062499994,
+        76.40270812499999,
+        83.90148437500002,
+        93.44677062500011,
+        80.67406250000005,
+        80.67036437500008,
+        78.21536437500001
+      ],
+      "medianUs": 80.67406250000005
+    },
+    {
+      "name": "timing-box-revision-2",
+      "accepted": false,
+      "childExit": 1,
+      "maxLoad": 3.23193359375,
+      "rejectedIntervals": [],
+      "unavailable": "instrument module resolution failed before CE import; not a runtime control failure"
+    },
+    {
+      "name": "timing-box-revision-3",
+      "accepted": false,
+      "childExit": 1,
+      "maxLoad": 3.212890625,
+      "rejectedIntervals": [
+        {
+          "atSeconds": 0.4136941432952881,
+          "load": [
+            3.212890625,
+            3.6416015625,
+            3.029296875
+          ],
+          "contenders": [
+            {
+              "pid": 15815,
+              "ppid": 72765,
+              "seconds": 170.57999999999998,
+              "cpu": 0.0,
+              "command": "/Users/arno/dev/compute-engine/node_modules/@typescript/typescript-darwin-arm64/lib/tsc",
+              "intervalCpu": 99.10703514777991
+            }
+          ],
+          "browserBackground": [
+            {
+              "pid": 9520,
+              "ppid": 96872,
+              "seconds": 625.18,
+              "cpu": 28.9,
+              "command": "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.51/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)",
+              "intervalCpu": 19.337958077599506
+            }
+          ],
+          "rejectedIntervalCommandLines": "15815 72765 /Users/arno/dev/compute-engine/node_modules/@typescript/typescript-darwin-arm64/lib/tsc --lsp --stdio\n72765 72220 /Users/arno/.local/bin/claude --dangerously-skip-permissions\n"
+        }
+      ],
+      "unavailable": "instrument module resolution failed before CE import; not a runtime control failure"
+    },
+    {
+      "name": "timing-box-revision-r3-1",
+      "accepted": false,
+      "childExit": 0,
+      "maxLoad": 3.359375,
+      "rejectedIntervals": [
+        {
+          "atSeconds": 1.281315803527832,
+          "load": [
+            3.359375,
+            3.568359375,
+            3.08349609375
+          ],
+          "contenders": [
+            {
+              "pid": 3188,
+              "ppid": 3187,
+              "seconds": 11695.07,
+              "cpu": 107.1,
+              "command": "/Users/arno/dev/tycho/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+              "intervalCpu": 100.81613325813585
+            }
+          ],
+          "browserBackground": [
+            {
+              "pid": 9520,
+              "ppid": 96872,
+              "seconds": 690.45,
+              "cpu": 95.9,
+              "command": "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.51/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)",
+              "intervalCpu": 98.52485750216967
+            }
+          ],
+          "rejectedIntervalCommandLines": " 3187  3149 /Users/arno/.nvm/versions/node/v26.13.0/bin/node --require /Users/arno/dev/tycho/node_modules/tsx/dist/preflight.cjs --import file:///Users/arno/dev/tycho/node_modules/tsx/dist/loader.mjs scripts/build.ts --dev --watch\n 3188  3187 /Users/arno/dev/tycho/node_modules/@esbuild/darwin-arm64/bin/esbuild --service=0.28.2 --ping\n"
+        }
+      ],
+      "iterationsPerSample": 1600,
+      "warmup": 1000,
+      "precision": 21,
+      "jit": "auto",
+      "samplesUs": [
+        82.32411437499998,
+        77.15312500000003,
+        84.419296875,
+        78.88786437500002,
+        83.60130249999997,
+        73.47059937500006,
+        74.19242187500004
+      ],
+      "medianUs": 78.88786437500002
+    },
+    {
+      "name": "timing-check-accepted-1",
+      "accepted": false,
+      "childExit": 1,
+      "maxLoad": 3.212890625,
+      "rejectedIntervals": [],
+      "unavailable": "instrument module resolution failed before CE import; not a runtime control failure"
+    },
+    {
+      "name": "timing-check-accepted-4",
+      "accepted": false,
+      "childExit": 1,
+      "maxLoad": 3.212890625,
+      "rejectedIntervals": [],
+      "unavailable": "instrument module resolution failed before CE import; not a runtime control failure"
+    },
+    {
+      "name": "timing-check-accepted-r2-1",
+      "accepted": false,
+      "childExit": 0,
+      "maxLoad": 3.7275390625,
+      "rejectedIntervals": [
+        {
+          "atSeconds": 1.7145259380340576,
+          "load": [
+            3.7275390625,
+            3.66650390625,
+            3.09521484375
+          ],
+          "contenders": [
+            {
+              "pid": 3188,
+              "ppid": 3187,
+              "seconds": 11681.38,
+              "cpu": 77.9,
+              "command": "/Users/arno/dev/tycho/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+              "intervalCpu": 94.38324656061792
+            }
+          ],
+          "browserBackground": [
+            {
+              "pid": 9520,
+              "ppid": 96872,
+              "seconds": 673.23,
+              "cpu": 90.0,
+              "command": "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.51/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)",
+              "intervalCpu": 98.98730736850273
+            },
+            {
+              "pid": 21437,
+              "ppid": 96872,
+              "seconds": 4.41,
+              "cpu": 10.8,
+              "command": "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.51/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)",
+              "intervalCpu": 11.510152019591596
+            }
+          ],
+          "rejectedIntervalCommandLines": " 3187  3149 /Users/arno/.nvm/versions/node/v26.13.0/bin/node --require /Users/arno/dev/tycho/node_modules/tsx/dist/preflight.cjs --import file:///Users/arno/dev/tycho/node_modules/tsx/dist/loader.mjs scripts/build.ts --dev --watch\n 3188  3187 /Users/arno/dev/tycho/node_modules/@esbuild/darwin-arm64/bin/esbuild --service=0.28.2 --ping\n"
+        }
+      ],
+      "iterationsPerSample": 800,
+      "warmup": 1000,
+      "precision": 21,
+      "jit": "auto",
+      "samplesUs": [
+        175.90578125000008,
+        169.5247912500001,
+        165.53031250000004,
+        166.16442750000004,
+        165.2729687499999,
+        152.02708374999986,
+        139.16677125000007
+      ],
+      "medianUs": 165.53031250000004
+    },
+    {
+      "name": "timing-check-revision-2",
+      "accepted": false,
+      "childExit": 1,
+      "maxLoad": 3.212890625,
+      "rejectedIntervals": [],
+      "unavailable": "instrument module resolution failed before CE import; not a runtime control failure"
+    },
+    {
+      "name": "timing-check-revision-3",
+      "accepted": false,
+      "childExit": 1,
+      "maxLoad": 3.212890625,
+      "rejectedIntervals": [],
+      "unavailable": "instrument module resolution failed before CE import; not a runtime control failure"
+    },
+    {
+      "name": "timing-notebook-accepted-1",
+      "accepted": false,
+      "childExit": 1,
+      "maxLoad": 3.212890625,
+      "rejectedIntervals": [],
+      "unavailable": "instrument module resolution failed before CE import; not a runtime control failure"
+    },
+    {
+      "name": "timing-notebook-accepted-4",
+      "accepted": false,
+      "childExit": 1,
+      "maxLoad": 3.03564453125,
+      "rejectedIntervals": [],
+      "unavailable": "instrument module resolution failed before CE import; not a runtime control failure"
+    },
+    {
+      "name": "timing-notebook-revision-2",
+      "accepted": false,
+      "childExit": 1,
+      "maxLoad": 3.212890625,
+      "rejectedIntervals": [],
+      "unavailable": "instrument module resolution failed before CE import; not a runtime control failure"
+    },
+    {
+      "name": "timing-notebook-revision-3",
+      "accepted": false,
+      "childExit": 1,
+      "maxLoad": 3.212890625,
+      "rejectedIntervals": [],
+      "unavailable": "instrument module resolution failed before CE import; not a runtime control failure"
+    }
+  ]
+}

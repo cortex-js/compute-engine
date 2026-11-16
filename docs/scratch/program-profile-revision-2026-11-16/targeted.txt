@@ -1,0 +1,6 @@
+
+Test Suites: 11 passed, 11 total
+Tests:       525 passed, 525 total
+Snapshots:   0 total
+Time:        2.507 s, estimated 3 s
+Ran all test suites matching test/epsil/program.test.ts|test/epsil/check-epsil.test.ts|test/epsil/function-declaration-hoisting.test.ts|test/epsil/parameter-default-values.test.ts|test/epsil/static-lambda-callee-arguments.test.ts|test/epsil/nested-statement-diagnostics.test.ts|test/epsil/reordered-call-error-location.test.ts|test/compute-engine/block-later-declarations.test.ts|test/compute-engine/block-locals-per-run.test.ts|test/compute-engine/parameter-default-values.test.ts|test/compute-engine/compile-caller-cancellation.test.ts.

@@ -1,0 +1,3 @@
+box-lock: RELEASED by codex-program-profile:diagnostics
+box-lock: now reserved for tycho-f4 for 3 min (first in the queue)
+box-lock: load 3.3 / 2.6 / 2.4 on 18 cores at release
