@@ -127,6 +127,7 @@ relative to `src/compute-engine/` unless noted):
 | Serialization bug (expression → wrong LaTeX) | `latex-syntax/serializer.ts` + the operator's dictionary entry                                                                                                 |
 | Wrong canonical form                         | `boxed-expression/arithmetic-*.ts`, `boxed-expression/canonical.ts`                                                                                            |
 | Wrong `evaluate()`/`N()` result              | the operator's `evaluate` handler in `library/<domain>.ts`, then `numerics/` for the kernel                                                                    |
+| Digits that follow another engine            | a call that omits its precision argument: run the tests with `scripts/precision-trace-setup.ts` (repository root; see its header)                              |
 | Simplification missing or wrong              | `symbolic/simplify-rules.ts` + [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md)                                                                                        |
 | Trig simplification                          | `symbolic/fu*.ts`, `boxed-expression/trigonometry.ts` (`constructibleValues`)                                                                                  |
 | Integration (symbolic)                       | `symbolic/antiderivative.ts` for built-ins; `rubi/` for the rule-based integrator; `latex-syntax/dictionary/README.md` for the ∫ parse→eval→serialize pipeline |

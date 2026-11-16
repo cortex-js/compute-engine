@@ -102,6 +102,11 @@
 
 ### Bug Fixes
 
+- **`bignumLcm` is exact.** It rounded the product of its operands to the
+  precision of the big decimals, so the least common multiple of two 41-digit
+  integers lost its last digits: `bignumLcm(10^40 + 7, 3·10^40 + 1)` was
+  `3.0000000000000000000000000000000000000022e+80`; it is now the exact
+  product, which ends in `…07`.
 - **A second engine with another precision no longer changes the digits of
   numbers computed by the first**
   ([#556](https://github.com/cortex-js/compute-engine/issues/556)). With an
