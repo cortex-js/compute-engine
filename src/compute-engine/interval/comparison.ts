@@ -312,7 +312,9 @@ export function not(a: BoolInterval): BoolInterval {
  * points of the input enclosures and not at others) throws an error whose
  * `name` is `'UndecidedConditionError'`. The runner of the compiled code (`run()`)
  * and the batch evaluator (`broadcast()`) catch it and give
- * `{ kind: 'entire' }`: no bound is known for the value.
+ * `{ kind: 'entire' }`: no bound is known for the value. The error is one
+ * frozen object for each message, thrown again at each call: its stack is
+ * that of its first throw.
  */
 export function decided(cond: BoolInterval): boolean {
   if (cond === 'true') return true;
@@ -401,12 +403,31 @@ function clampable(
 
 /** Throw the error that `decided()` throws for an undecided verdict, with
  *  `message`: no bound is known for the value (a loop of more passes than
- *  the `iterationBudget`, in the interval mode of the IR pipeline). */
+ *  the `iterationBudget`, in the interval mode of the IR pipeline).
+ *
+ *  `run()` and `broadcast()` answer `entire` for it at each box that does
+ *  not decide the program, so it is thrown often: one error is kept for
+ *  each message and thrown again, because making an `Error` (its stack) is
+ *  ten times the cost of the throw. Its stack is that of its first throw,
+ *  and it is frozen: a caller of `IntervalArithmetic.decided()` that catches
+ *  it cannot change the name by which the runners know it. */
 export function undecided(message: string): never {
-  const error = new Error(message);
-  error.name = UNDECIDED_CONDITION;
+  let error = UNDECIDED.get(message);
+  if (error === undefined) {
+    error = new Error(message);
+    error.name = UNDECIDED_CONDITION;
+    // The messages of the compiled code hold a host-chosen
+    // `iterationBudget`, so the map is capped; past the cap each throw makes
+    // a new error. Reading `stack` makes the engine format it and release
+    // the frames of the first throw, which a kept error would hold.
+    if (UNDECIDED.size < 64) {
+      void error.stack;
+      UNDECIDED.set(message, Object.freeze(error));
+    }
+  }
   throw error;
 }
+const UNDECIDED = new Map<string, Error>();
 
 /** The `name` of the error that `decided()` throws for an undecided
  * verdict. The batch evaluator (`broadcastIntervalsRange()` in

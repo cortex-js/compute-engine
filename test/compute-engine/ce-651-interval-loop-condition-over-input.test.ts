@@ -280,4 +280,40 @@ describe('CE-651: an interval loop condition over an input', () => {
     expect(IntervalArithmetic.decided('false')).toBe(false);
     expect(() => IntervalArithmetic.decided('maybe')).toThrow();
   });
+
+  test('the error of an undecided verdict is one object per message', () => {
+    // `run()` answers `entire` for it at each box that does not decide the
+    // program; making an `Error` at each throw was ten times the throw.
+    const thrown = (f: () => unknown): unknown => {
+      try {
+        f();
+      } catch (e) {
+        return e;
+      }
+      return undefined;
+    };
+    const first = thrown(() => IntervalArithmetic.decided('maybe'));
+    expect(first).toBeInstanceOf(Error);
+    expect((first as Error).name).toBe('UndecidedConditionError');
+    expect(thrown(() => IntervalArithmetic.decided('maybe'))).toBe(first);
+    // A caller that catches it cannot change what the runners test.
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(() => {
+      'use strict';
+      (first as Error).name = 'Error';
+    }).toThrow(TypeError);
+    expect((first as Error).name).toBe('UndecidedConditionError');
+    const other = thrown(() => IntervalArithmetic.undecided('another cause'));
+    expect(other).not.toBe(first);
+    expect((other as Error).name).toBe('UndecidedConditionError');
+    expect((other as Error).message).toBe('another cause');
+    // Past the cap of kept errors, each throw makes a new one.
+    for (let k = 0; k < 70; k++)
+      thrown(() => IntervalArithmetic.undecided(`cause ${k}`));
+    const late = thrown(() => IntervalArithmetic.undecided('a late cause'));
+    expect(thrown(() => IntervalArithmetic.undecided('a late cause'))).not.toBe(
+      late
+    );
+    expect((late as Error).name).toBe('UndecidedConditionError');
+  });
 });
