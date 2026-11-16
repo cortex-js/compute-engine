@@ -151,6 +151,19 @@
 
 ### Improvements
 
+- **`Series` of a function whose derivative is algebraic (`Arctan`, `Arcsin`,
+  `Arccos`, `Arccot`, `Arsinh`, `Arcosh`, `Artanh`, `Arcoth`, `Arsech`, `Ln`)
+  no longer takes time exponential in the order.**
+  `Series(Arctan(x), x, 0, 9)` took about 6 s and now takes about 0.1 s; at
+  order 11 it took about 20 s. The expansion differentiated the function once
+  per order, and the derivatives of `Arctan` grow with the order. When the
+  derivative of the function is built from arithmetic operators and powers,
+  its series is now expanded and integrated term by term. The coefficients
+  have the same values, but some are written in another form
+  (`Series(Arctan(x), x, a, 3)` has the cubic coefficient
+  `(4a²/(a² + 1)³ − 1/(a² + 1)²)/3`). `Series(Arcsin(√x), x, 0, 5)`, which
+  stayed unevaluated, now gives `√x + x^(3/2)/6 + 3x^(5/2)/40 + …`. (#588,
+  PR #589, contributed by [enumeratio](https://github.com/enumeratio))
 - **The experimental profile `'ir'` compiles `Apply` of a function literal
   over a list, and more list operators.** `Apply(k ↦ body, L)` of a literal of
   one parameter over a flat list of numbers is compiled as `Map` is, as the
