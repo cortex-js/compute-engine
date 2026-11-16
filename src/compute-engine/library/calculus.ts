@@ -6565,7 +6565,7 @@ volumes
     //
     Derivative: {
       description: 'Derivative operator that returns a derivative function.',
-      keywords: ['differentiate'],
+      keywords: ['differentiate', 'differentiation'],
       broadcastable: false,
 
       lazy: true,
@@ -7083,7 +7083,12 @@ volumes
     D: {
       description:
         'Symbolic partial derivative with respect to one or more variables.',
-      keywords: ['differentiate'],
+      keywords: [
+        'differentiate',
+        'differentiation',
+        'derivative',
+        'partial derivative',
+      ],
       broadcastable: false,
 
       // The differentiation variables are operands 1..n. They used to be bound

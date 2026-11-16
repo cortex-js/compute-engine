@@ -13846,7 +13846,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Sqrt: {
       description: 'Square Root',
-      keywords: ['square root', 'radical'],
+      keywords: ['square root', 'squareroot', 'radical'],
       wikidata: 'Q134237',
       complexity: 3000,
       broadcastable: true,

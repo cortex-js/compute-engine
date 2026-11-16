@@ -1116,6 +1116,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'Cosecant, the reciprocal of sine.',
         'complex'
       ),
+      keywords: ['cosec', 'cosecant'],
       examples: ['Csc(Pi / 6)', 'N(Csc(1))'],
     },
 

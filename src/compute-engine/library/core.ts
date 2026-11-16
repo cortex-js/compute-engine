@@ -10202,7 +10202,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'solution is a tuple of values in the order of the variable list, e.g.',
         'Solve([x + y == 3, x - y == 1], [x, y]) → [(2, 1)].',
       ],
-      keywords: ['roots', 'zeros'],
+      keywords: ['roots', 'zeros', 'equation', 'solve equation'],
       // Hold the arguments: the equation must NOT be pre-evaluated, or an
       // `Equal` collapses to a boolean (`x^2 = 1` → `False`) before solving.
       lazy: true,
@@ -10328,6 +10328,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // Hold the arguments: the target must not evaluate before substitution,
       // and the rules carry raw `To`/`Rule` forms.
       lazy: true,
+      keywords: ['substitute', 'substitution'],
       signature: '(any, any+) -> any',
       examples: ['ReplaceAll(x^2 + x, Rule(x, 3))'],
       canonical: (ops, { engine: ce }) => {
