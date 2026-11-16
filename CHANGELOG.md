@@ -466,7 +466,15 @@
   of the existing target, with the same number of pieces, or the closed
   form of the engine's antiderivative where the existing target uses one
   (an indefinite integral is its closed form); with an angular unit other
-  than radians it is the enclosure only. A `Loop` over a `Range` or a list
+  than radians it is the enclosure only. With a random draw in a bound it is
+  the enclosure only too, because the engine's closed form would hold one
+  draw made at compile time; an indefinite integral of an integrand with a
+  draw declines. With a bound `+∞` or `−∞` in the program, the parts of the
+  integrand that do not read its variable are not computed before the
+  integral, where the enclosure answers `entire` without calling the
+  integrand, and the closed form computes what it reads. The result
+  has `freeSymbols`, `freeSymbolTypes`, `unsupported` and `mode`, as on the
+  existing target. A `Loop` over a `Range` or a list
   compiles: a local that its passes assign holds the hull of both arms of
   an undecided `If` (the existing target answers `entire`), a bound that is
   not one integer over the box gives `entire`, and with an

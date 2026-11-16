@@ -177,6 +177,13 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `(1/(s√(2π)))·Integrate(e^(−Z²/(2s²)), Limits(Z, −∞, x))` at `s = 1` gives
   `7.0866e-16` at `x = −8` and `0` at `x = −9`; the interpreter gives
   `6.2210e-16` and `1.1286e-19`.
+- `javascript` and `interval-js` (crafted), `x: real`, `g(u) = u + Random()`:
+  the closed form of a definite integral with a draw in a bound holds one
+  draw, made at compile time: `Integrate(t, Limits(t, 0, Random()))` and
+  `Integrate(t, Limits(t, 0, g(x)))` give the same number at every call
+  (`interval-js`: the same point interval), where the interpreter draws at
+  each evaluation. The profile `ir` draws at each call on `javascript`, and
+  in the interval mode gives the enclosure of every draw (no closed form).
 - `javascript`, profile `ir` (crafted), `x: real`: `Zeta(x)` at
   `x = -171.5` gives `Infinity` (the machine kernel overflows below about
   `-171`); the interpreter at the default precision gives `4.739e172`.

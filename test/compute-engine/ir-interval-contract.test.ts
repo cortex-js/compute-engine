@@ -1591,3 +1591,49 @@ describe('the interval mode: a subtraction and a power of a rational exponent', 
     });
   });
 });
+
+describe('the interval mode: the references of the result', () => {
+  ce.assign('hv', ce.box(['Function', ['Add', 't', 'n'], 't'] as never));
+  /** The four fields of the result of `options`. */
+  const fields = (json: unknown, options: object) => {
+    const r = compile(ce.box(json as never), {
+      to: 'interval-js',
+      fallback: false,
+      ...options,
+    } as never) as unknown as Record<string, unknown>;
+    return {
+      freeSymbols: r.freeSymbols,
+      freeSymbolTypes: r.freeSymbolTypes,
+      unsupported: r.unsupported,
+      mode: r.mode,
+    };
+  };
+  test.each([
+    [['Sin', 'x'], {}],
+    [['Add', ['Power', 'x', 2], 'y'], {}],
+    [['Add', 'x', 'n'], { vars: { n: '_.n' } }],
+    [['Add', ['Sum', 'L'], 'x'], {}],
+    [['Add', 2, ['Sin', 1]], {}],
+  ])('%j %j: those of the existing target', (json, options) => {
+    const got = fields(json, { ...options, profile: 'ir' });
+    expect(got).toEqual(fields(json, options));
+    expect(got.unsupported).toEqual([]);
+    expect(got.mode).toBe('strict');
+  });
+
+  test('the types of an input and of a list input', () => {
+    const got = fields(['Add', ['Sum', 'L'], 'x'], { profile: 'ir' });
+    expect(got.freeSymbols).toEqual(['x', 'L']);
+    expect(got.freeSymbolTypes).toEqual({
+      x: { type: 'real', lowered: 'interval', provenance: 'declared' },
+      L: { type: 'vector<real^3>', lowered: 'array', provenance: 'declared' },
+    });
+    // A vars name that only the body of a user function reads is listed
+    // after the names of the expression; the existing target, which writes
+    // the body in place first, lists it before them.
+    const vars = { vars: { n: '_.n' } };
+    expect(fields(['hv', 'x'], { profile: 'ir', ...vars }).freeSymbols).toEqual(['x', 'n']);
+    expect(fields(['hv', 'x'], vars).freeSymbols).toEqual(['n', 'x']);
+    expect(fields(['Add', 2, ['Sin', 1]], { profile: 'ir' }).freeSymbols).toEqual([]);
+  });
+});

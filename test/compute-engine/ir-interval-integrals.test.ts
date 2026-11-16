@@ -708,3 +708,42 @@ describe('the interval mode, integrals: robustness', () => {
     60_000
   );
 });
+
+describe('the interval mode, integrals: batch 19', () => {
+  ce.assign('gr', ce.box(['Function', ['Add', 'u', ['Random']], 'u'] as never));
+
+  test.each([
+    I('t', 't', 0, ['Random']),
+    I('t', 't', ['Random'], 1),
+    I(['Multiply', 't', x], 't', 0, ['Add', x, ['Random']]),
+    I('t', 't', 0, ['gr', x]),
+  ].map((json) => [json]))('a draw in a bound: no closed form, the draw once: %j', (json) => {
+    // The engine's closed form would hold one draw, made at compile time,
+    // where the bound encloses every draw.
+    const r = mode(json);
+    expect(r.code).not.toMatch(/integrateClosed/);
+    expect(`${r.preambleOnce ?? ''}\n${r.code}`.match(/\{ lo: 0, hi: 1 \}/g)).toHaveLength(1);
+    const got = r.run({ x: { lo: 0.5, hi: 0.5 } });
+    const expr = ce.box(json as never).subs({ x: ce.box(['Rational', 1, 2] as never) });
+    for (let k = 0; k < 8; k++)
+      expect(contains(got, { v: expr.N().re, err: 1e-9 }, `draw ${k}`)).toEqual([]);
+    // A pure integral keeps its closed form.
+    expect(mode(I('t', 't', 0, x)).code).toMatch(/integrateClosed/);
+  });
+
+  test('an indefinite integral of an integrand with a draw declines', () => {
+    expect(() => mode(['Integrate', ['Add', 't', ['Random']], 't'])).toThrow(
+      /an integrand with an effect/
+    );
+  });
+
+  test('with an infinite bound no invariant is computed before the integral', () => {
+    // `_IA.integrate` answers `entire` with no call of the integrand.
+    const json = I(['Multiply', ['Gamma', y], ['Sin', ['Sin', 't']]], 't', x, 'PositiveInfinity');
+    const r = mode(json);
+    expect(r.code.indexOf('_IA.gamma(')).toBeGreaterThan(r.code.indexOf('_IA.integrate('));
+    const box = { x: { lo: 0, hi: 1 }, y: { lo: 1, hi: 2 } };
+    expect(r.run(box)).toEqual({ kind: 'entire' });
+    expect(r.run(box)).toEqual(existing(json).run(box));
+  });
+});

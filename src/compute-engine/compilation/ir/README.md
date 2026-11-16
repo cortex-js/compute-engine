@@ -593,7 +593,11 @@ would not), found through the operands of rows and of calls, is
 lowered once before the region (the memo of `value()` reads it there), as
 the existing target computes the invariants of an integrand once; unlike a
 value that reads no input, which the printer computes once per artifact,
-such a part can read an input and is computed once per call.
+such a part can read an input and is computed once per call. Not with a
+bound that is a number literal ±∞ (`PositiveInfinity`): `_IA.integrate`
+then answers `entire` and `_IA.integrateClosed` the closed form, neither
+calling the integrand; a bound that is infinite only at run time keeps the
+hoisting.
 
 The closed form is the existing target's rule: the engine's antiderivative
 (`integralClosedForm()`, which calls `closedFormIntegral()` of the shared
@@ -617,8 +621,12 @@ region would stay defined) is not lowered, and one that the mode does not
 print is removed before `admits()` (`dropClosedForms()`): the enclosure,
 of the same `n`, stands alone. The reads of `vars` entries in a closed form
 are not counted as effects (in the mode they read the inputs object). An
+integral that is not pure (`e.isPure`: a draw in a bound, also through a
+call) has no closed form, which would hold one draw made at compile time,
+where the bound encloses every draw (`Random()` is `[0, 1]`). An
 indefinite integral (no bounds, or a bound `Nothing`) is its closed form,
-and declines with none; its variable is then an input of the closed form,
+and declines with none, and when it is not pure ("an integrand with an
+effect"); its variable is then an input of the closed form,
 of the type that the closed form's use of it gives (`Integrate(x^2, x)` of
 an undeclared `x` compiles as `x^3/3` does, where the existing target,
 whose walk sees `x` as bound, refuses it as an input with no type). A compilation of the pipeline takes a
@@ -805,7 +813,17 @@ a warning is logged. The result has `target: 'interval-js'`, `success`,
 one, `preamble` (the two, in that order),
 `calling` (`'expression'`, or `'lambda'` for a root `Function` literal,
 which declines when its body reads a free name), `booleanInputs`,
-`listInputs`, `run`,
+`listInputs`, `run`, `freeSymbols`, `freeSymbolTypes`, `unsupported` (empty)
+and `mode` (`'strict'`), as on the existing target: the free names of
+`analyzeReferences()` with the interval target object, then the inputs of
+the entry and the names of `vars` that the code reads (through a call too)
+that the walk does not list, and their types from `freeSymbolTypes()`. The
+walk reads the expression, where the existing target reads its rewritten
+tree, so the order can differ (a name read in the body of a user function
+comes after the names of the expression), and so can the type of a name
+read only there (`provenance` and `type` of its definition, where the
+existing target reads its occurrence in the rewritten body), in 302 and 14
+of the 4,815 programs of Tycho's corpus that both compile.
 `profile: 'ir'`, and for an expression `broadcast()`, `broadcastAsync()`,
 `shippable` and `willUsePool()`, built by `createIntervalRuntime()`
 (`loadBroadcast()`, `loadBroadcastSlice()`) over the stored result. Options:

@@ -2330,6 +2330,8 @@ export function lower(
           (limits.nops < 3 ||
             limits.ops.slice(1).some((x) => isSymbol(x, 'Nothing')))))
     ) {
+      // The engine would read a draw of the integrand once, at compile time.
+      if (!e.isPure) decline(e, 'an integrand with an effect');
       const c = integralClosedForm(e.ops, options.varsTexts ?? {});
       if (c === undefined)
         decline(
@@ -2438,7 +2440,8 @@ export function lower(
     // once before the region, and the memo of `value()` reads it there, as
     // the existing interval target computes the invariants of an integrand
     // once. Only the operands of rows and of calls are searched: a part of
-    // an arm or of a scope stays in place.
+    // an arm or of a scope stays in place. Not with an infinite bound, where
+    // the integrand never runs.
     const invariant = (x: Expression): void => {
       if (!isFunction(x)) return;
       const k = facts(x);
@@ -2451,12 +2454,15 @@ export function lower(
       )
         x.ops.forEach(invariant);
     };
-    if (interval) invariant(literal?.ops[0] ?? f);
+    if (interval && !bounds.some((x) => isNumber(x) && x.isInfinity))
+      invariant(literal?.ops[0] ?? f);
     // The interval mode: the closed form of the existing interval target,
     // which `_IA.integrateClosed` gives when its scan of the integrand
-    // finds no pole (`print-interval.ts`); otherwise the enclosure.
+    // finds no pole (`print-interval.ts`); otherwise the enclosure. Not
+    // with a draw in a bound: the engine would read one draw, at compile
+    // time, where the bound encloses every draw.
     const closed =
-      interval && e.operator === 'Integrate'
+      interval && e.operator === 'Integrate' && e.isPure
         ? closedRegion(() => integralClosedForm(e.ops, options.varsTexts ?? {}))
         : undefined;
     const [out] = region(
