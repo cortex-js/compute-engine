@@ -655,3 +655,45 @@ describe('the interval mode, lists: robustness', () => {
     expect(r.code.length).toBeLessThan(200);
   });
 });
+
+describe('the interval mode: a name whose held value is an expression', () => {
+  // Tycho's three shapes (`neyret/lrpzqnemhy`, `neyret/urbddymicb`,
+  // `neyret/oonx9mijy7`), reduced: the value is lowered where it is read.
+  const e = new ComputeEngine();
+  for (const name of ['x', 'x_1', 'x_2']) e.declare(name, 'real');
+  e.declare('Rm', {
+    type: 'list<real>',
+    value: e.box(['Map', ['Function', ['Mod', ['Multiply', 10000, ['Sin', '_1']], 1], '_1'], ['Range', 0, 5]] as never),
+  });
+  e.declare('Px', { type: 'list<real^2>', value: e.box(['List', 'x_1', ['Multiply', 2, 'x_2']] as never) });
+  e.assign('F', e.box(['Function', ['Add', ['At', 'Px', 'j'], 'j'], 'j'] as never));
+  const E = (p: number) => ['Power', 'ExponentialE', ['Rational', p, 5]];
+  e.declare('kE', { type: 'list<real>', value: e.box(['List', 1, E(2), E(4)] as never) });
+  e.declare('ke', { type: 'real', value: e.box(E(2) as never) });
+  const point = (v: number) => ({ lo: v, hi: v });
+
+  test.each([
+    ['A1', ['Sum', ['Multiply', ['At', 'Rm', 'k'], 'x'], ['Limits', 'k', 1, 6]]],
+    ['A2', ['Add', ['F', 1], ['F', 2], 'x']],
+    ['A3', ['Sum', ['Multiply', ['At', 'kE', 'j'], 'x'], ['Limits', 'j', 1, 3]]],
+  ] as const)('%s: the interpreter value is in the box', (_, json) => {
+    const r = mode(json, e);
+    for (const p of [{ x: 0.3, x_1: 3, x_2: -1.25 }, { x: -2.5, x_1: -7, x_2: 0.5 }]) {
+      // `withValues()`: the inputs that a held value reads take the point too.
+      const values = Object.fromEntries(Object.entries(p).map(([k, n]) => [k, e.number(n)]));
+      const v = e.withValues(values, () => e.box(json as never).evaluate().N().re);
+      const got = r.run(Object.fromEntries(Object.entries(p).map(([k, n]) => [k, point(n)]))) as Kinded;
+      expect(got.kind).toBe('interval');
+      expect([v >= got.value!.lo, v <= got.value!.hi]).toEqual([true, true]);
+    }
+  });
+
+  test('an exact constant is an enclosure of its value', () => {
+    const got = mode(['Multiply', 'ke', 1], e).run({}) as Kinded;
+    const d = Math.exp(0.4);
+    expect(got.value!.lo).toBeLessThanOrEqual(nextDown(d));
+    expect(got.value!.hi).toBeGreaterThanOrEqual(nextUp(d));
+    expect(got.value!.lo).toBeGreaterThanOrEqual(step(d, 4, nextDown));
+    expect(got.value!.hi).toBeLessThanOrEqual(step(d, 4, nextUp));
+  });
+});

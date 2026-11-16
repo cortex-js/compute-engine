@@ -62,7 +62,7 @@ export function makeEngine(): ComputeEngine {
   ce.declare('W', 'complex');
   ce.declare('C', 'list<complex^2>');
   ce.assign('h', 2.5);
-  // `hx` has a value with a free name: it declines.
+  // `hx` has a value with a free name: it is that value where it is read.
   ce.assign('hx', ce.box(['Add', 'x', 1]));
   ce.declare('a', 'any');
   const fn = (json: unknown) => ce.box(json as never);
@@ -651,7 +651,7 @@ export const DECLINES: Record<string, Json> = {
   'of a list of booleans': ['If', ['At', ['Map', ['Function', ['Less', 'z', 0], 'z'], 'D'], 'n'], 1, 2],
   'not a literal': ['Map', 'g', 'D'],
   'in a loop': ['Block', ['Declare', 't', 'real', 0], ['Sum', ['Block', ['Assign', 't', 'k'], 'k'], ['Limits', 'k', 1, 3]], 't'],
-  'symbol with a value that is not': ['Add', 'hx', 1],
+  'symbol with a value that is not': ['Add', 'GoldenRatio', 1],
   'LambertW': ['LambertW', 'x'],
   'Equal of a list': ['If', ['Equal', 'L', 'M'], 1, 2],
   'canonical form': ['Add', 'p', 1],

@@ -392,6 +392,20 @@
   gives the real root of a negative base (`powReal([-8, -8], [0.2, 0.2])` is
   about `-1.5157`), any other float has no real value there
   (`powReal([-8, -8], [1.5, 1.5])` is `empty`).
+- **The experimental profile `'ir'` compiles a name whose value is an
+  expression**, on JavaScript, GLSL and `interval-js`: the value is lowered
+  where the name is read, as the existing compiler does. With `x_1` and `x_2`
+  inputs and `P := (x_1, 2x_2)`, `At(P, 2) + x_1` reads both inputs; a list
+  computed from constants (`R := Map(t ↦ 2t, Range(0, 100))`) and a list of
+  exact constants (`k := (1, e^(2/5))`, enclosed in the interval mode) compile
+  too, where they declined. The name stays in `symbolDeps`. Such a value
+  still declines when it reads the name again, has an effect (a draw, a name
+  of `vars`), or does not fit the declared type of the name, and when a name
+  that it reads may be a local, a parameter or an index where the name is
+  read: with `R := (n, 2n)`, `Sum(At(R, 1) + n, n = 1..3)` declines, since
+  `R` reads the global `n` (the same read already lowered outside the `Sum`
+  is reused, with the global `n`). A value of a library constant that is not
+  a number (`GoldenRatio`) still declines.
 
 ## 0.192.0 _2026-11-15_
 

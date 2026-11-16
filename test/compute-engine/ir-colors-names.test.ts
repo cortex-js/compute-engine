@@ -38,7 +38,8 @@ for (const name of ['x', 'y', 'z']) ce.declare(name, 'real');
 ce.declare('Cv', { type: 'color', value: ce.box(['Hsv', 270, 0.4, 0.95]) });
 ce.assign('Cr', ce.box(['Rgb', 0.2, 0.4, 0.6]));
 ce.assign('Cl', ce.box(['Oklab', 0.6, 0.1, -0.05]));
-// Values that decline: an alpha, a channel that is a name.
+// A value that declines (an alpha), and a value with a channel that is a
+// name, which is that expression where the name is read.
 ce.declare('Ca', {
   type: 'color',
   value: ce.box(['Hsv', 270, 0.4, 0.95, 0.5]),
@@ -474,8 +475,7 @@ function shader(r: ReturnType<typeof glsl>, k: number): string {
 
 // prettier-ignore
 const DECLINES: [label: string, json: Json, cause: RegExp][] = [
-  ['a colour name with an alpha', ['AsOklab', 'Ca'], /a symbol whose colour value is not Hsv of three real numbers/],
-  ['a colour name whose channel is a name', ['AsOklab', 'Cs'], /a symbol whose colour value is not Rgb of three real numbers/],
+  ['a colour name with an alpha', ['AsOklab', 'Ca'], /Hsv with 4 operands/],
   ['a colour parameter', ['AsOklab', ['fk', ['Rgb', 'x', 0, 0]]], /the parameter q of fk is not a scalar \(color\)/],
   ['a list of colour names', ['List', 'Cv', 'Cr'], /a list of colours/],
 ];
@@ -498,8 +498,22 @@ describe('IR profile, batch G9: the declines', () => {
     for (const to of ['javascript', 'glsl'] as const) {
       const d = failure(() => compile(e.box(['AsOklab', 'Cm']), { ...IR, to }));
       expect(d?.code).toBe('outside-profile');
-      expect(d?.message).toMatch(/or a colour of three numbers/);
+      expect(d?.message).toMatch(/the operator ColorMix is not in the slice/);
     }
+  });
+
+  test('a colour name whose channel is a name is its expression', () => {
+    for (const to of ['javascript', 'glsl'] as const)
+      expect(compile(ce.box(['AsOklab', 'Cs']), { ...IR, to }).success).toBe(
+        true
+      );
+    const run = (json: Json) =>
+      compile(ce.box(json as never), { ...IR, fallback: false }).run!({
+        y: 0.3,
+      } as never);
+    expect(run(['AsOklab', 'Cs'])).toEqual(
+      run(['AsOklab', ['Rgb', 'y', 0.4, 0.6]])
+    );
   });
 });
 

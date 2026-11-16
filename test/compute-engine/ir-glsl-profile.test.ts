@@ -1770,7 +1770,7 @@ describe('IR profile, batch G6: a valued name read in a function body', () => {
     expect(g6(['Ls', 'x'], 'javascript').run!({ x: 2 } as never)).toBe(5);
   });
 
-  test('the README witness: a value that is an expression of another name declines', () => {
+  test('the README witness: a value that is an expression of another name reads the binding of the value', () => {
     const e = g6Engine();
     e.assign('a2', 2);
     e.assign('v2', e.box(['Add', 'a2', 1]));
@@ -1784,11 +1784,14 @@ describe('IR profile, batch G6: a valued name read in a function body', () => {
     ]) {
       const expr = e.box(json as never);
       expect(interpret(e, expr, { x: 1 })).toBe(3);
-      for (const to of ['glsl', 'javascript'] as const)
-        expect(
-          thrown(() => compile(expr, { to, profile: 'ir', fallback: false }))
-            ?.message
-        ).toMatch(/a symbol with a value that is not/);
+      // `compile()` runs in the scope that the names of the expression are
+      // read from (`compilationScope()`), where `a2` is 2, as in the value
+      // of `v2` (`compileSlice()` declines: ir-slice-complex.test.ts).
+      for (const to of ['glsl', 'javascript'] as const) {
+        const r = compile(expr, { to, profile: 'ir', fallback: false });
+        expect(r.success).toBe(true);
+        if (to === 'javascript') expect(r.run!({ x: 1 } as never)).toBe(3);
+      }
     }
     e.popScope();
   });

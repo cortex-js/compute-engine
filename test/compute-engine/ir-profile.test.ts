@@ -1050,6 +1050,171 @@ describe('a user function that reads an input of the compilation', () => {
   });
 });
 
+describe('a name whose held value is an expression is that expression where it is read', () => {
+  /** `x`, `n`, `x_1`, `x_2` real; `Rm` a list computed by `Map` over a
+   *  `Range` of constants (Tycho's `neyret/lrpzqnemhy`), `P` a list of
+   *  inputs (`neyret/urbddymicb`), `kE` a list of exact constants
+   *  (`neyret/oonx9mijy7`), `Rn` a list that reads `n`. */
+  const engine = (): ComputeEngine => {
+    const e = new ComputeEngine();
+    for (const name of ['x', 'n', 'x_1', 'x_2']) e.declare(name, 'real');
+    const T = (body: Json) => ['Function', body, '_1'];
+    e.declare('Rm', {
+      type: 'list<real>',
+      value: box(
+        ['Map', T(['Mod', ['Multiply', 10000, ['Sin', '_1']], 1]), ['Range', 0, 5]],
+        e
+      ),
+    });
+    e.declare('P', {
+      type: 'list<real^2>',
+      value: box(['List', 'x_1', ['Multiply', 2, 'x_2']], e),
+    });
+    e.declare('kE', {
+      type: 'list<real>',
+      value: box(
+        ['List', 1, ['Power', 'ExponentialE', ['Rational', 2, 5]], ['Power', 'ExponentialE', ['Rational', 4, 5]]],
+        e
+      ),
+    });
+    e.declare('Rn', {
+      type: 'list<real^2>',
+      value: box(['List', 'n', ['Multiply', 2, 'n']], e),
+    });
+    e.assign('S', box(['Function', ['Sum', ['Multiply', ['At', 'Rm', 'k'], 'a'], ['Limits', 'k', 1, 6]], 'a'], e));
+    e.assign('F', box(['Function', ['Add', ['At', 'P', 'j'], 'j'], 'j'], e));
+    return e;
+  };
+  const failure = (e: ComputeEngine, json: Json, options = {}) => {
+    const o = outcome(box(json, e), options);
+    return 'message' in o ? o.message : 'compiled';
+  };
+
+  test('the three shapes of the corpus, against the interpreter', () => {
+    const e = engine();
+    const points = [{ x: 0.3 }, { x: -2.5 }];
+    againstInterpreter(e, ['Sum', ['Multiply', ['At', 'Rm', 'k'], 'x'], ['Limits', 'k', 1, 6]], points);
+    againstInterpreter(e, ['S', ['Multiply', 5, 'x']], points);
+    againstInterpreter(e, ['Sum', ['Multiply', ['At', 'kE', 'j'], 'x'], ['Limits', 'j', 1, 3]], points);
+    againstInterpreter(e, ['Add', ['F', 1], ['F', 2], 'x'], [
+      { x: 0.5, x_1: 3, x_2: -1.25 },
+      { x: 2, x_1: -7, x_2: 0.5 },
+    ]);
+    // A Map over a Range is a region that GLSL declines.
+    for (const json of [['At', 'kE', 2], ['F', 1]])
+      expect(compile(box(json, e), { ...IR, to: 'glsl', fallback: false }).success).toBe(true);
+  });
+
+  test('freeSymbols and symbolDeps are those of the existing compiler', () => {
+    const e = engine();
+    for (const json of [['Add', ['At', 'P', 1], ['At', 'P', 2], 'x'], ['Add', ['F', 1], ['F', 2]]]) {
+      const [ir, existing] = [IR, {}].map((profile) => {
+        const symbolDeps = new Set<string>();
+        const r = compile(box(json, e), { ...profile, fallback: false, symbolDeps });
+        return { free: r.freeSymbols, deps: [...symbolDeps].sort() };
+      });
+      expect(ir).toEqual(existing);
+    }
+    const symbolDeps = new Set<string>();
+    const r = compile(box(['Add', ['F', 1], ['F', 2]], e), { ...IR, fallback: false, symbolDeps });
+    expect([r.freeSymbols, [...symbolDeps].sort()]).toEqual([['x_1', 'x_2'], ['F', 'P']]);
+  });
+
+  test('a name read in two function bodies', () => {
+    const e = engine();
+    e.assign('F1', box(['Function', ['Multiply', ['At', 'P', 1], 'a'], 'a'], e));
+    e.assign('F2', box(['Function', ['Add', ['At', 'P', 2], 'b'], 'b'], e));
+    againstInterpreter(e, ['Add', ['F1', 'x'], ['F2', 'x']], [
+      { x: 0.5, x_1: 3, x_2: -1.25 },
+      { x: -4, x_1: 0.25, x_2: 8 },
+    ]);
+  });
+
+  test('a value that reads a name bound at the occurrence other than as an input declines', () => {
+    // The interpreter reads the global n in the value of Rn: Sum gives 3n + 6.
+    const e = engine();
+    e.assign('Gn', box(['Function', ['Add', ['At', 'Rn', 1], 'n'], 'n'], e));
+    for (const json of [
+      ['Sum', ['Add', ['At', 'Rn', 1], 'n'], ['Limits', 'n', 1, 3]],
+      ['Apply', ['Function', ['Add', ['At', 'Rn', 1], 'n'], 'n'], 4],
+      ['Block', ['Declare', 'n', 'real', 7], ['Add', ['At', 'Rn', 1], 'n']],
+      ['Gn', 4],
+    ])
+      expect(failure(e, json)).toMatch(/the value of Rn, which reads n, a local or a parameter here/);
+    againstInterpreter(e, ['Add', ['At', 'Rn', 2], 'n'], [{ n: 10 }, { n: -0.5 }]);
+    // A read already lowered at the top level is reused from the memo in the
+    // Sum: it reads the global n, as the interpreter does (46 at n = 10).
+    const reused = ['Add', ['At', 'Rn', 1], ['Sum', ['Add', ['At', 'Rn', 1], 'n'], ['Limits', 'n', 1, 3]]];
+    const r = againstInterpreter(e, reused, [{ n: 10 }, { n: -0.5 }]);
+    expect(r.run!({ n: 10 } as never)).toBe(46);
+  });
+  test('a value that reads a name of another binding than the input of that name declines', () => {
+    // The value of Rw reads the outer w (5); the input w is the inner one.
+    const e = engine();
+    e.declare('w', 'real');
+    e.assign('w', 5);
+    e.declare('Rw', { type: 'list<real^2>', value: box(['List', 'w', 1], e) });
+    e.pushScope();
+    e.declare('w', 'real');
+    for (const json of [['Add', ['At', 'Rw', 1], 'w'], ['Add', 'w', ['At', 'Rw', 1]]]) {
+      let cause = '';
+      try {
+        compileSlice(box(json, e), { target: 'javascript' });
+      } catch (x) {
+        cause = String((x as { cause?: string }).cause);
+      }
+      expect(cause).toMatch(/the value of Rw, which reads w of another binding/);
+    }
+    e.popScope();
+  });
+
+  test('a value that reads itself, or a draw, declines', () => {
+    const e = engine();
+    e.declare('aa', { type: 'real', value: box(['Add', 'aa', 1], e) });
+    expect(failure(e, ['Add', 'aa', 'x'])).toMatch(/the value of aa, which reads aa again/);
+    e.declare('p1', 'real');
+    e.declare('p2', { type: 'real', value: box(['Add', 'p1', 1], e) });
+    e.assign('p1', box(['Add', 'p2', 1], e));
+    expect(failure(e, ['Add', 'p1', 'x'])).toMatch(/which reads p1 again/);
+    e.declare('dr', { type: 'real', value: box(['Add', ['Random'], 1], e) });
+    expect(failure(e, ['Add', 'dr', 'dr'])).toMatch(/the value of dr, which has an effect/);
+  });
+
+  test('a name of vars in the value declines; a name of symbolic or inputs is an input', () => {
+    const e = engine();
+    e.declare('cc', { type: 'real', value: 5 });
+    e.declare('Rc', { type: 'list<real^2>', value: box(['List', 'cc', ['Multiply', 2, 'cc']], e) });
+    const json = ['At', 'Rc', 2];
+    // The host's text of cc is read where it is used: not the stored 5.
+    for (const to of ['javascript', 'interval-js'])
+      expect(failure(e, json, { to, vars: { cc: '_.cc' } })).toMatch(/the value of Rc, which has an effect/);
+    for (const options of [{ symbolic: ['cc'] }, { inputs: { cc: 'real' } }]) {
+      const r = outcome(box(json, e), options);
+      expect('result' in r && r.result.run!({ cc: 1.5 } as never)).toBe(3);
+    }
+    expect((outcome(box(json, e)) as { result: CompilationResult<'javascript'> }).result.run!({} as never)).toBe(10);
+  });
+
+  test('a value of a rank or a lane other than its type declines; an exact real is its value', () => {
+    const e = engine();
+    e.declare('Th', { type: 'integer', value: box(['Divide', 'x', 2], e) });
+    expect(failure(e, ['Add', 'Th', 0])).toMatch(/the value of Th, of another type than integer/);
+    e.declare('ke', { type: 'real', value: box(['Power', 'ExponentialE', ['Rational', 2, 5]], e) });
+    againstInterpreter(e, ['Multiply', 'ke', 'x'], [{ x: 1 }, { x: -3 }]);
+  });
+
+  test('a value that changes between two compilations gives two codes', () => {
+    const e = engine();
+    e.declare('Rv', { type: 'list<real^2>', value: box(['List', 'x_1', 3], e) });
+    const json = ['Add', ['At', 'Rv', 2], 'x_1'];
+    const first = againstInterpreter(e, json, [{ x_1: 1 }]);
+    e.assign('Rv', box(['List', 'x_1', 4], e));
+    const second = againstInterpreter(e, json, [{ x_1: 1 }]);
+    expect(second.code).not.toEqual(first.code);
+    expect([first.run!({ x_1: 1 } as never), second.run!({ x_1: 1 } as never)]).toEqual([4, 5]);
+  });
+});
+
 describe('Degrees and Cot', () => {
   test('Degrees on both targets (the witness Sin(Degrees(h_0)))', () => {
     const engine = new ComputeEngine();

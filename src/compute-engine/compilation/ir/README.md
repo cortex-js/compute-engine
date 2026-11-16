@@ -68,15 +68,31 @@ the engine (an integer, a rational, a radical such as `Sqrt(2)`, a complex), a
 list of such numbers or a tuple of them (a point, `P = (2.64, 17)`, also written
 `PointList(2.64, 17)`), or a colour constructor (`Rgb`, `Hsl`, `Hsv`, `Oklab`,
 `Oklch`) of three real numbers (`C = Hsv(270, 0.4, 0.95)`, which is lowered as
-that application on the colour lane): no symbol and no other application; a
-constructor with an alpha or a channel that is not a number declines with its
-own cause. The value is read from the innermost binding of the name
-(`ce.lookupDefinition`), as the interpreter reads a symbol that is not a call.
-Any other value declines, also a closed one (`Pi + 1`), since the names in a
-stored expression have bindings of their own (an outer `a = 2` and `v := a + 1`
-give 3 in the interpreter under a scope that declares `a = 10`). The program
-lists the name in `captures` (`symbolDeps`), unless its binding is the
-library's. A name with a value read in the body of a user function is that
+that application on the colour lane). The value is read from the innermost
+binding of the name (`ce.lookupDefinition`), as the interpreter reads a symbol
+that is not a call. Any other value of a name that is not the library's is its
+expression, lowered where the name is read (`expression()` in `lower.ts`): a
+list computed from constants (`R = Map(t ↦ 2t, Range(0, 100))`), a list of
+inputs (`P = (x_1, x_2)`, whose names are inputs of the program), exact
+constants (`k = (1, e^(2/5))`, enclosed in the interval mode), a colour of
+channels that are not numbers. The structural memo of `value()` lowers it once
+for the reads in one region with the same bindings. It declines when the value
+reads the name again (directly or through another name), when its lowering has
+an effect (a draw, a name of `vars`: the interpreter's value of the name is one
+value), when it writes a name, when its rank, a stated length or its lane does
+not fit the declared type of the name, and when a name that it reads (outside a
+function literal of the value that binds it) is a local, a parameter or an index
+where the name is read (`R = (n, 2n)` read in `Sum(…, n, …)`: the value reads
+the global `n`), or has another binding there than in the value with a value in
+one of the two, since the names in a stored expression have bindings of their
+own (an outer `a = 2` and `v := a + 1` give 3 in the interpreter under a scope
+that declares `a = 10`). The check of the locals is conservative: a lowering of
+an enclosing node reused from the memo (`At(R, 1)` read at the top level, then
+in `Sum(At(R, 1) + n, n = 1..3)`) reads the value's own bindings, the
+interpreter's, and is accepted. A value of a name of the library that is not a number
+(`GoldenRatio`) declines. The program lists the name in `captures`
+(`symbolDeps`), unless its binding is the library's. A name with a value read in
+the body of a user function is that
 value, as at the entry, when the innermost binding of the name is the definition
 that the occurrence in the body reads (`resolvedValueDefinition()`): the
 interpreter reads the binding of the body, which need not be the one of the name

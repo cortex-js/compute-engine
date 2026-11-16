@@ -32,7 +32,7 @@
  * - A free name with a value in the engine is that value, a literal of the
  *   program (`Program.captures`), when it is a number, or a list or a
  *   tuple of numbers, also in a function body whose occurrence reads the
- *   same binding.
+ *   same binding; any other value is its expression (`expression()`).
  * - A real read where a complex is read is converted there (`widen()`).
  *
  * Nothing persists between two calls of `lower()`: every cache is made per
@@ -1470,13 +1470,80 @@ export function lower(
       : undefined;
   };
 
+  // The names whose held value is being lowered (`expression()`).
+  const expanding = new Set<string>();
+
+  /** The held value `v` of the name `name`, which is not a literal, lowered
+   *  where `e` reads it. It declines when `v` reads `name` again, has an
+   *  effect, or has another rank or lane than the type of `e`, and when a
+   *  name that `v` reads (outside a function literal of `v` that binds it)
+   *  is bound here other than as an input, or has another binding here
+   *  than in `v` with a value in one of the two (the interpreter reads the
+   *  bindings of `v`). */
+  const expression = (e: Expression, name: string, v: Expression): V => {
+    // A node shared by several paths is walked once per set of names that
+    // the function literals around it bind.
+    const walked = new Map<Expression, readonly string[]>();
+    const reason = (x: Expression, inner: readonly string[]): string => {
+      if (walked.get(x) === inner) return '';
+      walked.set(x, inner);
+      if (isFunction(x, 'Function'))
+        inner = [
+          ...inner,
+          ...x.ops.slice(1).map((p) => (isSymbol(p) ? p.symbol : '')),
+        ];
+      if (!isSymbol(x))
+        return isFunction(x)
+          ? x.ops.reduce((s, op) => s || reason(op, inner), '')
+          : '';
+      const n = x.symbol;
+      if (inner.includes(n)) return '';
+      const role = lookup(n)?.binding.role;
+      if (role !== undefined && role !== 'input')
+        return `${n}, a local or a parameter here`;
+      if (n === name || expanding.has(n)) return `${n} again`;
+      const [h, d] = [held(n), resolvedValueDefinition(x)];
+      return h?.definition !== d &&
+        (h?.value !== undefined || d?.value !== undefined)
+        ? `${n} of another binding`
+        : '';
+    };
+    const why = facts(v).writes.size > 0 ? 'a write' : reason(v, []);
+    if (why) decline(e, `the value of ${name}, which reads ${why}`);
+    const effects = b.effects;
+    expanding.add(name);
+    let x: V;
+    try {
+      x = value(v)!;
+    } finally {
+      expanding.delete(name);
+    }
+    if (b.effects !== effects)
+      decline(e, `the value of ${name}, which has an effect`);
+    const t = inputIR(e.type.type);
+    if (
+      t !== undefined &&
+      (t.shape.length !== type(x).shape.length ||
+        t.shape.some((n, i) => {
+          const m = type(x).shape[i];
+          const k = typeof m === 'number' ? m : constant(m.v);
+          return typeof n === 'number' && k !== undefined && n !== k;
+        }) ||
+        !widensTo(type(x).lane, t.lane))
+    )
+      decline(
+        e,
+        `the value of ${name}, of another type than ${engineTypeToString(e.type.type)}`
+      );
+    return x;
+  };
+
   /** The value of the free name `e`, which holds `v` in the engine: a
    *  literal when `v` is a number, a list, a tuple or a `PointList` of
-   *  numbers, or a colour
-   *  constructor of three real numbers (`Hsv(270, 0.4, 0.95)`; no symbol, no
-   *  other application); any other value declines, as its names have
-   *  bindings of their own. The name is a capture (`symbolDeps`) unless its
-   *  binding is the library's. */
+   *  numbers, or a colour constructor of three real numbers
+   *  (`Hsv(270, 0.4, 0.95)`); any other value is its expression
+   *  (`expression()`), but for a name of the library, which declines. The
+   *  name is a capture (`symbolDeps`) unless its binding is the library's. */
   const captured = (e: Expression, name: string, v: Expression): V => {
     const numbers = (x: Expression): boolean =>
       isNumber(x) ||
@@ -1490,27 +1557,35 @@ export function lower(
       r?.arity === 3 &&
       r.signatures[0][1] === 'color' &&
       r.signatures[0][0].every((a) => a === 'real');
-    if (
-      color &&
-      isFunction(v) &&
-      (v.nops !== 3 || !v.ops.every((x) => isNumber(x) && x.im === 0))
-    )
+    const literal = color
+      ? isFunction(v) &&
+        v.nops === 3 &&
+        v.ops.every((x) => isNumber(x) && x.im === 0)
+      : numbers(v);
+    const library = held(name)!.library;
+    if (!literal && library)
       decline(
         e,
-        `a symbol whose colour value is not ${r.head} of three real numbers`
+        color
+          ? `a symbol whose colour value is not ${r.head} of three real numbers`
+          : 'a symbol with a value that is not a number or a list of numbers (or a tuple of numbers), or a colour of three numbers'
       );
-    if (!color && !numbers(v))
-      decline(
-        e,
-        'a symbol with a value that is not a number or a list of numbers (or a tuple of numbers), or a colour of three numbers'
-      );
-    if (!held(name)!.library) b.captures.add(name);
+    // After `expression()`: a decline in it leaves no capture behind.
+    const x = literal ? undefined : expression(e, name, v);
+    if (!library) b.captures.add(name);
+    if (x !== undefined) return x;
     // The interval mode: a constant of the library whose value is not exact
     // (`EulerGamma`, `CatalanConstant`) holds the double nearest to a number
     // that is not a double: an enclosure of one ulp on each side, as on the
     // existing interval target. A decimal of the program is its double
     // (`literalUlps()`).
-    else if (interval && isNumber(v) && v.im === 0 && Number.isFinite(v.re)) {
+    if (
+      library &&
+      interval &&
+      isNumber(v) &&
+      v.im === 0 &&
+      Number.isFinite(v.re)
+    ) {
       const nv = v.numericValue;
       if (typeof nv === 'number' ? !Number.isInteger(nv) : !nv.isExact)
         return number(v, 1)!;

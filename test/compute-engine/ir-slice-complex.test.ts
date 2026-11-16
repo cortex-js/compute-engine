@@ -384,7 +384,7 @@ describe('IR slice: the complex mode', () => {
 });
 
 describe('IR slice: names with a value', () => {
-  test('a number, a list and a complex number are literals; a closed expression declines', () => {
+  test('a number, a list and a complex number are literals; a closed expression is its value', () => {
     const engine = makeEngine();
     engine.assign('v', 10);
     engine.assign('lst', engine.box(['List', 1, 2, 3] as never));
@@ -400,8 +400,9 @@ describe('IR slice: names with a value', () => {
       2 * Math.SQRT2,
       15
     );
-    expect(declineOf(() => js(['Multiply', 's2', 'x'])).cause).toMatch(
-      /not a number or a list of numbers/
+    expect(js(['Multiply', 's2', 'x']).run({ x: 2 })).toBeCloseTo(
+      2 * (Math.PI + 1),
+      15
     );
     expect(js(['Add', 'zc', 'x']).run({ x: 1 })).toEqual({ re: 2, im: 2 });
     expect(js(['Add', 'v', 'x']).program.captures).toEqual(['v']);
@@ -426,20 +427,27 @@ describe('IR slice: names with a value', () => {
     // fixed at compile time is used (the existing compiler emits `10 + _.x`).
     expect(r.run({ x: 1, v: 99 })).toBe(11);
   });
-  test('a value that is a draw, an expression with a free name, a tuple with a name or a function declines', () => {
+  test('a value that is a draw declines; an expression with a free name, a tuple with a name is that expression', () => {
     const engine = makeEngine();
     engine.assign('r', engine.box(['Random'] as never));
     engine.assign('tp', engine.box(['Tuple', 1, 'y'] as never));
-    for (const json of [
-      ['Add', 'r', 1],
-      ['Add', 'hx', 1],
-      ['Add', ['At', 'tp', 1], 1],
-    ])
+    expect(
+      declineOf(() =>
+        compileSlice(engine.box(['Add', 'r', 1] as never), {
+          target: 'javascript',
+        })
+      ).cause
+    ).toMatch(/the value of r, which has an effect/);
+    for (const [json, value] of [
+      [['Add', 'hx', 1], 4],
+      [['Add', ['At', 'tp', 2], 1], 6],
+    ] as const)
       expect(
-        declineOf(() =>
-          compileSlice(engine.box(json as never), { target: 'javascript' })
-        ).cause
-      ).toMatch(/a symbol with a value that is not/);
+        compileSlice(engine.box(json as never), { target: 'javascript' }).run({
+          x: 2,
+          y: 5,
+        })
+      ).toBe(value);
   });
   test('the value is that of the innermost binding of the name', () => {
     // As the interpreter reads a symbol that is not a call: a scope pushed
@@ -489,24 +497,28 @@ describe('IR slice: names with a value', () => {
           { target: 'javascript' }
         )
       ).cause
-    ).toMatch(/a symbol with a value that is not/);
+    ).toMatch(/the value of r, which has an effect/);
     // A value with a name: the name has a binding of its own, which the
     // interpreter reads (an outer `a2` = 2 gives 3 below, where the
-    // innermost `a2` = 10 would give 11).
+    // innermost `a2` = 10 would give 11). A name of the library whose
+    // value is not a number declines.
     engine.assign('a2', 2);
     engine.assign('v2', engine.box(['Add', 'a2', 1] as never));
     engine.pushScope();
     engine.declare('a2', 'real');
     engine.assign('a2', 10);
-    for (const json of [
-      ['Add', 'v2', 'x'],
-      ['Add', 'GoldenRatio', 'x'],
-    ])
+    for (const [json, cause] of [
+      [
+        ['Add', 'v2', 'x'],
+        /the value of v2, which reads a2 of another binding/,
+      ],
+      [['Add', 'GoldenRatio', 'x'], /a symbol with a value that is not/],
+    ] as const)
       expect(
         declineOf(() =>
           compileSlice(engine.box(json as never), { target: 'javascript' })
         ).cause
-      ).toMatch(/a symbol with a value that is not/);
+      ).toMatch(cause);
     engine.popScope();
     engine.assign('w2', engine.box(['List', 1, ['Rational', 1, 2]] as never));
     const deps = new Set<string>();
