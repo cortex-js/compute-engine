@@ -19,6 +19,21 @@ User decisions of 2026-11-15, which the text below includes:
 - The mode compiles `Integrate` before the existing target is deleted
   (batch 6, section 17). A `Loop`, a `Break`, a recursive function and the
   `Enclosure` kind stay declines.
+- A decimal literal is the point at its double (approved 2026-11-15, after
+  batch 4; section 4, "Since batch 4").
+- A sum is added from the lower bound up (2026-11-15, reversing the
+  approval of the same day to add a sum of constant bounds from the upper
+  bound down, as the existing target does): an ascending loop of
+  outward-rounded additions contains the value that the scalar code
+  computes by adding upward in doubles; the descending order is narrower
+  and misses that value at some points (section 17, batch 7). Tycho's
+  Fourier sum stays an exception against the existing target.
+- `x^a` with an exponent known at run time keeps the interpreter's reading
+  of a point exponent, and its time above the criterion is accepted
+  (2026-11-15): 1.16 with `a` fixed at 0.2, 1.36 with a point `a` that
+  changes at every call. The existing target does not read the exponent
+  and answers `empty` at `x = -8`, `a = 0.2`, where the interpreter and the
+  JavaScript code give -1.5157.
 
 The values in the examples were measured at that commit. "Interpreter" is
 `expr.subs({…}).N()` at points of the box. "Existing" is
@@ -1028,26 +1043,35 @@ changes at every call, 1.36 (the mode reads the exponent, the existing
 target does not), and with `a` fixed at 0.2, 1.16 (the mode computes the
 real root over a negative base, where the existing target gives `empty`).
 
-**Batch 7, not landed: the order of a sum.** The 112 wider boxes are
-`2/π · Sum(sin(i·x)/i, i = 1..100) + 3` (`neyret/0jqrzf0b8u`): the class of
-section 9, item 3, at 100 terms. Measured: the kernels are not the cause
-(`_IA.scale` and `_IA.scaleDiv` take a point and give what `_IA.mul` and
-`_IA.div` give; the rewrite to them, 63 lines in `plain.ts`, changed one
-record and was dropped). The cause is the order: each `_IA.add` is rounded
-outward by an ulp of its result, the loop adds from the first term, and the
-existing target writes a sum of constant bounds out as
-`add(t1, add(t2, …))`, which adds from the last. `Sum(x/i, i = 1..100)` at
-`x = -1.62` has the width 1.78·10⁻¹³ in the mode and 3.91·10⁻¹⁴ there. A
-loop that runs from the upper bound down brings the wider records from 127
-to 13, and removes three of the test's exceptions, but it makes four list
-sums differ, which the existing target adds from the first element. The
-rule that matches both is: a `Sum` or `Product` with `Limits` whose two
-bounds are constants runs from the upper bound down. It needs a mark on the
-loop instruction (`ir.ts`, `aggregate()` in `lower-lists.ts`, one argument
-in `print.ts`), files in which `ce-compiler` has a batch in flight; it
-waits for that batch, and for the user's word that these boxes matter
-(their bounds differ by about 10⁻¹⁴ relative). The two experiments are
-kept as patches in `_TASKS/2026-11-15-interval-mode/`.
+**Batch 7: the order of a sum stays, and a reduction of a literal list.**
+The 112 wider boxes are `2/π · Sum(sin(i·x)/i, i = 1..100) + 3`
+(`neyret/0jqrzf0b8u`): the class of section 9, item 3, at 100 terms.
+Measured: the kernels are not the cause (`_IA.scale` and `_IA.scaleDiv`
+take a point and give what `_IA.mul` and `_IA.div` give; a rewrite to them
+changed one record and was dropped). The cause is the order: each
+`_IA.add` is rounded outward by an ulp of its result, the loop adds from
+the first term, and the existing target writes a sum of constant bounds
+out as `add(t1, add(t2, …))`, which adds from the last. `Sum(x/i, i =
+1..100)` at `x = -1.62` has the width 1.78·10⁻¹³ in the mode and
+3.91·10⁻¹⁴ there. A loop from the upper bound down for a `Sum` with two
+constant bounds was written and reviewed: it brings the wider records of
+the replay from 127 to 13. It was NOT landed, by user decision: the
+descending sum encloses the exact sum but not always the value that the
+scalar JavaScript code and the interpreter at machine precision compute
+by adding upward in doubles. On 100,000 random points, with the kernels,
+`Sum(sin(i·x)/i, i = 1..100)` misses that value at 169 points (worst by 5
+ulps) and `Sum(x^i/i, i = 1..20)` at 700 (worst by 4 ulps), and the
+existing target has the same misses; the ascending loop contains it by
+construction. So the sums stay exceptions against the existing target
+(wider by about 10⁻¹⁴ relative), and a test pins a point where the mode
+contains the interpreter's value and the existing target does not. The
+experiments are patches in `_TASKS/2026-11-15-interval-mode/`
+(`b7-*.patch`). What batch 7 lands: a reduction (`Sum`, `Max`, `Min`) of
+one literal `List` of numbers is the reduction of its elements, with no
+array, on every target (`Max(List(x, y, x·y))` from 1.04 to 0.89 of the
+existing target's time; `Sum(List(x, y, x·y))` is at 1.11, the addition
+of the identity, kept so that `Sum(List(-0))` is the interpreter's `+0` on
+JavaScript). Committed `b5fb3e563cc86de269edff6837b7b32df4359b05`.
 
 **Batch 6, integrals** (user decision; 43 of Tycho's programs).
 
@@ -1068,3 +1092,142 @@ The lowering already makes the region `integrate` (`integral()` in
    suite's, how many integrals have a closed form there and how much wider
    the enclosure alone is; the closed form is added if that measure shows
    boxes outside the criterion of results.
+
+**Batch 6, as written** (`3592da6cbad8f3c51dd3c7208ad9689466c804a8`; batches
+4 and 5 are `7af390c0d3162980ceea5e59f1b5feb6e9292bc2`). The sizing moved to
+`compilation/interval-quadrature.ts`, which both targets call; the lowering
+carries the count on the instruction. The measure asked for the closed
+form: of the 8 Tycho records that could be rebuilt and compile, 3 use it on
+the existing target, and without it a Gaussian from `-oo` to `x` was
+`entire` on 12 of 12 boxes and `∫ 0.1·√(t² + 1) dt` wider by a width ratio
+of about 5,000. With it, 7 of the 8 are equal on all 12 boxes. The closed
+form calls `closedFormIntegral()` of the shared layer through
+`intervalClosedForm()` (section 13 records the move that the deletion of
+that layer needs). It is not used with an angular unit other than radians,
+nor when the operands reach an `NIntegrate`, directly or through a
+definition; one that the lowering declines (`FresnelS`, `SinIntegral`: no
+row) leaves the enclosure. A part of the integrand that does not read the
+variable and is made of pure library operators is computed before the
+region. Still declined: several `Limits`, an integrand of several
+variables, an integrand that reads a `vars` entry. An indefinite integral
+over an undeclared name compiles (its closed form types the name by use,
+as `x^3/3` written directly), where the existing target refuses it: the
+two programs by which the shadow measure's count of "declined by the
+existing target, admitted by the mode" exceeds the run before (27 against
+25). Issues filed with these batches: CE-1346 (the interpreter's
+`Choose(x, 2)` just above 1) and CE-1347 (the interval library answers
+`empty` for an integral whose bound ranges over a box that reaches below
+the domain of the integrand, on both targets); CE-1341 is closed.
+
+## 18. The sweep of the whole corpus, and what is slower than the existing target
+
+Tycho's second audit was stopped by the user (a 3-hour run on a build with
+a known slowdown). In its place `tycho-desk` made a dump of every document
+with its definitions (`~/dev/compute-engine-recovery/interval-dump/`,
+`t12-interval-js-document-definitions.json`: 532 documents, 5,155 distinct
+programs; `t12-javascript-glsl-document-definitions.json` for the other
+seams), and the measures are made on the CE side:
+`_TASKS/2026-11-15-interval-mode/sweep-t12.mts` rebuilds each document's
+engine and, per program, records the admission or the cause of the decline,
+the class of the result against the existing target at six boxes sampled
+inside the declared types of the inputs, the containment of the scalar
+JavaScript value at three points per box, and the time per `run()` call.
+About 160 s on one core, under the box lock. It is run before every commit
+of this workstream; `one.mts` beside it shows one program with both codes.
+
+On main `641dbcc11aad526d1569b61fe46189031852acae` (batches 1 to 7; before
+the loop-invariant pass):
+
+- Admission: the existing target compiles 4,828 programs in the replay
+  engine (the others call operators of Tycho's that the replay does not
+  have); the mode admits 4,763; both 4,748. The existing target compiles and
+  the mode declines 80: a symbol that holds a value that is not a number or
+  a list (16), a recursive function (17), a function whose result is a list
+  (15), a list passed to a function of a scalar (13), `Break` (5),
+  `Apply(Derivative…)` (3). The mode admits and the existing target
+  declines 15.
+- Results, 28,488 boxes: equal within 4 ulps 28,055; tighter 259; wider 144
+  (sums added in loop order, section 17); `singular → partial` 15 (the pass
+  `narrow`); `partial → interval` 4; `empty → entire` 6 (one program, an
+  artefact of the sweep's inputs); 5 others.
+- Containment of the scalar value: 65,585 points, 50 misses in 6 programs,
+  the same 50 on the existing target.
+- Time: median ratio 0.981; 349 programs above 1.1, 50 above 1.5, 9 above
+  3, 7 above 10.
+
+The causes of the programs above 1.5, read in the emitted code. Each is a
+thing the existing compilers do and the pipeline does not:
+
+1. No loop-invariant motion: `showcase/voronoi-diagram` at 55 to 63 (its
+   functions call each other inside sums of 16 terms), and on JavaScript
+   `neyret/51a4237846` at 1,356. A pass `invariants` in `ir/passes.ts` is
+   written (not landed when this was written): voronoi from 40.8 ms to 4.2
+   ms per call (existing 0.8 ms), on JavaScript from 0.43 ms to 0.054 ms
+   (existing 0.013 ms).
+2. An invariant inside a called function: `n(x, y, k)` calls `F(x, y)` and
+   is called 16 times by each of four functions (what is left of voronoi,
+   5.8; `showcase/exoplanet-transit`, 1.8). The existing compilers inline
+   user functions.
+3. A sub-expression shared by the arms of nested conditionals is lowered
+   again in each arm: four programs of `showcase/joukowsky-airfoil` at 14 to
+   20 (58,000 characters of code against 3,300). The existing target names
+   it once before the conditionals.
+4. A region over constants (a `PointX` of a literal list of points, built
+   element by element) is rebuilt at each call: `neyret/ac6kkpwrep` at 17,
+   `neyret/nbbj88wunw` at 186 (there the existing target also decides the
+   comparison `0 ≤ Min(squares)` after it folded the list, and emits
+   `'true'`).
+5. In a sum of constant bounds the parts that read only the index are
+   computed at each pass, where the existing target writes the sum out with
+   constants: `neyret/ielrzhke1a` 1.5, `neyret/0jqrzf0b8u` 2.3.
+
+Items 1 to 3 are in the shared pipeline and slow JavaScript too
+(`ce-compiler`'s replay of the same dump: 299 of 8,826 JavaScript programs
+above 1.5, 28 above 10).
+
+### 18.1 After the loop-invariant pass: the programs above 1.1, by cause
+
+The pass `invariants` is on main (`6711724add10a79533ab5055e90ee351e4127c88`).
+The sweep on it: no program changes admission or the class of a result; time
+median 0.976; 36 programs above 1.5 (50). The sweep's own timings are noisy
+when the machine is loaded (three programs that looked 1.8 to 2.5 times
+slower were equal when timed alone), so every program above 1.08 was timed
+again under the box lock with interleaved runs of both targets, and both
+emitted codes were saved
+(`_TASKS/2026-11-15-interval-mode/retime-slow.mts`, record
+`retime-slow-with-invariants.json`, 489 programs). Of the 4,748 programs
+that both targets compile, 182 are above 1.1 (71 documents), 64 above 1.25,
+31 above 1.5 and 8 above 3:
+
+| Cause | Programs | Ratio | State |
+| --- | --- | --- | --- |
+| A run-time exponent: `_IA.powReal` where the existing target has `_IA.powInterval` (1.26 to 1.30 at the kernel) | 81 | median 1.18 | accepted by the user (section 17) |
+| A `Sum`, or an operation on a list, of constant size that the existing target writes out with the index as a constant: the parts that read only the index (`(-1)^i / i`, `cos(π n / 6)`) are constants of its preamble, and kernel calls at each pass in the mode | about 40 | 1.3 to 2.5 | to do: write out at most 100 passes at the lowering |
+| A rational exponent: `pow(nthRootInterval(x, 2), 3)` where the existing target has `pow(x, 1.5)` (3.8 at the kernel) | 20 | median 1.27 | fixed (denominator a power of 2), not landed when written |
+| `add(a, negate(b))` where the existing target has `sub(a, b)` (1.55 at the kernel) | 24 as the main cause | 1.10 to 1.17 | fixed, not landed when written |
+| Conditionals: a part shared by the arms lowered in each arm | 9 | airfoil 15 to 17, others 1.5 to 1.9 | to do: a pass |
+| Calls: an invariant in a callee (voronoi 5.6), calls of calls (`greek-wave-frieze` 2.3), `At(S(x), 1)` of a list-valued function | 5 | 2 to 5.6 | voronoi: the inlining batch of `ce-compiler` |
+| Singles: a comparison decided after folding (`nbbj88wunw` #1, 182), two integrals with a run-time exponent | 3 | | not assigned |
+
+`mul` by a constant against the existing target's `scale` makes no
+difference at the kernel (0.98).
+
+Found by the same reading: an exponent whose denominator is even and not a
+power of 2 (`5/6`) is enclosed as the root then the power by the mode and as
+the power of the nearest double by the existing target; each misses one of
+the interpreter's two readings (the rational at the default precision, the
+double at machine precision) at `x = 10¹⁰` and beyond, by about 3·10⁻¹⁵
+relative. It is a crafted line of the known-limitations list of
+`docs/COMPILATION-MODEL.md`, and a test pins it.
+
+Landed after the pass: the structural memo of the lowering
+(`b2d967ab9c477e823585ae8ac0bed94fec50bc64`: equal sub-expressions written
+as separate nodes are lowered once; `neyret/51a4237846` #9 on JavaScript
+from 36 ms to 2.7 µs per call, `neyret/ac6kkpwrep` #1 from 15.3 to 1.1) and
+the two kernel choices (`7f6ce285d19d95ec9d6f8095d5049a7c275b5caf`). The
+sweep on main plus both: no program changes admission; 29 boxes go from
+wider to equal, none moves away; time median 0.974, 221 programs above 1.1
+in the sweep's own timing (286), 32 above 1.5 (36), 3 above 10 (5). In
+flight when this was written: the sums of constant bounds written out, and
+the values common to the arms of a conditional.
+

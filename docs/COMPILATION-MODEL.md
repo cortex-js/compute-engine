@@ -541,6 +541,18 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `Arccsc(x)` and `Arcoth(x)` miss the value at the same point in the same
   way. The kernels `_IA.asec`, `_IA.acsc` and `_IA.acoth` take one outward
   step for the rounding of `1/x`, and the derivative there is about 1,000.
+- `interval-js` (crafted: a point box at `x = 10¹⁰` or beyond), `x: real`:
+  `Power(x, Rational(5, 6))` over the point box at `x = 10¹⁰`. The exponent
+  has two readings, which differ there by about 3·10⁻¹⁵ relative: the
+  rational 5/6, which the interpreter takes at the default precision
+  (`215443469.00318837`), and the double nearest to it, which the
+  interpreter takes at machine precision (`215443469.003189`). The code
+  encloses `x` to the power of the double (`_IA.pow(x, 0.8333…)`) and
+  misses the first; with the profile `ir` it encloses the root then the
+  power and misses the second. The same holds for every exponent whose
+  denominator is even and not a power of 2 (`7/6` at `x = 10¹⁰⁰`). An odd
+  denominator (`_IA.powRational`) and a power of 2 (the double is exact)
+  contain both.
 
 ## The worker pool and `parallel for`: `runAsync()`
 

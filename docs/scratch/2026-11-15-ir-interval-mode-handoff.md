@@ -4,16 +4,29 @@ Status: a brief for a new session, written by session `ce-compiler` on
 2026-11-15 at `52a408a81e65f6a358b71219721642211e73514b`. Step 1 is written
 by session `ce-interval` (2026-11-15):
 `docs/plans/2026-11-15-ir-interval-mode.md`, APPROVED by the user on
-2026-11-15 with the decisions at its top. Step 2 is in progress: the
-measure of Tycho's core corpus is in section 12a of the note, a census of
-the suite's interval compilations runs in `/tmp/wt-ce-interval` (temporary
-instrumentation, not to land) and is recorded in section 12b. Batch 1 is
-committed, `926016f4ce9fcd4dc07e74541046e7d46a461020`; batch 2,
-`2f6274edecb93fee440093a969125e7e56da704f`; batch 3 (lists) follows.
-Tycho's audit of batches 1 and 2 is section 16 of the note, and the two
-batches that answer it are section 17 (patches and records in
-`_TASKS/2026-11-15-interval-mode/` and
-`~/dev/compute-engine-recovery/interval-dump/`).
+2026-11-15 with the decisions at its top. Step 2 is done (sections 12a and
+12b of the note). Step 3, the batches on main: batch 1
+`926016f4ce9fcd4dc07e74541046e7d46a461020`; batch 2
+`2f6274edecb93fee440093a969125e7e56da704f`; batch 3 (lists)
+`08c7ffa6c02635d19936c9090d15224c03fa976e`; batches 4 and 5 (the results and
+the time that Tycho's first audit asked for, and `cse` of pure calls)
+`7af390c0d3162980ceea5e59f1b5feb6e9292bc2`; batch 6 (integrals)
+`3592da6cbad8f3c51dd3c7208ad9689466c804a8`. Tycho's first audit is section
+16 of the note and the batches that answer it section 17. The second
+audit, one request for the three seams with session `ce-compiler`, is with
+session `tycho-desk` on a build of `3592da6cb`
+(`/private/tmp/ce-build-3592da6cb/dist`; the request is
+`_TASKS/2026-11-15-interval-mode/joint-audit-request-draft.md`). Batch 7
+(a reduction of a literal list has no array; the sum of the mode stays
+ascending by user decision, section 17) is
+`b5fb3e563cc86de269edff6837b7b32df4359b05`. CE-1344 landed with
+`ce-compiler`'s batches G17 and G18 (`fc5c8958bb4dd8119e137f27a32289010496ce00`),
+with this session's interval tests. After the audit: the mode as the public
+default (the tests that change: `_TASKS/2026-11-15-default-census/run2/`
+and `_TASKS/2026-11-15-interval-mode/default-census-at-3592da6cb/`), then
+the deletion (section 13 of the note lists what it needs). Patches and
+records: `_TASKS/2026-11-15-interval-mode/` and
+`~/dev/compute-engine-recovery/interval-dump/`.
 
 ## Goal
 
