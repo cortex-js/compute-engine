@@ -98,8 +98,8 @@ The pattern grammar is exactly the one above — at least two elements, each a
 bare symbol, a `_` skipping that position, or a nested tuple pattern — and a
 shape mismatch is the same error value (`incompatible-type` or
 `unevaluated-tuple`), which writes **nothing**: the whole pattern is
-matched before any target is written, so a mismatch nested under a position that would have bound leaves that one alone
-too.
+matched before any target is written, so a mismatch nested under a position
+that would have bound leaves that one alone too.
 
 The differences from a destructuring `let` are the ones assignment always has:
 the targets keep their identity and their declared type (a value that does not
