@@ -29,7 +29,7 @@ import {
   CompileDeclineError,
   compileDiagnosticOf,
 } from './diagnostics.js';
-import { resolveStorageHints } from './storage-hints.js';
+import { resolveStorageHints } from './compile-references.js';
 import { lowerParallelHeads, sumAssignedNames } from './parallel-lowering.js';
 import {
   fragmentErrorDiagnostic,

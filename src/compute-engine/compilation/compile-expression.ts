@@ -16,7 +16,9 @@ import {
   CancellationError,
   throwIfCallerCancellation,
 } from '../../common/interruptible.js';
-import { resolveStorageHints } from './storage-hints.js';
+import { resolveStorageHintsOfInputs } from './storage-hints.js';
+import { resolveStorageHints } from './compile-references.js';
+import { interpreterFallback } from './interpreter-fallback.js';
 import {
   compileDiagnosticOf,
   isCompileDeclineError,
@@ -595,7 +597,17 @@ function compileInScope<
         'preamble a registered target provides. Omit `storage` or use a ' +
         'registered target (`to: "glsl"`).'
     );
-  if (options?.target === undefined && options?.storage !== undefined) {
+  // The profile `ir` validates the hints with no compiler: a hinted name must
+  // be one that the run of the expression takes from its inputs
+  // (`resolveStorageHintsOfInputs()`).
+  const irProfile =
+    options?.profile === 'ir' && (options.mode as string) !== 'auto';
+  if (irProfile && options?.storage !== undefined)
+    resolveStorageHintsOfInputs(options.storage, expr, {
+      vars: options.vars,
+      functions: options.functions,
+    });
+  else if (options?.target === undefined && options?.storage !== undefined) {
     const analysisTarget = expr.engine
       ._getCompilationTarget(options.to ?? 'javascript')
       ?.createTarget();
@@ -829,8 +841,6 @@ function compileInScope<
     };
     // The removed mode `auto` takes the existing route, which declines it
     // (with its fallback, as without the profile).
-    const irProfile =
-      options?.profile === 'ir' && (options.mode as string) !== 'auto';
     // The profile `ir` (experimental) compiles with the IR compiler
     // (`ir/adapter.ts`); a decline falls back in the catch below. On
     // `glsl` (`ir/adapter-glsl.ts`) and `interval-js`
@@ -902,6 +912,15 @@ function compileInScope<
             fallback: true,
           }) as unknown as CompilationResult<T, R>;
       }
+      // A decline of the profile `ir` on JavaScript: the result is built with
+      // no compiler (`interpreterFallback()`).
+      if (irProfile && (target as string) === 'javascript')
+        return interpreterFallback(
+          expr,
+          error,
+          compileDiagnosticOf(e, error),
+          options?.vars ? new Set(Object.keys(options.vars)) : undefined
+        ) as unknown as CompilationResult<T, R>;
       const compileTarget =
         options?.target ??
         expr.engine._getCompilationTarget(target as string)?.createTarget();

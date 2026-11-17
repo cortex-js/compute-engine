@@ -70,7 +70,7 @@ import {
   mayBeCollectionType,
   OWNED_LOCAL_UPDATE_OPS,
 } from './in-place-update.js';
-import { resolveStorageHints } from './storage-hints.js';
+import { resolveStorageHints } from './compile-references.js';
 import { unrollFits, unrolledTermSize } from './unroll-budget.js';
 import {
   isExpression,

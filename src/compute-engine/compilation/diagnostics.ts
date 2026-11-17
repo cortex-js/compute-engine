@@ -39,6 +39,10 @@ export const UNSETTLED_SHAPE_CODE = 'unsettled-shape';
  */
 export const UNION_DISPATCH_CODE = 'union-dispatch';
 
+/** The `code` of the diagnostic of `throwStaticTypeError()`
+ *  (`compile-static-type-error.ts`). */
+export const STATIC_TYPE_ERROR_CODE = 'static-type-error';
+
 /**
  * The `code` of the decline of a value that can be `Nothing` where compiled
  * code needs a value: an element of a collection or a coordinate of a tuple

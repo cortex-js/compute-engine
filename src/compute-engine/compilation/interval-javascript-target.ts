@@ -161,7 +161,7 @@ import {
   assertNoProfileOption,
 } from './diagnostics.js';
 import { compilationScope } from './compile-scope.js';
-import { resolveStorageHints } from './storage-hints.js';
+import { resolveStorageHints } from './compile-references.js';
 import {
   IntervalArithmetic,
   INTERVAL_RUNTIME_VERSION,

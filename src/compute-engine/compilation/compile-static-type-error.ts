@@ -15,15 +15,14 @@ import {
 } from '../boxed-expression/binding-sites.js';
 import { multiClauseState } from '../multi-clause.js';
 import type { CompileTarget } from './types.js';
-import { CompileDeclineError } from './diagnostics.js';
+import { CompileDeclineError, STATIC_TYPE_ERROR_CODE } from './diagnostics.js';
 import { isCompileBoundName } from './compiler-names.js';
 import {
   blockLocalFunction,
   userFunctionLiteral,
 } from './compile-assignment-checks.js';
 
-/** The `code` of the diagnostic of `throwStaticTypeError()`. */
-export const STATIC_TYPE_ERROR_CODE = 'static-type-error';
+export { STATIC_TYPE_ERROR_CODE };
 
 /**
  * The innermost sub-expression for which `test` is true, among the nodes

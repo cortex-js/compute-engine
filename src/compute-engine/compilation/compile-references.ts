@@ -1,33 +1,19 @@
 // Reference analysis of a compilation unit, free symbol types, reports, and
 // the interpreter fallback.
 
-import type {
-  BoxedDefinition,
-  Expression,
-  FunctionInterface,
-  Scope,
-} from '../global-types.js';
+import type { Expression, FunctionInterface, Scope } from '../global-types.js';
 import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
-import { rewriteWithBinders } from '../boxed-expression/binders.js';
-import { withBindingValuesFn } from '../engine-declarations.js';
 import { isTupleShapedType } from '../collection-utils.js';
-import {
-  collectionElementType,
-  isNonRealNumber,
-  resolveTypeAlias,
-  resolveTypeForCompiledLanes as resolveTypeForCompilation,
-  narrow,
-} from '../../common/type/utils.js';
+import { isNonRealNumber, narrow } from '../../common/type/utils.js';
 import { loweredKindType } from './kind-lowering.js';
 import { declaredTypeText } from './type-facts.js';
-import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import type { Type } from '../../common/type/types.js';
 import {
   isSymbol,
   isString,
-  isCharacter,
   isFunction,
   isAbsentSymbol,
   isDictionary,
@@ -37,7 +23,6 @@ import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import {
   freeAnonymousSlots,
   functionLiteralBoundNames,
-  functionLiteralParameters,
 } from '../boxed-expression/function-literal.js';
 import { multiClauseState } from '../multi-clause.js';
 import { STATIC_TYPE_ERROR_CODE } from './compile-static-type-error.js';
@@ -46,7 +31,9 @@ import {
   UNSETTLED_SHAPE_CODE,
   UNTYPED_INPUT_CODE,
 } from './diagnostics.js';
-import { callerScopeOf } from './compile-scope.js';
+import { interpreterRun } from './interpreter-fallback.js';
+import { storageHintsOf } from './storage-hints.js';
+import type { MathJsonSymbol } from '../../math-json/types.js';
 import { protocolOfSymbol } from '../engine-protocols.js';
 import { planProtocolDispatch } from './protocol-dispatch.js';
 import { buildCaseClosure } from '../boxed-expression/match-dispatch.js';
@@ -55,10 +42,8 @@ import type {
   CompileDiagnostic,
   CompileTarget,
   CompilationResult,
-  CompiledColor,
-  CompiledRunner,
-  ComplexResult,
   FreeSymbolType,
+  StorageKind,
   TargetSource,
 } from './types.js';
 import {
@@ -76,9 +61,7 @@ import { userFunctionLiteral } from './compile-assignment-checks.js';
 import { bindsFoldedValue, expandedFoldSize } from './compile-folded-values.js';
 import { foldValueCaptured } from './compile-folding.js';
 import {
-  COLOR_SPACE_HEADS,
   CONTROL_FLOW_HEADS,
-  INTERPRETED_COLOR_SPACES,
   MAX_FOLD_EXPANDED_NODES,
   OVERRIDABLE_CONTROL_FLOW_HEADS,
   STRUCTURAL_HEADS,
@@ -1157,6 +1140,65 @@ export function isNamesTarget(t: Expression): boolean {
 }
 
 /**
+ * The storage hints of a compilation, validated and normalized to a map from
+ * symbol name to storage kind — or `undefined` when the caller gave none
+ * (`storageHintsOf()`, `storage-hints.ts`).
+ *
+ * Every hinted name must be a free symbol of (at least one of) `exprs` as the
+ * code generator sees them (`analyzeReferences`): a symbol the
+ * engine has no value for, once bound variables are excluded, plus any
+ * `vars`-mapped symbol, and including the free symbols of a user-defined
+ * function body the expression calls (`f(x) := At(S, x)` read as `f(k)`
+ * reads `S`). A symbol with an assigned value is folded into the generated
+ * code and is never read from storage, so a hint on it names nothing; so does
+ * a hint on a name that does not occur at all. Both throw, naming the free
+ * symbols the hint could have applied to.
+ *
+ * `target` is the language target the expression will be compiled to
+ * (`languageTarget.createTarget()` suffices); `options` are the caller's
+ * `vars` and `functions`. The analysis walks a user-defined function body only
+ * when the target carries a user-function registry and the caller has not
+ * overridden that function's implementation — the same two conditions the
+ * real compilation lowers such a call under — so an analysis-only target with
+ * those two facts is built here rather than asked of every caller. Callers
+ * should invoke this only when `storage` is given: the target construction is
+ * not free, and there is nothing to validate otherwise.
+ */
+export function resolveStorageHints(
+  storage: unknown,
+  exprs: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
+  options: {
+    vars?: Readonly<Record<string, unknown>>;
+    functions?: Readonly<Record<string, unknown>>;
+  } = {}
+): ReadonlyMap<MathJsonSymbol, StorageKind> | undefined {
+  return storageHintsOf(storage, () => {
+    const { vars, functions } = options;
+    const analysis: CompileTarget<Expression> = {
+      ...target,
+      userFunctions: target.userFunctions ?? {
+        defs: new Map(),
+        compiling: new Set(),
+      },
+      // A head the caller overrides is not a user-function literal to descend
+      // into (its body is never compiled), so the analysis must see it as
+      // defined. Only definedness is read here; the spelling is immaterial.
+      functions: (id) =>
+        functions !== undefined && Object.hasOwn(functions, id)
+          ? id
+          : target.functions?.(id),
+    };
+    const varsKeys = vars ? new Set(Object.keys(vars)) : undefined;
+    const free = new Set<string>();
+    for (const expr of exprs)
+      for (const s of analyzeReferences(expr, analysis, varsKeys).freeSymbols)
+        free.add(s);
+    return free;
+  });
+}
+
+/**
  * Attach `freeSymbols` and `freeSymbolTypes` (from `analyzeReferences`),
  * `unsupported` and the mode report (`mode`) to a compilation result,
  * returning the same object. Used by the built-in targets to make every
@@ -1536,366 +1578,14 @@ export function buildInterpreterFallback<T extends string>(
     kind: 'capability',
     message: error,
   };
-  // The color value of an evaluated color node, or `undefined` when `e` is
-  // not one. The interpreter spells a color as one of five typed heads
-  // (`library/colors.ts`), and the head names the space its three channels
-  // are in — the same five spaces a compiled color value carries.
-  //
-  // The alpha follows the compiled runtime's rule (`normalizeAlpha`): an
-  // absent, non-finite or effectively-1 alpha is `undefined`, so the two
-  // routes answer the same object for an opaque color.
-  const interpretedColorValue = (e: Expression): CompiledColor | undefined => {
-    if (!isFunction(e)) return undefined;
-    const space = INTERPRETED_COLOR_SPACES[e.operator];
-    if (space === undefined) return undefined;
-    const ops = e.ops;
-    if (ops.length < 3) return undefined;
-    // Each channel is numericized before it is read, for the reason
-    // `interpretedRunValue` numericizes a scalar leaf: `evaluate()` stays
-    // symbolic for an exact argument, and `.re` of a symbolic expression is
-    // `NaN`.
-    const channel = (i: number): number => ops[i].N().re;
-    let alpha = ops.length >= 4 ? channel(3) : undefined;
-    if (
-      alpha === undefined ||
-      !Number.isFinite(alpha) ||
-      Math.abs(alpha - 1) < 1e-9
-    )
-      alpha = undefined;
-    return {
-      space,
-      c0: channel(0),
-      c1: channel(1),
-      c2: channel(2),
-      alpha,
-    };
-  };
-  // The value an ABSENT interpreter result (`Missing`) takes in
-  // the compiled-runner value contract. Compiled code spells an absent value
-  // by the kind of the position that holds it (`docs/ERROR-MODEL.md` §3): the
-  // numeric marker `NaN` in a numeric position, and the target's object null
-  // (`undefined` on JavaScript) in an object-domain position — a point, a
-  // tuple, a list, a colour, a boolean, a string — and wherever the position
-  // admits `missing` itself, since a written absence symbol lowers to the
-  // object null so that an absent cell stays distinct from a `NaN` cell. The
-  // fallback spells it the same way as a producer of compiled code (a
-  // written `Missing`, a read past the end), so a host cannot tell from the
-  // value which route ran. Without this rule every absent result was `NaN`,
-  // where a compiled producer of an absent point answers `undefined`.
-  //
-  // The kind is read from the static type `t` of the position. When that
-  // type says nothing (`unknown`, `any`, or no type), `hint` gives the kind
-  // of the present sibling cells of the same collection; with no hint the
-  // value is the spelling of a WRITTEN absence symbol on the target
-  // (`undefined` on JavaScript). A target that declares an absence
-  // capability without an object axis (the shader targets, the interval
-  // target) spells every absent value with its numeric marker, so the
-  // fallback gives `NaN` there.
-  //
-  // A target that spells a written absence symbol with its NUMERIC marker
-  // uses the
-  // object null only for an absent value in an object-domain position: a position whose type admits `missing`
-  // gives `NaN` unless every other arm of the type is disjoint from
-  // `number`.
-  const hasObjectNull =
-    compileTarget?.absence === undefined ||
-    compileTarget.absence.object !== undefined;
-  const writtenNumeric = compileTarget?.absence?.writtenSymbol === 'numeric';
-  // Whether `t` admits `missing` as one of its own arms (not in a cell).
-  const admitsMissing = (t: Readonly<Type>): boolean => {
-    const r = resolveTypeForCompilation(t);
-    if (r === 'missing') return true;
-    return (
-      typeof r !== 'string' && r.kind === 'union' && r.types.some(admitsMissing)
-    );
-  };
-  const absentRunValue = (
-    t: Readonly<Type> | undefined,
-    hint: 'number' | 'object' | undefined
-  ): number | undefined => {
-    if (!hasObjectNull) return NaN;
-    let typed = false;
-    if (t !== undefined) {
-      const r = resolveTypeForCompilation(t);
-      if (r !== 'unknown' && r !== 'any') {
-        typed = true;
-        if (admitsMissing(r)) {
-          if (!writtenNumeric) return undefined;
-          const present =
-            typeof r !== 'string' && r.kind === 'union'
-              ? r.types.filter((x) => !admitsMissing(x))
-              : [];
-          return present.length > 0 &&
-            present.every((x) => provablyDisjoint(x, 'number'))
-            ? undefined
-            : NaN;
-        }
-        if (isSubtype(r, 'number')) return NaN;
-        if (provablyDisjoint(r, 'number')) return undefined;
-      }
-    }
-    if (hint !== undefined) return hint === 'object' ? undefined : NaN;
-    return typed || writtenNumeric ? NaN : undefined;
-  };
-  // The static type of cell `i` of a collection whose type is `t`: the
-  // positional type of a tuple, the element type of a list, `undefined`
-  // when the type does not say. The collection's own `missing` arm is
-  // removed first: the collection is present, since it has cells. When `t`
-  // is not a collection type at all, the collection is a cell of an outer
-  // list whose type names only the scalar leaves (`[[1, Missing], [t, 2]]`
-  // is typed `list<integer | missing | number>`), and that leaf type applies
-  // to the cells at this depth too.
-  const isCollectionType = (x: Readonly<Type>): boolean =>
-    collectionElementType(x) !== undefined;
-  const cellType = (
-    t: Readonly<Type> | undefined,
-    i: number
-  ): Type | undefined => {
-    if (t === undefined) return undefined;
-    let r = resolveTypeForCompilation(t);
-    if (typeof r !== 'string' && r.kind === 'union') {
-      const arms = r.types
-        .filter((x) => !admitsMissing(x))
-        .map((x) => resolveTypeForCompilation(x));
-      if (!arms.some(isCollectionType)) return r;
-      if (arms.length !== 1) return undefined;
-      r = arms[0];
-    }
-    if (typeof r !== 'string' && r.kind === 'tuple') return r.elements[i]?.type;
-    return collectionElementType(r) ?? r;
-  };
-  const isAbsentValue = (e: Expression): boolean => isSymbol(e, 'Missing');
-  // Materialize an interpreted result matching the compiled-runner value
-  // contract: a scalar yields a `number` (imaginary part exactly zero), a
-  // `{re, im}` object (otherwise) or a boolean; a finite indexed collection
-  // becomes a nested JS array of element values; an absent value is spelled
-  // by `absentRunValue` from the static type `t` of its position. A scalar
-  // leaf is numericized first — `evaluate()` correctly stays symbolic for an
-  // exact argument (`ln(2)` evaluates to `Ln(2)`), and `.re` of a symbolic
-  // expression is NaN, so without `.N()` every decline whose expression has
-  // no non-symbolic evaluation would run to NaN instead of its value.
-  const interpretedRunValue = (
-    e: Expression,
-    t?: Readonly<Type>
-  ):
-    | number
-    | boolean
-    | ComplexResult
-    | CompiledColor
-    | string
-    | unknown[]
-    | undefined => {
-    if (isAbsentValue(e)) return absentRunValue(t, undefined);
-    // A string is a JS string, as compiled code answers it. It is tested
-    // before the collection rule below: a string is an indexed collection
-    // of its grapheme clusters, which that rule read as an array of `NaN`.
-    // A character (`isString` is false for it) is also a JS string, as
-    // compiled code answers it: without this test the scalar rule below
-    // read it as `NaN`. The same test serves a character cell of a list,
-    // since the collection rule calls this function for each cell.
-    if (isString(e) || isCharacter(e)) return e.string;
-    // A COLOR node keeps its space. The interpreter answers a color as a
-    // typed head — `Rgb(r, g, b)`, `Hsv(h, s, v)`, … — and the compiled
-    // runtime's color value carries the same three channels plus the space
-    // the head names, so a declining color expression comes back as the
-    // color it denotes. Without this the numericization below reduced the
-    // whole head to `NaN` (`.re` of a non-numeric expression), and a
-    // declined color expression ran to a scalar `NaN` under the default
-    // `fallback: true`.
-    const color = interpretedColorValue(e);
-    if (color !== undefined) return color;
-    if (e.isCollection) {
-      // The present cells are rendered first: when the type of an absent
-      // cell says nothing, their kind is the hint for its spelling (a
-      // list of points holds `undefined`, a list of numbers `NaN`).
-      const cells = [...e.each()];
-      const out = cells.map((c, i) =>
-        isAbsentValue(c) ? undefined : interpretedRunValue(c, cellType(t, i))
-      );
-      const kinds = new Set(
-        out
-          .filter((v, i) => !isAbsentValue(cells[i]))
-          .map((v) =>
-            typeof v === 'number' || isComplexArg(v) ? 'number' : 'object'
-          )
-      );
-      const hint =
-        kinds.size === 1
-          ? (kinds.values().next().value as 'number' | 'object')
-          : undefined;
-      return out.map((v, i) =>
-        isAbsentValue(cells[i]) ? absentRunValue(cellType(t, i), hint) : v
-      );
-    }
-    if (isSymbol(e, 'True')) return true;
-    if (isSymbol(e, 'False')) return false;
-    const n = e.N();
-    if (isSymbol(n, 'True')) return true;
-    if (isSymbol(n, 'False')) return false;
-    if (isAbsentValue(n)) return absentRunValue(t, undefined);
-    const im = n.im;
-    // `im` is NaN for a symbolic residue (no numeric value): a number, not
-    // an object, is the honest shape for "no value" — `re` is NaN too.
-    if (im !== 0 && !Number.isNaN(im)) return { re: n.re, im };
-    return n.re;
-  };
-  // The interpreter's value for a runtime argument: a `{re, im}` object is a
-  // complex number, anything else boxes as it always did.
-  const isComplexArg = (v: unknown): v is ComplexResult =>
-    typeof v === 'object' &&
-    v !== null &&
-    typeof (v as ComplexResult).re === 'number' &&
-    typeof (v as ComplexResult).im === 'number';
-  // A COLOR argument: the value shape a compiled runner answers for a color
-  // (`CompiledColor`). The same test the compiled runtime makes — an object
-  // whose `space` is one of the five spellings — so a color one runner
-  // produced can be handed straight back in as a `vars` value.
-  const isColorArg = (v: unknown): v is CompiledColor =>
-    typeof v === 'object' &&
-    v !== null &&
-    typeof (v as CompiledColor).space === 'string' &&
-    (v as CompiledColor).space in COLOR_SPACE_HEADS &&
-    typeof (v as CompiledColor).c0 === 'number';
-  // A JS ARRAY is a collection VALUE — the runner-argument shape of a list
-  // or point parameter (`{ P: [[0, 0], [3, 4]] }`) — not MathJSON:
-  // `ce.expr([1, 2])` reads it as an application and boxes an
-  // `unexpected-mathjson` error, so a list-valued argument ran the
-  // interpreter against an error value (Tycho item 234). Box it element by
-  // element, guided by the parameter's DECLARED type when one is in scope:
-  // an array in a `tuple<…>` position is a point, in a `list<…>` position
-  // a list whose elements follow the list's element type, and with no type
-  // evidence an array is a `List` — the same reading `PointList` and the
-  // compiled runtime give a bare array.
-  const boxArg = (v: unknown, type?: Type): Expression => {
-    if (isComplexArg(v)) return ce.number(ce.complex(v.re, v.im));
-    // A JS string is a string VALUE. `ce.expr` reads a string as MathJSON,
-    // where `"abc"` is the SYMBOL `abc`, so the interpreter read a text
-    // argument as an unknown symbol.
-    if (typeof v === 'string') return ce.string(v);
-    // A color VALUE boxes to the typed head that names its space, with its
-    // channels as operands and its alpha as a fourth. Without this the
-    // object reached `ce.expr` as MathJSON and boxed to an error, so a
-    // color a compiled runner produced could not be fed back into a
-    // declining color expression.
-    if (isColorArg(v)) {
-      const ops = [ce.number(v.c0), ce.number(v.c1), ce.number(v.c2)];
-      if (v.alpha !== undefined) ops.push(ce.number(v.alpha));
-      return ce.function(COLOR_SPACE_HEADS[v.space], ops);
-    }
-    if (Array.isArray(v)) {
-      const t = type === undefined ? undefined : resolveTypeAlias(type);
-      if (typeof t !== 'string' && t?.kind === 'tuple')
-        return ce.function(
-          'Tuple',
-          v.map((x, i) => boxArg(x, t.elements[i]?.type))
-        );
-      const elt =
-        typeof t !== 'string' &&
-        (t?.kind === 'list' || t?.kind === 'indexed_collection')
-          ? t.elements
-          : undefined;
-      return ce.function(
-        'List',
-        v.map((x) => boxArg(x, elt))
-      );
-    }
-    return ce.expr(v as never);
-  };
-  // An occurrence of each name that `expr` reads from outside itself (not
-  // a variable of a binder of `expr`), and of each name that the value of a
-  // symbol it reads, or the body of a function it calls, reads in turn
-  // (`f15 := f14 + f14`, `g := t ↦ t + a` with `a := 3t + 1`). An occurrence
-  // in `expr` comes first. The inputs of `run` below are given to the
-  // definitions that these occurrences are bound to. An occurrence in a
-  // held operand (not canonical) is bound to nothing yet: a canonical
-  // occurrence of the same name is preferred to it.
-  const freeOccurrences = new Map<string, Expression & { symbol: string }>();
-  const followed = new Set<object>();
-  const pending: Expression[] = [];
-  const follow = (def: object | undefined, source: () => unknown): void => {
-    if (def === undefined || followed.has(def)) return;
-    followed.add(def);
-    const e = source();
-    if (e !== undefined && e !== null) pending.push(e as Expression);
-  };
-  const collect = (e: Expression): void => {
-    rewriteWithBinders(
-      e,
-      (sym, shadowed) => {
-        if (shadowed?.has(sym.symbol)) return sym;
-        const seen = freeOccurrences.get(sym.symbol);
-        if (seen === undefined || (!seen.isCanonical && sym.isCanonical))
-          freeOccurrences.set(sym.symbol, sym);
-        const def = sym.valueDefinition;
-        if (def !== undefined && !def.isConstant) follow(def, () => def.value);
-        return sym;
-      },
-      undefined,
-      false,
-      new Map(),
-      (app, _ops, shadowed) => {
-        if (shadowed?.has(app.operator)) return undefined;
-        const op = app.operatorDefinition;
-        follow(op, () => op?._lambdaLiteral);
-        const value = app.valueDefinition;
-        if (value !== undefined && !value.isConstant)
-          follow(value, () => value.value);
-        return undefined;
-      }
-    );
-  };
-  collect(expr);
-  while (pending.length > 0) collect(pending.shift()!);
-  // The scope that a name of a held operand resolves from: a held operand
-  // is bound when it is evaluated, and `run` evaluates `expr` in the scope
-  // that is current when the fallback is built, the scope `compile()` is
-  // called in. An expression boxed in a pushed scope and compiled after its
-  // pop reads its canonical names from their own definitions, and its held
-  // names from this scope, as an evaluation after the pop does. A
-  // compilation that runs in the scope of `expr` builds its fallback there,
-  // and the scope of the call is the one it recorded (`callerScopeOf()`).
-  const buildScope = callerScopeOf(ce);
-  // The binding record that the occurrence of `k` reads, or `undefined`.
-  // With `declare`, a name with no definition is declared in the scope that
-  // it resolves from: the home scope of a free name, `buildScope` for a
-  // name of a held operand.
-  const bindingOf = (
-    k: string,
-    declare: boolean
-  ): BoxedDefinition | undefined => {
-    const sym = freeOccurrences.get(k) as
-      | (Expression & {
-          symbol: string;
-          _resolvedDefinition(): BoxedDefinition | undefined;
-          _homeScope?: Scope;
-        })
-      | undefined;
-    if (sym === undefined) return undefined;
-    const resolve = (): BoxedDefinition | undefined => {
-      if (sym.isCanonical) return sym._resolvedDefinition();
-      for (let s: Scope | null | undefined = buildScope; s; s = s.parent) {
-        const found = s.bindings.get(k);
-        if (found !== undefined) return found;
-      }
-      return undefined;
-    };
-    const found = resolve();
-    const home = sym.isCanonical ? sym._homeScope : buildScope;
-    if (found !== undefined || !declare || home === undefined) return found;
-    let scope: Scope = home;
-    while (scope.noAutoDeclare && scope.parent) scope = scope.parent;
-    ce._declareSymbolValue(k, { type: 'unknown', inferred: true }, scope);
-    return resolve();
-  };
-  // The declared type of a free symbol of `expr`, when it has one — the
-  // value given by `run` below must admit the argument value under that
-  // declaration's shape.
-  const declaredTypeOf = (k: string): Type | undefined => {
-    const def = bindingOf(k, false);
-    if (!isValueDef(def)) return undefined;
-    const t = def.value.type.type;
-    return t === 'unknown' || t === 'any' ? undefined : t;
-  };
+  // The run of `expr` with the interpreter, under the spelling of an absent
+  // value of the target (`interpreterRun()`, `interpreter-fallback.ts`).
+  const { calling, run } = interpreterRun(expr, {
+    objectNull:
+      compileTarget?.absence === undefined ||
+      compileTarget.absence.object !== undefined,
+    writtenNumeric: compileTarget?.absence?.writtenSymbol === 'numeric',
+  });
 
   // Declarative reference analysis so the (success: false) result still tells
   // the caller *why* it could not be compiled without parsing `error`. Never
@@ -1999,80 +1689,12 @@ export function buildInterpreterFallback<T extends string>(
   if (added.length > 0)
     refs = { ...refs, unsupported: [...refs.unsupported, ...added] };
 
-  // A function literal (lambda) uses the positional `lambda` calling
-  // convention — `run(a, b, ...)`. The fallback must mirror that by applying
-  // the function to its positional arguments via the interpreter; otherwise
-  // positional arguments are silently dropped.
-  if (isFunction(expr, 'Function')) {
-    // A positional argument is boxed under its parameter's declared type
-    // (`(p: tuple<number, number>) -> …` receives `[0, 0]` as a POINT), as
-    // the vars-object convention below does through `declaredTypeOf`.
-    const paramTypes = functionLiteralParameters(expr).map((p) => p.type);
-    // The absent result is spelled by the static type of the application,
-    // which is the function's result type for these arguments.
-    const lambdaRun = ((...args: unknown[]) => {
-      const applied = ce.function('Apply', [
-        expr,
-        ...args.map((a, i) => boxArg(a, paramTypes[i])),
-      ]);
-      return interpretedRunValue(applied.evaluate(), applied.type.type);
-    }) as unknown as CompiledRunner;
-    return {
-      target: targetName,
-      success: false,
-      code: '',
-      calling: 'lambda',
-      run: lambdaRun,
-      error,
-      diagnostic,
-      ...declineReport(),
-      ...refs,
-      ...fallbackTypes(),
-    } as CompilationResult<T>;
-  }
-
-  // Otherwise the expression uses the `expression` calling convention:
-  // `run({ x, y, ... })` with a variables object.
-  const fallbackRun = ((vars: Record<string, unknown>) => {
-    // The arguments are the values of the inputs while the expression is
-    // evaluated, given to the definitions that the expression reads
-    // (`withBindingValuesFn()`): a `{re, im}` object is a complex number,
-    // a color, a list, a string and a boolean are boxed as such, and any
-    // other argument is a number. An input that the expression does not
-    // read is ignored.
-    const values: Record<string, Expression> = {};
-    const bindings: { name: string; record: BoxedDefinition }[] = [];
-    if (vars && typeof vars === 'object')
-      for (const [k, v] of Object.entries(vars)) {
-        const record = bindingOf(k, true);
-        if (record === undefined) continue;
-        bindings.push({ name: k, record });
-        values[k] = isComplexArg(v)
-          ? ce.number(ce.complex(v.re, v.im))
-          : isColorArg(v)
-            ? boxArg(v)
-            : Array.isArray(v)
-              ? boxArg(v, declaredTypeOf(k))
-              : typeof v === 'string'
-                ? ce.string(v)
-                : typeof v === 'boolean'
-                  ? v
-                    ? ce.True
-                    : ce.False
-                  : ce.number(v as number);
-      }
-    return ce._inScope(buildScope, () =>
-      withBindingValuesFn(ce, bindings, values, () =>
-        interpretedRunValue(expr.evaluate(), expr.type.type)
-      )
-    );
-  }) as unknown as CompiledRunner;
   return {
     target: targetName,
     success: false,
     code: '',
-    calling: 'expression',
-    run: fallbackRun,
+    calling,
+    run,
     error,
     diagnostic,
     ...declineReport(),

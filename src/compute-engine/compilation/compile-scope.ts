@@ -326,37 +326,9 @@ export function compilationScope(
   });
 }
 
-/**
- * The scopes that `compile()` was called in, innermost last, for the
- * compilations in progress (`inCallerScope()`).
- */
-const callerScopes: { engine: object; scope: Scope }[] = [];
-
-/**
- * Run `f`, a compilation of `expr` that `compile()` was called for, with the
- * current scope recorded as the scope of the call. The interpreter fallback
- * of the compilation is built for that scope (`callerScopeOf()`), also when
- * the compilation runs in the scope of `expr`.
- */
-export function inCallerScope<T>(expr: Expression, f: () => T): T {
-  const ce = expr.engine;
-  callerScopes.push({ engine: ce, scope: ce.context.lexicalScope });
-  try {
-    return f();
-  } finally {
-    callerScopes.pop();
-  }
-}
-
-/**
- * The scope that the innermost compilation in progress on `ce` was called
- * in (`inCallerScope()`), or the current scope.
- */
-export function callerScopeOf(ce: { context: { lexicalScope: Scope } }): Scope {
-  for (let i = callerScopes.length - 1; i >= 0; i--)
-    if (callerScopes[i].engine === ce) return callerScopes[i].scope;
-  return ce.context.lexicalScope;
-}
+// The scope of the call of `compile()`, which the interpreter fallback is
+// built for, is recorded with the fallback.
+export { inCallerScope, callerScopeOf } from './interpreter-fallback.js';
 
 /** The half of `def` that a function expression keeps (its operator or its
  * value definition). */

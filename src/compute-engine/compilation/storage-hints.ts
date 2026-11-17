@@ -23,8 +23,8 @@
 
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import type { Expression } from '../global-types.js';
-import type { CompileTarget, StorageHint, StorageKind } from './types.js';
-import { BaseCompiler } from './base-compiler.js';
+import type { StorageHint, StorageKind } from './types.js';
+import { inputNamesRead } from './interpreter-fallback.js';
 
 /** The storage kinds a hint may name, in the order diagnostics list them. */
 export const STORAGE_KINDS: ReadonlyArray<StorageKind> = ['sampler2D'];
@@ -81,64 +81,23 @@ export function assertStorageHintsShape(
 }
 
 /**
- * The storage hints of a compilation, validated and normalized to a map from
- * symbol name to storage kind — or `undefined` when the caller gave none.
+ * The storage hints `storage`, validated and normalized to a map from symbol
+ * name to storage kind — or `undefined` when the caller gave none.
  *
- * Every hinted name must be a free symbol of (at least one of) `exprs` as the
- * code generator sees them (`BaseCompiler.analyzeReferences`): a symbol the
- * engine has no value for, once bound variables are excluded, plus any
- * `vars`-mapped symbol, and including the free symbols of a user-defined
- * function body the expression calls (`f(x) := At(S, x)` read as `f(k)`
- * reads `S`). A symbol with an assigned value is folded into the generated
- * code and is never read from storage, so a hint on it names nothing; so does
- * a hint on a name that does not occur at all. Both throw, naming the free
- * symbols the hint could have applied to.
- *
- * `target` is the language target the expression will be compiled to
- * (`languageTarget.createTarget()` suffices); `options` are the caller's
- * `vars` and `functions`. The analysis walks a user-defined function body only
- * when the target carries a user-function registry and the caller has not
- * overridden that function's implementation — the same two conditions the
- * real compilation lowers such a call under — so an analysis-only target with
- * those two facts is built here rather than asked of every caller. Callers
- * should invoke this only when `storage` is given: the target construction is
- * not free, and there is nothing to validate otherwise.
+ * Every hinted name must be one of the free symbols that `freeSymbols()`
+ * gives (called only when a hint is given). A name that is not throws,
+ * naming the free symbols the hint could have applied to.
  */
-export function resolveStorageHints(
+export function storageHintsOf(
   storage: unknown,
-  exprs: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>,
-  options: {
-    vars?: Readonly<Record<string, unknown>>;
-    functions?: Readonly<Record<string, unknown>>;
-  } = {}
+  freeSymbols: () => Iterable<string>
 ): ReadonlyMap<MathJsonSymbol, StorageKind> | undefined {
   if (storage === undefined) return undefined;
   assertStorageHintsShape(storage);
   const names = Object.keys(storage);
   if (names.length === 0) return undefined;
 
-  const { vars, functions } = options;
-  const analysis: CompileTarget<Expression> = {
-    ...target,
-    userFunctions: target.userFunctions ?? {
-      defs: new Map(),
-      compiling: new Set(),
-    },
-    // A head the caller overrides is not a user-function literal to descend
-    // into (its body is never compiled), so the analysis must see it as
-    // defined. Only definedness is read here; the spelling is immaterial.
-    functions: (id) =>
-      functions !== undefined && Object.hasOwn(functions, id)
-        ? id
-        : target.functions?.(id),
-  };
-  const varsKeys = vars ? new Set(Object.keys(vars)) : undefined;
-  const free = new Set<string>();
-  for (const expr of exprs)
-    for (const s of BaseCompiler.analyzeReferences(expr, analysis, varsKeys)
-      .freeSymbols)
-      free.add(s);
+  const free = new Set<string>(freeSymbols());
 
   const hints = new Map<MathJsonSymbol, StorageKind>();
   for (const name of names) {
@@ -157,4 +116,38 @@ export function resolveStorageHints(
     hints.set(name, storageKindOf(name, storage[name]));
   }
   return hints;
+}
+
+/**
+ * The storage hints of a compilation of `expr`, validated and normalized
+ * (`storageHintsOf()`), with no compiler: every hinted name must be a name
+ * that the run of `expr` takes from its inputs (`inputNamesRead()`): a
+ * symbol with no value, once bound variables are excluded, plus any
+ * `vars`-mapped symbol that the expression reads, and including the names
+ * read by the value of a symbol it reads and by the body of a user function
+ * it calls (`f(x) := At(S, x)` read as `f(k)` reads `S`), unless the caller
+ * implements that function with its `functions` option. A symbol with an
+ * assigned value is folded into the generated code and is never read from
+ * storage, so a hint on it names nothing; so does a hint on a name that
+ * does not occur at all. The existing targets validate with their own
+ * reference analysis (`resolveStorageHints()`, `compile-references.ts`).
+ */
+export function resolveStorageHintsOfInputs(
+  storage: unknown,
+  expr: Expression,
+  options: {
+    vars?: Readonly<Record<string, unknown>>;
+    functions?: Readonly<Record<string, unknown>>;
+  } = {}
+): ReadonlyMap<MathJsonSymbol, StorageKind> | undefined {
+  const { vars, functions } = options;
+  return storageHintsOf(storage, () =>
+    inputNamesRead(
+      expr,
+      vars ? new Set(Object.keys(vars)) : undefined,
+      functions === undefined
+        ? undefined
+        : (name) => Object.hasOwn(functions, name)
+    )
+  );
 }

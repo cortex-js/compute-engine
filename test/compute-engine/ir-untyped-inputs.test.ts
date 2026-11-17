@@ -108,7 +108,10 @@ describe('IR profile: an input with no type', () => {
         expect(existing.diagnostic).toMatchObject(refusal(names));
         expect(ir.diagnostic).toEqual(existing.diagnostic);
         expect(ir.success).toBe(existing.success);
-        expect(ir.unsupported).toEqual(existing.unsupported);
+        // The fallback of the profile names the inputs of the refusal only
+        // (the existing one also names the user function `hb` that its
+        // reference analysis does not lower).
+        expect(ir.unsupported).toEqual(fallback ? names.split(',') : undefined);
         if (fallback) expect(typeof ir.run).toBe('function');
       }
     }
