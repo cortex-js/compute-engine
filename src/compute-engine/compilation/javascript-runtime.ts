@@ -7083,7 +7083,8 @@ export const MAX_PRODUCT_EXPONENT = 16;
  * negative base with a non-integer exponent gives the interpreter's real
  * root when the exponent is `p/q` with an odd `q`
  * (`negativeBaseRealPow()`, the rule of `Power` on machine numbers, read to
- * the digits of the running code as `cpow` reads them), NaN otherwise.
+ * the digits of the running code as `cpow` reads them), NaN otherwise (a
+ * half-integer exponent, whose `q` is 2, without that search).
  */
 export function realPow(a: number, b: number): number {
   if (Number.isInteger(b) && b >= 1 && b <= MAX_PRODUCT_EXPONENT) {
@@ -7092,8 +7093,12 @@ export function realPow(a: number, b: number): number {
     return r;
   }
   if (b === 0) return a !== 0 && Number.isFinite(a) ? 1 : NaN;
+  // A half-integer exponent is `p/2`: no real value, without the search
+  // for the terms of the exponent (`x^1.5` of a negative `x` in a loop).
   if (a < 0 && !Number.isInteger(b))
-    return negativeBaseRealPow(a, undefined, b) ?? NaN;
+    return Number.isInteger(2 * b)
+      ? NaN
+      : (negativeBaseRealPow(a, undefined, b) ?? NaN);
   return Math.pow(a, b);
 }
 
@@ -7175,7 +7180,25 @@ export const COMPLEX_FUNCTIONS = Object.freeze({
       ? { re: nr / d, im: ni / d }
       : SYS_HELPERS.cdivedge(a.re, a.im, b.re, b.im);
   },
-  cpow: (a: Cx, b: Cx): Cx => SYS_HELPERS.cpow(a, b),
+  // `z^2` and `z^3` of a finite `z` off the real axis: the products of the
+  // interpreter (`integerPower()` of `complexPow()`), without the two
+  // `Complex` objects of the general power.
+  cpow: (a: Cx, b: Cx): Cx => {
+    if (
+      b.im === 0 &&
+      (b.re === 2 || b.re === 3) &&
+      a.im !== 0 &&
+      Number.isFinite(a.re) &&
+      Number.isFinite(a.im)
+    ) {
+      let re = a.re * a.re - a.im * a.im;
+      let im = 2 * a.re * a.im;
+      if (b.re === 3) [re, im] = [a.re * re - a.im * im, a.re * im + a.im * re];
+      if (Number.isFinite(re) && Number.isFinite(im))
+        return { re: re === 0 ? 0 : re, im: im === 0 ? 0 : im };
+    }
+    return SYS_HELPERS.cpow(a, b);
+  },
   croot: (a: Cx, b: Cx): Cx => SYS_HELPERS.croot(a, b),
   ...(Object.fromEntries(IR_KERNELS.map((f) => [f, SYS_HELPERS[f]])) as Pick<
     typeof SYS_HELPERS,

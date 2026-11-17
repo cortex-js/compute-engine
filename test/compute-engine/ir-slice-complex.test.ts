@@ -15,6 +15,10 @@ import {
 } from '../../src/compute-engine/compilation/ir';
 import type { Expression } from '../../src/compute-engine/global-types';
 import {
+  realPow,
+  SYS_HELPERS,
+} from '../../src/compute-engine/compilation/javascript-runtime';
+import {
   agrees,
   interpret,
   TOLERANCE,
@@ -345,6 +349,65 @@ describe('IR slice: the complex quotient', () => {
     });
     expect(quotient(z, { re: Infinity, im: 1 })).toEqual({ re: 0, im: 0 });
     expect(quotient(z, { re: NaN, im: 1 })).toEqual({ re: NaN, im: NaN });
+  });
+});
+
+describe('IR slice: a complex power of 2 or 3, a half-integer real power', () => {
+  // `_SYS.ir.cpow` computes `Z^2` and `Z^3` of a finite `Z` off the real
+  // axis as the products of the interpreter's `complexPow()`, which squares
+  // and multiplies, bit for bit with the general power. (That one builds
+  // two `Complex` objects: `art/kotqpqjiiy` #0 ran 1.9 times the existing
+  // compiler.)
+  const general = (z: Complex, n: number) =>
+    SYS_HELPERS.cpow(z, { re: n, im: 0 }) as Complex;
+
+  test('Z^2 and Z^3: the bits of the general power', () => {
+    let seed = 11;
+    const rnd = () =>
+      (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296 - 0.5;
+    const zs: Complex[] = [
+      ...Z_VALUES,
+      { re: 1e200, im: 1e200 },
+      { re: 1e-200, im: -1e-200 },
+      { re: 0, im: 5e-324 },
+      { re: Infinity, im: 1 },
+      { re: 1, im: NaN },
+      { re: -0, im: -3 },
+      // A real value in the complex lane: the general power is `Math.pow`
+      // (0.3^3 is 0.026999999999999996, the products give 0.027).
+      { re: 0.3, im: 0 },
+      ...Array.from({ length: 2000 }, () => ({
+        re: 20 * rnd(),
+        im: 20 * rnd(),
+      })),
+    ];
+    for (const n of [2, 3, 4, -2, 0.5])
+      for (const z of zs) {
+        const got = run(['Power', 'Z', n], { Z: z });
+        expect([z, n, sameBits(got, general(z, n))]).toEqual([z, n, true]);
+      }
+    // The product itself, at an ordinary point.
+    const z = { re: -5.193379009142518, im: -4.473833492957056 };
+    expect(run(['Power', 'Z', 2], { Z: z })).toEqual({
+      re: z.re * z.re - z.im * z.im,
+      im: 2 * z.re * z.im,
+    });
+  });
+
+  test('a half-integer power of a negative number is NaN, as before', () => {
+    // The exponent is `p/2`: no real value. (`realPow` searched the terms of
+    // the exponent at each call: `neyret/ielrzhke1a` #3, 1.6 times the
+    // existing compiler at points where the base is negative.)
+    for (const b of [0.5, 1.5, 2.5, -0.5, -3.5, 1e6 + 0.5])
+      for (const a of [-2, -0.25, -1e10]) expect(realPow(a, b)).toBeNaN();
+    expect(realPow(4, 1.5)).toBe(8);
+    expect(realPow(0, 1.5)).toBe(0);
+    // An odd denominator has a real value still.
+    expect(realPow(-8, 1 / 3)).toBeCloseTo(-2, 12);
+    expect(realPow(-8, 2 / 3)).toBeCloseTo(4, 12);
+    expect(realPow(-8, 0.2)).toBeCloseTo(-1.5157165665103982, 12);
+    expect(run(['Power', 'x', 1.5], { x: -2 })).toBeNaN();
+    expect(run(['Power', 'x', 1.5], { x: 4 })).toBe(8);
   });
 });
 
