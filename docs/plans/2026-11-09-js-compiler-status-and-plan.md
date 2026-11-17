@@ -2881,6 +2881,27 @@ Landed on 2026-11-16, night:
   cortex-js-compute-engine-0.193.0-tycho.b131ad60b.tgz`, SHA-256
   `69e34bc4564d6f4dcf9f88505a8bb9482eeb25d7fe919ec474d2864a02bf376b`, sent
   to `tycho-3f` on 2026-11-17.
+- Decisions of the user, 2026-11-17: once Tycho has adopted 0.193.0 (from
+  npm; `tycho-desk` runs its trial on it), the existing compilers are
+  deleted and `compile()` uses only the profile `ir`, with no fallback phase
+  (JavaScript, GLSL and interval alike). A decline then goes to the
+  interpreter (JavaScript) or has no compiled form. The `compile()` options
+  that only the existing compilers implement are dropped in a breaking
+  release with a migration note: `functions`, `operators`, `imports`,
+  `preamble`, `strictTypes`, and the `broadcast` batch body. `ce-interval`
+  deletes the existing interval target first, in its own commit; this
+  session deletes the rest after an inventory of what depends on the shared
+  core.
+- Corpus declines to weigh before the deletion (timing record `quiet3` on
+  `000f57677`): the profile declines 157 JavaScript programs and 27 GLSL
+  shaders that the existing compiler compiles. The largest causes: a list
+  where a scalar is required (26 in 15 documents), operators not in the
+  slice (`Cross`, `RotateLeft`, `Dot`, `Mandelbrot`, `BesselJ`, `Sort`,
+  `Mean`, `Median`, `Ordering`, `Unique`, `EvaluateAt`, `ParallelLoop`: about
+  22), a list of points times another shape (10), `vars` texts on GLSL (13
+  of the 27), lists of different lengths (8), a list of lists of run-time
+  length (7), a write to a constant or a list local (7), arms or elements of
+  two types (8, declines the rules require).
 
 Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
 states, each step gated by a render audit with no lost series, no new hang
