@@ -2842,6 +2842,24 @@ Landed on 2026-11-16, night:
   tests of `ir-cse-regions.test.ts` fail without the change, not 7.
 - The 107 "other" failures of census run 3 were read: no defect of the
   profile (`_TASKS/2026-11-15-default-census/run3/README.md`).
+- `16cd422dcb30da0caa92279421b3c236f9a63509` (G38): two run-time helpers
+  take a short path with the same bits: `realPow` of a negative base and a
+  half-integer exponent is NaN at once (`ielrzhke1a` #3 and #5 from about
+  1.6 and 1.4 to about 0.95), and `_SYS.ir.cpow` computes `z^2` and `z^3`
+  as the interpreter's products (`kotqpqjiiy` #0 from about 1.9 to about
+  0.9). No corpus text changes. Still above the bound for their other
+  complex helpers: `lrhjtkkyls` #1, `13obrwvjag` #2.
+- Timing of the corpus on `000f57677` (bundle, two passes, lower time per
+  compiler): 9,162 programs, median 0.726; 24 above 1.25, 14 above 1.5, 6
+  above 2. The count above 1.1 moves by about 15 between two runs of the
+  same code (68 and 53): read the band 1.1 to 1.25 with care.
+- The exact sine hash of the existing GLSL target (`gpu-exact-trig.ts`):
+  it is emitted for 17 corpus shaders in 7 documents (`4hi9use9t2`,
+  `bi0xqfjz6i`, `iej4fjazoe`, `ipwqctmqzm`, `lgp8zspg1s`, `rw6bgiznly`,
+  `yac5cxfjm1`). The profile compiles all 17 with the float32 hash and the
+  warning `float32-unsafe-argument` (174 shaders warn with the profile, 158
+  with the existing target). Not decided: carry the exact form over, or
+  rely on the host's CPU lane for a flagged curve.
 
 Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
 states, each step gated by a render audit with no lost series, no new hang
