@@ -1063,6 +1063,95 @@ describe('the interval mode: batch 4, results', () => {
       }
   });
 
+  test('a run-time exponent over a base whose enclosure is >= 0 is _IA.powInterval', () => {
+    // The reading of `_IA.powReal` cannot apply there (`nonnegative()` with
+    // `enclosed` in `ir/lower.ts`); the existing target prints the same
+    // kernel.
+    expect(inlined(mode(['Power', 2, 'y']))).toBe(
+      '_IA.powInterval({ lo: 2, hi: 2 }, _.y)'
+    );
+    expect(mode(['Power', ['Abs', 'x'], 'y']).code).toBe(
+      '_IA.powInterval(_IA.abs(_.x), _.y)'
+    );
+    expect(mode(['Power', ['Power', 'x', 2], 'y']).code).toBe(
+      '_IA.powInterval(_IA.square(_.x), _.y)'
+    );
+    // `sqrt` of any operand, and a `max` of one such operand (a ramp).
+    expect(mode(['Power', ['Sqrt', 'x'], 'y']).code).toBe(
+      '_IA.powInterval(_IA.sqrt(_.x), _.y)'
+    );
+    expect(inlined(mode(['Power', ['Max', 'x', 0], 'y']))).toBe(
+      '_IA.powInterval(_IA.max(_.x, { lo: 0, hi: 0 }), _.y)'
+    );
+    // A real constant printed a few ulps wide around 0 can reach below 0.
+    for (const base of [
+      ['Rational', 1, ['Power', 10, 400]],
+      ['Add', ['Abs', 'x'], ['Power', 10, -400]],
+    ])
+      expect(mode(['Power', base, 'y']).code).toContain('_IA.powReal(');
+    // A real parameter that the loop index replaces after the lowering: the
+    // pass `plain` makes the power `_IA.pow` of the number index.
+    const engine = new ComputeEngine();
+    engine.declare('x', 'real');
+    engine.declare('h', '(real) -> real');
+    engine.assign('h', engine.box(['Function', ['Power', 2, 't'], 't'] as never));
+    const loop = compile(
+      engine.box(['Sum', ['Multiply', 'x', ['h', 'k']], ['Limits', 'k', 1, 200]] as never),
+      { ...IR, fallback: false } as never
+    ) as unknown as Result;
+    expect(loop.code).toMatch(/_IA\.pow\(v\d+, v\d+\)/);
+    expect(loop.code).not.toContain('powInterval');
+    // A product can step its lower end below 0, and a base that is an input
+    // can be negative: the reading stays. At -8, `0.2` is `1/5`, the real
+    // root -1.5157…, as the interpreter gives.
+    expect(mode(['Power', ['Multiply', 'x', 'x'], 'y']).code).toContain('_IA.powReal(');
+    const r = mode(['Power', 'x', 'y']);
+    expect(r.code).toBe('_IA.powReal(_.x, _.y, 17)');
+    const root = r.run({ x: -8, y: 0.2 });
+    const expected = ce.box(['Power', -8, 0.2] as never).N().re;
+    expect(expected).toBeCloseTo(-1.5157165665103982, 15);
+    expect(root.value.lo).toBeLessThanOrEqual(expected);
+    expect(root.value.hi).toBeGreaterThanOrEqual(expected);
+    expect(root.value.hi).toBeLessThan(-1.5);
+  });
+
+  test('a run-time exponent over a base whose enclosure is >= 0 contains the interpreter', () => {
+    const bases = [
+      2,
+      0,
+      ['Abs', 'x'],
+      ['Power', 'x', 2],
+      ['Exp', 'x'],
+      ['Sqrt', ['Add', ['Power', 'x', 2], 1]],
+      ['Sqrt', 'x'],
+      ['Max', 'x', 0],
+    ];
+    const exponents = [0.2, 1.5, 3, -0.2, { lo: 0.1, hi: 0.3 }];
+    for (const base of bases) {
+      const json = ['Power', base, 'y'];
+      const r = mode(json);
+      for (const [lo, hi] of [[-2, 3], [0, 0], [0.5, 4], [-8, -8]])
+        for (const y of exponents) {
+          const got = r.run({ x: { lo, hi }, y });
+          const ys = typeof y === 'number' ? [y] : [y.lo, (y.lo + y.hi) / 2, y.hi];
+          for (const t of [0, 0.5, 1])
+            for (const e of ys) {
+              const at = lo + t * (hi - lo);
+              const n = ce
+                .box(json as never)
+                .subs({ x: ce.number(at), y: ce.number(e) })
+                .N();
+              // No real value (`Sqrt(-2)^0.2` is complex): nothing to contain.
+              const v = n.im === 0 ? n.re : NaN;
+              if (!Number.isFinite(v)) continue;
+              expect(['interval', 'partial', 'singular']).toContain(got.kind);
+              expect(got.value.lo).toBeLessThanOrEqual(v);
+              expect(got.value.hi).toBeGreaterThanOrEqual(v);
+            }
+        }
+    }
+  });
+
   test('Binomial and Choose of reals: _IA.binomial in the mode only', () => {
     for (const head of ['Binomial', 'Choose']) {
       const r = mode([head, 'x', 'y']);

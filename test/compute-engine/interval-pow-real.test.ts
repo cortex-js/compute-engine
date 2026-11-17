@@ -144,4 +144,104 @@ describe('powReal', () => {
     });
     expect(IA.powReal(I(1, 2), { kind: 'entire' })).toEqual({ kind: 'entire' });
   });
+
+  test('over a base whose lower end is >= 0, powReal is powInterval', () => {
+    // The interval mode prints `_IA.powInterval` for such a base
+    // (`nonnegative()` with `enclosed` in `ir/lower.ts`). The two differ
+    // only at a negative exponent read as a rational of odd denominator,
+    // where `powReal` takes the scalar `pow`: a base [0, b] gives the same
+    // `partial` with the other clipped side, and a base whose upper end
+    // raised to the exponent underflows to 0 (an upper end +∞ included) the
+    // lower end -5e-324 where `powInterval` has 0 (the power is > 0).
+    const ends = [0, 5e-324, 1e-300, 0.25, 1, 2, 8, 1e300, Infinity];
+    const bases: Array<ReturnType<typeof I> | Record<string, unknown>> = [];
+    for (const lo of ends)
+      for (const hi of ends) if (hi >= lo) bases.push(I(lo, hi));
+    bases.push(
+      I(NaN, NaN),
+      { kind: 'partial', value: I(0, 2), domainClipped: 'lo' },
+      { kind: 'singular', at: 1, value: I(1, 3) },
+      { kind: 'singular' },
+      { kind: 'empty' }
+    );
+    const points = [0, 1, 2, 3, -1, -2, 0.2, -0.2, 1 / 3, -1 / 3, -5 / 3,
+      0.6, 1.4, 0.5, -0.5, 1.5, Math.PI, NaN, Infinity, -Infinity, 1e20];
+    const exponents: unknown[] = points.map((e) => I(e, e));
+    exponents.push(I(0.1, 0.3), I(-2, 3), I(-1, -0.5), I(-Infinity, Infinity));
+    for (const e of [0.2, -0.2, 2, 1.5]) {
+      exponents.push(
+        { kind: 'partial', value: I(e, e), domainClipped: 'both' },
+        { kind: 'singular', at: 0, value: I(e, e) }
+      );
+    }
+    exponents.push({ kind: 'singular' }, { kind: 'empty' }, { kind: 'entire' });
+    const valueOf = (r: any) => r.value as { lo: number; hi: number };
+    let differ = 0;
+    for (const b of bases)
+      for (const e of exponents) {
+        const real: any = IA.powReal(b as never, e as never, 17);
+        const principal: any = IA.powInterval(b as never, e as never);
+        if (JSON.stringify(real) === JSON.stringify(principal)) continue;
+        differ++;
+        const d = valueOf(e.kind === undefined ? { value: e } : e).lo;
+        expect(d < 0 && realPowerBranchTerms(undefined, d, 17)![1] % 2).toBe(1);
+        expect(real.kind).toBe(principal.kind);
+        const [p, q] = [valueOf(real), valueOf(principal)];
+        expect(p.hi).toBe(q.hi);
+        if (p.lo !== q.lo) expect([p.lo, q.lo]).toEqual([-5e-324, 0]);
+      }
+    expect(differ).toBeGreaterThan(0);
+  });
+
+  test('an exponent that is not read is powInterval, marks included', () => {
+    // `powRealRaw` calls the rounded `powInterval` kernel without its
+    // `liftJump`: the export of `powReal` lifts the same operands once.
+    const ends = [-Infinity, -8, -1, -5e-324, 0, 5e-324, 1, 8, Infinity];
+    const kinded = (x: { lo: number; hi: number }): unknown[] => [
+      x,
+      { kind: 'partial', value: x, domainClipped: 'lo' },
+      ...(Number.isFinite(x.lo) && Number.isFinite(x.hi)
+        ? [{ kind: 'singular', at: 0, value: x }]
+        : []),
+    ];
+    const bases = ends
+      .flatMap((lo) => ends.filter((hi) => hi >= lo).map((hi) => I(lo, hi)))
+      .flatMap(kinded);
+    bases.push(IA.floor(I(0.5, 1.5)), { kind: 'empty' }, { kind: 'singular' });
+    const exponents = [I(2, 2), I(-3, -3), I(1.5, 1.5), I(NaN, NaN),
+      I(Infinity, Infinity), I(0.1, 0.3), I(-2, 3)].flatMap(kinded);
+    exponents.push(IA.floor(I(0.5, 1.5)), { kind: 'entire' });
+    for (const b of bases)
+      for (const e of exponents)
+        expect(IA.powReal(b as never, e as never, 17)).toEqual(
+          IA.powInterval(b as never, e as never)
+        );
+  });
+
+  test('the enclosures that the mode reads as >= 0 have a lower end >= 0', () => {
+    // `nonnegative()` with `enclosed` in `ir/lower.ts`: `sqrt` of any
+    // operand, a `max` of one such operand; not a product, whose outward
+    // step moves a lower end 0 to -5e-324.
+    const ends = [-Infinity, -1e300, -8, -1, -1e-300, -5e-324, 0, 5e-324,
+      1e-300, 1e-160, 0.1, 1, 3, 800, 1e300, Infinity];
+    const all = ends.flatMap((lo) => ends.filter((hi) => hi >= lo).map((hi) => I(lo, hi)));
+    const nonnegative = all.filter((x) => x.lo >= 0);
+    const lo = (r: any) => (r.kind === undefined ? r : r.value)?.lo ?? 0;
+    for (const x of all) {
+      for (const r of [IA.abs(x), IA.exp(x), IA.square(x), IA.pow(x, 4), IA.pow(x, -2)])
+        expect(lo(r)).toBeGreaterThanOrEqual(0);
+      expect(lo(IA.powReal(x, I(-4, -4)))).toBeGreaterThanOrEqual(0);
+      expect(lo(IA.sqrt(x))).toBeGreaterThanOrEqual(0);
+      for (const y of nonnegative) {
+        expect(lo(IA.max(x, y))).toBeGreaterThanOrEqual(0);
+        expect(lo(IA.max(y, x))).toBeGreaterThanOrEqual(0);
+      }
+    }
+    for (const x of nonnegative)
+      for (const y of nonnegative)
+        expect(lo(IA.add(x, y))).toBeGreaterThanOrEqual(0);
+    expect(IA.mul(I(1e-200, 1), I(1e-200, 1))).toMatchObject({
+      value: { lo: -5e-324 },
+    });
+  });
 });

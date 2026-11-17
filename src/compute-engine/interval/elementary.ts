@@ -2383,9 +2383,10 @@ function hypotRaw(
 export const sqrt = liftJump(outwardUnlessExact(sqrtRaw, exactSqrt));
 export const square = liftJump(outwardUnlessExact(squareRaw, exactSquare));
 export const pow = liftJump(outwardUnlessExact(powRaw, exactPow));
-export const powInterval = liftJump(
-  outwardUnlessExact(powIntervalRaw, exactPowInterval)
-);
+// `powRealRaw` calls the rounded routine, not the export: its own export
+// lifts the jumps of the same operands once.
+const powIntervalRounded = outwardUnlessExact(powIntervalRaw, exactPowInterval);
+export const powInterval = liftJump(powIntervalRounded);
 // `nthRoot` and `powRational` take NO step at their export, and are the two
 // exceptions to the one-step-per-routine rule. Both answer an enclosure that
 // is already a proof:
@@ -2483,7 +2484,7 @@ function powRealRaw(
     if (lastRead.branch !== undefined)
       return powRealBranchRaw(base, e.lo, lastRead.branch);
   }
-  return powInterval(base, exponent);
+  return powIntervalRounded(base, exponent);
 }
 /** The last reading of `powRealRaw`: the exponent, the digits, and whether
  *  the real root is negative (`undefined`: no real root). */

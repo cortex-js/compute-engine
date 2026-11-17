@@ -457,7 +457,10 @@
   a negative `x`, `x^1.5` has no value there. A difference is one
   `_IA.sub`, and a rational exponent whose denominator is a power of 2
   (`x^(3/2)`) is the power of its double, as on the existing target, with
-  its bounds. `Binomial` and `Choose` of
+  its bounds. An exponent known at run time over a base whose enclosure
+  cannot be negative (`2^y`, `|x|^y`, `(x^2)^y`) is `_IA.powInterval`, as on
+  the existing target, without the reading of the exponent, which cannot
+  apply there. `Binomial` and `Choose` of
   real operands compile (`_IA.binomial`). A comparison that the engine
   decides for every value of its inputs (`(x + 1)^2 < 0` or `Equal(x, x)`
   of a real `x`) is that verdict, as on the existing target. A value that

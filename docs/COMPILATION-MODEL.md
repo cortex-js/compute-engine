@@ -571,6 +571,14 @@ interpreter's value. A line is removed when the case declines or is fixed.
   denominator is even and not a power of 2 (`7/6` at `x = 10¹⁰⁰`). An odd
   denominator (`_IA.powRational`) and a power of 2 (the double is exact)
   contain both.
+- `javascript`, `interval-js` (crafted: a base near 10⁻²⁰⁰), `x: real`,
+  `y: real`: `Power(x, y)` at `x = 10⁻²⁰⁰`, `y = 0.2`. The exponent is known
+  at run time, as a double. At the default precision the interpreter reads
+  it as the decimal `1/5` and gives `1e-40`; the code computes the power of
+  the double (`9.999999999999948e-41`, about 5·10⁻¹⁵ below), and
+  `interval-js` encloses that number (`[9.999999999999946e-41,
+  9.99999999999995e-41]`), with or without the profile `ir`. At machine
+  precision the interpreter gives the code's number.
 
 ## The worker pool and `parallel for`: `runAsync()`
 

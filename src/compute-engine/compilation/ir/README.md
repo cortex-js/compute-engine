@@ -733,7 +733,8 @@ adds `number` (`_IA.number(x)`: the number of a point that is an integer of
 magnitude at most 2^32, else a throw of the error of `_IA.decided()`, which
 `run()` and `broadcast()` answer with `entire`, and which `broadcast()`
 does not count as a failure). A scalar `pow` whose exponent is plain is
-`_IA.pow($0, n)` with a number exponent (`x^3` is `_IA.pow(_.x, 3)`); a
+`_IA.pow($0, n)` with a number exponent (`x^3` is `_IA.pow(_.x, 3)`), and
+so is a scalar `pow.interval` whose exponent is plain; a
 list power is `_IA.powReal` of each element; a power by the constant 2 stays `_IA.square`. Every other integer is an
 interval: `Floor(x) + 1` is `_IA.add(_IA.floor(_.x), { lo: 1, hi: 1 })`.
 So the bounds and the index of every loop are numbers, and no code tests a
@@ -818,6 +819,20 @@ last reading, so a plot with one exponent reads it once), and is
 `_IA.powInterval` otherwise; `digits` is `realPowerReconstructionDigits()`
 of the engine's precision when the code is printed, written in the code, so
 that stored code reads the exponent as the engine that compiled it.
+A scalar real exponent known at run time over a scalar base whose
+enclosure the lowering proves `>= 0` (`nonnegative()` with `enclosed`: an
+integer constant `>= 0`, a real constant of at least 2^-1022 other than
+`e`, `abs`, `exp`, `square`, `sqrt` of any operand, an even integer power,
+a sum of such values and a `max` of one; not a product or `hypot`, whose
+outward step can move a lower end 0 to `-5e-324`, nor a real constant
+printed a few ulps wide around 0) is `pow.interval`, `_IA.powInterval` as
+on the existing target (`2^y`, `Abs(x)^y`, `Max(x, 0)^y`): the reading
+cannot apply there. The two kernels differ over such a base only at a
+negative exponent read as a rational of odd denominator, where
+`_IA.powReal` takes the scalar `_IA.pow`: a base `[0, b]` gives the same
+`partial` with the other clipped side, and a base whose upper end raised
+to the exponent underflows to 0 (an upper end `+∞` included) the lower end
+`-5e-324` where `_IA.powInterval` gives 0.
 
 Values computed once (`computedOnce()` of `print-interval.ts`). A value
 that depends on no input, parameter, loop index or draw is computed when

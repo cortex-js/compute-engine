@@ -127,6 +127,8 @@ export const JS_INTERVAL: Syntax = Object.freeze({
     'pow.branch': '_IA.powRealBranch($0, $1.lo, true)',
     'pow.branch.even': '_IA.powRealBranch($0, $1.lo, false)',
     'pow.principal': '_IA.pow($0, $1.lo)',
+    // A run-time exponent over a base whose enclosure is `>= 0`.
+    'pow.interval': '_IA.powInterval($0, $1)',
     root: '_IA.nthRootInterval($0, $1)',
     deg: `_IA.div(_IA.mul($0, ${enclosure(Math.PI, 1)}), { lo: 180, hi: 180 })`,
     draw: '{ lo: 0, hi: 1 }',
@@ -220,9 +222,10 @@ export const INTERVAL_ROWS: readonly OperatorRow[] = deepFreeze([
   row(undefined, 1, arith('square', 1), {}),
   // A power by a float literal that the lowering reads at compile time,
   // and `pow.principal` of a rational exponent whose denominator is a
-  // power of 2.
-  ...['pow.branch', 'pow.branch.even', 'pow.principal'].map((op) =>
-    row(undefined, 2, [[[R, R], R, op]], {})
+  // power of 2; `pow.interval` of a run-time exponent over a base whose
+  // enclosure is `>= 0`.
+  ...['pow.branch', 'pow.branch.even', 'pow.principal', 'pow.interval'].map(
+    (op) => row(undefined, 2, [[[R, R], R, op]], {})
   ),
   ...['atleast', 'atmost'].map((op) => row(undefined, 2, arith(op, 2), list)),
   ...PLAIN_ROWS,

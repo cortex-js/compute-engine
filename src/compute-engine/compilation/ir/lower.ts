@@ -356,23 +356,37 @@ export function lower(
    *  constant, an operation whose value is nonnegative (`abs`, `exp`, an
    *  even power), a sum or a product of such values. Not the type of an
    *  input: an assumption narrows it (`assume(s >= 0)` makes the type of
-   *  `s` `real<0..>`) and `forget()` widens it again. */
-  const nonnegative = (v: V, depth = 0): boolean => {
+   *  `s` `real<0..>`) and `forget()` widens it again.
+   *
+   *  `enclosed` (the interval mode): the printed enclosure of `v` has a
+   *  lower end `>= 0`, not only its value. An integer constant `>= 0`, a
+   *  real one of at least 2^-1022 (a real literal can be printed a few ulps
+   *  wide, and 0 or a denormal then reaches below 0), `abs`, `exp`,
+   *  `square`, `sqrt`, an even power, a sum of such values, and a `max` of
+   *  one; not a product or `hypot`, whose outward step moves a lower end 0
+   *  to `-5e-324`, nor `mul(a, a)`, whose enclosure over a base that
+   *  straddles 0 has a negative part. */
+  const nonnegative = (v: V, depth = 0, enclosed = false): boolean => {
     const c = constant(v);
-    if (c !== undefined) return c >= 0;
+    if (c !== undefined)
+      return enclosed && type(v).lane !== 'integer' ? c >= 2 ** -1022 : c >= 0;
     const i = b.defs.get(v);
     if (i === undefined || depth > 16) return false;
     const op = i.op.split('.')[0];
     const k = constant(i.args[1]);
-    if (['abs', 'cabs', 'exp', 'hypot'].includes(op)) return true;
+    const next = (a: V) => nonnegative(a, depth + 1, enclosed);
+    const always = enclosed ? ['square', 'sqrt'] : ['cabs', 'hypot'];
+    if (['abs', 'exp', ...always].includes(op)) return true;
     if (op === 'pow' && k !== undefined && Number.isInteger(k) && k % 2 === 0)
       return true;
+    if (enclosed)
+      return op === 'max'
+        ? i.args.some(next)
+        : op === 'add' && i.args.every(next);
     if (op === 'mul' && i.args[0] === i.args[1]) return true;
     return (
       ['add', 'mul', 'max', 'pow', 'sqrt'].includes(op) &&
-      (op === 'pow' ? [i.args[0]] : i.args).every((a) =>
-        nonnegative(a, depth + 1)
-      )
+      (op === 'pow' ? [i.args[0]] : i.args).every(next)
     );
   };
 
@@ -1003,8 +1017,20 @@ export function lower(
                   : 'pow.branch.even';
             return apply(e, ofOp(op), [x, k]);
           }
-          return constant(k) === 2 && type(k).lane === 'integer'
-            ? apply(e, ofOp('square'), [x])
+          if (constant(k) === 2 && type(k).lane === 'integer')
+            return apply(e, ofOp('square'), [x]);
+          // A scalar real exponent known at run time over a scalar base whose
+          // enclosure is `>= 0`: the reading of `_IA.powReal` gives the
+          // principal power there, `pow.interval`. The base `e` stays
+          // `Power` (its row makes it `Exp`).
+          return constant(k) === undefined &&
+            type(k).lane === 'real' &&
+            type(x).lane !== 'complex' &&
+            type(x).shape.length === 0 &&
+            type(k).shape.length === 0 &&
+            constant(x) !== Math.E &&
+            nonnegative(x, 0, true)
+            ? apply(e, ofOp('pow.interval'), [x, k])
             : apply(e, 'Power', [x, k]);
         }
         if (2 ** Math.round(Math.log2(pq[1])) === pq[1])

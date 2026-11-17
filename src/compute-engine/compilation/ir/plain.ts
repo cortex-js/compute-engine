@@ -170,15 +170,16 @@ export function plain(p: Program): string | undefined {
         continue;
       }
       // A scalar power only: the rows of `pow.num` do not thread, and a list
-      // power stays `pow`, `_IA.powReal` of each element.
+      // power stays `pow`, `_IA.powReal` of each element. `pow.interval` (a
+      // base whose enclosure is `>= 0`) of a plain integer is `pow.num` too.
       if (
         i.k === 'op' &&
-        (i.op === 'pow' || i.op === 'pow.int') &&
+        (i.op === 'pow' || i.op === 'pow.int' || i.op === 'pow.interval') &&
         p.types[i.out].shape.length === 0 &&
         magnitude(i.args[1]) < LIMIT
       ) {
         i.args = [asInterval(i.args[0], body), asNumber(i.args[1], body)];
-        i.op = i.op === 'pow' ? 'pow.num' : 'pow.int.num';
+        i.op = i.op === 'pow.int' ? 'pow.int.num' : 'pow.num';
         body.push(i);
         continue;
       }
