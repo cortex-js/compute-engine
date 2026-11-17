@@ -12,6 +12,31 @@
   kept for the current pass of the derivation that reads it so repeated reads
   within that pass can reuse it.
 
+- **The guard digits of an exact operand grow with its nearness to a pole, and
+  for some functions with its size.** An exact operand is read at the working
+  precision plus 10 digits under `.N()`, which does not cover a condition
+  number past 10^10: `Gamma(3000000001/3)` was 7 units off at every
+  precision, `Zeta` and `DirichletEta` of `-3000000001/3` 2 to 3,
+  `HurwitzZeta` with `s` near 10^15 up to 10^5, `Binomial` of two operands of
+  10^15 lost 6 of 30 digits, and `Beta(1/3, b)` with `a + b` within 10^-11 of a
+  negative integer 2 to 27. The guard now adds a digit per power of ten of
+  the distance of an operand, or of the sum or difference of two, to the
+  nearest integer, computed from the exact operands (also below the rounding
+  scale of the working precision: `Beta(1/3, -13/3 + 10^-29)`), for the
+  gamma family, `Beta` and `Binomial` (at the non-positive integers) and
+  `HurwitzZeta` (`s` at 1, `a` at the non-positive integers), which are
+  singular there; `Zeta(10^-600)` and `DirichletEta(1 + 10^-500)` are regular
+  and add none. For `Gamma`,
+  `Factorial`, `Zeta`, `DirichletEta`, `HurwitzZeta`, `Exp` and `Binomial`,
+  whose condition number grows with the operand, it also adds a digit per
+  power of ten of the operand above 100; the other functions do not, so
+  `Ln(2^2000 + 1)`, `Arctan(10^600 + 1)`, `Sqrt(10^600 + 1/3)` and
+  `Sin(10^600 + 1)` are answered. Past 500 extra digits the expression stays
+  unevaluated. An exact integer operand that the working precision holds
+  exactly (`10^1000`) has no rounding error and costs none; one that it rounds
+  (`GammaLn(2^100)` at 30 digits) is read exactly (#618, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 ## 0.195.0 _2026-11-20_
 
 ### New Features

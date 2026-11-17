@@ -7,7 +7,13 @@ import type { EvaluateHandlerOptions, Expression } from '../global-types.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
 import { isExactConstantExpression } from '../boxed-expression/compare.js';
-import { isExactRealLiteral } from '../boxed-expression/constraint-subject.js';
+import { BigDecimal } from '../../big-decimal/index.js';
+import {
+  exactRealValueOf,
+  isExactRealLiteral,
+} from '../boxed-expression/constraint-subject.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
+import { exactIntegerValue } from '../numeric-value/exact-integer-value.js';
 
 /**
  * The number of digits above the working precision at which an exact
@@ -19,6 +25,286 @@ import { isExactRealLiteral } from '../boxed-expression/constraint-subject.js';
  * three digits.
  */
 const EXACT_OPERAND_GUARD_DIGITS = 10;
+
+/**
+ * Operands below this magnitude (10^2) need no guard digits beyond
+ * `EXACT_OPERAND_GUARD_DIGITS`: their condition number, `|x·ln x|`, is far
+ * inside it.
+ */
+const GUARD_FREE_MAGNITUDE_DIGITS = 2;
+
+/**
+ * The most digits added to `EXACT_OPERAND_GUARD_DIGITS` for the size of an
+ * operand and its distance to a pole. Past it, the handler declines (the
+ * expression stays unevaluated) instead of answering from an operand it
+ * cannot read with enough digits.
+ */
+const MAX_EXTRA_GUARD_DIGITS = 500;
+
+/** The largest exponent of a float that is converted to an exact rational. */
+const MAX_EXACT_EXPONENT = 5000;
+
+/** An exact rational, `[numerator, denominator]`, denominator positive. */
+type Rational = [bigint, bigint];
+
+const abs = (n: bigint): bigint => (n < 0n ? -n : n);
+const digitCount = (n: bigint): number => abs(n).toString().length;
+
+/** The exact value of a big decimal. */
+function rationalOfBigDecimal(v: BigDecimal): Rational | undefined {
+  // Past the double range the digits are not worth an exact integer.
+  if (Math.abs(v.exponent) > MAX_EXACT_EXPONENT) return undefined;
+  return v.exponent >= 0
+    ? [v.significand * 10n ** BigInt(v.exponent), 1n]
+    : [v.significand, 10n ** BigInt(-v.exponent)];
+}
+
+/** The largest exponent of a `Power` that is evaluated exactly. */
+const MAX_EXACT_POWER = 10_000;
+
+/**
+ * True when `x` is built only from exact number literals and rational
+ * arithmetic (`Add`, `Subtract`, `Multiply`, `Divide`, `Negate`, `Rational`,
+ * and `Power` with a small integer exponent): no symbol and no call, so
+ * evaluating it exactly has no effect (a host function records the request
+ * it gets) and costs little.
+ */
+function isRationalArithmetic(x: Expression): boolean {
+  if (isNumber(x)) return x.isExact && !x.isComplex;
+  if (!isFunction(x)) return false;
+  switch (x.operator) {
+    case 'Add':
+    case 'Subtract':
+    case 'Multiply':
+    case 'Divide':
+    case 'Negate':
+    case 'Rational':
+      return x.ops.every(isRationalArithmetic);
+    case 'Power': {
+      const e = x.op2;
+      return (
+        isRationalArithmetic(x.op1) &&
+        isNumber(e) &&
+        e.isInteger === true &&
+        Math.abs(e.re) <= MAX_EXACT_POWER
+      );
+    }
+    default:
+      return false;
+  }
+}
+
+/**
+ * The exact value of `original` when it is a rational number (an exact real
+ * literal or a pure exact expression that evaluates to one), else
+ * `undefined` (`π`, `√2`).
+ */
+function exactRationalOf(original: Expression): Rational | undefined {
+  if (!isRationalArithmetic(original)) return undefined;
+  const v = exactRealValueOf(original);
+  if (v === undefined || !isNumber(v)) return undefined;
+  const nv = v.numericValue;
+  if (typeof nv === 'number')
+    return Number.isInteger(nv) ? [BigInt(nv), 1n] : undefined;
+  const exact = nv.asExact;
+  if (
+    !(exact instanceof ExactNumericValue) ||
+    exact.radical !== 1 ||
+    nv.im !== 0
+  )
+    return undefined;
+  let [n, d] = exact.rational.map(BigInt) as Rational;
+  if (d === 0n) return undefined;
+  if (d < 0n) [n, d] = [-n, -d];
+  return [n, d];
+}
+
+/**
+ * The digits that a distance `|n/d|` below 1 costs: `⌊−log10 |n/d|⌋`, up to
+ * one more. An exact zero costs none: the handler decides an exact integer
+ * on the exact operands.
+ */
+function digitsBelowOne([n, d]: Rational): number {
+  if (n === 0n) return 0;
+  return Math.max(0, digitCount(d) - digitCount(n));
+}
+
+/** The distance of `[n, d]` to the nearest integer. */
+function distanceToInteger([n, d]: Rational): Rational {
+  let r = n % d;
+  if (r < 0n) r += d;
+  return 2n * r > d ? [d - r, d] : [r, d];
+}
+
+const addRational = ([a, b]: Rational, [c, e]: Rational): Rational => [
+  a * e + c * b,
+  b * e,
+];
+const negRational = ([a, b]: Rational): Rational => [-a, b];
+
+/**
+ * A real operand of a guarded call: its value at the working precision, and
+ * its exact value when it has one (a rational, or a float, which is exact as
+ * given) or `read`, a function that approximates it at a higher precision
+ * (`π`, `√2`).
+ */
+interface GuardOperand {
+  /** The index of the operand in the call. */
+  index: number;
+  value: BigDecimal;
+  exact: Rational | undefined;
+  read: () => BigDecimal | undefined;
+}
+
+/**
+ * The precision, in digits above the working precision, at which a distance
+ * that is below the rounding scale of the working precision is resolved: the
+ * distance of `Β(1/3, −13/3 + 10^−29)`'s `a + b` to −4 is 10^−29 at 30
+ * digits, and a float of each operand cancels to 11 correct digits.
+ */
+const POLE_RESOLUTION_DIGITS =
+  MAX_EXTRA_GUARD_DIGITS + EXACT_OPERAND_GUARD_DIGITS;
+
+/**
+ * The digits that the nearness of `operands`, or of the sum or difference of
+ * two, to an integer costs, or `undefined` past `MAX_EXTRA_GUARD_DIGITS`. The
+ * error of an operand reaches the result multiplied by `1/d`, with `d` the
+ * distance of an operand, or of the sum or difference of two operands
+ * (`Β(a, b)` at `a + b` a non-positive integer, `Binomial(n, k)` at `n − k`
+ * one), to the nearest integer. `d` is computed exactly when the operands
+ * are rational. For others (`π`), a `d` within the rounding error of the
+ * working precision is read again at `POLE_RESOLUTION_DIGITS` more digits,
+ * and when it is still within the rounding error there, it is not known to
+ * be non-zero: the handler declines.
+ */
+function poleDigits(
+  operands: ReadonlyArray<GuardOperand>,
+  working: number,
+  mode: PoleMode | ReadonlyArray<PoleMode>
+): number | undefined {
+  const terms: {
+    parts: GuardOperand[];
+    signs: (1 | -1)[];
+    mode: PoleMode;
+  }[] = [];
+  for (let i = 0; i < operands.length; i++) {
+    const m =
+      typeof mode === 'string' ? mode : (mode[operands[i].index] ?? 'none');
+    if (m !== 'none') terms.push({ parts: [operands[i]], signs: [1], mode: m });
+    // Sums of operands only for a function that names no operand.
+    if (typeof mode === 'string')
+      for (let j = i + 1; j < operands.length; j++) {
+        terms.push({ parts: [operands[i], operands[j]], signs: [1, 1], mode });
+        terms.push({ parts: [operands[i], operands[j]], signs: [1, -1], mode });
+      }
+  }
+  let pole = 0;
+  for (const { parts, signs, mode } of terms) {
+    // `one`: the distance to 1, as the distance of `x - 1` to 0.
+    const shift = mode === 'one' ? -1n : 0n;
+    const sum = parts.every((p) => p.exact !== undefined)
+      ? addRational(
+          parts
+            .map((p, k) => (signs[k] > 0 ? p.exact! : negRational(p.exact!)))
+            .reduce(addRational),
+          [shift, 1n]
+        )
+      : undefined;
+    // A function singular at the non-positive integers is regular at the
+    // positive ones (`Gamma(1 + 10^-600)`), and one singular at 1 only is
+    // regular at the other integers (`HurwitzZeta(10^-600, 1/3)`): the
+    // nearest integer must be one it is singular at.
+    const regular =
+      parts.length === 1 &&
+      (mode === 'nonpositive' || mode === 'one') &&
+      (sum !== undefined
+        ? mode === 'one'
+          ? 2n * abs(sum[0]) >= sum[1]
+          : sum[0] * 2n > sum[1]
+        : mode === 'one'
+          ? Math.abs(parts[0].value.toNumber() - 1) >= 0.5
+          : parts[0].value.round().toNumber() >= 1);
+    if (regular) continue;
+    if (sum !== undefined) {
+      pole = Math.max(pole, digitsBelowOne(distanceToInteger(sum)));
+      continue;
+    }
+    // A non-rational operand: the distance from the floats.
+    const measure = (vals: BigDecimal[], digits: number) => {
+      const s = vals.reduce((acc, v, k) =>
+        k === 0
+          ? signs[0] > 0
+            ? v
+            : v.neg()
+          : signs[k] > 0
+            ? acc.add(v)
+            : acc.sub(v)
+      );
+      const t = shift === 0n ? s : s.sub(1);
+      const d = Math.abs(t.sub(t.round()).toNumber());
+      const noise = 10 ** (2 - digits) * Math.max(1, Math.abs(s.toNumber()));
+      return { d, noise };
+    };
+    const near = measure(
+      parts.map((p) => p.value),
+      working
+    );
+    if (near.d >= near.noise) {
+      pole = Math.max(pole, Math.floor(-Math.log10(near.d)));
+      continue;
+    }
+    const raised = parts.map((p) => p.read());
+    if (raised.some((v) => v === undefined)) return undefined;
+    const far = measure(
+      raised as BigDecimal[],
+      working + POLE_RESOLUTION_DIGITS
+    );
+    if (far.d < far.noise) return undefined;
+    pole = Math.max(pole, Math.floor(-Math.log10(far.d)));
+  }
+  return pole > MAX_EXTRA_GUARD_DIGITS ? undefined : pole;
+}
+
+/**
+ * The digits above `EXACT_OPERAND_GUARD_DIGITS` that the guarded evaluation
+ * of `operands` (the real operands as the handler received them, at the
+ * working precision `working`) needs, or `undefined` past
+ * `MAX_EXTRA_GUARD_DIGITS`. Two conditions grow beyond what the fixed guard
+ * covers:
+ * - magnitude, of the `sized` values, for a function whose condition number
+ *   grows with the operand (`sizeCondition`): the error of an operand `x`
+ *   reaches the result multiplied by about `|x|·ln|x|`
+ *   (`Γ(3000000001/3)` lost 7 units at every precision), so `⌈log10|x|⌉`
+ *   digits are added. A function whose condition number does not grow
+ *   (`Ln`, `Sin`, `Sqrt`, `Arctan`) adds none, and `Ln(2^2000 + 1)` is
+ *   answered;
+ * - a pole, see `poleDigits()`.
+ */
+function extraGuardDigits(
+  operands: ReadonlyArray<GuardOperand>,
+  sized: ReadonlyArray<BigDecimal>,
+  working: number,
+  sizeCondition: boolean,
+  pole: PoleMode | ReadonlyArray<PoleMode> | undefined
+): number | undefined {
+  let extra = 0;
+  if (sizeCondition) {
+    let magnitude = 0;
+    for (const v of sized) {
+      if (v.isZero()) continue;
+      // Digits of the integer part, from the significand and exponent: the
+      // value may be past the range of a double.
+      magnitude = Math.max(magnitude, v.exponent + digitCount(v.significand));
+    }
+    extra = Math.max(0, magnitude - GUARD_FREE_MAGNITUDE_DIGITS);
+  }
+  if (pole !== undefined) {
+    const digits = poleDigits(operands, working, pole);
+    if (digits === undefined) return undefined;
+    extra += digits;
+  }
+  return extra > MAX_EXTRA_GUARD_DIGITS ? undefined : extra;
+}
 
 /**
  * The precision of the guarded evaluation that runs now (the working
@@ -46,6 +332,51 @@ function needsGuardDigits(original: Expression): boolean {
   if (isNumber(original))
     return isExactRealLiteral(original) && original.isInteger !== true;
   return isExactConstantExpression(original);
+}
+
+/**
+ * True when `original`, an exact integer expression (`10^600`, `2^100 + 1`),
+ * has exactly the value of `op`, its approximation at the working
+ * precision: nothing was rounded, so its size adds no guard digits.
+ */
+function readExactly(original: Expression, op: Expression): boolean {
+  if (isNumber(original) || original.isInteger !== true) return false;
+  const exact = original.evaluate();
+  if (!isNumber(exact) || !exact.isExact || exact.isComplex) return false;
+  // The exact integer, not `exact.bignumRe`, which is rounded to the working
+  // precision: at 30 digits `2^100` rounds to `…5380` on both sides, where
+  // the integer ends in `…5376`.
+  const nv = exact.numericValue;
+  const integer =
+    typeof nv === 'number'
+      ? Number.isSafeInteger(nv)
+        ? BigInt(nv)
+        : null
+      : exactIntegerValue(nv);
+  if (integer === null || !isNumber(op)) return false;
+  return new BigDecimal(integer).eq(op.bignumRe ?? op.engine.bignum(op.re));
+}
+
+/**
+ * The conditions beyond the fixed guard that a function opts into, because
+ * they hold only for some functions:
+ * - `size`: its condition number grows with the operand (`Gamma`, `Zeta`,
+ *   `Exp`); a function that is well conditioned at a large operand (`Ln`,
+ *   `Sin`, `Sqrt`, `Arctan`) must not have it, or `Ln(2^2000 + 1)` is
+ *   declined. A function, for a call as written: `Power` is for `e^x` only;
+ * - `pole`: it is singular at the integers it names, `nonpositive` for the
+ *   gamma family, one mode per operand for `HurwitzZeta` (`s` at 1, `a` at
+ *   the non-positive integers). A function
+ *   regular there (`Zeta(10^-600)`, `DirichletEta(1 + 10^-500)`) must not
+ *   have it, or the distance past the cap declines a defined value.
+ */
+export type PoleMode = 'nonpositive' | 'integer' | 'one' | 'none';
+
+export interface GuardRules {
+  size?: boolean | ((expression: Expression) => boolean);
+  /** A mode for every operand and sum of operands, or one for each operand
+   * (`one`: singular at 1 only; `none`: regular). */
+  pole?: PoleMode | ReadonlyArray<PoleMode>;
 }
 
 /**
@@ -87,7 +418,8 @@ export function guardDigitsN(
     ops: ReadonlyArray<Expression>,
     options: EvaluateHandlerOptions
   ) => Expression | undefined,
-  readAgain?: (original: Expression, index: number) => boolean
+  readAgain?: (original: Expression, index: number) => boolean,
+  rules: GuardRules = {}
 ): (
   ops: ReadonlyArray<Expression>,
   options: EvaluateHandlerOptions
@@ -114,7 +446,45 @@ export function guardDigitsN(
     if (!guarded.some((x) => x)) return evaluate(ops, options);
 
     const working = ce.precision;
-    const raisedPrecision = working + EXACT_OPERAND_GUARD_DIGITS;
+    const grows =
+      typeof rules.size === 'function' ? rules.size(expression) : !!rules.size;
+    const operands: GuardOperand[] = [];
+    const sized: BigDecimal[] = [];
+    ops.forEach((op, i) => {
+      if (!isNumber(op) || op.isComplex || op.isFinite !== true) return;
+      const value = op.bignumRe ?? ce.bignum(op.re);
+      operands.push({
+        index: i,
+        value,
+        // A float, or an operand read exactly, is its own exact value. Only a
+        // function with a pole rule reads it: evaluating an operand exactly
+        // has effects (a host function records the request it got).
+        exact:
+          rules.pole === undefined
+            ? undefined
+            : guarded[i]
+              ? exactRationalOf(originals[i])
+              : rationalOfBigDecimal(value),
+        read: () => {
+          const v = ce._withTransientPrecision(
+            working + POLE_RESOLUTION_DIGITS,
+            () => {
+              const r = originals[i].N();
+              return isNumber(r) && !r.isComplex
+                ? (r.bignumRe ?? ce.bignum(r.re))
+                : undefined;
+            }
+          );
+          return v;
+        },
+      });
+      // An integer held exactly has no rounding error to grow with its size.
+      if (grows && guarded[i] && !readExactly(originals[i], op))
+        sized.push(value);
+    });
+    const extra = extraGuardDigits(operands, sized, working, grows, rules.pole);
+    if (extra === undefined) return undefined;
+    const raisedPrecision = working + EXACT_OPERAND_GUARD_DIGITS + extra;
     const outerGuardedPrecision = guardedPrecision.get(ce);
     const result = ce._withTransientPrecision(raisedPrecision, () => {
       guardedPrecision.set(ce, raisedPrecision);
@@ -145,6 +515,49 @@ export function guardDigitsN(
     if (result === null) return evaluate(ops, options);
     return roundToWorkingPrecision(result, working);
   };
+}
+
+/** `guardDigitsN` with the size rule (`Zeta`, `DirichletEta`, `Exp`). */
+export function guardDigitsSizeN(
+  evaluate: Parameters<typeof guardDigitsN>[0],
+  readAgain?: Parameters<typeof guardDigitsN>[1],
+  size: GuardRules['size'] = true
+): ReturnType<typeof guardDigitsN> {
+  return guardDigitsN(evaluate, readAgain, { size });
+}
+
+/** `guardDigitsN` with the size rule and the pole rule at the non-positive
+ * integers (`Gamma`, `Factorial`, `Binomial`). */
+export function guardDigitsGammaN(
+  evaluate: Parameters<typeof guardDigitsN>[0],
+  readAgain?: Parameters<typeof guardDigitsN>[1]
+): ReturnType<typeof guardDigitsN> {
+  return guardDigitsN(evaluate, readAgain, {
+    size: true,
+    pole: 'nonpositive',
+  });
+}
+
+/** `guardDigitsN` with the pole rule at the non-positive integers (`GammaLn`,
+ * `Digamma`, `Beta`: conditioned well at a large operand). */
+export function guardDigitsPoleN(
+  evaluate: Parameters<typeof guardDigitsN>[0],
+  readAgain?: Parameters<typeof guardDigitsN>[1]
+): ReturnType<typeof guardDigitsN> {
+  return guardDigitsN(evaluate, readAgain, { pole: 'nonpositive' });
+}
+
+/** `guardDigitsN` with the size rule and, for each operand, its own pole:
+ * `HurwitzZeta(s, a)` is singular at `s = 1` and at `a` a non-positive
+ * integer, and regular elsewhere. */
+export function guardDigitsSizePoleN(
+  evaluate: Parameters<typeof guardDigitsN>[0],
+  readAgain?: Parameters<typeof guardDigitsN>[1]
+): ReturnType<typeof guardDigitsN> {
+  return guardDigitsN(evaluate, readAgain, {
+    size: true,
+    pole: ['one', 'nonpositive'],
+  });
 }
 
 /**
