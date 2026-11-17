@@ -2912,6 +2912,32 @@ Landed on 2026-11-16, night:
   interval adapters ask the old targets for `freeSymbols`/`freeSymbolTypes`
   (being moved); the interpreter-fallback result of `compile()` is built by
   the old target; `storage-hints.ts` uses `BaseCompiler`.
+- Preparation landed 2026-11-17 (no change of compiled code): three
+  functions moved (`f240967a08a6d7fc8e11761ea55749157992884e`); the closed
+  form of an integral and its budgets (`b7559c904847fb320806ed85bfa6af0492a6ae4b`);
+  the profile's own input report, option 1 of the user
+  (`c25c15fe8bae13c7399c2209387355ab80fd8c0b`: `freeSymbols` in first-reading
+  order, the names the code reads; `freeSymbolTypes` declared type first, new
+  on JavaScript; folded names in `symbolDeps`; the CHANGELOG entry goes with
+  the deletion release); the interpreter fallback and the `storage` check of
+  the profile route (`d2d1e47194c6686f3ff7a1c786cf98f63a118e7b`). CE-1168
+  (`d201f0589dd413392c633595d0394ff77efecbb2`): Fresnel in the profile. Compile
+  time: the per-pass checks run only under Jest
+  (`fb22c18a4046a4d95b38a741e7b509f595c664fd`). Not yet landed: the GLSL
+  `pow` speed fix (review findings being fixed) and the decline codes (wait
+  on the user's answer to ce-interval's question 2).
+- Tycho's trial t14 on 0.193.0 (2026-11-17,
+  `compute-engine-recovery/interval-dump/t14-results.json`): no program
+  newly declined; 0 defects of the profile among the 122 value differences
+  (most inputs outside their declared types); the GLSL render slowdown is
+  `_gpu_ir_pow` (fix above); compile time of `1a9de333a1` (fixed above).
+- Left for the deletion commit itself: `compile()` calls the pipeline only
+  (the `_getCompilationTarget('javascript')` lookup before the branch goes);
+  delete the 110 modules of the inventory (`delC.txt`), the registry, the
+  target classes and their exports, `js-profile-switch.ts`, the census
+  scaffolding; the tests of the existing compilers (about 740 files) are
+  deleted or moved to the profile; the migration note and the CHANGELOG;
+  the cortexjs.io guide. ce-interval deletes the interval target first.
 - Corpus declines to weigh before the deletion (timing record `quiet3` on
   `000f57677`): the profile declines 157 JavaScript programs and 27 GLSL
   shaders that the existing compiler compiles. The largest causes: a list
