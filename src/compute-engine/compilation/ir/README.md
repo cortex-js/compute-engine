@@ -1353,8 +1353,8 @@ list of tuples of other elements, or of tuples of two lengths, declines.
 
 `pure` (merged, removed, moved, folded, evaluated where it was not written),
 `may-fail` (removed when unused; shared by the lowering with an evaluation of
-the same or an equal node that dominates it, and by `cse` for a call; nothing
-else), `effectful` (keeps its place, count and order). The effect of a user
+the same or an equal node that dominates it, and by `cse` for a call and for an
+instruction with regions; nothing else), `effectful` (keeps its place, count and order). The effect of a user
 function
 is the least fixed point over
 its calls, from `pure`, and from `may-fail` for a function on a cycle of calls:
@@ -1390,6 +1390,26 @@ merged call are not counted, so a program that threw
 `iteration-limit-exceeded` can give its value, as for a moved call
 ("Effects"). A function that draws, directly or through a call, is
 `effectful` and is called each time, also on a cycle of calls.
+
+An instruction with regions (a `loop`, an `if`, a `build`, a `filter`, a
+`seeded`, `integrate` or `derivative` region) that is not `effectful` is
+merged by the same rule as a call, `may-fail` included: two are one when they
+have the same kind and fields (operation, `passes`, `exit`, `pieces`; not
+`site`, the source text for a message: the merged one keeps the first), the same
+operands, the same types of their values, and regions that are equal
+instruction by instruction, where a value defined in the regions (a parameter,
+a value of an inner instruction) is named by its order of definition and a
+value from outside by its identity (after the substitutions of the pass). So
+`X + X·X` with `X` a `Comprehension` written out three times builds `X` once,
+and `Min(Map(…))` or a `Sum` written twice runs one loop. A region with a draw,
+or with a call of an effectful function, is `effectful` and is not merged; two
+`Loop`s that assign one local are not equal (the second starts from the value
+that the first leaves). One of more than 1,000 instructions, nested ones
+included, gets no key: the key costs one walk of the instruction per run of
+the pass for itself and one for each instruction with regions around it (a
+chain of 40 nested `Sum`s compiles about 1.5 times slower). The regions are compared as the pass finds them, before it rewrites
+their insides: two that become equal by a merge inside them are merged in the
+next round.
 
 The pass `invariants` computes once, before the loop, an instruction at the top
 level of the body of a `loop`, a `build` or a `filter` that reads no parameter
@@ -1771,8 +1791,9 @@ the region `derivative`, printed as its call `_SYS.nd((t) => …, 1,
 'scalar')(x)`, so the value is its value bit for bit, at the value of the
 name `x` outside (`D` binds `x`). Its body is pure, of a real scalar value;
 one with an effect (a draw, a write, a `vars` read) declines, and so do GLSL
-and the interval mode. The region is `may-fail`, as `integrate`: `cse` does
-not merge it, and it moves out of a loop only as a whole. Otherwise the node
+and the interval mode. The region is `may-fail`, as `integrate`: `cse` merges
+it only with an equal visible region, and it moves out of a loop only as a
+whole. Otherwise the node
 declines: with no closed form (`Apply(Derivative(g), a)` has no stencil, and
 neither has `D(f, (x, 2))`), under an angular unit other than radians, when
 the node or the result has more than `CLOSED_SIZE` nodes counted on every

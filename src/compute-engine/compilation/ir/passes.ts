@@ -27,7 +27,8 @@
  *   is visible reads that value instead, and so does a call of a function
  *   that is not effectful (also one on a cycle of calls), merged with an
  *   earlier visible call of the same arguments, which failed if this one
- *   would (each of its results).
+ *   would (each of its results); so is an instruction with regions that is
+ *   not effectful, by its structure (`regionKey` below).
  *   No value is moved.
  * - `invariants`: an instruction of a loop body that reads nothing that the
  *   body computes is computed once, before the loop (`invariants` below).
@@ -506,24 +507,79 @@ const strength: Pass = (p) =>
     return undefined;
   });
 
+/** The most instructions of an instruction with regions that `cse` keys. */
+const KEYED_SIZE = 1000;
+
 const cse: Pass = (p, rows) => {
   const fx = effects(p, rows);
-  const key = (i: Instr): string | undefined => {
+  const key = (i: Instr, resolve: (v: V) => V): string | undefined => {
     // A call of a function with no effect: a `may-fail` one too (a function
     // on a cycle of calls), since the visible call failed if this one would.
     if (i.k === 'call')
       return fx.of(i) !== 'effectful'
         ? `c ${i.fn} ${i.args.join(',')}`
         : undefined;
+    if (regionsOf(i).length > 0) return regionKey(i, resolve);
     if (!fx.mergeable(i)) return undefined;
     if (i.k === 'const') return literalKey(i.value);
     if (i.k === 'op') return `o ${i.op} ${i.args.join(',')}`;
     if (i.k === 'list') return `l ${p.types[i.out].lane} ${i.args.join(',')}`;
     return undefined;
   };
+  // An instruction with regions that is not effectful (a `may-fail` one, as
+  // a call): its fields, operands, the types of its values and its regions
+  // instruction by instruction, a value defined in them by its order of
+  // definition, an outer one by its identity; not its `site`, the text of
+  // a message. None above `KEYED_SIZE`.
+  const regionKey = (i: Instr, resolve: (v: V) => V): string | undefined => {
+    if (fx.of(i) === 'effectful') return undefined;
+    const own = outsOf(i);
+    const inner = new Map<V, number>();
+    const name = (v: V): string =>
+      inner.has(v)
+        ? `#${inner.get(v)}`
+        : own.includes(v)
+          ? `@${own.indexOf(v)}`
+          : `${resolve(v)}`;
+    const type = (v: V) => {
+      const t = p.types[v];
+      const shape = t.shape.map((n) => (typeof n === 'number' ? n : name(n.v)));
+      return `${t.lane}${t.storage ?? ''}[${shape.join(',')}]`;
+    };
+    const def = (v: V) => (inner.set(v, inner.size), type(v));
+    const parts: string[] = [];
+    let left = KEYED_SIZE;
+    const walk = (x: Instr, top: boolean): boolean => {
+      if (--left < 0) return false;
+      const head =
+        x.k === 'const'
+          ? literalKey(x.value)
+          : x.k === 'op'
+            ? `op ${x.op}`
+            : x.k === 'region'
+              ? `region ${x.op} ${x.pieces}`
+              : x.k === 'call'
+                ? `call ${x.fn}`
+                : x.k === 'loop'
+                  ? `loop ${x.passes} ${x.exit}`
+                  : x.k;
+      parts.push(`(${head}`, ...argsOf(x).map(name));
+      for (const r of regionsOf(x)) {
+        parts.push('{', ...r.params.map(def));
+        if (!r.body.every((y) => walk(y, false))) return false;
+        parts.push('|', ...r.yields.map(name), '}');
+      }
+      parts.push('=', ...outsOf(x).map(top ? type : def), ')');
+      return true;
+    };
+    return walk(i, true) ? parts.join(' ') : undefined;
+  };
   // `seen`: the keys of the visible instructions to their values.
   return rewrite<V[]>(p, (i, { subst, seen }) => {
-    const k = key(i);
+    const k = key(i, (v) => {
+      while (subst.has(v)) v = subst.get(v)!;
+      return v;
+    });
     if (k === undefined) return undefined;
     const found = seen.get(k);
     if (found !== undefined) {

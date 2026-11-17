@@ -9,7 +9,9 @@
  *   merged, folded, moved or evaluated where it was not written. One
  *   exception, in `cse`: a call of a function that is not `effectful`
  *   (also one on a cycle of calls) is merged with an earlier visible call
- *   of the same arguments, which failed if this one would.
+ *   of the same arguments, which failed if this one would; and so is an
+ *   instruction with regions that is not `effectful`, with an earlier
+ *   visible equal one.
  * - `effectful`: changes or reads state; is evaluated exactly once per
  *   evaluation that the program asks for, in program order.
  *
