@@ -2821,6 +2821,28 @@ Landed on 2026-11-16, night:
   different lengths, inputs outside their type, or tests of the interval
   mode that compare with "the existing target".
 
+- `2063e806f6918ad18819f80afa5c92b19d6956c9` (G37, GLSL): loops of run-time
+  counts, nested or one after the other, compile: a run-time count is one
+  pass in the compile-time bound of the passes (it was the budget, so two
+  such loops declined). The 42 programs of the largest group of GLSL
+  declines compile: GLSL 3,828 of 3,855. Cost, by the user's ruling on
+  iteration caps: such loops can run more passes in all than the budget,
+  where the existing target gives NaN past it. The review ran the 42
+  shaders in WebGL 2; seven differ from the existing shader because the
+  profile has no exact sine hash (`gpu-exact-trig.ts`, 929 lines, of the
+  existing target; the profile warns `float32-unsafe-argument`).
+- `000f5767715f32269b499dbcd6a294161bd5ca77` (CE-1373): the pass `cse`
+  merges an instruction with regions (a loop, an if, a build, a filter, an
+  integral) with an earlier visible equal one that is not effectful: a list
+  or a `Sum` written several times is computed once. `odyxeaoouk` #0 from
+  2.47 to 0.33 times the existing compiler, `nqfechxzqp` #0 2.23 to 0.32,
+  `lg5hblqpel` #8 and #9 1.9 to 0.34, `zrklhsz34x` #4 1.33 to 1.08. 30
+  JavaScript, 3 GLSL and 10 interval programs change text, none declines.
+  `ir/` is 11,309 lines. Correction to the commit message: 8 of the 15
+  tests of `ir-cse-regions.test.ts` fail without the change, not 7.
+- The 107 "other" failures of census run 3 were read: no defect of the
+  profile (`_TASKS/2026-11-15-default-census/run3/README.md`).
+
 Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
 states, each step gated by a render audit with no lost series, no new hang
 and no build or render over 1.5 times): its `At` handler on GLSL and the
