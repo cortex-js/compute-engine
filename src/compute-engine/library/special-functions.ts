@@ -940,6 +940,9 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
             hurwitzOperand(engine, z),
             engine.precision
           );
+          // `null`: the series cannot reach the digits (z near the rim);
+          // declining beats the double kernels' 15 digits boxed as more.
+          if (big === null) return undefined;
           if (big !== undefined) return boxBignumApprox(engine, big);
         }
 

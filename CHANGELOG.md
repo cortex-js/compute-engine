@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`PolyLog` and `LerchPhi` no longer answer in doubles at a precision
+  above machine when `z` is too close to the unit circle.** Inside `|z| < 1`
+  the arbitrary-precision series gives up past 30,000 terms (about
+  `|z| > 0.99` at 50 digits), and the call then fell through to the double
+  kernel and boxed its 15 digits as a 30 to 100 digit number:
+  `PolyLog(1/2, 0.999999999999).N()` at 100 digits was wrong from the 5th
+  digit. Such a call now stays unevaluated, as every other kernel that cannot
+  vouch for its digits does; at machine precision the double kernels are
+  unchanged. Against mpmath over 2,900 grid points (less 12 mpmath-noise
+  rows) at 30, 50 and 100 digits, the 215 wrong answers (all with `|z|` from 0.99 to `1 - 1e-12`) are now
+  unevaluated, and the rest are unchanged. (#614, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 ## 0.194.2 _2026-11-19_
 
 ### Breaking Changes

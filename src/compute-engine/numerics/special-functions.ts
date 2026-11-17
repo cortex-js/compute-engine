@@ -3943,6 +3943,13 @@ const LERCH_BIG_CONSECUTIVE = 3;
  * needs an integer s to stay real — `BigDecimal.pow` answers NaN
  * otherwise, and `bigLerchPhi` declines there too.
  *
+ * The result is `undefined` where the series does not apply (|z| ≥ 1, a
+ * pole, a complex value), and `null` where it applies but cannot vouch for
+ * the requested digits: z so close to the rim that it needs more than
+ * `LERCH_BIG_MAX_TERMS` terms, or a cancellation it cannot make up. A caller
+ * above machine precision leaves the expression unevaluated on `null`; the
+ * double kernels would answer about 15 digits.
+ *
  * Pass an exact rational operand as `[numerator, denominator]` (see
  * `HurwitzOperand`) so it converts only once the working precision below
  * is raised — the same reason `hurwitzOperand` gives for `HurwitzZeta`.
@@ -3953,7 +3960,7 @@ export function bigLerchPhi(
   s: HurwitzOperand,
   a: HurwitzOperand,
   requested: number
-): BigNum | undefined {
+): BigNum | undefined | null {
   const zd = hurwitzOperandNumber(z, requested);
   const sd = hurwitzOperandNumber(s, requested);
   const ad = hurwitzOperandNumber(a, requested);
@@ -3974,15 +3981,16 @@ export function bigLerchPhi(
       working
     );
     if (r === undefined) return undefined;
+    if (r === null) return null;
     if (r.sum.isZero()) return r.sum.toPrecision(requested);
     // Terms larger than the sum cancel (an alternating series, z < 0): if
     // that ate into the guard, redo with the digits it ate added.
     const lost = Math.ceil(r.largest - bigLog10Abs(r.sum));
     if (lost <= guard - 8) return r.sum.toPrecision(requested);
-    if (!Number.isFinite(lost)) return undefined;
+    if (!Number.isFinite(lost)) return null;
     guard = lost + SPECIAL_FN_GUARD;
   }
-  return undefined;
+  return null;
 }
 
 /** The series at the precision `working` (raised by the caller),
@@ -3999,11 +4007,11 @@ function lerchPhiSeries(
   sd: number,
   ad: number,
   working: number
-): { readonly sum: BigNum; readonly largest: number } | undefined {
+): { readonly sum: BigNum; readonly largest: number } | undefined | null {
   const rnd = (x: BigNum): BigNum => x.toPrecision(working);
   const negS = s.neg();
   const growth = Math.max(0, -sd); // max(0, −s), the ratio bound's growth term
-  if (!lerchPhiSeriesFits(working, zd, growth, ad)) return undefined;
+  if (!lerchPhiSeriesFits(working, zd, growth, ad)) return null;
   let sum = BigDecimal.ZERO;
   let zPow = BigDecimal.ONE; // zᵏ
   let largest = -Infinity;
@@ -4052,7 +4060,7 @@ function lerchPhiSeries(
     confirmed = 0;
     zPow = rnd(zPow.mul(z));
   }
-  return undefined;
+  return null;
 }
 
 /**
@@ -4107,14 +4115,14 @@ export function bigPolyLog(
   s: HurwitzOperand,
   z: HurwitzOperand,
   requested: number
-): BigNum | undefined {
+): BigNum | undefined | null {
   // Φ is returned with 3 digits more than requested: rounding Φ to the
   // requested digits first, then rounding the product z·Φ again, can move
   // the last requested digit of Liₛ(z) by more than one unit. (`bigLerchPhi`
   // keeps its own guard digits while it sums; these 3 only protect the
   // final product, so they add few terms to the series.)
   const phi = bigLerchPhi(ce, z, s, [1n, 1n], requested + 3);
-  if (phi === undefined) return undefined;
+  if (phi === undefined || phi === null) return phi;
   return hurwitzOperandBig(z, requested + 3)
     .mul(phi)
     .toPrecision(requested);

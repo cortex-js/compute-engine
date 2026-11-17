@@ -7419,6 +7419,9 @@ function evaluateLerchPhi(
       hurwitzOperand(engine, a),
       engine.precision
     );
+    // `null`: the series cannot reach the digits (z near the rim); decline
+    // rather than box the double kernel's 15 digits as more.
+    if (big === null) return undefined;
     if (big !== undefined) return boxBignumApprox(engine, big);
   }
 

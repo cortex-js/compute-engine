@@ -176,28 +176,41 @@ describe('LerchPhi and PolyLog: the term cap', () => {
     ce.precision = MACHINE_PRECISION;
   });
 
-  test('LerchPhi(0.9999,2,1) past the term cap falls back to the double kernel rather than certify a wrong digit', () => {
+  test('LerchPhi(0.9999,2,1) past the term cap stays unevaluated', () => {
     // mpmath: lerchphi(0.9999,2,1) = 1.644077391995345031725298771108308762362
     // At 50 digits this close to z = 1 the series needs upward of a million
     // terms (see `LERCH_BIG_MAX_TERMS`'s doc comment): `bigLerchPhi`
-    // declines and `evaluateLerchPhi` falls through to the double
-    // continuation, so the result carries only that kernel's accuracy.
-    const expected = 1.644077391995345031725298771108308762362;
-    const n = phi(0.9999, 2, 1).N();
-    expect(n.isExact).toBe(false);
-    const relErr = Math.abs(n.re - expected) / expected;
-    expect(relErr).toBeLessThan(1e-8); // the double kernel's own accuracy
-    expect(relErr).toBeGreaterThan(1e-20); // proves it did not reach 50 digits
+    // declines, and so does `evaluateLerchPhi`, rather than box the double
+    // kernel's 15 digits as 50.
+    expect(phi(0.9999, 2, 1).N().toString()).toBe('LerchPhi(0.9999, 2, 1)');
   });
 
-  test('PolyLog(2,0.9999) past the term cap falls back the same way', () => {
+  test('PolyLog(2,0.9999) past the term cap stays unevaluated', () => {
     // mpmath: polylog(2,0.9999) = 1.643912984256145497222126241231197931486
-    const expected = 1.643912984256145497222126241231197931486;
+    expect(li(2, 0.9999).N().toString()).toBe('PolyLog(2, 0.9999)');
+  });
+
+  test('near the rim, at 30 digits, every route declines', () => {
+    ce.precision = 30;
+    for (const [head, latex] of [
+      ['PolyLog', '\\operatorname{PolyLog}(0.5, 0.999999999999)'],
+      ['PolyLog', '\\operatorname{PolyLog}(2, -0.99999999)'],
+      ['LerchPhi', '\\operatorname{LerchPhi}(0.999, 2, 0.5)'],
+    ])
+      expect(ce.parse(latex).N().operator).toBe(head);
+    expect(li(['Rational', 1, 2], 0.999999999999).N().operator).toBe('PolyLog');
+    expect(li(2, -0.99999999).N().operator).toBe('PolyLog');
+    expect(li(2, -0.99999999).evaluate().operator).toBe('PolyLog');
+    expect(phi(0.999, 2, ['Rational', 3, 7]).N().operator).toBe('LerchPhi');
+    // Still answered at 30 digits where the series fits.
+    // mpmath: polylog(2, 0.9) = 1.2997147230049587
+    expectDigits(li(2, 0.9).N().re, 1.2997147230049587, 14);
+  });
+
+  test('machine precision keeps the double kernel near the rim', () => {
+    ce.precision = 'machine';
     const n = li(2, 0.9999).N();
-    expect(n.isExact).toBe(false);
-    const relErr = Math.abs(n.re - expected) / expected;
-    expect(relErr).toBeLessThan(1e-8);
-    expect(relErr).toBeGreaterThan(1e-20);
+    expect(n.re).toBeCloseTo(1.6439129842561455, 12);
   });
 });
 
