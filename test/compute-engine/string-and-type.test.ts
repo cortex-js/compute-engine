@@ -531,6 +531,43 @@ describe('DigitsFrom reads an integer past 2^53 exactly', () => {
     expect(digits("'0xff'")).toBe('255');
   });
 
+  test('a sign before the 0x or 0b prefix (CE-1401)', () => {
+    // The prefix was read only at the start of the string: these were 0.
+    expect(digits("'-0x1F'")).toBe('-31');
+    expect(digits("' -0x1F '")).toBe('-31');
+    expect(digits("'+0x1F'")).toBe('31');
+    expect(digits("'-0b101'")).toBe('-5');
+    expect(digits(`'-0x${'f'.repeat(20)}'`)).toBe(
+      (-(16n ** 20n - 1n)).toString()
+    );
+    expect(digits("'-0X1F'")).toBe('-31');
+    expect(digits("'0B101'")).toBe('5');
+    // With a base, the prefix is read only when it is the base's prefix:
+    // otherwise `0b1` is a numeral of that base.
+    expect(digits("'0x1F'", 16)).toBe('31');
+    expect(digits("'-0b101'", 2)).toBe('-5');
+    expect(digits("'0b1'", 16)).toBe('177');
+    expect(digits("'-0b1'", 16)).toBe('-177');
+    expect(digits("'0bad'", 16)).toBe('2989');
+    expect(digits("'0x10'", 10)).toContain('unexpected-digit');
+    // With the base, the digits after the prefix follow the rules of a
+    // numeral of that base: a bad digit is an error, not the end.
+    expect(digits("'0x1G'", 16)).toContain('unexpected-digit');
+    expect(digits(`'0x${'f'.repeat(20)}'`, 16)).toBe(
+      (16n ** 20n - 1n).toString()
+    );
+    expect(digits("'0x'", 16)).toBe('NaN');
+    expect(digits("'0x1F'", 1)).toContain('unexpected-base');
+    // A prefix with no digit after it is NaN, with or without a sign.
+    expect(digits("'-0x'")).toBe('NaN');
+    expect(digits("'0bz'")).toBe('NaN');
+  });
+
+  test('an operand that is not yet a string stays unevaluated (CE-1401)', () => {
+    // It was the error "expected `string`, got `character | string`".
+    expect(digits('x')).toBe('DigitsFrom(x)');
+  });
+
   test('small values are unchanged', () => {
     expect(digits("'ff'", 16)).toBe('255');
     expect(digits("'-101'", 2)).toBe('-5');

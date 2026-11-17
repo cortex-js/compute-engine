@@ -12187,7 +12187,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     DigitsFrom: {
       description: `Return an integer representation of the string \`s\` in base \`base\`.`,
-      // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
+      // @todo could accept `(deadbeef)_16` as a string format
       // @todo could accept "roman"... as base
       // @todo could accept optional third parameter as the (padded) length of the output
 
@@ -12195,54 +12195,72 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       examples: ['DigitsFrom("ff", 16)', 'DigitsFrom("1010", 2)'],
 
       evaluate: (ops, { engine }) => {
+        // An operand that is not yet a string (an undeclared symbol) stays
+        // unevaluated, as with `NumberFrom`.
         let op1str = textOf(ops[0]);
+        if (op1str === undefined) return undefined;
         const ce = engine;
-        if (!op1str) return ce.typeError('string', ops[0]?.type, ops[0]);
 
         op1str = op1str.trim();
-
-        // The digits are read as a bigint, so a numeral past 2^53 stays
-        // exact. As with `parseInt`, the longest prefix of valid digits is
-        // read, and a numeral with none is `NaN`.
-        if (op1str.startsWith('0x')) {
-          const digits = /^[0-9a-f]+/i.exec(op1str.slice(2));
-          return ce.number(digits ? BigInt('0x' + digits[0]) : NaN);
-        }
-
-        if (op1str.startsWith('0b')) {
-          const digits = /^[01]+/.exec(op1str.slice(2));
-          return ce.number(digits ? BigInt('0b' + digits[0]) : NaN);
-        }
-
-        const op2 = ops[1] ?? ce.Nothing;
-        if (sym(op2) === 'Nothing') {
-          // A plain decimal integer keeps its digits past 2^53.
-          if (/^[+-]?\d+$/.test(op1str)) return ce.number(BigInt(op1str));
-          return ce.number(Number.parseInt(op1str, 10));
-        }
 
         // The declared signature admits the base as an INTEGER
         // (`DigitsFrom("101", 2)`) or as a numeric STRING
         // (`DigitsFrom("101", "2")`), so both are resolved to a number here
-        // before the range check. Reading them separately is what made the
-        // operand a no-op: the range check read `op2.re` (fine for an integer,
-        // `NaN` for a string, hence `unexpected-base NaN`) while `fromDigits`
-        // was handed `op2.string ?? sym(op2) ?? 10`, which is `10` for an
-        // integer operand — so `DigitsFrom("101", 2)` parsed "101" in base TEN
-        // and answered 101 instead of 5.
+        // before the range check.
+        const op2 = ops[1] ?? ce.Nothing;
         const baseText = textOf(op2);
         const base =
-          baseText !== undefined
-            ? baseFromString(baseText)
-            : (asSmallInteger(op2) ?? NaN);
-        if (!Number.isInteger(base) || base < 2 || base > 36) {
+          sym(op2) === 'Nothing'
+            ? undefined
+            : baseText !== undefined
+              ? baseFromString(baseText)
+              : (asSmallInteger(op2) ?? NaN);
+        if (
+          base !== undefined &&
+          (!Number.isInteger(base) || base < 2 || base > 36)
+        ) {
           // An operand that resolves to no number at all (a free symbol) is
           // reported as written, since `NaN` names nothing the reader gave.
           const shown = Number.isNaN(base) ? op2.toString() : `${base}`;
           return ce.error(['unexpected-base', shown], op2.toString());
         }
 
-        const [value, rest, exact] = fromDigits(op1str, base);
+        // An optional sign, then a `0x` or `0b` prefix. With no base, the
+        // digits are read as a bigint, so a numeral past 2^53 stays exact; as
+        // with `parseInt`, the longest prefix of valid digits is read, and a
+        // numeral with none is `NaN`. With a base, the numeral is read by
+        // `fromDigits` below.
+        const prefixed = /^([+-]?)0([xb])(.*)$/is.exec(op1str);
+        const kind = prefixed?.[2].toLowerCase();
+        if (prefixed && base === undefined) {
+          const [, sign, , rest] = prefixed;
+          const digits = (kind === 'x' ? /^[0-9a-f]+/i : /^[01]+/).exec(rest);
+          if (!digits) return ce.number(NaN);
+          const magnitude = BigInt(`0${kind}${digits[0]}`);
+          return ce.number(sign === '-' ? -magnitude : magnitude);
+        }
+
+        if (base === undefined) {
+          // A plain decimal integer keeps its digits past 2^53.
+          if (/^[+-]?\d+$/.test(op1str)) return ce.number(BigInt(op1str));
+          return ce.number(Number.parseInt(op1str, 10));
+        }
+
+        // A prefix is read only when it is the prefix of the base: with
+        // another base, `0b1` is a numeral of that base (177 in base 16).
+        // `fromDigits` reads a lowercase `0x` or `0b` as a radix prefix even
+        // when it is handed a base (CE-1420), so the prefix is removed here,
+        // or, for a numeral of another base, its leading `0`, which does not
+        // change the value.
+        let numeral = op1str;
+        if (prefixed) {
+          const [, sign, written, rest] = prefixed;
+          numeral =
+            base === (kind === 'x' ? 16 : 2)
+              ? `${sign}${rest}`
+              : `${sign}${written}${rest}`;
+        }
+        const [value, rest, exact] = fromDigits(numeral, base);
 
         if (rest) return ce.error(['unexpected-digit', rest[0]], rest);
 

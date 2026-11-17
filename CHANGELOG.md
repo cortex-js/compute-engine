@@ -163,6 +163,15 @@
 
 ### Bug Fixes
 
+- **`DigitsFrom` reads a sign before a `0x` or `0b` prefix.**
+  `DigitsFrom("-0x1F")` gave 0; it now gives -31, and `DigitsFrom("+0b101")`
+  gives 5. The prefix may be uppercase (`0X`, `0B`). With a base, a prefix is
+  read only when it is the prefix of that base: `DigitsFrom("0b1", 16)` gives
+  177 (it gave 1), `DigitsFrom("0x10", 10)` is an `unexpected-digit` error (it
+  gave 16), and an invalid base is an error for a prefixed string too.
+  `DigitsFrom(x)` with `x` not a string stays unevaluated, as
+  `NumberFrom(x)` does, in place of an `incompatible-type` error, and
+  `DigitsFrom("")` gives `NaN`, as any string with no digit does.
 - **`IsCenteredSquare` recognizes the centered square numbers.** It tested
   `n = 4t² + 1`, so it answered `False` for 13, 25 and 41 and `True` for 17
   and 37. It now answers `True` exactly for `n = t² + (t + 1)²`: 1, 5, 13,
