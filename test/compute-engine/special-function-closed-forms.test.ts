@@ -258,3 +258,74 @@ describe('Hypergeometric reductions', () => {
     ).toBe('Hypergeometric2F1');
   });
 });
+
+describe('Simple exact values of Bessel, LambertW, ClausenCl and AGM', () => {
+  const pi = (a: number, b: number) => ['Multiply', q(a, b), 'Pi'];
+  const cases: [Json, Json][] = [
+    [['BesselJ', 0, 0], 1],
+    [['BesselI', 0, 0], 1],
+    [['BesselJ', 1, 0], 0],
+    [['BesselJ', -2, 0], 0],
+    [['BesselI', 3, 0], 0],
+    [['LambertW', 0], 0],
+    [['LambertW', 'ExponentialE'], 1],
+    [['LambertW', ['Exp', 1]], 1],
+    [['ClausenCl', 1, ['Divide', 'Pi', 3]], 0],
+    [['ClausenCl', 1, pi(5, 3)], 0],
+    [['ClausenCl', 1, pi(-7, 3)], 0],
+    [['AGM', 1, 1], 1],
+    [['AGM', 'a', 'a'], 'a'],
+    [['AGM', 1, 0], 0],
+    [['AGM', 0, 'a'], 0],
+    [['AGM', 'a', 0], 0],
+    [['AGM', 1], 1],
+    [['AGM', 0], 0],
+  ];
+  for (const [json, value] of cases)
+    test(`${JSON.stringify(json)} is ${JSON.stringify(value)}`, () => {
+      const call = ce.expr(json);
+      expect(call.evaluate().json).toEqual(value);
+      expect(call.N().isSame(ce.expr(value))).toBe(true);
+    });
+
+  test('a float operand gives a float', () => {
+    const cases: [Json, string][] = [
+      [['BesselJ', 0, { num: '0.0' }], '1'],
+      [['BesselI', { num: '1.0' }, 0], '0'],
+      [['AGM', 2, { num: '2.0' }], '2'],
+      [['AGM', 'a', { num: '0.0' }], '0'],
+      [['LambertW', { num: '0.0' }], '0'],
+    ];
+    for (const [json, value] of cases) {
+      const result = ce.expr(json).evaluate();
+      expect(result.toString()).toBe(value);
+      expect(result.isExact).toBe(false);
+    }
+  });
+
+  test('LambertW of a symbol whose value is e', () => {
+    const engine = new ComputeEngine();
+    engine.assign('u', engine.E);
+    expect(engine.expr(['LambertW', 'u']).evaluate().toString()).toBe('1');
+  });
+
+  test('other branches and orders are not changed', () => {
+    // W₋₁(e) is not real; W_k(0) = −∞ for k ≠ 0.
+    expect(ce.expr(['LambertW', 'ExponentialE', -1]).evaluate().operator).toBe(
+      'LambertW'
+    );
+    expect(ce.expr(['LambertW', 0, 1]).evaluate().toString()).toBe('-oo');
+    // Cl₂(π/3) is not 0, and Cl₁(2π/3) = −ln(3)/2 is not 0.
+    expect(
+      ce.expr(['ClausenCl', 2, ['Divide', 'Pi', 3]]).evaluate().operator
+    ).toBe('ClausenCl');
+    expect(ce.expr(['ClausenCl', 1, pi(2, 3)]).N().re).toBeCloseTo(
+      -Math.log(3) / 2,
+      12
+    );
+    expect(ce.expr(['BesselY', 0, 0]).evaluate().toString()).toBe('-oo');
+    expect(
+      ce.expr(['AGM', 'PositiveInfinity', 'PositiveInfinity']).evaluate().isNaN
+    ).toBe(true);
+  });
+});

@@ -174,6 +174,14 @@
 
 ### Bug Fixes
 
+- **Several special functions evaluate without `N` at points where their
+  exact value is a simple number.** `BesselJ(0, 0)` and `BesselI(0, 0)` are
+  `1`, and `BesselJ(n, 0)` and `BesselI(n, 0)` are `0` for every other
+  integer `n`. `LambertW(0)` is `0` and `LambertW(e)` is `1`.
+  `ClausenCl(1, π/3)` and `ClausenCl(1, 5π/3)` are `0`; before, they stayed
+  unevaluated under `N` too. `AGM(a, a)` is `a` and `AGM(a, 0)` is `0`, for
+  any `a`. A float operand gives a float: `BesselJ(0, 0.0)` is the float `1`.
+
 - **The description of `Length` gives the value for an absent operand
   correctly.** The description, which `epsil doc length`, the editor hover
   and the Epsil reference show, said that `Length(Missing)` is `NaN`. The

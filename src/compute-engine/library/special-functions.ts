@@ -729,6 +729,14 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const args = ops.length === 1 ? [engine.One, ops[0]] : [...ops];
         const infinite = agmValueAtInfinity(args[0], args[1], engine);
         if (infinite !== undefined) return infinite;
+        // AGM(a, 0) = AGM(0, b) = 0 (the geometric mean is 0 from the first
+        // step) and AGM(a, a) = a (both means stay a), for any finite a. The
+        // kernels agree on the complex AGM: AGM(−1, −1.000001) = −1.0000005.
+        // Two infinite operands were answered above (`NaN`); a symbol is
+        // taken to be finite, as `x − x` is 0.
+        if (args.some((x) => isNumber(x) && x.isSame(0)))
+          return floatIfFloatOperand(args, engine.Zero);
+        if (args[0].isSame(args[1])) return floatIfFloatOperand(args, args[0]);
         if (!shouldNumericize(numericApproximation, ...ops)) return undefined;
         return applyN(
           args,
@@ -1086,7 +1094,9 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
                 ? 'pi'
                 : q[1] === 2n * (q[0] < 0n ? -q[0] : q[0])
                   ? 'half-pi'
-                  : undefined;
+                  : q[1] === 3n && (q[0] === 1n || q[0] === -1n)
+                    ? 'third-pi'
+                    : undefined;
 
         // θ ≡ 0: Cl₁ is +∞, even orders vanish, odd orders are ζ(n).
         if (
@@ -1129,6 +1139,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
             value.evaluate({ numericApproximation: numericPoint })
           );
         }
+
+        // Cl₁(±π/3) = −ln|2 sin(π/6)| = 0: the zeros of Cl₁, where the
+        // numeric kernel cannot give `ce.precision` correct digits.
+        if (point === 'third-pi' && order === 1)
+          return floatIfFloatOperand(ops, engine.Zero);
 
         if (!shouldNumericize(numericApproximation, n, theta)) return undefined;
         // A real value carries `ce.precision` digits or the head stays unevaluated.

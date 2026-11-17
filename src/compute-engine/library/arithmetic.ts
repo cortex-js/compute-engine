@@ -5405,8 +5405,9 @@ function polygammaValueAtExceptionalPoint(
  *   exponentially in some direction of the complex plane and decays in
  *   another (`J_n(iy) = iⁿ I_n(y)`), so there is no value at the
  *   direction-less point.
- * - The origin: `J_n(0)` and `I_n(0)` are the finite values the kernels
- *   compute (1 for n = 0, else 0). `Y_n` and `K_n` have a pole there:
+ * - The origin: `J_n(0)` and `I_n(0)` are 1 for n = 0 and 0 for every
+ *   other integer n (a float when the argument is a float, as the kernels
+ *   give under `.N()`). `Y_n` and `K_n` have a pole there:
  *   `Y₀(x) ≈ (2/π) ln x → −∞` and `K₀(x) ≈ −ln x → +∞` (the imaginary
  *   part of the complex continuation stays bounded, the `Ln(0) = −∞`
  *   convention), while for n ≠ 0 the leading term is `1/xⁿ`, a complex
@@ -5427,7 +5428,8 @@ function besselValueAtExceptionalPoint(
     if (kind === 'K') return ce.ComplexInfinity;
     return n % 2 === 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
   }
-  if ((kind === 'Y' || kind === 'K') && !x.isComplex && x.isSame(0)) {
+  if (!x.isComplex && x.isSame(0)) {
+    if (kind === 'J' || kind === 'I') return n === 0 ? ce.One : ce.Zero;
     if (n !== 0) return ce.ComplexInfinity;
     return kind === 'Y' ? ce.NegativeInfinity : ce.PositiveInfinity;
   }
@@ -5478,7 +5480,12 @@ function evaluateBessel(
   if (order === null)
     return evaluateBesselRealOrder(kind, n, x, ce, numericApproximation);
   const special = besselValueAtExceptionalPoint(kind, order, x, ce);
-  if (special !== undefined) return special;
+  // A float order or argument makes the value of `J` or `I` at the origin a
+  // float.
+  if (special !== undefined)
+    return (kind === 'J' || kind === 'I') && x.isSame(0)
+      ? floatIfFloatOperand([n, x], special)
+      : special;
   if (!shouldNumericize(numericApproximation, n, x)) return undefined;
   // Above machine precision a real argument has the digits asked for or the
   // head stays unevaluated (`bigBessel` declines where it cannot reach them);
@@ -10347,9 +10354,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             // π, and such a value is the real infinity `+∞`.
             return engine.PositiveInfinity;
           }
-          // W_k(0) = −∞ on a branch k ≠ 0 (W₀(0) = 0 comes from the kernels).
-          if (branch !== 0 && isNumber(x) && x.isSame(0))
-            return engine.NegativeInfinity;
+          // W₀(0) = 0, and W_k(0) = −∞ on a branch k ≠ 0, as `Ln(0)`.
+          if (isNumber(x) && x.isSame(0))
+            return branch === 0
+              ? floatIfFloatOperand(ops, engine.Zero)
+              : engine.NegativeInfinity;
           // The branch point: W₀(−1/e) = W₋₁(−1/e) = −1, exactly. It is read
           // on the operand BEFORE its numeric evaluation (under `.N()` the
           // handler receives a float): −1/e rounded to a double is just below
@@ -10364,6 +10373,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             raw.mul(engine.E).isSame(-1)
           )
             return engine.NegativeOne;
+          // W₀(e) = 1, since 1·e¹ = e; read on the operand before its numeric
+          // evaluation too, as above, and on the evaluated operand for a
+          // symbol whose value is e.
+          if (branch === 0 && (raw.isSame(engine.E) || x.isSame(engine.E)))
+            return engine.One;
           if (!shouldNumericize(numericApproximation, x)) return undefined;
           // The real kernels give `NaN` outside the real domain of the branch,
           // and `apply()` then uses the complex kernel.
