@@ -6717,6 +6717,29 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Singular value decomposition of a matrix.',
       complexity: 8700,
       signature: '(matrix) -> tuple',
+      // The triple `(U, S, V)` for an m×n matrix: U is m×m, S is m×n and V
+      // is n×n. All three are computed in machine precision
+      // (`matrixResultCellType()`, `'numeric'`), so their cells are
+      // `number`. A name bound to one of them by destructuring gets its
+      // type, so `U * S` is a matrix product and keeps its order.
+      type: ([m], context) => {
+        const operand = matrixOperandShape(m);
+        if (operand === undefined || operand.dims.length !== 2)
+          return undefined;
+        const [rows, columns] = operand.dims;
+        const cell = matrixResultCellType(operand.tier, 'numeric');
+        return BoxedType.forResult(
+          {
+            kind: 'tuple',
+            elements: [
+              { type: tensorType(cell, [rows, rows]) },
+              { type: tensorType(cell, [rows, columns]) },
+              { type: tensorType(cell, [columns, columns]) },
+            ],
+          },
+          context.engine._typeResolver
+        );
+      },
       // Provable declines only (the operand must be a walkable, finite tensor
       // value); success is not cheaply decidable — see
       // `canEnumerateFiniteSource`.

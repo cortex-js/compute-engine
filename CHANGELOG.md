@@ -163,6 +163,15 @@
 
 ### Bug Fixes
 
+- **A product of the factors of `SVD` keeps its order.** `SVD` had no result
+  type for its three matrices, so a name bound to one of them by a
+  destructuring had no type when a product was read, and the factors of the
+  product were reordered: in Epsil, `let (U, S, V) = N(svd(A));
+  U * S * transpose(V)` gave `[[-2.81…, 4.69…], [0.31…, 0.19…]]` for
+  `A = [[1, 2], [3, 4]]`, and an error for a 2×3 matrix. It now gives `A`.
+  The type of `SVD(A)` for an m×n matrix is now a tuple of an m×m, an m×n and
+  an n×n matrix (`tuple<matrix<2x2>, matrix<2x3>, matrix<3x3>>` for a 2×3
+  matrix).
 - **`DigitsFrom` reads a sign before a `0x` or `0b` prefix.**
   `DigitsFrom("-0x1F")` gave 0; it now gives -31, and `DigitsFrom("+0b101")`
   gives 5. The prefix may be uppercase (`0X`, `0B`). With a base, a prefix is

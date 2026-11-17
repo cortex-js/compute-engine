@@ -1,6 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import { isSubtype } from '../../src/common/type/subtype';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 /**
  * The static result types of the linear-algebra operators whose type handler
@@ -631,6 +632,56 @@ describe('SingularValues', () => {
   });
   test('unknown extents', () => {
     sound(ce, ['SingularValues', 'm'], 'vector');
+  });
+});
+
+describe('SVD', () => {
+  const ce = engine();
+  test('U is m×m, S is m×n and V is n×n', () => {
+    // An exact matrix stays unevaluated under `evaluate()`; a float cell
+    // decomposes it
+    sound(ce, ['SVD', A], 'tuple<matrix<2x2>, matrix<2x2>, matrix<2x2>>');
+    sound(ce, ['SVD', R], 'tuple<matrix<2x2>, matrix<2x3>, matrix<3x3>>');
+    sound(ce, ['SVD', T], 'tuple<matrix<3x3>, matrix<3x2>, matrix<2x2>>');
+    expect(
+      sound(ce, ['SVD', F], 'tuple<matrix<2x2>, matrix<2x2>, matrix<2x2>>')
+        .operator
+    ).toBe('Tuple');
+    sound(ce, ['SVD', C], 'tuple<matrix<2x2>, matrix<2x2>, matrix<2x2>>');
+  });
+  test('the value under N() has a subtype of the static type', () => {
+    for (const M of [A, R, T, C]) {
+      const e = ce.box(['SVD', M] as any);
+      const value = e.N();
+      expect(value.operator).toBe('Tuple');
+      expect(isSubtype(value.type.type, e.type.type)).toBe(true);
+    }
+  });
+  test('unknown extents', () => {
+    sound(ce, ['SVD', 'm'], 'tuple<matrix, matrix, matrix>');
+  });
+  test('the factors bound by an Epsil destructuring keep their order', () => {
+    // CE-1385: the names had no type when the product was boxed, so the
+    // factors were sorted like numbers and `U * S` was `S * U`
+    for (const [source, expected] of [
+      ['[[1, 2], [3, 4]]', [[1, 2], [3, 4]]],
+      ['[[1, 2, 3], [4, 5, 6]]', [[1, 2, 3], [4, 5, 6]]],
+      ['[[1, 2], [3, 4], [5, 6]]', [[1, 2], [3, 4], [5, 6]]],
+    ] as const) {
+      const result = executeEpsil(
+        new ComputeEngine(),
+        `let A = ${source}; let (U, S, V) = N(svd(A)); U * S * transpose(V)`
+      );
+      const value = result.value;
+      expect(value.operator).toBe('List');
+      const cells = (value.ops ?? []).map((row) =>
+        (row.ops ?? []).map((x) => x.re)
+      );
+      expect(cells.length).toBe(expected.length);
+      cells.forEach((row, i) =>
+        row.forEach((x, j) => expect(x).toBeCloseTo(expected[i][j], 12))
+      );
+    }
   });
 });
 
