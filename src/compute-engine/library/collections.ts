@@ -12138,7 +12138,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Length: {
     examples: ['Length([5, 6, 7])', 'Length("hello")'],
     description:
-      'Number of elements in a collection. Returns +oo for an infinite collection (an unbounded Range, `Integers`, `Repeat(5)`, an interval), as `Count` does, an `incompatible-type` error for an operand that is decidably not a collection, `NaN` for an absent operand (`Missing`), and stays unevaluated for a collection whose size is not known (a `Filter` over an infinite source).',
+      'Number of elements in a collection. Returns +oo for an infinite collection (an unbounded Range, `Integers`, `Repeat(5)`, an interval), as `Count` does, an `incompatible-type` error for an operand that is decidably not a collection, `Missing` for an absent operand, and stays unevaluated for a collection whose size is not known (a `Filter` over an infinite source).',
     keywords: ['size'],
     complexity: 4000,
     // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
@@ -12263,7 +12263,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // yet keeps the inert form (see `nonCollectionSizeOperandError`). An
       // ABSENT operand never reaches this handler: `missingBehavior:
       // 'propagate'` above makes the evaluation driver's absence gate answer
-      // `NaN` for `Length(Missing)` first (user decision 2026-09-25).
+      // `Missing` for `Length(Missing)` first.
       if (!xs.isCollection)
         return nonCollectionSizeOperandError(engine, xs, 'Length');
       // `count` is asked FIRST and `isEmptyCollection` only as its fallback.
@@ -13985,10 +13985,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // The counted value or predicate (position 1) is NOT threaded. See
     // `SEARCHED_VALUE_POLICY`.
     threadsConditionals: [0],
-    // An absent collection has no count: `Count(Missing)` answers `NaN`, as
-    // `Length(Missing)` does (user decision 2026-09-25). Declared because the
-    // optional predicate parameter is `any`, which the default policy does
-    // not read as a collection. Only the collection strips `missing`: an
+    // An absent collection has no count: `Count(Missing)` answers `Missing`,
+    // as `Length(Missing)` does. Declared because the optional predicate
+    // parameter is `any`, which the default policy does not read as a
+    // collection. Only the collection strips `missing`: an
     // absent counted value is an ordinary needle, counted where the same
     // marker sits (`SEARCHED_VALUE_POLICY`).
     missingBehavior: 'propagate',
@@ -14115,9 +14115,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ops.length === 1 ? withFirst(peekCountPreserving(ops[0]), ops) : ops;
       // The absent operand is admitted at a stripped position, as the
       // generic boxing route admits it (strip-before-validate): `Count` now
-      // propagates absence and answers `NaN` for `Count(Missing)` (user
-      // decision 2026-09-25). Without the policy this handler's own
-      // validation refused it with an `incompatible-type` error.
+      // propagates absence and answers `Missing` for `Count(Missing)`.
+      // Without the policy this handler's own validation refused it with an
+      // `incompatible-type` error.
       const adjusted = validateAgainstDeclaration(ce, 'Count', stripped, true);
       return ce._fn('Count', adjusted ?? stripped);
     },

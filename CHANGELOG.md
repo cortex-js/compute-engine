@@ -163,6 +163,11 @@
 
 ### Bug Fixes
 
+- **The description of `Length` gives the value for an absent operand
+  correctly.** The description, which `epsil doc length`, the editor hover
+  and the Epsil reference show, said that `Length(Missing)` is `NaN`. The
+  engine gives `Missing`, and the description now says so.
+
 - **The quantile of a binomial or Poisson distribution evaluates without
   `N`.** `Quantile(BinomialDistribution(10, 1/2), 1/2)` stayed unevaluated
   under `evaluate()`; it now gives the exact integer `5`, and

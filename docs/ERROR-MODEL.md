@@ -1616,8 +1616,8 @@ which `NaN` equals nothing and `Missing` compared with anything is `Missing`.
   `src/compute-engine/library/collections.ts`. Before this rule `Count` threw
   and `Filter` returned its error message as a value on an absent cell.
 - **E. An absent collection makes the whole result absent** (ruled
-  2026-09-26, above): `Length(Missing)` and `IndexOf(Missing, 3)` are `NaN`,
-  `Reverse(Missing)` is `Missing`. A boolean predicate is the exception
+  2026-09-26, above): `Length(Missing)`, `IndexOf(Missing, 3)` and
+  `Reverse(Missing)` are `Missing`. A boolean predicate is the exception
   since the user decision of 2026-11-02 (two-valued comparisons, above):
   `Contains(Missing, 3)`, `Element(3, Missing)` and `IsEmpty(Missing)` are
   `False` (they were `Missing` before). `NaN` in a
@@ -1839,7 +1839,7 @@ is mandatory:
 
      **Clarification:** this rule describes the existing successful-value
      convention, not proof that markers cannot occur. For example,
-     `Length(Missing)` produces `NaN`. Analysis and compiled code must not
+     `Length(Missing)` produces `Missing`. Analysis and compiled code must not
      use the absence of a displayed marker union as a presence guarantee.
      Preserving known absence while keeping concise signatures is part of
      the design note; it does not require turning `unknown` into a content
