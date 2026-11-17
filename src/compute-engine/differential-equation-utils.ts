@@ -1,5 +1,5 @@
 import type { Expression, IComputeEngine } from './global-types.js';
-import { implicitCompileNumeric } from './implicit-compile.js';
+import { implicitCompile } from './implicit-compile.js';
 import {
   isFunction,
   isNumber,
@@ -261,6 +261,47 @@ function substituteDependentState(
 }
 
 /**
+ * The compiled right-hand side `rhs` of an ODE, as a function of the
+ * independent variable and of the state of the system, or `undefined` when
+ * `rhs` does not compile.
+ *
+ * `rhs` is compiled as the function literal
+ * `Function(rhs, independentName, ...stateNames)`. The compiler refuses an
+ * input that has no type, and a parameter of a function literal is not an
+ * input: so the state names, which nothing declares, and the independent
+ * variable, which the caller need not declare, compile on a fresh engine. A
+ * value assigned to the independent variable does not replace it in the
+ * code, since the parameter binds the name.
+ *
+ * The parameters are not canonical, so the binder of the literal binds them.
+ *
+ * The result is a real number: a value that is not a `number` (a complex
+ * value, a boolean, a collection) is `NaN`.
+ */
+function compileRhs(
+  ce: IComputeEngine,
+  rhs: Expression,
+  independentName: string,
+  stateNames: readonly string[]
+): ((x: number, state: readonly number[]) => number) | undefined {
+  const params = [independentName, ...stateNames].map((name) =>
+    ce.symbol(name, { canonical: false })
+  );
+  const compiled = implicitCompile(
+    ce,
+    ce.function('Function', [rhs, ...params]),
+    'ndsolve'
+  );
+  if (!compiled?.success || typeof compiled.run !== 'function')
+    return undefined;
+  const run = compiled.run as (...args: number[]) => unknown;
+  return (x, state) => {
+    const v = run(x, ...state);
+    return typeof v === 'number' ? v : NaN;
+  };
+}
+
+/**
  * The compiled right-hand side and numeric problem data shared by the
  * `NDSolve` (sample-grid) and `NDSolveFunction` (interpolating-function)
  * evaluate paths. `vector` is true for the multi-dependent system form,
@@ -309,7 +350,7 @@ function prepareODE(
     const stateNames = names.map((name, i) => `ndsolve${name}state${i}`);
     if (stateNames.some((stateName) => equation.has(stateName)))
       return undefined;
-    const runs: ((vars: Record<string, number>) => number)[] = [];
+    const runs: ((x: number, state: readonly number[]) => number)[] = [];
 
     for (let i = 0; i < equation.ops.length; i++) {
       const rhsInfo = explicitDerivativeRhs(
@@ -325,18 +366,14 @@ function prepareODE(
         independentName,
         stateNames
       );
-      const compiled = implicitCompileNumeric(ce, compiledRhs, 'ndsolve');
+      const compiled = compileRhs(ce, compiledRhs, independentName, stateNames);
       if (!compiled) return undefined;
       runs.push(compiled);
     }
 
     return {
       f: (x, y) => {
-        const vars: Record<string, number> = { [independentName]: x };
-        stateNames.forEach((name, i) => {
-          vars[name] = y[i];
-        });
-        const values = runs.map((run) => run(vars));
+        const values = runs.map((run) => run(x, y));
         return values.every(Number.isFinite) ? values : undefined;
       },
       x0,
@@ -375,16 +412,12 @@ function prepareODE(
       independentName,
       stateNames
     );
-    const run = implicitCompileNumeric(ce, compiledRhs, 'ndsolve');
+    const run = compileRhs(ce, compiledRhs, independentName, stateNames);
     if (!run) return undefined;
 
     return {
       f: (x, y) => {
-        const vars: Record<string, number> = { [independentName]: x };
-        stateNames.forEach((name, i) => {
-          vars[name] = y[i];
-        });
-        const highest = run(vars);
+        const highest = run(x, y);
         if (!Number.isFinite(highest)) return undefined;
         return [...y.slice(1), highest];
       },
@@ -403,12 +436,12 @@ function prepareODE(
     independentName,
     stateName
   );
-  const run = implicitCompileNumeric(ce, compiledRhs, 'ndsolve');
+  const run = compileRhs(ce, compiledRhs, independentName, [stateName]);
   if (!run) return undefined;
 
   return {
-    f: (x, [y]) => {
-      const v = run({ [independentName]: x, [stateName]: y });
+    f: (x, y) => {
+      const v = run(x, y);
       return Number.isFinite(v) ? [v] : undefined;
     },
     x0,

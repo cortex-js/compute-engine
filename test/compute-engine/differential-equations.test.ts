@@ -1,14 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { engine } from '../utils';
 
-// The solver compiles its right-hand side with the state of the system and
-// the independent variable as inputs; compilation refuses an input with no
-// type.
-engine.declare('x', 'real');
-engine.declare('ndsolveystate', 'real');
-engine.declare('ndsolveystate0', 'real');
-engine.declare('ndsolvezstate1', 'real');
-
 function dsolve(equation: unknown, dependent = 'y', independent = 'x') {
   return engine.expr(['DSolve', equation, dependent, independent]).evaluate();
 }
@@ -1755,6 +1747,104 @@ describe('DSolve LaTeX parsing on a fresh engine', () => {
 
     expect(solution.operator).toBe('List');
     expect(solution.toString()).toMatchInlineSnapshot(`[y(x) == cos(x)]`);
+  });
+});
+
+// The solver compiles its right-hand side as a function of the independent
+// variable and of the state of the system. Each case uses its own engine, on
+// which nothing is declared: the solver gives samples, and does not read a
+// value assigned to the independent variable.
+describe('NDSolve and NDSolveFunction on a fresh engine', () => {
+  test('a first-order equation, with the independent variable undeclared', () => {
+    const ce = new ComputeEngine();
+    const result = ce
+      .expr([
+        'NDSolve',
+        ['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']],
+        'y',
+        ['Limits', 'x', 0, 1],
+        1,
+        100,
+      ])
+      .evaluate();
+    expect(result.operator).toBe('List');
+    expect(result.nops).toBe(101);
+    const [x, y] = finalSample(result);
+    expect(x).toBe(1);
+    expect(y).toBeCloseTo(Math.E, 9);
+  });
+
+  test('a second-order equation', () => {
+    const ce = new ComputeEngine();
+    const result = ce
+      .expr([
+        'NDSolve',
+        ['Equal', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['Negate', ['y', 'x']]],
+        'y',
+        ['Limits', 'x', 0, 1],
+        ['List', 0, 1],
+        10,
+      ])
+      .evaluate();
+    expect(result.operator).toBe('List');
+    const [, y] = finalSample(result);
+    expect(y).toBeCloseTo(Math.sin(1), 9);
+  });
+
+  test('a system of two equations', () => {
+    const ce = new ComputeEngine();
+    const result = ce
+      .expr([
+        'NDSolve',
+        [
+          'List',
+          ['Equal', ['D', ['y', 'x'], 'x'], ['z', 'x']],
+          ['Equal', ['D', ['z', 'x'], 'x'], ['Negate', ['y', 'x']]],
+        ],
+        ['List', 'y', 'z'],
+        ['Limits', 'x', 0, 1],
+        ['List', 0, 1],
+        10,
+      ])
+      .evaluate();
+    expect(result.operator).toBe('List');
+    const [, [y, z]] = finalSystemSample(result);
+    expect(y).toBeCloseTo(Math.sin(1), 9);
+    expect(z).toBeCloseTo(Math.cos(1), 9);
+  });
+
+  test('the independent variable has a value: the solver does not read it', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    const result = ce
+      .expr([
+        'NDSolve',
+        ['Equal', ['D', ['y', 'x'], 'x'], ['Multiply', 'x', ['y', 'x']]],
+        'y',
+        ['Limits', 'x', 0, 1],
+        1,
+        10,
+      ])
+      .evaluate();
+    expect(result.operator).toBe('List');
+    const [, y] = finalSample(result);
+    expect(y).toBeCloseTo(Math.exp(0.5), 9);
+  });
+
+  test('NDSolveFunction gives an applicable solution', () => {
+    const ce = new ComputeEngine();
+    const solution = ce
+      .expr([
+        'NDSolveFunction',
+        ['Equal', ['D', ['y', 't'], 't'], ['Multiply', 't', ['y', 't']]],
+        'y',
+        ['Limits', 't', 0, 1],
+        1,
+      ])
+      .evaluate();
+    expect(solution.operator).toBe('Function');
+    const value = ce.expr(['Apply', solution.json, 1]).N().re;
+    expect(value).toBeCloseTo(Math.exp(0.5), 9);
   });
 });
 

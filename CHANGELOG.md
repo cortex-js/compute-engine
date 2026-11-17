@@ -128,6 +128,16 @@
 
 ### Bug Fixes
 
+- **`NDSolve` and `NDSolveFunction` evaluate on a fresh engine.** Before,
+  `["NDSolve", ["Equal", ["D", ["y", "x"], "x"], ["y", "x"]], "y",
+  ["Limits", "x", 0, 1], 1, 100]` stayed unevaluated unless the caller
+  declared the independent variable and internal names such as
+  `ndsolveystate` as `real`. It now gives the list of 101 samples, without
+  a declaration. A value assigned to the independent variable no longer
+  replaces it in the right-hand side: with `x := 5`, `y' = x·y`, `y(0) = 1`
+  on `[0, 1]` gave `y(1) = 148.41…` (`e^5`), and now gives `1.6487…`
+  (`e^0.5`).
+
 - **The compiled square of the square root of a sum keeps the sum grouped.**
   Since 0.128.0, the JavaScript code of `1 - \sqrt{x^2+y^2}^2` was
   `-(_.x * _.x) + (_.y * _.y) + 1`, which gives `0.8125` at `x = 0.5`,
