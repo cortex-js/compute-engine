@@ -128,6 +128,16 @@
 
 ### Bug Fixes
 
+- **The compiled square of the square root of a sum keeps the sum grouped.**
+  Since 0.128.0, the JavaScript code of `1 - \sqrt{x^2+y^2}^2` was
+  `-(_.x * _.x) + (_.y * _.y) + 1`, which gives `0.8125` at `x = 0.5`,
+  `y = 0.25`; it is now `-((_.x * _.x) + (_.y * _.y)) + 1`, which gives
+  `0.6875`, as `evaluate()` does. A negation, a product or a difference of
+  `\sqrt{X}^2`, where `X` is a sum that cannot be negative, had this defect:
+  `2\sqrt{x^2+1}^2` gave `19` at `x = 3`, and now gives `20`. The same
+  defect affected `Abs`, `Real` and `Conjugate` of a `Block` of one
+  expression: `2·Abs(Block(x^2 + 1))` compiled to `2 * (_.x * _.x) + 1`,
+  and now compiles to `2 * ((_.x * _.x) + 1)`.
 - **`bignumLcm` is exact.** It rounded the product of its operands to the
   precision of the big decimals, so the least common multiple of two 41-digit
   integers lost its last digits: `bignumLcm(10^40 + 7, 3·10^40 + 1)` was

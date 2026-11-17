@@ -441,3 +441,100 @@ describe('a power with a root in its exponent takes the root', () => {
     expect(relative(Math.pow(1e200, 2 / 3))).toBeGreaterThan(1e-14);
   });
 });
+
+describe('the square of a square root is its radicand, as one operand', () => {
+  // `√X²` is `X` when `X` is provably non-negative. A parent chose its
+  // parentheses for the power, so a sum `X` is written as a group.
+  const ce = newEngine({ x: 'real', y: 'real' });
+  // Inside the unit disk, where `√(1 - (x² + y²))` is real.
+  const points = [
+    { x: 0.5, y: 0.25 },
+    { x: -0.6, y: 0.3 },
+    { x: 0.1, y: -0.7 },
+    { x: 0.8, y: 0 },
+  ];
+  const sum = ['Add', ['Power', 'x', 2], 1];
+  const r2 = ['Power', ['Sqrt', sum], 2];
+
+  function expectInterpreterValues(e: ReturnType<ComputeEngine['box']>) {
+    const r = compile(e, { fallback: false });
+    expect(r.success).toBe(true);
+    for (const p of points) {
+      const want = e.subs(p).N();
+      const got = r.run!(p);
+      if (typeof got === 'boolean') expect(got).toBe(want.symbol === 'True');
+      else expect(got as number).toBeCloseTo(want.re!, 12);
+    }
+  }
+
+  test('the sum is grouped under a negation and a product', () => {
+    expect(codeOf(ce, '1-\\sqrt{x^2+y^2}^2')).toBe(
+      '-((_.x * _.x) + (_.y * _.y)) + 1'
+    );
+    expect(codeOf(ce, '2\\sqrt{x^2+1}^2')).toBe('2 * ((_.x * _.x) + 1)');
+    // A symbol or a call is already one operand.
+    expect(codeOf(ce, '\\sqrt{x^2}^2')).toBe('(_.x * _.x)');
+    expect(codeOf(ce, '\\sqrt{|x|}^2')).toBe('Math.abs(_.x)');
+  });
+
+  test('the values match the interpreter', () => {
+    for (const latex of [
+      '1-\\sqrt{x^2+y^2}^2',
+      '2\\sqrt{x^2+1}^2',
+      // The square root of a value that is negative when the sum is not
+      // grouped: `√(1 - x² + y²)` in place of `√(1 - (x² + y²))`.
+      '\\sqrt{1-\\sqrt{x^2+y^2}^2}',
+    ])
+      expectInterpreterValues(ce.parse(latex));
+  });
+
+  test('the values match the interpreter in every operand position', () => {
+    for (const json of [
+      ['Negate', r2],
+      ['Multiply', 'y', r2],
+      ['Subtract', 3, r2],
+      ['Divide', 2, r2],
+      ['Divide', r2, ['Add', 'y', 5]],
+      // At `x = 0.8` the ungrouped `2 * x² + 1` is below 3 and the product
+      // is not.
+      ['Less', ['Multiply', 2, r2], 3],
+      // Coverage: these parents write the radicand as a call argument or do
+      // not reach the reduction to the radicand, so they were right before.
+      ['Power', r2, 'y'],
+      ['Power', 2, r2],
+      ['Mod', r2, 2],
+    ])
+      expectInterpreterValues(ce.box(json as any));
+  });
+
+  test('a one-expression block or an ascription is read through', () => {
+    // A `Block` of one expression and a `Typed` are written as the code of
+    // their operand, which can be a sum.
+    const block = ['Block', sum];
+    const typed = ['Typed', ['Add', 'x', 1], "'real'"];
+    for (const json of [
+      ['Multiply', 2, ['Power', ['Sqrt', block], 2]],
+      ['Negate', ['Power', ['Sqrt', block], 2]],
+      ['Subtract', 3, ['Power', ['Sqrt', block], 2]],
+      ['Divide', 2, ['Power', ['Sqrt', block], 2]],
+      ['Divide', ['Power', ['Sqrt', block], 2], ['Add', 'x', 5]],
+      ['Multiply', 2, ['Square', ['Sqrt', block]]],
+      ['Multiply', 2, ['Power', ['Root', block, 2], 2]],
+      ['Multiply', 2, ['Power', ['Power', block, ['Rational', 1, 2]], 2]],
+      ['Multiply', 2, ['Abs', block]],
+      ['Negate', ['Abs', ['Block', block]]],
+      ['Multiply', 2, ['Real', block]],
+      ['Divide', 1, ['Conjugate', block]],
+      ['Multiply', 2, ['Real', typed]],
+      ['Multiply', 2, ['Conjugate', ['Block', typed]]],
+      // Coverage: `X^1` is `X` at canonicalization.
+      ['Multiply', 2, ['Power', block, 1]],
+    ])
+      expectInterpreterValues(ce.box(json as any));
+    expect(
+      compile(ce.box(['Multiply', 2, ['Abs', block]] as any), {
+        fallback: false,
+      }).code
+    ).toBe('2 * ((_.x * _.x) + 1)');
+  });
+});

@@ -3999,12 +3999,21 @@ function identityPassthrough(
  * to compile its operand through a helper of its own and so cannot hand the
  * operand over. Same rule: parenthesize `code` when the head of `x` has an
  * infix spelling on this target.
+ *
+ * A head that the compiler writes as its operand's own code is read through:
+ * a `Block` of one expression and a `Typed` ascription. `2·|{x² + 1}|` was
+ * emitted as `2 * (_.x * _.x) + 1`.
  */
 function parenthesizeIdentity(
   x: Expression,
   code: string,
   target: CompileTarget<Expression> | undefined
 ): string {
+  while (
+    (isFunction(x, 'Block') && x.nops === 1) ||
+    (isFunction(x, 'Typed') && x.nops >= 1)
+  )
+    x = x.ops[0];
   if (!isFunction(x)) return code;
   const op =
     target?.operators?.(x.operator) ?? JAVASCRIPT_OPERATORS[x.operator];
@@ -9993,7 +10002,9 @@ function realRadicalPower(
   if (e !== 1 && e !== 1.5 && e !== 2 && e !== 2.5) return undefined;
   if (radicand === base && Number.isInteger(e)) return undefined;
   if (!BaseCompiler.assumedRealNonNegative(radicand)) return undefined;
-  if (e === 1) return compile(radicand);
+  // The parent chose its parentheses for a `Power`: a sum under it
+  // (`1 - √(x² + y²)²`) is written as a group.
+  if (e === 1) return identityPassthrough(radicand, compile, target);
   if (e === 2) return `_SYS.pow2(${compile(radicand)})`;
   const spliceable =
     isNumber(radicand) ||

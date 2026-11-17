@@ -132,6 +132,11 @@ interpreter's value. A line is removed when the case declines or is fixed.
 
 - `javascript`, `x: real`: `Digamma(x)` at `x = +Infinity` gives `NaN`. The
   interpreter gives `+Infinity`.
+- `plausible?` — `javascript`, the existing compiler, `x: real`: a type
+  ascription under an operator, `2·Typed(x + 1, 'real')`, compiles to
+  `2 * _.x + 1`: `2` at `x = 0.5`. The interpreter and the profile `ir`
+  give `3`. The code of the ascribed value is written with no parentheses
+  (the same cause as CE-1196 and CE-1224).
 - `javascript` (crafted), the existing compiler, `i: real`: a `compile`
   handler of `At` that returns an expression of another shape than the node,
   `List(args[1], 2)`, in `Add(At([10, 20, 30], i), 1)`: at `i = 1` the code
