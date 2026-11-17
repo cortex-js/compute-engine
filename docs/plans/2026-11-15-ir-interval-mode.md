@@ -1437,9 +1437,9 @@ and an entry of `freeSymbolTypes` differs in 14.
 **The baseline on main `d6e29c7e9`** (`sweep-t12-at-d6e29c7e9`, the
 corrected replay of the older dump; `retime-slow-at-d6e29c7e9.json`): the
 mode admits 4,848 of 5,155 programs, the existing target 4,835; 5 programs
-compile only on the existing target, each a decline by a rule of the
-compilation model (arms of two types 2, an input typed
-`indexed_collection<number>` 2, a list of no single length 1); 25 compile
+compile only on the existing target (arms of two types 2, required by R3;
+an input typed `indexed_collection<number>` 2 and a list of no single
+length 1, capability limits: see the end of section 18.6); 25 compile
 only in the mode. Boxes: 28,515 equal, 295 tighter, 124 wider (sums); 51
 containment misses in 5 programs, the same on both targets. The quiet
 re-timing of the 501 programs that the sweep put above 1.05: 84 above 1.1
@@ -1608,3 +1608,17 @@ which moves between runs with no change of text (`sjjo3qgnfp` #91 1.16, `art/mav
 ("I accept all five", with the exception of `nbbj88wunw` #1 accepted the day before): the speed goal of
 the mode is met, and the proposed small fixes (a fast path in `freshIntervalValue()`, a guard for the
 invariants of a loop that makes no pass, no throw for an undecided loop bound) are not scheduled.
+
+**What the deletion of the existing target loses** (Tycho's t13 dump,
+main `7435ebfc4`, `sweep-t13-at-7435ebfc4.*`): the mode admits 4,918 of
+5,213 programs, the existing target 4,889; six compile only on the existing
+target, each a correct enclosure there. `neyret/0vlrmhen37` #0 (a
+`Comprehension` of two clauses over constant ranges) was a capability limit
+of `plain()`, fixed in `50f1961254f03ed7c7e62732c10e422652afb09f`. The other
+five stay declines: `rwhqbsp4wq` #3 and #5 (a list arm beside a scalar arm:
+R3; Tycho compiles them only as the expanded fallback of #2 and #4, which
+the mode compiles), `p0kazir1l9` #15 and #16 (an input of type
+`indexed_collection<number>`: a capability limit, but `X` has no definition
+in the document and the program has no value at any point on any target),
+`xyrqlhvltc` #18 (a `Which` over a list condition: the expanded fallback of
+#17, which the mode compiles).
