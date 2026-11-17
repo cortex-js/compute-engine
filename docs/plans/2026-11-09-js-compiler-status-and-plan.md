@@ -2462,6 +2462,45 @@ while the host keeps its evaluate handler for the interpreter. Recommended:
 as a host function today; the mask and the comparison need `Map` of several
 lists and `ListFrom` in the slice. Nothing is built.
 
+Decided by the user on 2026-11-16, afternoon, after a walk through the
+options and the answer of `tycho-3f`:
+
+- "For `Which`: Tycho would absolutely have to rewrite. Our goal is to drop
+  the old compiler as quickly as possible."
+- A compile handler may defer or return an expression (CE-1370, batch G28;
+  a public type change, approved: "1 and 2: yes"). The handler is called with
+  the operands, a `compile` callback and a context (`language`, `typeOf`).
+  `undefined`, `null` or `''` defers to the library's lowering; a boxed
+  expression is lowered in place of the node; a text, a call of the callback
+  or a throw declines. A node that the handler created (not an operand
+  object, and not inside one) consults no handler, so a handler that rewrites
+  `At(L, i)` to `At(L, Max(Floor(i), 0))` does not loop. No answer is kept
+  across `compile()` calls. This replaces option (3) above: the host states
+  its lowering in MathJSON through the handler it already has, and Tycho's
+  `Which.compile`, which defers in most cases, stops causing a fallback.
+- A boolean mask of another length (CE-1371, batch G29; "We could relax our
+  boolean masking to accept lists of different lengths"): `At(L, M)` keeps
+  `L[k]` up to the shorter length where `M[k]` is `True`; a `Missing` or
+  `NaN` member keeps nothing. In the pipeline it is a `filter` region on
+  JavaScript and the interval mode; GLSL declines. `Equal` and `NotEqual` of
+  a list and a scalar, and `And`, `Or`, `Not` of lists of booleans, thread.
+- The user told `tycho-3f` to stop its rewrite attempt of row MK. When G28
+  and G29 are on main, a tarball is packed and its path given to `tycho-3f`,
+  which reruns its two instruments; no run is asked of Tycho before it says.
+
+The replay's typing, corrected the same day: it installed a function held as
+a value with `ce.assign`, which infers a signature, where Tycho declares the
+name with the type `function`. The scripts now declare such a name with its
+dumped type when that type is the bare `function` (`TYPED=0` restores the
+old behaviour). Typed, on `3783bedeb`: JavaScript 9,195 of 9,509 (96.7%),
+GLSL 3,773 of 3,858 (97.8%); the counts of the untyped replays above are
+upper bounds. A dump built from Tycho's own run
+(`t13-javascript-glsl-from-hook-report.json`) agrees in the direction that
+matters: 27 JavaScript and 3 GLSL programs are admitted by the replay and
+declined by Tycho, all landed since that build. To ask of Tycho at its next
+run: a `declared` flag per definition and a complete JavaScript and GLSL
+dump.
+
 Landed after the run: `e81e5d8fa` (G24: a constant colour is computed once;
 a colour constructor of a list on JavaScript: 59 programs back under 1.1
 times, 64 newly compiled) and `3783bedeb` (G25: a closed constant `Range` in
@@ -2472,6 +2511,29 @@ times the existing compiler (185 before), 9 above 3. `ir/` is 10,419 lines.
 `ce-interval`'s short lists written out in its mode (one field,
 `unrollBuilds`, 16 in the mode, 0 on JavaScript) is review-clean and lands
 after a rebase; the JavaScript number is then measured with the replay.
+
+Then, on 2026-11-16: `ce-interval`'s short lists (`301cd2e88`), its fix for
+a name declared with the type `function` (`d6e29c7e9`), an exponent change
+(`7fbb0870f`), the dictionary of a `Declare` in `facts()` (`0641b9c62`, a
+wrong value of a written-out sum, found by G27's implementer) and the lazy
+`And` and `Or` of its mode (`2bf11ff24`); and
+`476f3757dd4017ea1ced5d453274d34f13bf0f00` (G26: `Map` of several lists,
+`ListFrom`, `Clamp`, `At` with a list of indexes; the forms that CE-1365 and
+CE-1366 name compile). CE-1373 is filed (P4): the pass `cse` merges
+instructions and not regions, so a list expression or a sum written several
+times is computed once per occurrence (`neyret/odyxeaoouk` #0 at 1.5 times).
+`ir/` is 10,689 lines on `2bf11ff24`.
+
+In flight on 2026-11-16, evening: G27, the switches `unrollSums` and
+`unrollBuilds` on JavaScript (round 2 after the Claude review: a compile
+blow-up on nested constant sums, which exists on main in the interval mode
+and is fixed in the shared `writtenOut()`; a retry of the lowering with the
+switches off when it declines; one `_SYS.tick(n)` per function for the
+passes written out in it); G28 (round 2: an authored node inside a dissolved
+operand was read as created; a `Range` evaluated above a handled node;
+handlers on control-flow heads other than `Which` are ignored, as the type's
+comment says); G29 (Claude review running). Codex's second rounds are owed
+for G20 and G23 to G29.
 
 Queue from here (the items of this paragraph that the table above lists are
 done). Speed: colour constants computed once (59 programs), the two
