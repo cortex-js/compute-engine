@@ -3195,6 +3195,21 @@ export function describeError(error: MathJsonExpression): string {
           ? `expected \`${payload[0]}\`, got \`${payload[1]}\``
           : `incompatible type: ${payload.join(', ')}`;
       break;
+    case 'unevaluated-tuple': {
+      // Payload: [operator] when the value is an application, else none. The
+      // site is the value that has a tuple type but did not evaluate to a
+      // tuple, so a destructuring cannot take it apart. The sentence names a
+      // short value itself; a long one stays a trailing site. Only an
+      // application gets the `N` hint: `N` does not give a value to a symbol.
+      const short = siteText !== '' && siteText.length <= 40;
+      const subject = short ? `\`${siteText}\`` : 'the value';
+      const tail = short || site === '' ? '' : ` ${site}`;
+      const hint =
+        payload.length > 0
+          ? `; if \`${payload[0]}\` needs numeric input, write \`N(…)\``
+          : '';
+      return `${subject} did not evaluate to a tuple, so it cannot be destructured${hint}${tail}`;
+    }
     case 'missing':
       detail =
         payload.length === 0

@@ -59,9 +59,11 @@ The pattern is **irrefutable in form** — no literals, pins, or guards (use
 [`match`](/epsil/control-flow/) for conditional destructuring). The value is
 evaluated once; it must be a tuple of the same shape, otherwise the
 declaration yields an `incompatible-type` **error value** and binds nothing.
-With `const`, every bound name is a constant. An initializer is required, and
-a type annotation is not accepted on a pattern. Duplicate names anywhere in
-one pattern are a diagnostic.
+A value whose type is a tuple type but that did not evaluate to a tuple, such
+as `svd([[1, 2], [3, 4]])`, which stays unevaluated until `N`, yields the
+error `unevaluated-tuple` instead. With `const`, every bound name is a
+constant. An initializer is required, and a type annotation is not accepted
+on a pattern. Duplicate names anywhere in one pattern are a diagnostic.
 
 ## Destructuring assignment
 
@@ -94,9 +96,9 @@ a
 
 The pattern grammar is exactly the one above — at least two elements, each a
 bare symbol, a `_` skipping that position, or a nested tuple pattern — and a
-shape mismatch is the same `incompatible-type` error value, which writes
-**nothing**: the whole pattern is matched before any target is written, so a
-mismatch nested under a position that would have bound leaves that one alone
+shape mismatch is the same error value (`incompatible-type` or
+`unevaluated-tuple`), which writes **nothing**: the whole pattern is
+matched before any target is written, so a mismatch nested under a position that would have bound leaves that one alone
 too.
 
 The differences from a destructuring `let` are the ones assignment always has:

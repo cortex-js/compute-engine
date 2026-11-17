@@ -388,10 +388,11 @@ literal or a per-element type annotation is a diagnostic):
 ```
 
 The argument must be a tuple of the pattern's shape; anything else yields an
-`incompatible-type` error value, the same one the destructuring `let`
-produces. A destructuring lambda is interpreted, never compiled: no compile
-target lowers the tuple match, so a compiled context falls back rather than
-emit code that binds the wrong names.
+error value (`incompatible-type`, or `unevaluated-tuple` for a value that has
+a tuple type but did not evaluate to a tuple), the same one the destructuring
+`let` produces. A destructuring lambda is interpreted, never compiled: no
+compile target lowers the tuple match, so a compiled context falls back
+rather than emit code that binds the wrong names.
 
 **Callbacks and arity.** An ordinary call with too few arguments partially
 applies the function — `f(1)` on a two-parameter `f` is a function awaiting

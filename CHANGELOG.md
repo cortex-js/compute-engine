@@ -52,6 +52,17 @@
 
 ### Behavior Changes
 
+- **A destructuring of a value that did not evaluate to a tuple has its own
+  error.** `let (U, S, V) = svd([[1, 2], [3, 4]])` failed with "expected
+  `tuple`, got `tuple<matrix<2x2>, matrix<2x2>, matrix<2x2>>`": `svd` of an
+  exact matrix stays unevaluated until `N`, and its type is a tuple type. The
+  error code is now `unevaluated-tuple`, and Epsil prints "`SVD([[1,2],[3,4]])`
+  did not evaluate to a tuple, so it cannot be destructured; if `SVD` needs
+  numeric input, write `N(…)`". The same applies to a `(a, b) := v`
+  assignment, a `for` pattern and a destructuring parameter. A pattern whose
+  number of elements differs from the tuple type of the value still gives
+  `incompatible-type`.
+
 - **A matrix to a symbolic power is no longer computed entry by entry.**
   `ce.box(['Power', [[1, 2], [3, 4]], 'n']).evaluate()`, with `n` an unknown,
   gave `[[1, 2^n], [3^n, 4^n]]`, which is wrong once `n` holds an integer: an

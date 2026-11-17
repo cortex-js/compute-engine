@@ -102,14 +102,31 @@ export function collectTuplePattern(
     }
     return null;
   }
-  if (!isFunction(v, 'Tuple'))
+  if (!isFunction(v, 'Tuple')) {
+    // A value whose type is a tuple type but that is not a `Tuple` did not
+    // evaluate: `SVD` of an exact matrix stays `SVD(…)` until `N`. A type
+    // error would read "expected `tuple`, got `tuple<…>`". An arity that
+    // the type already shows to be wrong is the arity error below, which
+    // holds whatever the value becomes. The payload names the operator of
+    // an application, the only kind of value that `N` can make a tuple.
+    if (v.type.matches('tuple')) {
+      const t = v.type.type;
+      const arity =
+        typeof t === 'object' && t.kind === 'tuple'
+          ? t.elements.length
+          : undefined;
+      if (arity === undefined || arity === pattern.nops)
+        return ce.error(
+          isFunction(v)
+            ? ['unevaluated-tuple', v.operator]
+            : ['unevaluated-tuple'],
+          v.toString()
+        );
+      return arityError(pattern.nops, v);
+    }
     return ce.typeError('tuple', v.type, v.toString());
-  if (v.nops !== pattern.nops)
-    return ce.typeError(
-      parseType(`tuple<${Array(pattern.nops).fill('unknown').join(', ')}>`)!,
-      v.type,
-      v.toString()
-    );
+  }
+  if (v.nops !== pattern.nops) return arityError(pattern.nops, v);
   for (let i = 0; i < pattern.nops; i++) {
     const p = pattern.ops[i];
     const el = v.ops[i];
@@ -124,4 +141,14 @@ export function collectTuplePattern(
     out.push([name, el]);
   }
   return null;
+}
+
+/** The error of a tuple value `v` whose arity is not `arity`, the arity of
+ * the pattern. */
+function arityError(arity: number, v: Expression): Expression {
+  return v.engine.typeError(
+    parseType(`tuple<${Array(arity).fill('unknown').join(', ')}>`)!,
+    v.type,
+    v.toString()
+  );
 }
