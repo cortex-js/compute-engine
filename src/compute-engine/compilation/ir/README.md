@@ -1142,12 +1142,14 @@ over the sum of the lengths, whose element at `k` is read from the first list
 whose end is after `k` (a chain of `n − 1` tests per element); its lists are of
 numbers, or all of points. On GLSL it declines (a build).
 
-`Repeat(v, n)` is a build of `n` copies of `v`, whose value is lowered once
-before it. The value must be pure: the interpreter evaluates `v` once when it
-evaluates the `Repeat` (as a result, under `At`, `Max`, `Map`), but once per
-element, and not at all for a count of 0, when a consumer reads the list
-lazily (`Sum`, `Add`), so a value with a draw or a write
-(`Sum(Repeat(Random(), 3))`) declines. The count is that of `Range(1, n)`
+`Repeat(v, n)` is a build of `n` copies of `v`. A pure value is lowered once
+before the build. The interpreter evaluates a value that is not pure once per
+element, in order, and not at all for a count of 0, in every position
+(CE-1396), so such a value is the body of the build, as the body of
+`Map(_ ↦ v, Range(1, n))`: `Repeat(Random(), 3)` is three draws, and a short
+list keeps its loop on JavaScript. A write to an outer local in the value
+declines, as in a `Map` body, and so does a draw on GLSL. The count is that of
+`Range(1, n)`
 (`rangecount`): 0 below 1, the floor of a real count (a count that is not an
 integer is an error of the interpreter, unspecified); a constant count is a
 stated length, so a short list is written out (`Repeat(-1, 2)` is `[-1, -1]`).
@@ -1492,8 +1494,8 @@ and has no budget runs until the host's deadline, as on the existing compiler
 a statement (`If(c, Break(), 1)` read as a value, one outside a `Loop`, or in
 a function literal in the body), a `Break` with a value, a `Return`, a `Loop`
 with no `Element` clause, a write to the index and a `Loop` whose value is read
-decline. `Repeat(v, n)` is the list of `n` copies of `v`, not a loop: it
-declines.
+decline. `Repeat(v, n)` is the list of `n` copies of `v`, not a loop (see
+"Lists").
 
 `Integrate(f, Limits(t, a, b))` and `NIntegrate(f, a, b)` of real bounds
 (infinite ones too) and a real integrand (a function literal of one parameter,

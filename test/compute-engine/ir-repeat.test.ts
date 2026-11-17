@@ -1,10 +1,9 @@
 /**
  * `Repeat(v, n)` in the profile `ir` (batch G31; README of
  * `src/compute-engine/compilation/ir/`, "Lists"): a list of `n` copies of
- * `v`. The value is lowered once and must be pure: the interpreter
- * evaluates it once, or once per element under a consumer that reads the
- * list lazily (`Sum`, `Add`), so a draw or a write declines. The count is
- * the count of
+ * `v`. A pure value is lowered once; a value that is not pure (a draw) is
+ * the body of the build, evaluated once per element as the interpreter
+ * evaluates it (CE-1396). The count is the count of
  * `Range(1, n)`: 0 for a count below 1. A constant count gives a list of a
  * stated length, written out when it is short (JavaScript, the interval
  * mode) and required on GLSL; a run-time count gives a build, which GLSL
@@ -190,29 +189,97 @@ describe('Repeat as an operand on JavaScript', () => {
     });
 });
 
-describe('the declines', () => {
-  test('a value with an effect: a draw, a write', () => {
-    // The interpreter evaluates the value once per element under `Sum` or
-    // `Add`, and once when `Repeat` itself is evaluated.
-    const write = ['Block', ['Assign', 'c', ['Add', 'c', 1]], 'c'];
-    for (const json of [
-      ['WithRandomSeed', 3, ['Add', ['Repeat', ['Random'], 3], 1]],
-      ['WithRandomSeed', 3, ['Sum', ['Repeat', ['Random'], 'n']]],
-      ['Repeat', ['Random'], 3],
-      [
-        'Block',
-        ['Declare', 'c', 'integer', 1],
-        ['Declare', 'r', 'integer', ['Sum', ['Repeat', write, 3]]],
-        ['Add', 'r', ['Multiply', 100, 'c']],
-      ],
-    ])
-      for (const to of [js, glsl, interval])
-        expect([json, failure(() => to(json))]).toEqual([
-          json,
-          expect.stringMatching(/a value of Repeat with an effect|on glsl/),
-        ]);
+describe('a value that is not pure (CE-1396)', () => {
+  // The interpreter evaluates a value that is not pure once per element, in
+  // order, and not at all for a count of 0: the value is the body of the
+  // build, as the body of a `Map`.
+  const m = makeMachineEngine();
+  m.declare('c', 'integer');
+  const R = (n: Json) => ['Repeat', ['Random'], n];
+  const seeded = (x: Json) => ['WithRandomSeed', 3, x];
+  const PROGRAMS: Json[] = [
+    R(3),
+    R('n'),
+    ['Max', R(3)],
+    ['Min', R('n')],
+    ['Add', R(3), ['List', 1, 2, 3]],
+    ['Add', R(3), 'L'],
+    ['Add', R(3), 1],
+    ['Multiply', R('n'), 2],
+    ['Sum', R(3)],
+    ['Sum', R('n')],
+    ['Product', R(3)],
+    ['Sin', R(3)],
+    ['ListJoin', R(2), ['List', 9]],
+    // The interpreter keeps a `Map` lazy, past the seed: its `Sum`.
+    ['Sum', ['Map', ['Function', ['Multiply', 't', 10], 't'], R(3)]],
+    // The draws after the list: none for a count of 0.
+    ['Add', ['At', R(3), 2], ['Random']],
+    ['Add', ['Length', R(3)], ['Random']],
+    ['Add', ['Length', R(0)], ['Random']],
+    ['Add', ['Sum', R('n')], ['Random']],
+  ];
+
+  test('on JavaScript: the values and the draws of the interpreter', () => {
+    for (const json of PROGRAMS.map(seeded)) {
+      const r = compile(m.box(json as never), IR);
+      for (const p of POINTS) {
+        const got = r.run(p);
+        const want = interpret(m, m.box(json as never), p);
+        expect([json, p, agrees(got, want)]).toEqual([json, p, true]);
+      }
+    }
   });
 
+  test('three draws, as Map(_ ↦ Random(), Range(1, 3))', () => {
+    const v = compile(m.box(seeded(R(3)) as never), IR).run({}) as number[];
+    expect(new Set(v).size).toBe(3);
+    const map = ['Map', ['Function', ['Random'], 'k'], ['Range', 1, 3]];
+    expect(compile(m.box(seeded(map) as never), IR).run({})).toEqual(v);
+    // A short list keeps the build: one draw site, in a loop.
+    const code = compile(m.box(R(3) as never), IR).code;
+    expect(code).toMatch(/for \(/);
+  });
+
+  test('in the interval mode: [0, 1] for each element', () => {
+    for (const json of [R(3), ['Sum', R(3)]]) {
+      const got = interval(json).run({});
+      const want = interpret(m, m.box(seeded(json) as never), {});
+      expect([json, got]).toEqual([
+        json,
+        Array.isArray(want)
+          ? want.map(() => ({ kind: 'interval', value: { lo: 0, hi: 1 } }))
+          : { kind: 'interval', value: { lo: 0, hi: 3 } },
+      ]);
+    }
+  });
+
+  test('the declines: GLSL, a write, a list of lists', () => {
+    expect(failure(() => glsl(['Sum', R(3)]))).toMatch(/Random on glsl/);
+    // A write to an outer local in the value declines, as in a Map body.
+    const write = ['Block', ['Assign', 'c', ['Add', 'c', 1]], 'c'];
+    const program = (list: Json) => [
+      'Block',
+      ['Declare', 'c', 'integer', 1],
+      ['Declare', 'r', 'integer', ['Sum', list]],
+      ['Add', 'r', ['Multiply', 100, 'c']],
+    ];
+    for (const list of [
+      ['Repeat', write, 3],
+      ['Map', ['Function', write, 'k'], ['Range', 1, 3]],
+    ])
+      for (const to of [js, glsl, interval])
+        expect(failure(() => to(program(list)))).toMatch(
+          /a write in a loop to a local declared outside/
+        );
+    // The inner list is a build of a run-time length.
+    expect(failure(() => js(['Repeat', R(3), 2]))).toMatch(
+      /a list of lists of run-time length/
+    );
+  });
+});
+
+describe('the declines', () => {
   test('a complex count', () => {
     expect(failure(() => js(['Repeat', 'x', 'Z']))).toMatch(
       /a count of Repeat that is not a real number/

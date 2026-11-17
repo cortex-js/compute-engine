@@ -446,6 +446,15 @@ function linspaceSample(
 }
 
 /**
+ * The element of a lazy `Repeat` that a read returns: the value as written
+ * when it is pure, and the value evaluated at this read when it is not, so
+ * that each element read of `Repeat(Random())` is a new draw (CE-1396).
+ */
+function repeatElement(value: Expression): Expression {
+  return value.isPure ? value : value.evaluate();
+}
+
+/**
  * Tri-state read of an integer parameter for collection handlers whose
  * fallback would be a different collection rather than
  * "unknown":
@@ -21912,7 +21921,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Repeat: {
     examples: ['Repeat(0, 3)'],
     description:
-      'Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies.',
+      'Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies. A value that is not pure (`Random()`) is evaluated once per element, in order, and each read of an element of a lazy `Repeat` evaluates it again.',
     complexity: 8200,
     // A function value is an element, held and never called, so the effects
     // of its body are not effects of `Repeat`. An operand with an effect of
@@ -21941,23 +21950,64 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         context.engine._typeResolver
       );
     },
-    evaluate: (ops, { engine }) => {
-      if (ops.length !== 2) return undefined;
+    // The value is held, so that a value that is not pure (`Random()`, a
+    // `Block` with an `Assign`) is evaluated once per element, in order, as
+    // the lazy reads of the iterator and of `at` evaluate it: every consumer
+    // then reads the same list (CE-1396, user decision 2026-11-16). A pure
+    // value is evaluated once and copied.
+    operands: () => [{ kind: 'held' }, { kind: 'value' }],
+    evaluate: (ops, { engine, numericApproximation }) => {
+      const value = ops[0];
+      const pure = value.isPure;
+      // The list stays lazy: a pure value is held evaluated, and a value
+      // that is not pure as written, so that each element read evaluates it.
+      const held = () =>
+        pure
+          ? engine._fn('Repeat', [
+              value.evaluate({ numericApproximation }),
+              ...ops.slice(1),
+            ])
+          : undefined;
+      if (ops.length !== 2) return held();
       const raw = toInteger(ops[1]);
       if (raw === null) {
         // A repeat count that is not a safe integer: a negative one is the
         // empty list, a positive one stays lazy (it is larger than
         // `maxCollectionSize`).
         const big = unsafeIntegerOperand(ops[1]);
-        return big !== undefined && big < 0n
-          ? engine._fn('List', [])
-          : undefined;
+        return big !== undefined && big < 0n ? engine._fn('List', []) : held();
       }
       const n = Math.max(0, raw);
       // Larger requests stay lazy; elements remain accessible via .at()
-      // and the iterator.
-      if (n > engine.maxCollectionSize) return undefined;
-      return engine._fn('List', Array(n).fill(ops[0]));
+      // and the iterator. A value that is not pure is then the body of the
+      // lazy `Map(_ ↦ v, Range(1, n))`, whose reads evaluate it once per
+      // element: the iterator of `Repeat` yields the value as written.
+      if (n > engine.maxCollectionSize) {
+        if (pure) return held();
+        const k = engine.temporaryName('k', value);
+        // The function is canonicalized by `Map`, which types its
+        // parameter by the range.
+        const f = engine._fn(
+          'Function',
+          [value, engine.symbol(k, { canonical: false })],
+          { canonical: false }
+        );
+        return engine.function('Map', [
+          f,
+          engine.function('Range', [engine.One, engine.number(n)]),
+        ]);
+      }
+      if (!pure) {
+        const elements: Expression[] = [];
+        for (let i = 0; i < n; i++)
+          elements.push(value.evaluate({ numericApproximation }));
+        return engine._fn('List', elements);
+      }
+      if (n === 0) return engine._fn('List', []);
+      return engine._fn(
+        'List',
+        Array(n).fill(value.evaluate({ numericApproximation }))
+      );
     },
     // A repeat count that is not a safe integer is read exactly, with
     // `unsafeIntegerOperand()`, by every handler, so that the handlers agree:
@@ -22024,12 +22074,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return {
             next: () =>
               i++ < count
-                ? { value: expr.op1, done: false }
+                ? // The value as written: a walk outside evaluation (the
+                  // numeric inference of a canonical form) must not evaluate
+                  // it, and a consumer that reads the list during evaluation
+                  // (`Sum`) evaluates each element.
+                  { value: expr.op1, done: false }
                 : { value: undefined, done: true },
           };
         }
         // Infinite sequence
-        return { next: () => ({ value: expr.op1, done: false }) };
+        return {
+          next: () => ({ value: repeatElement(expr.op1), done: false }),
+        };
       },
       // at is 1-based (consistent with Range, Take, and other collection handlers)
       at: (expr, index) => {
@@ -22051,7 +22107,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // Infinite sequence: any positive 1-based index is valid
           if (index < 1) return undefined;
         }
-        return expr.op1;
+        return repeatElement(expr.op1);
       },
     },
   },

@@ -6595,6 +6595,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Could not compile \`Repeat\`: only the (value, count) form compiles — the 1-argument ` +
           `form is an infinite sequence.`
       );
+    // The interpreter evaluates a value that is not pure once per element
+    // (CE-1396); the code below evaluates it once.
+    if (!args[0].isPure)
+      throw new Error(
+        'Could not compile `Repeat`: a value that is not pure is evaluated once per element'
+      );
     if (isNonFiniteBound(args[1]!))
       throw new Error(
         `Could not compile \`Repeat\`: a statically non-finite count (${args[1]!.toString()}) is ` +

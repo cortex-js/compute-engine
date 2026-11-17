@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compile';
 
 describe('A6 polish — lowercase count alias', () => {
   test('\\operatorname{count}(L) parses to Length', () => {
@@ -84,6 +85,235 @@ describe('A6 polish — Repeat arity', () => {
     const expr = ce.expr(['Repeat', 5, 10000]).evaluate();
     expect(expr.operator).toEqual('List');
     expect(expr.ops?.length).toEqual(10000);
+  });
+});
+
+describe('Repeat of a value that is not pure (CE-1396)', () => {
+  // A value that is not pure is evaluated once per element, in order, in
+  // every position, as the body of `Map(_ ↦ v, Range(1, n))`; a pure value
+  // is evaluated once and copied.
+  const ce = new ComputeEngine();
+  ce.declare('L', 'list<real>');
+  ce.assign('L', ce.box(['List', 1, 2, 3]));
+  ce.declare('c', 'integer');
+  ce.declare('g', 'function');
+  ce.assign('g', ce.box(['Function', ['Random'], 'z']));
+  const seeded = (json: unknown) =>
+    JSON.stringify(
+      ce
+        .box(['WithRandomSeed', 3, json] as never)
+        .evaluate()
+        .N().json
+    );
+  /** The first `k` draws of the seed 3. */
+  const draws = (k: number) =>
+    seeded(['List', ...Array.from({ length: k }, () => ['Random'])]);
+  const R = ['Repeat', ['Random'], 3];
+  const M = ['Map', ['Function', ['Random'], 'k'], ['Range', 1, 3]];
+
+  test('by itself: three draws, in order', () => {
+    expect(seeded(R)).toBe(draws(3));
+    expect(seeded(['Repeat', ['g', 1], 3])).toBe(draws(3));
+    // Nested: six draws.
+    expect(seeded(['Flatten', ['Repeat', R, 2]])).toBe(draws(6));
+  });
+
+  test('every consumer reads the list of the equivalent Map', () => {
+    for (const f of [
+      (x: unknown) => ['Max', x],
+      (x: unknown) => ['Min', x],
+      (x: unknown) => ['List', ['At', x, 2], ['Random']],
+      (x: unknown) => ['ListJoin', x, ['List', 9]],
+      (x: unknown) => ['Sum', x],
+      (x: unknown) => ['Product', x],
+      (x: unknown) => ['Add', x, ['List', 1, 2, 3]],
+      (x: unknown) => ['Add', x, 'L'],
+      (x: unknown) => ['Add', x, 1],
+      (x: unknown) => ['Multiply', x, ['List', 1, 2, 3]],
+      (x: unknown) => ['Multiply', x, 'L'],
+      (x: unknown) => ['Multiply', x, 2],
+      (x: unknown) => ['Sin', x],
+      (x: unknown) => [
+        'Sum',
+        ['Map', ['Function', ['Multiply', 't', 10], 't'], x],
+      ],
+    ])
+      expect([f('R'), seeded(f(R))]).toEqual([f('R'), seeded(f(M))]);
+  });
+
+  test('Length evaluates the list, as of a list literal; a count of 0 draws nothing', () => {
+    expect(seeded(['List', ['Length', R], ['Random']])).toBe(
+      seeded([
+        'List',
+        ['Length', ['List', ['Random'], ['Random'], ['Random']]],
+        ['Random'],
+      ])
+    );
+    expect(seeded(['List', ['Repeat', ['Random'], 0], ['Random']])).toBe(
+      seeded(['List', ['List'], ['Random']])
+    );
+  });
+
+  test('the unbounded list evaluates the value at each element read', () => {
+    expect(
+      seeded(['ListJoin', ['Take', ['Repeat', ['Random']], 3], ['List']])
+    ).toBe(draws(3));
+    expect(seeded(['At', ['Repeat', ['Random']], 2])).toBe(seeded(['Random']));
+  });
+
+  test('a write: once per element in every position', () => {
+    const run = (f: (x: unknown) => unknown) => {
+      ce.assign('c', 1);
+      const v = ce
+        .box(
+          f([
+            'Repeat',
+            ['Block', ['Assign', 'c', ['Add', 'c', 1]], 'c'],
+            3,
+          ]) as never
+        )
+        .evaluate().json;
+      return [v, ce.box('c').evaluate().json];
+    };
+    expect(run((x) => x)).toEqual([['List', 2, 3, 4], 4]);
+    expect(run((x) => ['Sum', x])).toEqual([9, 4]);
+    expect(run((x) => ['Max', x])).toEqual([4, 4]);
+    expect(run((x) => ['At', x, 2])).toEqual([3, 4]);
+  });
+
+  test('a pure value: evaluated once, the forms unchanged', () => {
+    expect(ce.box(['Repeat', ['Add', 'x', 1], 3]).evaluate().json).toEqual([
+      'List',
+      ['Add', 'x', 1],
+      ['Add', 'x', 1],
+      ['Add', 'x', 1],
+    ]);
+    expect(ce.box(['Repeat', ['Add', 1, 2]]).evaluate().json).toEqual([
+      'Repeat',
+      3,
+    ]);
+    const r = ce.box(R as never);
+    expect(r.json).toEqual(R);
+    expect(r.latex).toBe('\\mathrm{Repeat}(\\mathrm{Random}(), 3)');
+  });
+
+  test('boxing, serializing, typing and compiling evaluate nothing', () => {
+    // A host operator that is not pure counts its evaluations.
+    let ticks = 0;
+    const te = new ComputeEngine();
+    te.declare('Tick', {
+      signature: '() -> integer',
+      pure: false,
+      evaluate: () => te.number(++ticks),
+    });
+    const json = ['Add', ['Repeat', ['Tick'], 3], 1];
+    const count = (f: () => unknown) => {
+      ticks = 0;
+      f();
+      return ticks;
+    };
+    const e = te.box(json as never);
+    expect({
+      box: count(() => te.box(json as never)),
+      json: count(() => te.box(json as never).json),
+      type: count(() => te.box(json as never).type.toString()),
+      latex: count(() => te.box(json as never).latex),
+      parse: count(() => te.parse(e.latex)),
+      compileIr: count(() => {
+        try {
+          compile(te.box(json as never), { profile: 'ir', fallback: false });
+        } catch {}
+      }),
+      compile: count(() => compile(te.box(json as never))),
+    }).toEqual({
+      box: 0,
+      json: 0,
+      type: 0,
+      latex: 0,
+      parse: 0,
+      compileIr: 0,
+      compile: 0,
+    });
+    expect([count(() => e.evaluate()), e.evaluate().json]).toEqual([
+      3,
+      ['List', 5, 6, 7],
+    ]);
+    // A symbolic count that has a value when the expression is boxed.
+    te.declare('m', 'integer');
+    te.assign('m', 3);
+    ticks = 0;
+    const s = te.box(['Add', ['Repeat', ['Tick'], 'm'], 1] as never);
+    expect([ticks, s.evaluate().json, ticks]).toEqual([
+      0,
+      ['List', 2, 3, 4],
+      3,
+    ]);
+  });
+
+  test('a write in a numeric operand is not run by boxing', () => {
+    ce.assign('c', 1);
+    const e = ce.box([
+      'Add',
+      ['Repeat', ['Block', ['Assign', 'c', ['Add', 'c', 1]], 'c'], 3],
+      1,
+    ] as never);
+    expect(ce.box('c').evaluate().json).toBe(1);
+    expect(e.evaluate().json).toEqual(['List', 3, 4, 5]);
+    expect(ce.box('c').evaluate().json).toBe(4);
+  });
+
+  test('above maxCollectionSize: the values and evaluations of the lazy Map', () => {
+    // `First(Sort(Map(…)))` and `Length(Unique(Map(…)))` of an impure body
+    // are older defects of `Map` at this size: they are not pinned here.
+    let ticks = 0;
+    const te = new ComputeEngine();
+    te.declare('Tick', {
+      signature: '() -> integer',
+      pure: false,
+      evaluate: () => te.number(++ticks),
+    });
+    const n = te.maxCollectionSize + 1;
+    const die = ['Add', ['Floor', ['Multiply', 6, ['Random']]], 1];
+    const run = (json: unknown) => {
+      ticks = 0;
+      const v = te
+        .box(json as never)
+        .evaluate()
+        .N().json;
+      return [JSON.stringify(v), ticks];
+    };
+    for (const [v, f] of [
+      [['Tick'], (x: unknown) => ['Mean', x]],
+      [['Tick'], (x: unknown) => ['Max', x]],
+      [['Tick'], (x: unknown) => ['Min', x]],
+      [['Tick'], (x: unknown) => ['Variance', x]],
+      [['Tick'], (x: unknown) => ['Contains', x, 5]],
+      [['Tick'], (x: unknown) => ['At', ['ListJoin', x, ['List', 9]], 1]],
+      [die, (x: unknown) => ['WithRandomSeed', 3, ['Count', x, 6]]],
+      [['Random'], (x: unknown) => ['WithRandomSeed', 3, ['Max', x]]],
+    ] as [unknown, (x: unknown) => unknown][]) {
+      const repeat = run(f(['Repeat', v, n]));
+      const map = run(f(['Map', ['Function', v, 'k'], ['Range', 1, n]]));
+      expect([f('R'), repeat]).toEqual([f('R'), map]);
+    }
+    // Sorted under a seed.
+    const sorted = te
+      .box(['WithRandomSeed', 3, ['Sort', ['Repeat', ['Random'], n]]] as never)
+      .evaluate()
+      .N().json as unknown[];
+    const xs = sorted.slice(1).map(Number);
+    expect(xs).toHaveLength(n);
+    expect(xs.every((x, i) => i === 0 || xs[i - 1] <= x)).toBe(true);
+    // A pure value stays a lazy `Repeat`.
+    const pure = te.box(['Repeat', ['Add', 'x', 1], n] as never);
+    expect(pure.evaluate().json).toEqual(['Repeat', ['Add', 'x', 1], n]);
+    expect(pure.json).toEqual(['Repeat', ['Add', 'x', 1], n]);
+  });
+
+  test('under a seed, the draws of the literal list', () => {
+    expect(seeded(['Add', R, 1])).toBe(
+      seeded(['Add', ['List', ['Random'], ['Random'], ['Random']], 1])
+    );
   });
 });
 

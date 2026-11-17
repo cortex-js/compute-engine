@@ -855,32 +855,18 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
 
   // --- JS: Repeat ---------------------------------------------------------
 
-  test('JS: Repeat(Random(), 3) draws ONCE and repeats the same value', () => {
-    // The interpreter evaluates the value operand once and repeats the
-    // resulting VALUE: `Repeat(Random(), 3)` is three copies of one draw. A
-    // lowering that spliced the compiled value into a per-element callback
-    // would draw three DIFFERENT numbers.
-    const json = ['Repeat', ['Random'], 3];
-    expect(jsDraws(json)).toBe(1);
-    const v = compile(ce.box(json), { fallback: false }).run!({}) as number[];
-    expect(v).toHaveLength(3);
-    expect(v[1]).toBe(v[0]);
-    expect(v[2]).toBe(v[0]);
-    // Framed, element-for-element against the interpreter.
-    const { compiled: c, interpreted: i } = bothEngines(ce, json, 42);
-    expect(c).toEqual(i);
-  });
-
-  test('JS: Repeat draws its value even when the count is ≤ 0', () => {
-    // Probed: the interpreter consumes exactly one draw for
-    // `Repeat(Random(), 0)` and `Repeat(Random(), -1)` — the value is
-    // evaluated before the count is consulted. Hoisting it into an IIFE
-    // parameter (rather than the `Array.from` callback) preserves that.
-    for (const n of [0, -1]) {
-      const r = compiled(ce, ['Repeat', ['Random'], n]);
-      expect(r.run!({})).toEqual([]);
-      expect(trailingDraw(ce, 42, () => r.run!({}))).toBe(draw(42, 1));
-    }
+  test('JS: Repeat of a value that is not pure declines, at every count', () => {
+    // The interpreter evaluates a value that is not pure once per element,
+    // in order, and not at all for a count of 0 or less (CE-1396): the
+    // lowering evaluates the value once, so it declines and the program
+    // falls back to the interpreter.
+    for (const n of [3, 0, -1])
+      expect(() =>
+        compile(ce.box(['Repeat', ['Random'], n]), {
+          fallback: false,
+          constantFold: false,
+        })
+      ).toThrow(/a value that is not pure is evaluated once per element/);
   });
 
   test('JS: Repeat keeps the pure emission (byte-identical pin)', () => {

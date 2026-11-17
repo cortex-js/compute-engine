@@ -7517,7 +7517,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies.",
+      "description": "Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies. A value that is not pure (`Random()`) is evaluated once per element, in order, and each read of an element of a lazy `Repeat` evaluates it again.",
       "examples": [
         "Repeat(0, 3)"
       ]

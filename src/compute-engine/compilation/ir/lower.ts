@@ -1256,18 +1256,16 @@ export function lower(
         }
         return lists.built(e, s.length, s.at);
       }
-      // `Repeat(v, n)`: a build of `n` copies of `v`, lowered once. The
-      // interpreter evaluates `v` once when it evaluates the `Repeat`, and
-      // once per element (none for a count of 0) when a consumer reads the
-      // list lazily (`Sum`, `Add`): a value with an effect declines. The
-      // count is that of `Range(1, n)`: 0 for `n < 1`.
+      // `Repeat(v, n)`: a build of `n` copies of `v`. A pure `v` is lowered
+      // once; the interpreter evaluates a `v` that is not pure once per
+      // element, in order (none for a count of 0), so such a `v` is the body
+      // of the build, as the body of a `Map`. The count is that of
+      // `Range(1, n)`: 0 for `n < 1`.
       case 'Repeat': {
         if (e.nops !== 2)
           decline(e, 'Repeat with no count (an unbounded list)');
-        const effects = b.effects;
-        const v = value(e.ops[0])!;
-        if (b.effects > effects || facts(e.ops[0]).writes.size > 0)
-          decline(e, 'a value of Repeat with an effect');
+        const pure = e.ops[0].isPure && facts(e.ops[0]).writes.size === 0;
+        const v = pure ? value(e.ops[0])! : undefined;
         const n = scalar(e.ops[1]);
         if (type(n).lane !== 'integer' && type(n).lane !== 'real')
           decline(e.ops[1], 'a count of Repeat that is not a real number');
@@ -1276,7 +1274,14 @@ export function lower(
           c !== undefined && Number.isFinite(c)
             ? b.constant(Math.max(0, Math.floor(c)), 'integer')
             : apply(e, ofOp('rangecount'), [one, n, one]);
-        return lists.over(e, { length, at: (k) => k }, '', () => v, false, e);
+        return lists.over(
+          e,
+          { length, at: (k) => k },
+          '',
+          v === undefined ? e.ops[0] : () => v!,
+          false,
+          e
+        );
       }
       case 'Map':
         if (e.nops > 2) return lists.mapLists(e);
