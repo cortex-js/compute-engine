@@ -18,7 +18,7 @@ import {
 import { createIntervalRuntime } from '../interval-runtime.js';
 import { readsVarsObject } from '../vars-inputs.js';
 import { withIntegralClosedFormBudgets } from '../interval-quadrature.js';
-import { isBooleanBindingType } from '../compiler-type-facts.js';
+import { isBooleanBindingType } from '../type-facts.js';
 import { analyzeReferences, freeSymbolTypes } from '../compile-references.js';
 import { compileSlice } from './index.js';
 import { entryOf, regionsOf, type Region } from './ir.js';

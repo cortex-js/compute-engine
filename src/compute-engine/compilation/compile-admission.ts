@@ -30,6 +30,7 @@ import {
   isCompileDeclineError,
   UNSETTLED_SHAPE_CODE,
   UNTYPED_INPUT_CODE,
+  throwUntypedInputs,
 } from './diagnostics.js';
 import { isCompileBoundName } from './compiler-names.js';
 import { collectDeclaredTopSymbols } from './compiler-type-facts.js';
@@ -460,39 +461,6 @@ function namesReadIn(
     (node) => droppedOperandsOf(node, target)
   );
   return { kept, dropped };
-}
-
-/**
- * Decline the compilation when an input has the static type `unknown` or
- * `any` (`untypedInputs()`): `names` are the names of these inputs.
- *
- * The compiled code reads each input in one shape, a number, a list or a
- * point, and the shape comes from the input's type. With no type, the shape
- * is not known, and the compiled value can differ from the interpreter's:
- * with `M` undeclared, `If(M < 3, M, 0)` read `M` as a number, and gave `0`
- * for `M = [1, 5]` where the interpreter gives `[1, 0]`. The host declares
- * the input (`ce.declare("M", "real")`, or a union such as
- * `real | list<real>` when it can pass both shapes).
- *
- * This applies on every target. The diagnostic has the code
- * `'untyped-input'` and the kind `'correctness'`. Its `value` is the names
- * of the inputs, separated by commas, for display. The interpreter fallback
- * puts each name in `unsupported` (`buildInterpreterFallback()`): the
- * names of `value`, and those that `untypedInputsOf()` finds (also when
- * another reason declines first).
- */
-export function throwUntypedInputs(names: ReadonlyArray<string>): never {
-  const list = names.map((name) => `\`${name}\``).join(', ');
-  throw new CompileDeclineError({
-    code: UNTYPED_INPUT_CODE,
-    kind: 'correctness',
-    message:
-      `Could not compile: the input${names.length > 1 ? 's' : ''} ${list} ` +
-      `${names.length > 1 ? 'have' : 'has'} no type (\`unknown\` or ` +
-      `\`any\`). Declare the type of each input, for example with ` +
-      `\`ce.declare("${names[0]}", "real")\`.`,
-    value: names.join(','),
-  });
 }
 
 /**

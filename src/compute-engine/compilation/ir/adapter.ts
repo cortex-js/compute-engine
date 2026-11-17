@@ -22,7 +22,7 @@ import {
   storeEntryPlan,
   type EntryPlan,
 } from '../javascript-runtime.js';
-import { CompileDeclineError } from '../diagnostics.js';
+import { CompileDeclineError, throwUntypedInputs } from '../diagnostics.js';
 import { RUNTIME_VERSION } from '../../../common/runtime-versions.js';
 import {
   isShippableCode,
@@ -36,12 +36,11 @@ import {
   makeWillParallelize,
   type RunAsyncSpec,
 } from '../run-async.js';
-import { broadcastStrideOfType } from '../compiler-type-facts.js';
+import { broadcastStrideOfType } from '../type-facts.js';
 import { readsVarsObject } from '../vars-inputs.js';
 import { withIntegralClosedFormBudgets } from '../interval-quadrature.js';
 import { realPowerReconstructionDigits } from '../../numerics/real-power.js';
 import { ALL_PASSES } from './passes.js';
-import { throwUntypedInputs } from '../compile-admission.js';
 import { Decline, UntypedInputs } from './lower-context.js';
 import { compileSlice, type Extension, type Warning } from './index.js';
 import type { JavaScriptResult } from './print-js.js';

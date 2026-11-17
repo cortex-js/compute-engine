@@ -279,12 +279,12 @@ throws an `UntypedInputs` with all such names, in the order the lowering reads
 them (not always the order of the text: `Sum(w, Limits(k, v, u))` gives `v,u,w`,
 the existing compiler `w,v,u`), which `sliceError()` turns into the
 `untyped-input` decline of the existing compiler (`throwUntypedInputs()` of
-`compile-admission.ts`: the same code, kind, message and `value`, the names
-separated by commas). A decline of the lowering is reported as it is; a refusal
-of the target after a completed lowering (recursion, a list of run-time length
-on GLSL) comes after the refusal of the input. Until the end such an input is
-read as a real. It is not `outside-profile`: with `fallback`, the interpreter
-fallback names them in `unsupported`, and the statistics of the switch count it
+`diagnostics.ts`: the same code, kind, message and `value`, the names separated
+by commas). A decline of the lowering is reported as it is; a refusal of the
+target after a completed lowering (recursion, a list of run-time length on GLSL)
+comes after the refusal of the input. Until the end such an input is read as a
+real. It is not `outside-profile`: with `fallback`, the interpreter fallback
+names them in `unsupported`, and the statistics of the switch count it
 `declined`. A name with a value, a local, an index, a parameter of a user
 function and a parameter of a root function literal are not inputs: a parameter
 of no declared type is a real, and one declared `any` or `value` declines, as an

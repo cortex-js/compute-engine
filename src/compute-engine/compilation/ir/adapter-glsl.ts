@@ -12,7 +12,7 @@ import type { Fn } from './lower-context.js';
 import { userBinding } from './lower-functions.js';
 import { analyzeReferences, freeSymbolTypes } from '../compile-references.js';
 import { gpuIsReservedWord } from '../gpu-reserved.js';
-import { gpuExactConstant } from '../gpu-exact-trig.js';
+import { gpuExactConstant } from '../gpu-exact-constant.js';
 import {
   isFunction,
   isNumber,
