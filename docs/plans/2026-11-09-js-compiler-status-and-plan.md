@@ -2676,6 +2676,22 @@ Landed on 2026-11-16, night:
   `Which` whose list arms have different run-time lengths), `Multiply` of a
   list of points and another shape 10, lists of different lengths or ranks 8.
 
+- Timing on a bundle (2026-11-16, after `ce-interval` found that `tsx`
+  wraps named inner closures at each call, which a release build does not):
+  the replay timed on an esbuild bundle of main `292763d1e`, under plain
+  `node` (`BUNDLE=<ce.mjs>` of `replay-t12.mts`; records
+  `replay-t12/bundle-*.jsonl`, and `tsx2-*.jsonl` for `tsx` under the same
+  load): median 0.736 of the existing compiler (0.745 under `tsx`); above
+  1.1: 498; above 1.25: 362; above 1.5: 52 (76 under `tsx`); above 2: 17;
+  above 3: 7. Per program the ratio can move by three times where the
+  existing compiler's code calls runtime helpers. Times are measured on the
+  bundle from here on. The 52: `vwbagbcerj` (2, a sample artefact),
+  `lrpzqnemhy` (2, the existing compiler returns at the first NaN term),
+  `odyxeaoouk`, `nqfechxzqp` and `lg5hblqpel` (CE-1373), `kthjqzwc4g` #0 at
+  3.7, `art/lrhjtkkyls` #1 at 3.2, `neyret/cucxkogo6q` (8 programs at 1.85
+  to 2.3), `F(3, x)` and `F(2, x)` of `ltjak2qii0`, `bygw3kdipo` and
+  `p0kazir1l9` at about 2.2: the next speed work.
+
 Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
 states, each step gated by a render audit with no lost series, no new hang
 and no build or render over 1.5 times): its `At` handler on GLSL and the
