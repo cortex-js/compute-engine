@@ -2760,6 +2760,34 @@ Landed on 2026-11-16, night:
   a power of a small integer exponent through the general `cpow`; 5 corpus
   programs have the form).
 
+- **The measure against the 1.1 goal on main `c0e55ae7f`** (the replay timed
+  alone, two passes, one process at a time, on a bundle; the better time of
+  each program; records `replay-t12/quiet2{a,b}-*.jsonl`, the list in
+  `quiet2-above-1.1.json`): of 9,162 JavaScript programs timed, **53 are
+  above 1.1 times the existing compiler**, 24 above 1.25, 16 above 1.5, 7
+  above 2, 4 above 3; median 0.711; 2,828 programs run in less than two
+  thirds of the existing compiler's time. Coverage on that head: JavaScript
+  9,346 of 9,503 (98.3%), GLSL 3,786 of 3,855 (98.2%). The 53, by cause:
+  - a sample artefact, not a slowdown in Tycho's use: `vwbagbcerj` #2, #3
+    (31 times: the replay feeds a list shorter than the sum reads, and the
+    existing compiler leaves the sum at the first NaN term);
+  - the existing compiler returns at the first NaN term of a `Sum`:
+    `lrpzqnemhy` #2, #3, #5 (1.6 to 4.0);
+  - CE-1373, a list expression written several times is built several
+    times: `nqfechxzqp` #0 (2.8), `odyxeaoouk` #0 (2.8), `lg5hblqpel` #8, #9
+    (1.8, 1.9), `zrklhsz34x` #4 (1.4);
+  - a seeded frame with a constant seed and no input, which the existing
+    compiler folds to a constant: `kthjqzwc4g` #0 (3.3);
+  - complex arithmetic through the general helpers: `art/lrhjtkkyls` #1
+    (2.4), `art/kotqpqjiiy` #0 (1.95), `art/13obrwvjag` #2 (1.5);
+  - not examined, between 1.1 and 1.7: 38 programs, 21 of them under 0.1 µs
+    a call, where a difference of 10 ns is the whole ratio (`6l8vae4zkn`,
+    `6pabsosfsq`, `ielrzhke1a`, the `F(3, x)` programs of `ltjak2qii0`,
+    `bygw3kdipo` and `p0kazir1l9`, `showcase/three-body-problem` at 1.13 to
+    1.23, `skz0syspxp`, `mrbspdqeqo`, `dmibg1uaof`), and five programs of 10
+    to 70 µs a call at 1.11 to 1.24 (`pmciiapek6` #5, `u1ahfsr3vv` #2,
+    `dmynve1fwf` #0, `buzq5x2t5n` #56, `jejjp1xikd` #2, `pixe2ayhtt` #5).
+
 Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
 states, each step gated by a render audit with no lost series, no new hang
 and no build or render over 1.5 times): its `At` handler on GLSL and the
