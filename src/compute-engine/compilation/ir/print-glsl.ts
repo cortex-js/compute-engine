@@ -158,6 +158,14 @@ export const GLSL: Syntax = deepFreeze({
       helpers: ['_gpu_ir_factorial'],
     },
     'gcd': { text: '_gpu_ir_gcd($0, $1)', helpers: ['_gpu_ir_gcd'] },
+    'fresnelc': {
+      text: '_gpu_ir_fresnelc($0)',
+      helpers: ['_gpu_ir_polevl', '_gpu_ir_fresnel_fg', '_gpu_ir_fresnelc'],
+    },
+    'fresnels': {
+      text: '_gpu_ir_fresnels($0)',
+      helpers: ['_gpu_ir_polevl', '_gpu_ir_fresnel_fg', '_gpu_ir_fresnels'],
+    },
     'deg': 'radians($0)',
     ...calls('', ['floor', 'ceil']),
     'round': { text: '_gpu_ir_round($0)', helpers: ['_gpu_ir_round'] },
@@ -314,6 +322,73 @@ export const GLSL: Syntax = deepFreeze({
   int x = abs(int(a)), y = abs(int(b));
   for (int i = 0; i < 64 && y != 0; i++) { int t = x % y; x = y; y = t; }
   return float(x);
+}`,
+    // The Fresnel integrals: the rational approximations of the kernels
+    // `fresnelC` and `fresnelS` (Cephes). GLSL has no conversion between
+    // array sizes, so every table is a `float[12]`, padded with zeros after
+    // its `n` coefficients.
+    _gpu_ir_polevl: `float _gpu_ir_polevl(float x, float c[12], int n) {
+  float r = c[0];
+  for (int i = 1; i < n; i++) r = r * x + c[i];
+  return r;
+}`,
+    // For x >= 1.6: (f·sin z - g·cos z, f·cos z + g·sin z), z = πx²/2 of
+    // the asymptotic expansion. The phase is reduced as (π/2)·(x² mod 4),
+    // from x = n + r: n² mod 4 on `int`s, 2nr mod 4 (n·r is exact in
+    // float) and r²: the float `(π/2)·x²` loses the phase as x grows. Then
+    // (π/2)·q + w, q an integer, |w| <= π/4: the sine and cosine of w are
+    // their Taylor polynomials (an error below 2e-9), not the builtins,
+    // which a renderer can compute to 1e-5 only (SwiftShader).
+    _gpu_ir_fresnel_fg: `vec2 _gpu_ir_fresnel_fg(float x) {
+  float fn[12] = float[12](4.21543555043677546506e-1, 1.43407919780758885261e-1, 1.15220955073585758835e-2, 3.450179397825740279e-4, 4.63613749287867322088e-6, 3.05568983790257605827e-8, 1.02304514164907233465e-10, 1.72010743268161828879e-13, 1.34283276233062758925e-16, 3.76329711269987889006e-20, 0.0, 0.0);
+  float fd[12] = float[12](1.0, 7.51586398353378947175e-1, 1.16888925859191382142e-1, 6.44051526508858611005e-3, 1.55934409164153020873e-4, 1.8462756734893054587e-6, 1.12699224763999035261e-8, 3.60140029589371370404e-11, 5.8875453362157841001e-14, 4.52001434074129701496e-17, 1.25443237090011264384e-20, 0.0);
+  float gn[12] = float[12](5.04442073643383265887e-1, 1.97102833525523411709e-1, 1.87648584092575249293e-2, 6.84079380915393090172e-4, 1.15138826111884280931e-5, 9.82852443688422223854e-8, 4.45344415861750144738e-10, 1.08268041139020870318e-12, 1.37555460633261799868e-15, 8.36354435630677421531e-19, 1.86958710162783235106e-22, 0.0);
+  float gd[12] = float[12](1.0, 1.47495759925128324529, 3.37748989120019970451e-1, 2.53603741420338795122e-2, 8.14679107184306179049e-4, 1.27545075667729118702e-5, 1.04314589657571990585e-7, 4.60680728146520428211e-10, 1.10273215066240270757e-12, 1.38796531259578871258e-15, 8.39158816283118707363e-19, 1.86958710162783236342e-22);
+  float t = 3.14159265 * x * x;
+  float u = 1.0 / (t * t);
+  float f = 1.0 - u * _gpu_ir_polevl(u, fn, 10) / _gpu_ir_polevl(u, fd, 11);
+  float g = _gpu_ir_polevl(u, gn, 11) / (t * _gpu_ir_polevl(u, gd, 12));
+  float n = floor(x);
+  float r = x - n;
+  int k = int(mod(n, 4.0));
+  float m = mod(float((k * k) % 4) + 2.0 * mod(n * r, 2.0) + r * r, 4.0);
+  float q = floor(m + 0.5);
+  float w = 1.57079633 * (m - q);
+  float w2 = w * w;
+  float s0 = w * (1.0 - w2 / 6.0 * (1.0 - w2 / 20.0 * (1.0 - w2 / 42.0 * (1.0 - w2 / 72.0))));
+  float c0 = 1.0 - w2 / 2.0 * (1.0 - w2 / 12.0 * (1.0 - w2 / 30.0 * (1.0 - w2 / 56.0 * (1.0 - w2 / 90.0))));
+  int j = int(q) % 4;
+  float s = j == 0 ? s0 : j == 1 ? c0 : j == 2 ? -s0 : -c0;
+  float c = j == 0 ? c0 : j == 1 ? -s0 : j == 2 ? -c0 : s0;
+  return vec2(f * s - g * c, f * c + g * s);
+}`,
+    // C(x) and S(x), odd; ±1/2 from |x| = 1e7, where the oscillation
+    // 1/(πx) is about one ulp of 1/2.
+    _gpu_ir_fresnelc: `float _gpu_ir_fresnelc(float x_in) {
+  float x = abs(x_in);
+  float v;
+  if (x < 1.6) {
+    float cn[12] = float[12](-4.98843114573573548651e-8, 9.50428062829859605134e-6, -6.45191435683965050962e-4, 1.88843319396703850064e-2, -2.05525900955013891793e-1, 9.99999999999999998822e-1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    float cd[12] = float[12](3.99982968972495980367e-12, 9.15439215774657478799e-10, 1.25001862479598821474e-7, 1.22262789024179030997e-5, 8.68029542941784300606e-4, 4.12142090722199792936e-2, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    float t = x * x * x * x;
+    v = x * _gpu_ir_polevl(t, cn, 6) / _gpu_ir_polevl(t, cd, 7);
+  } else if (x < 1e7) {
+    v = 0.5 + _gpu_ir_fresnel_fg(x).x / (3.14159265 * x);
+  } else v = 0.5;
+  return x_in < 0.0 ? -v : v;
+}`,
+    _gpu_ir_fresnels: `float _gpu_ir_fresnels(float x_in) {
+  float x = abs(x_in);
+  float v;
+  if (x < 1.6) {
+    float sn[12] = float[12](-2.99181919401019853726e3, 7.08840045257738576863e5, -6.29741486205862506537e7, 2.54890880573376359104e9, -4.42979518059697779103e10, 3.18016297876567817986e11, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    float sd[12] = float[12](1.0, 2.81376268889994315696e2, 4.55847810806532581675e4, 5.1734388877009640073e6, 4.19320245898111231129e8, 2.2441179564534092094e10, 6.07366389490084914091e11, 0.0, 0.0, 0.0, 0.0, 0.0);
+    float t = x * x * x * x;
+    v = x * x * x * _gpu_ir_polevl(t, sn, 6) / _gpu_ir_polevl(t, sd, 7);
+  } else if (x < 1e7) {
+    v = 0.5 - _gpu_ir_fresnel_fg(x).y / (3.14159265 * x);
+  } else v = 0.5;
+  return x_in < 0.0 ? -v : v;
 }`,
     // The colour conversions of the interpreter (`@arnog/colors`): OKLab to
     // OKLCh (hue in degrees, in [0, 360)) and back; extended sRGB (a

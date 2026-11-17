@@ -90,10 +90,10 @@ const CASES: Case[] = [
  *  box, with the reason: another kind, or a bound wider by more than 4
  *  ulps. */
 // prettier-ignore
-const EXCEPTIONS: Record<string, string> = {
-  [JSON.stringify(I(['Sin', ['Multiply', 't', 't']], 't', 0, 1))]:
-    'the closed form holds FresnelS, which the IR has no row for (the existing target has _IA.fresnelS): the enclosure',
-};
+// Empty since the IR has a row for FresnelS (CE-1168): the closed form of
+// the integral of sin(t^2) is a constant of `N()` marked inexact, as on the
+// existing target.
+const EXCEPTIONS: Record<string, string> = {};
 
 /** The programs whose result is `empty` at a box where some bound has a
  *  value: the library answers `empty` when a piece of the partition from

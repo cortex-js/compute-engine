@@ -248,8 +248,12 @@ of integers (`GCD(Round(a), Round(b))`) is `_gpu_ir_gcd` on `int`s. `Hypot` is
 `length(vec2(x, y))`; `Arsinh` is `sign(x)·asinh(|x|)` (the builtin is wrong for
 a large negative argument); `Sinh`, `Cosh`, `Tanh`, `Arctan` and the reciprocal
 rows (`Sec`, `Csc`, `Coth`, `Sech`, `Csch`) are builtins or their reciprocals.
-The other real functions (`Erf`, `Gamma`, `Zeta`, `Arccot`, `Arcsec`, ...)
-decline there.
+`FresnelC` and `FresnelS` are the helpers `_gpu_ir_fresnelc` and
+`_gpu_ir_fresnels`: the rational approximations of the JavaScript kernels, each
+table a `float[12]` padded with zeros (GLSL converts no array size), the phase
+πx²/2 reduced mod 2π from x = n + r, and its sine and cosine Taylor polynomials
+(a renderer's `sin` can be wrong by 1e-5); ±1/2 from |x| = 10^7. The other real
+functions (`Erf`, `Gamma`, `Zeta`, `Arccot`, `Arcsec`, ...) decline there.
 
 `Mod` on JavaScript is `floorMod()` (the remainder with the sign of the
 divisor). For a divisor of 1 it computes `x - floor(x)`, the same double with no
@@ -634,15 +638,16 @@ operands, `binomial.real`, a row of the mode), `GCD`, `LCM`, the comparisons,
 `And`, `Or`, `Not` (Kleene logic on verdicts), `If`, `Which`, a `Block` with
 locals, user functions, `Sum` and `Product` with `Limits`, `Random()` and
 `WithRandomSeed` of a number seed, a root function literal, and the lists below,
-and integrals (below). `Haversine`, `Zeta` and the complex and colour operations
-have no spelling and decline (a cause of the mode ends with "on interval-js"). A
-`Loop` is lowered as on JavaScript ("Loops and the runtime"): its carried values
-are intervals, a local assigned in an undecided `If` of a pass holds the hull of
-both arms (the existing target answers `entire` there), and one whose values are
-not read is removed; a `Break` and a `Continue` compile, and a pass whose flag
-of a `Break` is undecided throws the error of `_IA.decided()` (the whole range);
-a `Return` declines in the slice. A string seed and `Random` of a domain decline
-in the lowering.
+and integrals (below). `Haversine`, `Zeta`, `FresnelC`, `FresnelS` (the kernel
+`_IA.fresnelS` misses S(1.5) by 4 ulps, more than its outward ulp) and the
+complex and colour operations have no spelling and decline (a cause of the mode
+ends with "on interval-js"). A `Loop` is lowered as on JavaScript ("Loops and
+the runtime"): its carried values are intervals, a local assigned in an
+undecided `If` of a pass holds the hull of both arms (the existing target
+answers `entire` there), and one whose values are not read is removed; a `Break`
+and a `Continue` compile, and a pass whose flag of a `Break` is undecided throws
+the error of `_IA.decided()` (the whole range); a `Return` declines in the
+slice. A string seed and `Random` of a domain decline in the lowering.
 
 Lists. What the lowering makes of a list (sections "Lists" and "Tuples") is
 printed with the spellings of the mode, and what it declines for JavaScript

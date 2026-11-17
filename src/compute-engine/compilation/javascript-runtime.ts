@@ -7121,6 +7121,8 @@ export const REAL_FUNCTIONS = Object.freeze({
   },
   erf: (x: number): number => erf(x),
   erfc: (x: number): number => erfc(x),
+  fresnelc: (x: number): number => fresnelC(x),
+  fresnels: (x: number): number => fresnelS(x),
   gamma: (x: number): number =>
     Number.isInteger(x) && x <= 0 ? Infinity : gamma(x),
   gammaln: (x: number): number => lnAbsGamma(x),

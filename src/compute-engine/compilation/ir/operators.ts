@@ -251,6 +251,8 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Arcsch',       1,          rc('acsch', 1),                { fold: F.acsch }),
   row('Erf',          1,          [[[R], R, 'erf']],             { fold: F.erf }),
   row('Erfc',         1,          [[[R], R, 'erfc']],            { fold: F.erfc }),
+  row('FresnelC',     1,          [[[R], R, 'fresnelc']],        { fold: F.fresnelc }),
+  row('FresnelS',     1,          [[[R], R, 'fresnels']],        { fold: F.fresnels }),
   row('Gamma',        1,          [[[R], R, 'gamma']],           { fold: F.gamma }),
   row('GammaLn',      1,          [[[R], R, 'gammaln']],         { fold: F.gammaln }),
   // An integer operand first: GLSL spells `factorial.int` only.
