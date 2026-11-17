@@ -93,6 +93,10 @@ const LITERAL_WORDS: Readonly<Record<string, string>> = {
   Missing: 'missing',
 };
 
+/** The functions that the value mode writes as a call, not in the notation of
+ * the engine's textual form. */
+const CALL_FORM_FUNCTIONS = ['Abs', 'Norm', 'Root'] as const;
+
 /**
  * The text of a value in the human-facing value mode: the engine's textual
  * form (`toString()`), with the symbols written as Epsil writes them. The
@@ -101,7 +105,9 @@ const LITERAL_WORDS: Readonly<Record<string, string>> = {
  * library constant has its Epsil spelling (`integers`), and another symbol is
  * written as Epsil writes it (`a1`). A symbol that the textual form does not
  * quote (`x`, `pi`) keeps its form, and so does the name of a function,
- * which the textual form does not quote (`QuotientRing(integers, 3)`). A lazy
+ * which the textual form does not quote (`QuotientRing(integers, 3)`). An
+ * absolute value, a norm and a root are calls (`abs(a)`, `norm(M, 3)`,
+ * `root(2, 3)`), not the `|a|` and `||M||` of the textual form. A lazy
  * collection shows the same preview as `toString()`.
  */
 export function epsilValueText(value: Expression): string {
@@ -114,6 +120,11 @@ export function epsilValueText(value: Expression): string {
       if (!materialized.isLazyCollection) shown = materialized;
     }
     const engine = value.engine;
+    // A symbol or a function name whose Epsil spelling the session binds keeps
+    // its MathJSON name, so that the text reads back as the value.
+    const spelling = {
+      isBound: (name: string) => engine.lookupDefinition(name) !== undefined,
+    };
     const symbols: Record<string, string> = {};
     // Every place that `toAsciiMath` prints a symbol from: the operands of a
     // function, the values of a dictionary and the slots of an object. The
@@ -126,18 +137,19 @@ export function epsilValueText(value: Expression): string {
         const name = node.symbol;
         if (Object.hasOwn(symbols, name)) return;
         if (!toAsciiMath(node).startsWith('"')) return;
-        symbols[name] =
-          LITERAL_WORDS[name] ??
-          serializeEpsil(name, {
-            isBound: (spelling) =>
-              engine.lookupDefinition(spelling) !== undefined,
-          });
+        symbols[name] = LITERAL_WORDS[name] ?? serializeEpsil(name, spelling);
       } else if (isFunction(node)) node.ops.forEach(collect);
       else if (isDictionary(node)) node.values.forEach(collect);
       else if (isObject(node)) node._slots.forEach(collect);
     };
     collect(shown);
-    return toAsciiMath(shown, { symbols });
+    // The textual form writes `Abs` as `|a|`, `Norm` as `||M||` (without its
+    // second operand) and `Root` as `root(3)(2)`, which Epsil cannot read;
+    // here each is a call with the Epsil spelling of its name.
+    const functions: Record<string, string> = {};
+    for (const name of CALL_FORM_FUNCTIONS)
+      functions[name] = serializeEpsil(name, spelling);
+    return toAsciiMath(shown, { symbols, functions });
   } catch {
     // `toString()` never throws and turns a failure into a message.
     return value.toString();

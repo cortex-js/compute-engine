@@ -5,6 +5,7 @@ import {
   CliUsageError,
 } from '../../src/cli/arguments';
 import {
+  epsilValueText,
   formatDiagnostics,
   formatValue,
   hasErrors,
@@ -144,10 +145,35 @@ describe('Epsil CLI value output', () => {
       'type P = object{flag: boolean, n: integer}\nlet p = P(flag: 1 == 1, n: 2)\np',
       'P(flag: true, n: 2)',
     ],
+    // An absolute value, a norm and a root are calls that Epsil reads back,
+    // not `|a|`, `||M||` or `root(3)(2)`.
+    ['abs(a)', 'abs(a)'],
+    ['abs(x + y*i)', 'abs(x + i * y)'],
+    ['norm([a, b])', 'sqrt(abs(a)^2 + abs(b)^2)'],
+    ['norm([[1, 2], [3, 4]], 3)', 'norm([[1,2],[3,4]], 3)'],
+    ['root(2, 3)', 'root(2, 3)'],
+    ['let abs = 3; Abs(a)', 'Abs(a)'],
   ])('%s', async (source, expected) => {
     const { io, stdout } = makeIo();
     expect(await main(['-e', source], io)).toBe(0);
     expect(stdout()).toBe(`${expected}\n`);
+  });
+
+  // The printed text of an absolute value, a norm and a root reads back as the
+  // same value.
+  test.each([
+    'abs(a)',
+    'abs(x + y*i)',
+    'norm([a, b])',
+    'norm([[1, 2], [3, 4]], 3)',
+    'root(2, 3)',
+  ])('%s reads back', (source) => {
+    const session = makeEpsilSession(0);
+    const value = session.evaluate(source).value;
+    const printed = epsilValueText(value);
+    const again = makeEpsilSession(0).evaluate(printed);
+    expect(again.diagnostics).toEqual([]);
+    expect(again.value.json).toEqual(value.json);
   });
 });
 

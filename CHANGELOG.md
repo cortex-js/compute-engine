@@ -171,6 +171,11 @@
   with its Epsil spelling (`integers`). The name of a function keeps the
   engine's form (`QuotientRing(integers, 3)`). The examples of the Epsil library
   reference show the same form.
+- **The `epsil` command line tool writes an absolute value, a norm and a root
+  as calls that Epsil can read.** `epsil -e 'abs(a)'` printed `|a|`,
+  `norm([[1, 2], [3, 4]], 3)` printed `||[[1,2],[3,4]]||` without its second
+  operand, and `root(2, 3)` printed `root(3)(2)`. They now print `abs(a)`,
+  `norm([[1,2],[3,4]], 3)` and `root(2, 3)`.
 - **`NDSolve` and `NDSolveFunction` evaluate on a fresh engine.** Before,
   `["NDSolve", ["Equal", ["D", ["y", "x"], "x"], ["y", "x"]], "y",
   ["Limits", "x", 0, 1], 1, 100]` stayed unevaluated unless the caller
