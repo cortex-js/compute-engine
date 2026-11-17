@@ -2858,8 +2858,13 @@ Landed on 2026-11-16, night:
   `bi0xqfjz6i`, `iej4fjazoe`, `ipwqctmqzm`, `lgp8zspg1s`, `rw6bgiznly`,
   `yac5cxfjm1`). The profile compiles all 17 with the float32 hash and the
   warning `float32-unsafe-argument` (174 shaders warn with the profile, 158
-  with the existing target). Not decided: carry the exact form over, or
-  rely on the host's CPU lane for a flagged curve.
+  with the existing target). Decided by the user on 2026-11-17: the exact
+  form is not carried over. Tycho (`tycho-desk`, from its source,
+  `src/plot-core/glsl-float32-bounds.ts`) draws a warned curve on its CPU
+  lane and keeps a warned field shader; 16 of the 17 are parametric curves
+  (the same picture, in float64 on the CPU), and one is a field,
+  `neyret/lgp8zspg1s` #2, whose noise pattern changes at Standard precision
+  (accepted). `gpu-exact-trig.ts` goes with the existing GLSL target.
 
 Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
 states, each step gated by a render audit with no lost series, no new hang
