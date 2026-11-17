@@ -52,10 +52,13 @@ node scripts/roadmap-batch.mjs --queue <out>/queue.json --count <n> --out <out>
 different work areas of `docs/COMPUTE-ENGINE-BOX-SPECIFICS.md` §9 (found from
 the source files that the issue names; the header of the script says how), and
 counts the other Compute Engine sessions that run. Run one batch at a time: a
-runner counts neither the sessions nor the areas of another runner. The script
-ends when every item has ended. Wait for its end notice; do not poll.
-Each session marks its item `in-progress` with `issues.mjs start` and removes it
-(or sets `fixed` for a Tycho issue) in its commit.
+runner counts neither the sessions nor the areas of another runner. When three
+other sessions already run and the user wants progress anyway, add
+`--one-at-a-time`: the script then runs one session at a time, also when the
+others run (the exception in §9), and does not read the areas. The script ends
+when every item has ended. Wait for its end notice; do not poll. Each session
+marks its item `in-progress` with `issues.mjs start` and removes it (or sets
+`fixed` for a Tycho issue) in its commit.
 
 ## 3. The report
 

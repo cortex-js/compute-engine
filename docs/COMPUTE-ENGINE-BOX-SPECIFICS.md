@@ -176,7 +176,9 @@ audits, sweeps and censuses; prefer them to `general-purpose`. Find code with th
 `scripts/where.ts`.
 
 Run at most three Compute Engine sessions at the same time, each in a different
-area. The areas, by the files they change most:
+area. One exception: a batch run with `scripts/roadmap-batch.mjs
+--one-at-a-time` adds one session to the others, because it runs its items one
+after the other. The areas, by the files they change most:
 
 | Area                       | Main files                                                                                   |
 | -------------------------- | -------------------------------------------------------------------------------------------- |

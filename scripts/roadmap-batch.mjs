@@ -23,6 +23,12 @@
  * script, and its parents, do not count: they only wait. A runner does not
  * count the sessions of another runner, so run one batch at a time.
  *
+ * With `--one-at-a-time`, the runner starts one session at a time, each item
+ * after the end of the one before, whatever the number of other sessions: the
+ * exception to the limit of three in §9. `--concurrency` and the areas are not
+ * read, because one batch session cannot conflict with another, and the runner
+ * does not know the areas of the other sessions.
+ *
  * The areas of an item are the work areas of §9 (compilation, evaluation,
  * library, latex, epsil, types) of every source file that the issue body
  * names: a path such as `latex-syntax/dictionary/foo.ts`, or a bare file name
@@ -57,6 +63,8 @@
  *                         flagged and low-priority candidates.
  *   --out <dir>           The output directory (required).
  *   --concurrency <n>     At most this many sessions in this repo (default 3).
+ *   --one-at-a-time       One batch session at a time, also when other
+ *                         sessions run (see above).
  *   --timeout-min <n>     Stop a session after this many minutes (default 180).
  *   --dry-run             Print the briefs and the launch order; start nothing.
  *
@@ -92,15 +100,17 @@ const { values } = parseArgs({
     'concurrency': { type: 'string', default: '3' },
     'timeout-min': { type: 'string', default: '180' },
     'dry-run': { type: 'boolean', default: false },
+    'one-at-a-time': { type: 'boolean', default: false },
   },
 });
 if (!values.queue || !values.out) {
   console.error(
-    'Usage: roadmap-batch.mjs --queue <file> --out <dir> [--items CE-1,CE-2] [--concurrency 3] [--dry-run]'
+    'Usage: roadmap-batch.mjs --queue <file> --out <dir> [--items CE-1,CE-2] [--concurrency 3 | --one-at-a-time] [--dry-run]'
   );
   process.exit(2);
 }
 
+const oneAtATime = values['one-at-a-time'];
 const concurrency = Number(values.concurrency);
 const timeoutMs = Number(values['timeout-min']) * 60_000;
 const queueFile = JSON.parse(readFileSync(values.queue, 'utf8'));
@@ -330,7 +340,8 @@ function writeStatus(finished = null) {
       started: batchStarted,
       updated: new Date().toISOString(),
       finished,
-      concurrency,
+      concurrency: oneAtATime ? 1 : concurrency,
+      oneAtATime,
       waiting: waitingNote,
       items: [...itemStatus.values()],
     };
@@ -445,7 +456,14 @@ function launch(item) {
 
 let waitingNoted = '';
 function schedule() {
-  while (pending.length > 0) {
+  if (oneAtATime) {
+    // The queue order decides; areas and other sessions are not read.
+    if (pending.length > 0 && running.size === 0) {
+      waitingNote = '';
+      launch(pending.shift());
+    }
+  }
+  while (!oneAtATime && pending.length > 0) {
     const others = otherSessions();
     if (running.size + others.length >= concurrency) {
       const note = `waiting: ${running.size} batch sessions, other sessions in this repo: ${others.join(', ') || 'none'}`;
