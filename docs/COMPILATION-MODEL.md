@@ -137,6 +137,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
   compiled derivative is the general form `y·x^(y - 1)`, whose factor is
   `0^0` there: `javascript` gives `NaN` and `interval-js` gives `empty` at
   the point box (a box that holds other points is not affected).
+- `interval-js` (crafted), the existing compiler: `FresnelS(x)` over
+  `x = [1.5, 1.7]` gives an upper end `0.6975049600820927`, below
+  `S(1.5) = 0.6975049600820931`: the kernel widens its result by one ulp,
+  less than its error there. The profile `ir` declines `FresnelS` and
+  `FresnelC` on `interval-js`; the line goes with the existing interval
+  target.
 - `interval-js` (crafted), both compilers: `y^x` over `y = [-1, 0]`,
   `x = [-1.5, -0.5]` gives the interval `[-∞, +∞]` with no mark, where the
   base 0 is a pole (`0^-1` is `~oo` in the interpreter). The enclosure holds
