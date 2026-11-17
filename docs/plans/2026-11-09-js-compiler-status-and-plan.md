@@ -2788,6 +2788,23 @@ Landed on 2026-11-16, night:
     to 70 µs a call at 1.11 to 1.24 (`pmciiapek6` #5, `u1ahfsr3vv` #2,
     `dmynve1fwf` #0, `buzq5x2t5n` #56, `jejjp1xikd` #2, `pixe2ayhtt` #5).
 
+- **The census of the default, run 3** (2026-11-17, main `c0e55ae7f`: the
+  suite with `CE_JS_PROFILE_PUBLIC=ir`, the test-only switch that tries the
+  profile first for every public compile; record
+  `_TASKS/2026-11-15-default-census/run3/`): the suite ends, no hang; 1,883
+  of 87,648 tests fail in 310 suites (run 2 on 2026-11-15: 1,676). By the
+  classes of the first census: 1,075 pin an emitted text; 135 a result
+  contract (a field of the result, a diagnostic, a warning); 75 a value
+  within the caveats; 54 a value where the profile differs by a decision of
+  the user or a crafted case; 36 other; 507 are not in the first census
+  (245 of them tests written since run 2, many for `interval-js` and for
+  the existing compilers' fixes), of which 369 pin a text, a diagnostic or
+  a result field, 31 compare a value and 107 are other. Not done: reading
+  the 31 value failures and the 107 others one by one. This is the distance
+  to making the profile the default: about 1,450 pinned texts to re-pin,
+  about 135 result-contract items to decide or implement, and 138 tests to
+  read.
+
 Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
 states, each step gated by a render audit with no lost series, no new hang
 and no build or render over 1.5 times): its `At` handler on GLSL and the
