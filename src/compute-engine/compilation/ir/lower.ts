@@ -1406,13 +1406,14 @@ export function lower(
             e,
             'Apply of a value that is not a function literal of one untyped parameter per argument'
           );
-        // A list argument of a literal of one parameter whose signature
-        // is scalar is `Map(f, list)`, the interpreter's route
-        // (`applyLiteralMaps()`) for a flat list of numbers. Another list
-        // or tuple argument declines: the interpreter maps a nested list to
-        // its leaves, a tuple is atomic, and a signature that takes a
+        // A list argument of a literal whose signature is scalar is mapped
+        // over, the interpreter's route (`applyLiteralMaps()`) for flat lists
+        // of numbers: `Map(f, list)` of one parameter, and of several the
+        // lists zipped and each scalar bound whole in every cell. Another
+        // list or tuple argument declines: the interpreter maps a nested list
+        // to its leaves, a tuple is atomic, and a signature that takes a
         // collection binds the argument whole.
-        const maps = args.length === 1 && literalParamsMap(f.type.type);
+        const maps = literalParamsMap(f.type.type);
         const values = args.map((a) => {
           const v = value(a)!;
           const t = type(v);
@@ -1427,16 +1428,29 @@ export function lower(
             );
           return v;
         });
-        // The argument is lowered once: its effects run once.
-        if (maps && type(values[0]).shape.length > 0)
-          return lists.over(
-            e,
-            lists.listSource(values[0]),
-            names[0],
-            f.ops[0],
-            false,
-            f
-          );
+        // The arguments are lowered once: their effects run once. Lists of
+        // different lengths are `incompatible-dimensions` for the
+        // interpreter (`applyLiteralMapped()`): of stated lengths, a decline.
+        const sources = values.map((v) =>
+          type(v).shape.length > 0 ? lists.listSource(v) : undefined
+        );
+        const mapped = sources.filter((s) => s !== undefined);
+        if (new Set(mapped.flatMap((s) => constant(s.length) ?? [])).size > 1)
+          decline(e, 'Apply of lists of different lengths');
+        if (mapped.length > 0) {
+          const length = lists.shortest(e, mapped);
+          const cell = (k: V) =>
+            withFrame(true, (frame) => {
+              names.forEach((n, i) =>
+                frame.names.set(n, {
+                  v: sources[i]?.at(k) ?? values[i],
+                  role: 'index',
+                })
+              );
+              return value(f.ops[0])!;
+            });
+          return lists.over(e, { length, at: (k) => k }, '', cell, false, f);
+        }
         return withFrame(false, (frame) => {
           names.forEach((n, i) =>
             frame.names.set(n, { v: values[i], role: 'index' })

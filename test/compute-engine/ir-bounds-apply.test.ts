@@ -396,7 +396,6 @@ describe('IR profile, batch G12: real bounds, real Ranges and Apply', () => {
     ['Apply of a typed parameter', ['Apply', fn(['Add', 'z', 1], ['Typed', 'z', "'integer'"]), 'x'], /Apply of a value that is not a function literal/],
     ['a complex bound', ['Sum', 'k', ['Limits', 'k', 1, 'Z']], /a bound that is not a real number/],
     ['a complex Range', ['Range', 'Z', 5], /a Range of an operand that is not a real number/],
-    ['Apply of a list and a scalar', ['Apply', fn(['Max', 'p', 'q'], 'p', 'q'), 'L', 'x'], /may map the function over it/],
     ['Apply of a tuple', ['Apply', fn(['Add', 'z', 1], 'z'), ['Tuple', 'x', 'y']], /may map the function over it/],
     ['an infinite upper bound', ['Sum', ['Divide', ['Power', 'x', 'k'], ['Factorial', 'k']], ['Limits', 'k', 0, 'PositiveInfinity']], /a bound that is a constant infinity or NaN/],
     ['an infinite bound of a series', ['Sum', ['Divide', 1, ['Power', 'k', 2]], ['Limits', 'k', 1, 'PositiveInfinity']], /a bound that is a constant infinity or NaN/],
@@ -413,6 +412,18 @@ describe('IR profile, batch G12: real bounds, real Ranges and Apply', () => {
       expect(d?.code).toBe('outside-profile');
       expect(d?.message).toMatch(cause);
     }
+  });
+
+  test('Apply of a literal of two parameters to a list and a scalar maps over the list', () => {
+    // It declined before batch G32 ("the interpreter may map the function
+    // over it"): the interpreter maps, each element with the scalar.
+    check(
+      ['Apply', fn(['Max', 'p', 'q'], 'p', 'q'), 'L', 'x'],
+      [
+        { x: 0.5, L: [1, 7, -2] },
+        { x: -3, L: [0.5, 5, 6] },
+      ]
+    );
   });
 
   test('a list argument for a scalar parameter is the function mapped over the list (neyret/rwhqbsp4wq)', () => {

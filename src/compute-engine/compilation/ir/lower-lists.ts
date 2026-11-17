@@ -671,6 +671,7 @@ export function listLowering(cx: Lowering) {
     reduction,
     build,
     mapLists,
+    shortest,
     mask,
     over,
     comprehension,

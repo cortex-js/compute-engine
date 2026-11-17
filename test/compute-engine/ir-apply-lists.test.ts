@@ -251,7 +251,6 @@ describe('IR profile, batch G18: Apply of a literal over a list (CE-1344)', () =
     ['a nested list (maps to the leaves: [[2, 2.3], [4, 5]])', ['Apply', ['Function', ['Add', 'k', 1], 'k'], ['List', ['List', 1, 'x'], ['List', 3, 4]]], /a list or a tuple argument of Apply/],
     ['a tuple (atomic: an incompatible-type error)', ['Apply', ['Function', ['Add', 'k', 1], 'k'], ['Tuple', 1, 'x']], /a list or a tuple argument of Apply/],
     ['a list of points (a point is atomic: a list of errors)', ['Apply', ['Function', ['Add', 'k', 1], 'k'], ['List', ['Tuple', 1, 'x'], ['Tuple', 3, 4]]], /a list or a tuple argument of Apply/],
-    ['several parameters with a list (maps: [4, 3.3])', ['Apply', ['Function', ['Add', 'a', 'b'], 'a', 'b'], ['List', 1, 'x'], 3], /a list or a tuple argument of Apply/],
     ['a literal whose parameter is a collection by its signature (bound whole: 2)', ['Apply', ['Function', ['Length', 'k'], 'k'], ['List', 1, 'x']], /a list or a tuple argument of Apply/],
     ['a list of booleans (maps: [False, True])', ['Apply', ['Function', ['Not', 'k'], 'k'], ['List', 'True', ['Less', 'x', 0]]], /a list or a tuple argument of Apply/],
     ['a typed parameter (maps: [2, 1.3]; every typed parameter of an Apply declines)', ['Apply', ['Function', ['Add', 'k', 1], ['Typed', 'k', "'real'"]], ['List', 1, 'x']], /one untyped parameter per argument/],

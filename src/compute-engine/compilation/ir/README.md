@@ -1661,16 +1661,32 @@ name.
 name, is the body with each parameter bound to its argument, the arguments
 lowered once, in order, before the body (as a `Block` of locals); a parameter
 shadows an input or a local of its name, and an argument reads the names
-outside. A flat list of numbers as the one argument of a literal of one
-parameter whose signature is scalar (`literalParamsMap()`, the test of the
-interpreter's `applyLiteralMaps()`, which maps the literal over the list) is
-`Map(literal, list)`:
-`Apply(k ↦ Which(k = m, 10^9, True, k), List(x^2, (x - 1)^2))`. Another list or
-tuple argument declines: a nested list (the interpreter maps to the leaves), a
-tuple and a list of points (atomic), a list of booleans, a list with several
-parameters, and a literal whose signature takes a collection (`k ↦ Length(k)`,
-which binds the list whole). A typed parameter and another count of arguments
-decline too; `Apply(g, x)` of a name is the call `g(x)` in the canonical form.
+outside. A literal whose signature is scalar (`literalParamsMap()`, the test
+of the interpreter's `applyLiteralMaps()`: every parameter scalar, or a tuple)
+maps over its flat list arguments of numbers, as the interpreter's
+`applyLiteralMapped()` in `library/core.ts`: one cell per index, the lists
+zipped, each scalar argument bound whole in every cell, the arguments evaluated
+once, in order, before the cells, and the body once per cell, in order. So one
+parameter is `Map(literal, list)`
+(`Apply(k ↦ Which(k = m, 10^9, True, k), List(x^2, (x - 1)^2))`), and
+`Apply((a, b) ↦ Max(0, a - b), P, t)` is `[0, 1, 4]` at `P = [-1, 2, 5]`,
+`t = 1` (each element, not the maximum of the list); `Apply((a, b) ↦ a + b, P,
+Q)` zips the lists. The build is over the shortest length (`shortest()`, as
+`Map` of several lists): lists of different lengths are
+`incompatible-dimensions` for the interpreter, so different stated lengths
+decline ("Apply of lists of different lengths"), and of different run-time
+lengths the value is unspecified (the static type does not show the error).
+A list argument that is a lazy collection with a draw (`Map(u ↦ u +
+Random(), P)`) is read by the interpreter one element at a time, each after
+the cell before it, where the code builds the argument first: the frame has
+several draw sites and carries the `seeded-draw-order` warning (as for one
+parameter before).
+Another list or tuple argument declines: a nested list (the interpreter maps to
+the leaves), a tuple and a list of points (atomic), a list of booleans or of
+complex numbers, and a literal whose signature takes a collection
+(`(a, b) ↦ Length(a) + b`, which binds every argument whole). A typed parameter
+and another count of arguments decline too; `Apply(g, x)` of a name is the call
+`g(x)` in the canonical form.
 `Apply(Derivative(g, n…), a1, …)` is the application of the function literal
 that the engine gives for the derivative at compile time, and `D(f, x, …)` the
 expression it gives (`derivativeClosedForm()`, the closed form of the existing

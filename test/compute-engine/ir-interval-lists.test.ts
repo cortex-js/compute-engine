@@ -648,11 +648,10 @@ describe('the interval mode, lists: declines', () => {
     [['RandomChoice', 'L', 2], /RandomChoice of another domain than Interval\(0, 1\)/],
     [['Comprehension', ['Multiply', 'j', 'k'], ['Element', 'j', ['Range', 1, 3]], ['Element', 'k', ['Range', 1, 3]]], /a list whose length is not one number/],
     // `Apply` over a list still declines where the interpreter does not map
-    // a flat list: a nested list, a tuple, a literal of several parameters.
+    // a flat list: a nested list, a tuple.
     [['Apply', K(['Multiply', 'k', x]), ['List', ['List', 1, 2], ['List', 3, 4]]], /a list or a tuple argument of Apply/],
     [['Apply', K(['Multiply', 'k', x]), 'P'], /a list or a tuple argument of Apply/],
     [['Apply', K(['Multiply', 'k', x]), ['Tuple', x, y]], /a list or a tuple argument of Apply/],
-    [['Apply', ['Function', ['Add', 'j', 'k'], 'j', 'k'], 'L', x], /a list or a tuple argument of Apply/],
     // A `Break` that is not a statement of a `Loop` body, and a `Return`,
     // decline in the pipeline.
     [loopOf(['Loop', addTo(['If', ['Greater', 't', 3], ['Break'], x]), ['Element', 'k', ['Range', 1, 9]]]), /a Break that is not a statement of a Loop body/],
