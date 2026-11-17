@@ -2524,16 +2524,55 @@ instructions and not regions, so a list expression or a sum written several
 times is computed once per occurrence (`neyret/odyxeaoouk` #0 at 1.5 times).
 `ir/` is 10,689 lines on `2bf11ff24`.
 
-In flight on 2026-11-16, evening: G27, the switches `unrollSums` and
-`unrollBuilds` on JavaScript (round 2 after the Claude review: a compile
-blow-up on nested constant sums, which exists on main in the interval mode
-and is fixed in the shared `writtenOut()`; a retry of the lowering with the
-switches off when it declines; one `_SYS.tick(n)` per function for the
-passes written out in it); G28 (round 2: an authored node inside a dissolved
-operand was read as created; a `Range` evaluated above a handled node;
-handlers on control-flow heads other than `Which` are ignored, as the type's
-comment says); G29 (Claude review running). Codex's second rounds are owed
-for G20 and G23 to G29.
+Landed on 2026-11-16, evening:
+
+- `6a50f248a20ef966c14f483959addd1a24a8047a` (G28, CE-1370): a compile
+  handler may defer or return an expression, in the profile and in the
+  existing compilers. The Claude reviews found, before landing: an authored
+  node inside an operand that canonicalization dissolves was read as created
+  and lost its handler; a `Range` evaluated by the interpreter above a
+  handled node; the memo of a handled node read the authored names; handlers
+  on control-flow heads other than `Which` (ignored, as the type's comment
+  says); marks kept after a decline in the existing compiler. The full suite
+  with the shadow measure found one more, after the reviews:
+  `compile-references.test.ts` ran out of memory, because the profile asked a
+  handler that reads `args[0].json` about the nodes of a shared value of 2^37
+  nodes as a tree (the shape of Tycho's height map). No handler is asked
+  about a node of a value of more than 20,000 nodes as a tree, or about a
+  node under one; such a node declines, as the existing compilers refuse
+  that value. `D` and `Integrate` over a node whose handler answers an
+  expression decline.
+- `d583f9aa5dce053a3dc22cc7287df80444ce660d` (G29, CE-1371): the mask of
+  another length, in the interpreter, the existing JavaScript compiler and
+  the profile. Found by the review: a mask over a lazy base that draws gave
+  other seeded values than the interpreter (a mask or a base of a mask with
+  an effect declines in the profile); `isMask()` walked a whole numeric
+  index. Corpus: 12 programs of `art/khpocp8io0` newly compile, no program
+  that compiled changes text.
+- Both: the text records of the three seams otherwise identical; the full
+  suite with the profile on and with the shadow measure, no failure;
+  baseline-declined-admitted public 85, GLSL 80, interval 44. `ir/` is
+  10,946 lines.
+- The build for Tycho: a local tarball of `d583f9aa5`, version
+  `0.193.0-tycho.d583f9aa5`, in `_TASKS/2026-11-15-tycho-builds/` (SHA-256
+  `d6fb39e814cc01d71bd80968eac55a7ef38d850f7f91588558ec09d93525e199`),
+  announced in `issues/CE-1370.md` and `issues/CE-1371.md` (both `fixed`)
+  and given to `tycho-3f`; no run is asked. Asked for its next run: a
+  complete JavaScript and GLSL dump, a `declared` flag per definition, the
+  count of `Which` cases that need a dispatch at run time.
+
+In flight: G27, the switches `unrollSums` and `unrollBuilds` on JavaScript,
+round 3 on main's head. Round 2 fixed the compile blow-up on nested constant
+sums in the shared `writtenOut()` (it existed on main in the interval mode),
+retries the lowering with the switches off when it declines (the interval
+mode included, at its owner's request), and charges the deadline for the
+passes written out (`Region.ticks`, printed as `_SYS.tick(n)` at the start
+of a region on JavaScript). Its verification found: `fold` of a constant
+`if` and `hoist` dissolve an arm without moving its ticks, so the deadline
+is missed again (blocking); what `scalarize` writes out is not charged; a
+deep nest of few terms still compiles in seconds (14 levels of 3 terms:
+21 s). Codex's reviews are owed for G20 and G23 to G29 (recorded with
+`~/.claude/review-common/owed.sh`, seven `range` entries of 2026-11-16).
 
 Queue from here (the items of this paragraph that the table above lists are
 done). Speed: colour constants computed once (59 programs), the two
