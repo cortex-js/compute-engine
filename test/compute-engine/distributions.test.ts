@@ -709,16 +709,150 @@ describe('distribution operators', () => {
       }
     });
 
-    test('discrete Quantile searches under .N()', () => {
-      // A discrete quantile has no closed form. Its value IS an exact
-      // integer, but the search compares the machine CDF against p with a
-      // tolerance (see `discreteQuantile` in `numerics/distributions.ts`), so
-      // it cannot certify that integer: an exact p a hair above a CDF jump
-      // would select the previous support point. The search therefore stays
-      // on the `.N()` route and `evaluate()` leaves the application symbolic.
+    test('discrete Quantile: exact under evaluate(), float under .N()', () => {
+      // `evaluate()` with exact operands decides each `CDF(k) ≥ p` with
+      // bigint rationals (`binomialQuantileExact`, `poissonQuantileExact`
+      // in `numerics/distributions.ts`) and gives an exact integer.
       const q = ce.box(['Quantile', ['BinomialDistribution', 10, ['Rational', 1, 2]], ['Rational', 1, 2]]);
-      expect(q.evaluate().operator).toBe('Quantile');
+      const qe = q.evaluate();
+      expect([qe.toString(), qe.isExact]).toEqual(['5', true]);
       expect(q.N().re).toBe(5);
+      const qp = ce
+        .box(['Quantile', ['PoissonDistribution', 9], ['Rational', 19, 20]])
+        .evaluate();
+      expect([qp.toString(), qp.isExact]).toEqual(['14', true]);
+    });
+
+    test('discrete Quantile under evaluate() is exact at a CDF jump', () => {
+      const B = ['BinomialDistribution', 10, ['Rational', 1, 2]];
+      // CDF(5) = 319/512: p at the jump gives 5, p just above it gives 6.
+      expect(ev(['Quantile', B, ['Rational', 319, 512]])).toBe('5');
+      expect(ev(['Quantile', B, ['Rational', 319001, 512000]])).toBe('6');
+      // 1/2 + 10^-13 is above CDF(0) = 1/2, so the quantile is 1. The
+      // float search of `.N()` takes it as 1/2 and gives 0.
+      expect(
+        ev([
+          'Quantile',
+          ['BinomialDistribution', 1, ['Rational', 1, 2]],
+          ['Add', ['Rational', 1, 2], ['Power', 10, -13]],
+        ])
+      ).toBe('1');
+      // Operands beyond the double range: the seed of the search is still
+      // finite, and an exact p that rounds to the double 1 is compared
+      // exactly (CDF(0) = 1 − 10^-500 ≥ 1 − 10^-400).
+      expect(
+        ev([
+          'Quantile',
+          ['BinomialDistribution', 3, ['Subtract', 1, ['Power', 10, -400]]],
+          ['Rational', 1, 2],
+        ])
+      ).toBe('3');
+      expect(
+        ev([
+          'Quantile',
+          ['BinomialDistribution', 1, ['Power', 10, -500]],
+          ['Subtract', 1, ['Power', 10, -400]],
+        ])
+      ).toBe('0');
+      // A Poisson p below 1 that rounds to the double 1: the float seed is
+      // +oo, and the steps start in the far tail.
+      const near1 = ev([
+        'Quantile',
+        ['PoissonDistribution', 3],
+        ['Subtract', 1, ['Power', 10, -17]],
+      ]);
+      expect(near1).toMatch(/^\d+$/);
+      const k1 = Number(near1);
+      const tail = (k: number) =>
+        ce
+          .box(['Subtract', ['CDF', ['PoissonDistribution', 3], k], ['Subtract', 1, ['Power', 10, -17]]])
+          .N().re;
+      expect([tail(k1) >= 0, tail(k1 - 1) < 0]).toEqual([true, true]);
+      // Further from 1, beyond the steps of the search: no value, no error.
+      expect(
+        ce
+          .box(['Quantile', ['PoissonDistribution', 3], ['Subtract', 1, ['Power', 10, -400]]])
+          .evaluate().operator
+      ).toBe('Quantile');
+      // The upper tail is summed when k is above n/2.
+      expect(
+        ev([
+          'Quantile',
+          ['BinomialDistribution', 10, ['Rational', 1, 2]],
+          ['Rational', 1023, 1024],
+        ])
+      ).toBe('9');
+      expect(
+        ev([
+          'Quantile',
+          ['BinomialDistribution', 10, ['Rational', 1, 2]],
+          ['Rational', 1024 * 1000 - 1, 1024 * 1000],
+        ])
+      ).toBe('10');
+    });
+
+    test('discrete Quantile under evaluate() agrees with the CDF', () => {
+      const dists = [
+        ['BinomialDistribution', 20, ['Rational', 1, 3]],
+        ['BinomialDistribution', 7, 0],
+        ['BinomialDistribution', 7, 1],
+        ['PoissonDistribution', 3],
+        ['PoissonDistribution', ['Rational', 7, 2]],
+        ['PoissonDistribution', ['Rational', 1, 1000]],
+      ];
+      for (const d of dists) {
+        for (let i = 1; i < 40; i++) {
+          const p = ['Rational', i, 40];
+          const k = ce.box(['Quantile', d, p]).evaluate();
+          expect(k.isExact).toBe(true);
+          const kv = k.re;
+          // CDF(k) ≥ p > CDF(k - 1): exactly for a binomial (a rational
+          // CDF), numerically for a Poisson (`e^-λ` times a rational, never
+          // equal to p).
+          const at = (j: number) => {
+            const diff = ce.box(['Subtract', ['CDF', d, j], p]).evaluate();
+            if (diff.sgn !== undefined) return diff.sgn;
+            return diff.N().re < 0 ? 'negative' : 'positive';
+          };
+          expect([JSON.stringify(d), i, at(kv)]).not.toContainEqual('negative');
+          if (kv > 0)
+            expect([JSON.stringify(d), i, at(kv - 1)]).toContainEqual(
+              'negative'
+            );
+        }
+      }
+    });
+
+    test('discrete Quantile under evaluate() stays symbolic outside the exact search', () => {
+      // A parameter that is not rational.
+      expect(
+        ce
+          .box(['Quantile', ['PoissonDistribution', ['Sqrt', 2]], ['Rational', 1, 2]])
+          .evaluate().operator
+      ).toBe('Quantile');
+      // A distribution above the size limits of the exact search.
+      expect(
+        ce
+          .box(['Quantile', ['PoissonDistribution', 1001], ['Rational', 1, 2]])
+          .evaluate().operator
+      ).toBe('Quantile');
+      expect(
+        ce
+          .box(['Quantile', ['BinomialDistribution', 25001, ['Rational', 1, 2]], ['Rational', 1, 2]])
+          .evaluate().operator
+      ).toBe('Quantile');
+      // A Poisson `λ` whose denominator is above 64 bits.
+      expect(
+        ce
+          .box(['Quantile', ['PoissonDistribution', ['Power', 10, -200000]], ['Rational', 1, 2]])
+          .evaluate().operator
+      ).toBe('Quantile');
+      // `.N()` still gives the value.
+      expect(
+        ce
+          .box(['Quantile', ['PoissonDistribution', 1001], ['Rational', 1, 2]])
+          .N().re
+      ).toBe(1001);
     });
 
     test('discrete Quantile(CDF(k)) = k at integer k', () => {

@@ -570,6 +570,9 @@ describe('empirical Quantile', () => {
 
   test('distribution branch still works (Poisson regression check)', () => {
     expect(ce.box(['Quantile', ['PoissonDistribution', 9], 0.95]).N().re).toBe(14);
+    // A float probability: `evaluate()` gives the float, as `.N()` does.
+    const q = ce.box(['Quantile', ['PoissonDistribution', 9], 0.95]).evaluate();
+    expect([q.re, q.isExact]).toEqual([14, false]);
   });
 });
 

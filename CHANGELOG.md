@@ -163,6 +163,18 @@
 
 ### Bug Fixes
 
+- **The quantile of a binomial or Poisson distribution evaluates without
+  `N`.** `Quantile(BinomialDistribution(10, 1/2), 1/2)` stayed unevaluated
+  under `evaluate()`; it now gives the exact integer `5`, and
+  `Quantile(PoissonDistribution(9), 19/20)` gives `14`. With exact
+  operands, each test `CDF(k) ≥ p` is decided exactly, so a `p` just above
+  a step of the CDF gives the next integer:
+  `Quantile(BinomialDistribution(1, 1/2), 1/2 + 10^(-13))` is `1` (under `N`
+  it stays `0`). A float operand gives a float, as for the other
+  distributions: in Epsil, `quantile(poissonDistribution(9), 0.95)` gives
+  `14`. An irrational parameter, a binomial with large `n` (`n·log₂(b)` above
+  50,000, for a success probability `a/b`) and a Poisson with `λ` above 1000 stay
+  unevaluated; `N` gives their value.
 - **`Series(LogGamma(x), x, +∞)` gives Stirling's series.** It stayed
   unevaluated; it now gives the series of `GammaLn(x)` at `+∞`,
   `x(ln x − 1) − ½ ln x + ½ ln(2π) + 1/(12x) − 1/(360x³) + O(x⁻⁵)`. The two

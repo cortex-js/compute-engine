@@ -36,8 +36,11 @@ import {
   evaluateRegularizedBetaBetween,
 } from './generalized-special-forms.js';
 import {
+  bigRational,
   binomialQuantile,
+  binomialQuantileExact,
   poissonQuantile,
+  poissonQuantileExact,
 } from '../numerics/distributions.js';
 import { asRational, asSmallInteger } from '../boxed-expression/numerics.js';
 import { isWalkableFiniteCollection } from '../collection-utils.js';
@@ -1034,10 +1037,9 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           if (!r) return undefined;
           return numericApproximation ? r.N() : r.evaluate();
         }
-        // A discrete quantile is a search, made under `.N()` only (above): a
-        // float does not start it.
-        const numeric =
-          !!numericApproximation || (!isDiscrete(dist) && hasFloat(dist, p));
+        // A float operand makes the quantile a float, as for `.N()`: for a
+        // discrete distribution, the float search (`distributionQuantile`).
+        const numeric = !!numericApproximation || hasFloat(dist, p);
         const r = distributionQuantile(ce, dist, p, pv, numeric);
         if (!r) return undefined;
         return floatIfFloat(dist, p, numeric ? r.N() : r.evaluate());
@@ -1431,20 +1433,35 @@ function distributionQuantile(
       const [n, p0] = distOps(dist);
       if (pv === 0) return ce.Zero;
       // The support tops out at `n`, whatever its magnitude; only a
-      // non-literal `n` leaves the top of the support unknown.
-      if (pv === 1) return isFiniteRealLiteral(n) ? n : ce.PositiveInfinity;
-      // A discrete quantile has no closed form. Its value IS an exact
-      // integer, but the only search available here is the FLOAT one in
-      // `numerics/distributions.ts`, and that search compares the machine CDF
-      // against `p` with a tolerance (`prob - 1e-12`) so that the
-      // `Quantile(CDF(k)) = k` round trip survives round-off. A tolerance
-      // cannot deliver the exact answer: an exact `p` a hair above a CDF jump
-      // (`Quantile(Binomial(1, 1/2), 1/2 + 10^-13)`) selects the previous
-      // support point. So the search stays on the `.N()` route, whose answer
-      // is a float and is allowed to be approximate; under `evaluate()` the
-      // application stays symbolic rather than claim an exact integer the
-      // search cannot certify.
-      if (!numericApproximation) return undefined;
+      // non-literal `n` leaves the top of the support unknown. An exact `p`
+      // below 1 can round to the double `1` (`1 − 10^-400`): it goes to the
+      // exact search below, which compares `p` itself.
+      if (pv === 1 && (numericApproximation || p.isSame(ce.One)))
+        return isFiniteRealLiteral(n) ? n : ce.PositiveInfinity;
+      // A discrete quantile has no closed form. Under `.N()` (or with a
+      // float operand) it is the float search of `numerics/distributions.ts`,
+      // which compares the machine CDF against `p` with a tolerance
+      // (`prob - 1e-12`) so that the `Quantile(CDF(k)) = k` round trip
+      // survives round-off, and can therefore miss by one support point when
+      // `p` is within that tolerance of a CDF jump
+      // (`Quantile(Binomial(1, 1/2), 1/2 + 10^-13)`). Under `evaluate()` with
+      // exact operands it is the exact search, which decides each
+      // `CDF(k) ≥ p` with bigint rationals; it gives no value (the
+      // application stays symbolic) for an operand that is not rational or
+      // a distribution too large for it.
+      if (!numericApproximation) {
+        const nr = asRational(n);
+        const p0r = asRational(p0);
+        const pr = asRational(p);
+        if (!nr || !p0r || !pr || BigInt(nr[1]) !== 1n) return undefined;
+        const k = binomialQuantileExact(
+          Number(nr[0]),
+          bigRational(p0r),
+          bigRational(pr),
+          ce._deadline
+        );
+        return k === undefined ? undefined : ce.number(k);
+      }
       const nn = litVal(n);
       const ppv = litVal(p0);
       if (nn === undefined || ppv === undefined || pv === undefined)
@@ -1455,10 +1472,23 @@ function distributionQuantile(
     case 'PoissonDistribution': {
       const [lambda] = distOps(dist);
       if (pv === 0) return ce.Zero;
-      if (pv === 1) return ce.PositiveInfinity;
-      // See the binomial above: the tolerance-based float search is a `.N()`
-      // route only.
-      if (!numericApproximation) return undefined;
+      // An exact `p` below 1 can round to the double `1`: it goes to the
+      // exact search (see the binomial above).
+      if (pv === 1 && (numericApproximation || p.isSame(ce.One)))
+        return ce.PositiveInfinity;
+      // See the binomial above: the float search under `.N()`, the exact one
+      // under `evaluate()`.
+      if (!numericApproximation) {
+        const lr = asRational(lambda);
+        const pr = asRational(p);
+        if (!lr || !pr) return undefined;
+        const k = poissonQuantileExact(
+          bigRational(lr),
+          bigRational(pr),
+          ce._deadline
+        );
+        return k === undefined ? undefined : ce.number(k);
+      }
       const lv = litVal(lambda);
       if (lv === undefined || pv === undefined) return undefined;
       return ce.number(poissonQuantile(lv, pv, ce._deadline));

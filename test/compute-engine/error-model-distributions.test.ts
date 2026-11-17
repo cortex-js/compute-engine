@@ -529,12 +529,10 @@ describe('Contract B — Quantile carrier', () => {
     }
   });
 
-  test('a discrete quantile searches under `.N()` only, agreeing with a direct cumulative sum', () => {
-    // The search in `numerics/distributions.ts` compares the machine CDF
-    // against `p` with a tolerance, so it cannot certify an EXACT integer:
-    // an exact `p` a hair above a CDF jump would select the previous support
-    // point. It therefore stays on the `.N()` route, where the answer is a
-    // float, and `evaluate()` leaves the application symbolic.
+  test('a discrete quantile at a float probability is a float, agreeing with a direct cumulative sum', () => {
+    // A float operand makes the result a float, so `evaluate()` gives the
+    // value of the float search of `numerics/distributions.ts`, as `.N()`
+    // does.
     const e = new ComputeEngine();
     const fact = [1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880, 3628800];
     const poiPmf = (k: number) => (Math.exp(-2) * 2 ** k) / fact[k];
@@ -553,13 +551,10 @@ describe('Contract B — Quantile carrier', () => {
       let k2 = 0;
       while (s2 + binPmf(k2) < p) s2 += binPmf(k2++);
       expect([p, e.box(['Quantile', BINOMIAL, p]).N().re]).toEqual([p, k2]);
-      expect([p, e.box(['Quantile', POISSON, p]).evaluate().operator]).toEqual([
-        p,
-        'Quantile',
-      ]);
-      expect([p, e.box(['Quantile', BINOMIAL, p]).evaluate().operator]).toEqual(
-        [p, 'Quantile']
-      );
+      const poi = e.box(['Quantile', POISSON, p]).evaluate();
+      expect([p, poi.re, poi.isExact]).toEqual([p, k, false]);
+      const bin = e.box(['Quantile', BINOMIAL, p]).evaluate();
+      expect([p, bin.re, bin.isExact]).toEqual([p, k2, false]);
     }
   });
 
