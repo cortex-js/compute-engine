@@ -284,6 +284,70 @@ describe('IR slice: the complex rows against the interpreter', () => {
   );
 });
 
+describe('IR slice: the complex quotient', () => {
+  // `cdiv` is the interpreter's `complexQuotient()`: the textbook formula
+  // where its intermediate values are ordinary doubles (bit for bit), the
+  // scaled division and the poles elsewhere. (It took the scaled division
+  // everywhere: `art/u53yhut60h`, 256 programs of the corpus at 1.27 times
+  // the existing compiler.)
+  const quotient = (a: Complex, b: Complex) =>
+    run(['Divide', 'Z', 'W'], { Z: a, W: b }) as Complex;
+  const interpreted = (a: Complex, b: Complex) => {
+    const c = (z: Complex) => ['Complex', z.re, z.im];
+    const v = ce
+      .box(['Divide', c(a), c(b)] as never)
+      .evaluate()
+      .N();
+    return { re: v.re, im: v.im };
+  };
+
+  test('the textbook formula at ordinary operands, bit for bit', () => {
+    let seed = 7;
+    const rnd = () =>
+      (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296 - 0.5;
+    for (let k = 0; k < 2000; k++) {
+      const a = { re: 20 * rnd(), im: 20 * rnd() };
+      const b = { re: 20 * rnd(), im: 20 * rnd() };
+      const d = b.re * b.re + b.im * b.im;
+      expect([a, b, quotient(a, b)]).toEqual([
+        a,
+        b,
+        {
+          re: (a.re * b.re + a.im * b.im) / d,
+          im: (a.im * b.re - a.re * b.im) / d,
+        },
+      ]);
+    }
+  });
+
+  test('the interpreter value at ordinary and at extreme operands', () => {
+    // prettier-ignore
+    const PAIRS: [Complex, Complex][] = [
+      [{ re: 1, im: 2 }, { re: 3, im: -4 }], [{ re: -0.5, im: 0 }, { re: 0, im: 2 }],
+      [{ re: 1, im: 0 }, { re: 1e-200, im: 1e-200 }], [{ re: 1, im: 0 }, { re: 1e308, im: 1e308 }],
+      [{ re: 1e308, im: 1e308 }, { re: 1, im: 1 }], [{ re: 1e-320, im: 1 }, { re: 3, im: 1e-320 }],
+      [{ re: 3, im: 4 }, { re: 5e-324, im: 0 }],
+    ];
+    for (const [a, b] of PAIRS) {
+      const got = quotient(a, b);
+      const want = interpreted(a, b);
+      expect([a, b, got.re, got.im]).toEqual([a, b, want.re, want.im]);
+    }
+  });
+
+  test('a zero, infinite or NaN divisor is as before: a pole, 0 or NaN', () => {
+    const z = { re: 1, im: 2 };
+    const pole = quotient(z, { re: 0, im: 0 });
+    expect(Number.isFinite(pole.re) && Number.isFinite(pole.im)).toBe(false);
+    expect(quotient({ re: 0, im: 0 }, { re: 0, im: 0 })).toEqual({
+      re: NaN,
+      im: NaN,
+    });
+    expect(quotient(z, { re: Infinity, im: 1 })).toEqual({ re: 0, im: 0 });
+    expect(quotient(z, { re: NaN, im: 1 })).toEqual({ re: NaN, im: NaN });
+  });
+});
+
 describe('IR slice: the complex mode', () => {
   test('a real input that leaves the reals is complex: Sqrt(x) at -4 is 2i', () => {
     expect(run(['Sqrt', 'x'], { x: -4 }, 'complex')).toEqual({ re: 0, im: 2 });

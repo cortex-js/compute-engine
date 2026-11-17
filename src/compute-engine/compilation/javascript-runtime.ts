@@ -154,6 +154,7 @@ import {
   cosSinPi,
   gamma as complexGamma,
   scaledComplexDivide,
+  textbookQuotientIsAccurate,
   hurwitzZetaComplexWithError,
   polylogComplex,
   ellipticKComplex,
@@ -7163,7 +7164,17 @@ export const COMPLEX_FUNCTIONS = Object.freeze({
     re: a.re * b.re - a.im * b.im,
     im: a.re * b.im + a.im * b.re,
   }),
-  cdiv: (a: Cx, b: Cx): Cx => SYS_HELPERS.cdivedge(a.re, a.im, b.re, b.im),
+  // The interpreter's quotient (`complexQuotient()`): the textbook formula
+  // where its intermediate values are ordinary doubles, as the existing
+  // compiler writes it; the scaled division and the poles otherwise.
+  cdiv: (a: Cx, b: Cx): Cx => {
+    const d = b.re * b.re + b.im * b.im;
+    const nr = a.re * b.re + a.im * b.im;
+    const ni = a.im * b.re - a.re * b.im;
+    return textbookQuotientIsAccurate(a.re, a.im, b.re, b.im, d, nr, ni)
+      ? { re: nr / d, im: ni / d }
+      : SYS_HELPERS.cdivedge(a.re, a.im, b.re, b.im);
+  },
   cpow: (a: Cx, b: Cx): Cx => SYS_HELPERS.cpow(a, b),
   croot: (a: Cx, b: Cx): Cx => SYS_HELPERS.croot(a, b),
   ...(Object.fromEntries(IR_KERNELS.map((f) => [f, SYS_HELPERS[f]])) as Pick<

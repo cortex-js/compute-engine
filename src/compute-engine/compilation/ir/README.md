@@ -342,6 +342,14 @@ exactly 0 is returned as the number, at the root and in the cells of a list;
 another complex value is a `{re, im}` object. A program whose root is real
 returns a number.
 
+The complex quotient (`cdiv`) is the interpreter's `complexQuotient()`: the
+textbook formula `(a·conj(b)) / |b|²` where its intermediate values are
+ordinary doubles (`textbookQuotientIsAccurate()`), bit for bit, and the
+scaled division with the poles (`cdivedge`) elsewhere. It took the scaled
+division for every quotient, about twice the time: the 256 programs of
+`art/u53yhut60h` (curves `(2t + i) / i^(t + c)`) ran at 1.27 times the
+existing compiler.
+
 The mode. A row with `leaves` (`Sqrt`, `Ln`, `Log`, `Power`, `Root`, `Arcsin`,
 `Arccos`, `Arcsec`, `Arccsc`, `Arcosh`, `Artanh`, `Arcoth`, `Arsech`) takes its
 complex signature in both modes when its operands are finite constants on which

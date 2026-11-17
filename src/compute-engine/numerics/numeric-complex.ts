@@ -195,7 +195,7 @@ export function complexQuotient(
  * intermediate values are bounded by the same operands), so a caller that
  * must keep its previous Smith result bit for bit can use it in this case.
  */
-function textbookQuotientIsAccurate(
+export function textbookQuotientIsAccurate(
   ar: number,
   ai: number,
   br: number,
