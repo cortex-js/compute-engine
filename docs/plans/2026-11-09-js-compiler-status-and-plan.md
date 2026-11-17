@@ -2561,18 +2561,17 @@ Landed on 2026-11-16, evening:
   complete JavaScript and GLSL dump, a `declared` flag per definition, the
   count of `Which` cases that need a dispatch at run time.
 
-In flight: G27, the switches `unrollSums` and `unrollBuilds` on JavaScript,
-round 3 on main's head. Round 2 fixed the compile blow-up on nested constant
-sums in the shared `writtenOut()` (it existed on main in the interval mode),
-retries the lowering with the switches off when it declines (the interval
-mode included, at its owner's request), and charges the deadline for the
-passes written out (`Region.ticks`, printed as `_SYS.tick(n)` at the start
-of a region on JavaScript). Its verification found: `fold` of a constant
-`if` and `hoist` dissolve an arm without moving its ticks, so the deadline
-is missed again (blocking); what `scalarize` writes out is not charged; a
-deep nest of few terms still compiles in seconds (14 levels of 3 terms:
-21 s). Codex's reviews are owed for G20 and G23 to G29 (recorded with
-`~/.claude/review-common/owed.sh`, seven `range` entries of 2026-11-16).
+G27, the switches `unrollSums` and `unrollBuilds` on JavaScript, went through
+three rounds. Round 2 fixed the compile blow-up on nested constant sums in
+the shared `writtenOut()` (it existed on main in the interval mode), added
+the retry of the lowering with the switches off when it declines (the
+interval mode included, at its owner's request), and charged the deadline
+for the passes written out (`Region.ticks`). Its verification found that
+`fold` of a constant `if` and `hoist` dissolved an arm without moving its
+ticks, that what `scalarize` writes out was not charged, and that a deep
+nest of few terms still compiled in seconds (14 levels of 3 terms: 21 s).
+Codex's reviews are owed for G20, G23 to G30 (recorded with
+`~/.claude/review-common/owed.sh`, nine `range` entries of 2026-11-16).
 
 User, 2026-11-16, evening, on that finding: "I am very lenient regarding
 iteration cap checks and other deadline while executing compiled code. Hosts
@@ -2596,6 +2595,47 @@ point of NaN out of range; 33 of the 51 then compile, 12 of the others meet
 `Repeat`), a list or tuple argument of `Apply` 29, `Repeat` 23, a list where
 a scalar is required 15, `Multiply` of a list of points and another shape 10;
 GLSL: loops that can run more passes than the budget 42, a `vars` entry 13.
+
+Landed on 2026-11-16, night:
+
+- `79e249839991b6832843b8f11f6efa34f894e291` (G30): on JavaScript, `At` with
+  a run-time index of a list of booleans (`atu`, `undefined` out of range)
+  and of a list of real points (`atp`, a point of NaN, the interpreter's
+  value). A first form also admitted rows and complex numbers; its
+  verification found that a nested read of an absent row threw, and no
+  corpus program reads one, so those keep the decline. 33 of the 51 programs
+  compile.
+- `c17ba79f97bfb25d9c40f8673301dced3522739c` (G27): sums and products of
+  constant bounds (at most 100 passes) and lists of a constant length (at
+  most 16) are written out on JavaScript. 648 corpus programs change text,
+  none in value; the largest gains run at 0.20 to 0.81 of main's time. The
+  deadline charge is removed (the user's ruling above). The nests: a static
+  count of the bodies (`bodies()`), `looped` and a hard stop after the first
+  refusal by a limit; every nest measured compiles in under 0.3 s on
+  JavaScript and in the interval mode, where main took seconds to over 90 s.
+- The replay on that head: JavaScript 9,294 of 9,503 (97.8%), GLSL 3,786 of
+  3,855 (98.2%); median time 0.741 of the existing compiler; 67 programs
+  above 1.5, 19 above 2, 7 above 3. Largest decline causes left, JavaScript:
+  `Repeat` 35, a list or tuple argument of `Apply` 29, a list where a scalar
+  is required 20, `Multiply` of a list of points and another shape 10. `ir/`
+  is 11,082 lines.
+
+Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
+states, each step gated by a render audit with no lost series, no new hang
+and no build or render over 1.5 times): its `At` handler on GLSL and the
+interval target returns an expression (declines on the handler 24 to 0 and
+19 to 0); its `Which` handler on JavaScript returns the broadcast as an
+expression (2 to 0); its `At` handler on JavaScript returns an expression
+when the types settle the case (145 to 9). No `Which` case of those states
+needs a dispatch at run time; 9 `At` calls of 2 states do. The largest
+decline it then saw, 84 calls of the run-time index of lists of points, is
+G30's; none of the 84 reads a list of lists. Its other causes, for the queue:
+"the value of L, which has an effect", "elements of two types" for a `List`
+of three products, "arms of two types" for a literal `List` arm beside a
+list expression, a value that reads the index of another binding,
+`Ordering`, `Unique`. Tycho lands the conversion with the adoption of the CE
+release that holds CE-1370 and CE-1371. G30 and G27 are not in that
+tarball; the next one is packed when Tycho or the user asks.
 
 Queue from here (the items of this paragraph that the table above lists are
 done). Speed: colour constants computed once (59 programs), the two
