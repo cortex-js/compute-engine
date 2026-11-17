@@ -167,6 +167,25 @@
   `n = 4t² + 1`, so it answered `False` for 13, 25 and 41 and `True` for 17
   and 37. It now answers `True` exactly for `n = t² + (t + 1)²`: 1, 5, 13,
   25, 41, 61, 85, 113, … (OEIS A001844).
+- **The compiled code of a function that is written with an operator keeps
+  its parentheses under another operator.** The JavaScript and GLSL
+  compilers wrote the code of some functions as an infix expression and put
+  it with no parentheses into the operator around it, which then applied to
+  a part of it. With `x` and `b` parameters, `2 / \operatorname{hav}(x)`
+  compiled to `2 / (1 - Math.cos(x)) / 2`, a quarter of the value (since
+  0.51.0);
+  `2 / \operatorname{sech}(x)` to `2 / Math.cosh(x)` and
+  `2 / \operatorname{csch}(x)` to `2 / Math.sinh(x)` (since 0.26.0);
+  `2·\operatorname{frac}(b)` to `2 * b - Math.floor(b)`, `7.5` at
+  `b = 7.25` where `evaluate()` gives `0.5`; `2 / H_x` (`HarmonicNumber`) to
+  `2 / _SYS.digamma(x + 1) + 0.577…` (since 0.189.0, on GLSL too). The
+  selected branch of an `If` whose condition is decided by the types had the
+  same defect: `2·If(2 < 3, x + 1, 0)` compiled to `2 * x + 1`, `3` at
+  `x = 1` for `4`; so had a type ascription, `2·Typed(x + 1, 'real')`, and
+  the code that the `compile` handler of a user operator returns. Such
+  code is now in parentheses when it is an operand, unless it is a name, a
+  number, a call or another expression that an operator takes whole:
+  `2 / ((1 - Math.cos(x)) / 2)`, `2 * (x + 1)`.
 - **The `epsil` command line tool writes booleans and symbols without
   quotes.** A result printed a symbol of more than one letter in quotes, so it
   looked like a string: `epsil -e '[1 == 1, x, "s", a1]'` printed

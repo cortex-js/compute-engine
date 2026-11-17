@@ -13,6 +13,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { BaseCompiler } from './base-compiler.js';
+import { closingBracket } from './code-primary.js';
 import { asRational } from '../boxed-expression/numerics.js';
 import {
   negativeBaseRealPowFromRational,
@@ -950,28 +951,19 @@ function foldComplexCall(
  * The text between a redundant outer parenthesis pair — the whole code is one
  * parenthesized group — or `undefined` when it is not of that shape.
  *
- * The scan counts parentheses, which is only a reliable reading of the code
- * when no parenthesis can be part of something else. Emitted code that
- * contains a QUOTE may hold one inside a string literal, so any quote
- * character declines the whole reading rather than risk cutting a group at the
- * wrong place. That is the same conservatism the reader itself has: it knows
+ * The scan (`closingBracket()`) counts brackets. Emitted code that contains a
+ * QUOTE declines the whole reading: the reader that evaluates the body knows
  * no string grammar.
  */
 function parenthesizedBody(code: string): string | undefined {
   const text = code.trim();
   if (!text.startsWith('(') || !text.endsWith(')')) return undefined;
   if (/['"`]/.test(text)) return undefined;
-  let depth = 0;
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === '(') depth += 1;
-    else if (text[i] === ')') {
-      depth -= 1;
-      // The opening parenthesis closes before the end, so the code is not one
-      // group (`(a) * (b)`).
-      if (depth === 0 && i !== text.length - 1) return undefined;
-    }
-  }
-  return depth === 0 ? text.slice(1, -1) : undefined;
+  // The opening parenthesis closes before the end, so the code is not one
+  // group (`(a) * (b)`).
+  return closingBracket(text, 0) === text.length - 1
+    ? text.slice(1, -1)
+    : undefined;
 }
 
 /** The folded `value` spelled for `dialect`, followed by the unfolded `rest`.

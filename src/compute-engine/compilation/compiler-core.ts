@@ -483,6 +483,7 @@ import {
   throwStaticTypeError,
 } from './compile-static-type-error.js';
 import { isLibraryOperator } from './builtin-callback.js';
+import { operandCode } from './code-primary.js';
 
 export function compile(
   expr: Expression | undefined,
@@ -3491,8 +3492,11 @@ export function compileExpr(
   // handler (`compileExprCustomHandler`). It returns the code it wrote,
   // `CUSTOM_HANDLER_DECLINED` when the handler ran and declined, or
   // `undefined` when there is no handler.
+  // Its code is the source of one expression, which can be infix: it is an
+  // operand, as a target handler's code is (`operandCode()`).
   const custom = compileExprCustomHandler(engine, h, args, target, node);
-  if (custom !== undefined && custom !== CUSTOM_HANDLER_DECLINED) return custom;
+  if (custom !== undefined && custom !== CUSTOM_HANDLER_DECLINED)
+    return operandCode(custom, prec);
 
   // After the per-operator handler: a user operator that supports these
   // operand types lowers them itself.
@@ -3557,8 +3561,11 @@ export function compileExpr(
   sub = compileExprStatementHead(h, args, target, node);
   if (sub !== undefined) return sub;
 
+  // A selection whose condition has a constant type is written as the code
+  // of the branch it selects, which can be infix (`x + 1`): it is an operand,
+  // put in parentheses unless it is a primary (`operandCode()`).
   sub = compileExprSelection(engine, h, args, target, node);
-  if (sub !== undefined) return sub;
+  if (sub !== undefined) return operandCode(sub, prec);
 
   sub = compileExprMatchOrBlock(engine, h, args, prec, target, node);
   if (sub !== undefined) return sub;
@@ -3605,8 +3612,10 @@ export function compileExpr(
   // Shared user-function definitions retain their own representations, so an
   // ascription cannot recompile a callee differently for one call site.
   // Analysis and code generation make these choices in compileExprTyped.
+  // The ascription is written as the code of its value, which can be infix:
+  // it is an operand, as a selection is.
   sub = compileExprTyped(engine, h, args, target, node);
-  if (sub !== undefined) return sub;
+  if (sub !== undefined) return operandCode(sub, prec);
 
   // A qualified protocol call — `Comparable.compare(x, y)` — canonicalizes
   // to `Apply(Field(Comparable, "compare"), x, y)` and STAYS that (the

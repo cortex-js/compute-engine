@@ -29,6 +29,7 @@ import { tempVar, withBoundScope } from './compiler-naming.js';
 import { compileValueOperand } from './compile-statements.js';
 import { typedTemp } from './compile-declarations.js';
 import { wholeTupleCall } from './compile-assignment-checks.js';
+import { operandCode } from './code-primary.js';
 
 /**
  * The call of a function whose lowering is a function of the target. A case
@@ -146,9 +147,14 @@ export function compileExprFunctionCall(
     // into an enclosing `s * …` without parentheses yielded
     // `s * vec2(a, b) + vec2(c, d)`, read as `(s * P) + Q`. Wrapping here on
     // `op[1] < prec` mirrors the infix path's own rule verbatim.
+    //
+    // The code of a head with NO infix spelling is written as its handler
+    // chooses, and can be infix (`(1 - Math.cos(x)) / 2` for `Haversine`).
+    // It is an operand: in an operand position (`prec > 0`) it is put in
+    // parentheses unless it is a primary (`operandCode()`).
     const opPrec = target.operators?.(h)?.[1];
-    if (opPrec !== undefined && opPrec < prec) return `(${code})`;
-    return code;
+    if (opPrec !== undefined) return opPrec < prec ? `(${code})` : code;
+    return operandCode(code, prec);
   }
   return undefined;
 }
