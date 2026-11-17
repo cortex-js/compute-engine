@@ -31,6 +31,7 @@ import {
   loopPasses,
   regionsOf,
   useIndex,
+  type IRType,
   type Region,
 } from './ir.js';
 import {
@@ -115,6 +116,64 @@ function amplifiedTrigMemo(): (u: Expression) => boolean {
     return r;
   };
   return (u) => walk(u, true, false);
+}
+
+/** The NaN of a result of type `t`: a `float` or a `vecN`. */
+function nanOf(t: IRType): string | undefined {
+  const name = typeName(t);
+  const nan = 'uintBitsToFloat(0x7fc00000u)';
+  if (name === 'float') return nan;
+  return /^vec[234]$/.test(name) ? `${name}(${nan})` : undefined;
+}
+
+/**
+ * The printed lines of a program whose loops can run more passes in all
+ * than the budget (`budget()`: a run-time count as the budget, multiplied
+ * down the nesting, as the existing target bounds it), with one counter of
+ * every pass, `_gpu_ir_passes`, as the existing GLSL target counts them: a
+ * pass past the budget leaves its loop, and the result is NaN. Each `Sum`
+ * or `Product` is also limited by its own count. Unchanged when the bound
+ * is within the budget. A result that is not a number or a point declines.
+ */
+function counted(
+  printed: { body: string[]; functions: string[] },
+  result: IRType,
+  budget: () => number | undefined
+): { body: string[]; functions: string[] } {
+  const b = budget();
+  if (b === undefined) return printed;
+  const nan = nanOf(result);
+  if (nan === undefined)
+    throw decline(
+      `a ${typeName(result)} result of a program whose loops can run more passes than the iterationBudget (${b}) on glsl`
+    );
+  const pass = (lines: string[]) =>
+    lines.flatMap((line) => {
+      const loop = /^(\s*)for \(int \w+_i = /.exec(line);
+      return loop === null
+        ? [line]
+        : [line, `${loop[1]}  if (++_gpu_ir_passes > ${b}) break;`];
+    });
+  const lines = pass(printed.body);
+  const last = /^ {2}return (.*);$/s.exec(lines[lines.length - 1]);
+  if (last === null) throw new Error('slice GLSL printer: no return');
+  return {
+    body: [
+      '  _gpu_ir_passes = 0;',
+      ...lines.slice(0, -1),
+      `  ${typeName(result)} _gpu_ir_result = ${last[1]};`,
+      `  return _gpu_ir_passes > ${b} ? ${nan} : _gpu_ir_result;`,
+    ],
+    functions: [
+      // Guarded as the existing target's counter: a host that joins two
+      // counted programs in one shader declares it once.
+      '#ifndef _GPU_IR_PASSES_DECLARED',
+      '#define _GPU_IR_PASSES_DECLARED',
+      'int _gpu_ir_passes = 0;',
+      '#endif',
+      ...printed.functions.map((f) => pass(f.split('\n')).join('\n')),
+    ],
+  };
 }
 
 /** The warning `float32-unsafe-argument` of the existing target, once per
@@ -284,10 +343,12 @@ export function compileWithIrProfileGlsl(
       throw decline(
         `loops that can run more passes than the iterationBudget (${budget}) on glsl`
       );
-    const preamble = [...s.printed.helpers, ...s.printed.functions].join('\n');
+    const { body, functions } = counted(s.printed, entry.results[0], () =>
+      loopPasses(p, budget, def) <= budget ? undefined : budget
+    );
+    const preamble = [...s.printed.helpers, ...functions].join('\n');
     const code =
-      expressionOf(s.printed.body) ??
-      s.printed.body.map((line) => line.slice(2)).join('\n');
+      expressionOf(body) ?? body.map((line) => line.slice(2)).join('\n');
     const inputs = entry.paramNames;
     const lowered: Record<string, string> = {};
     entry.body.params.forEach((v, k) => {

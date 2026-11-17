@@ -152,9 +152,9 @@ const PROGRAMS: [Json, Point[]][] = [
   [['Round', 'x'], [{ x: 2.5 }, { x: -2.5 }, { x: 0.25 }]],
   [['Block', ['Declare', 't', 'real', 0], ['If', ['Less', 'x', 0], ['Assign', 't', 1], ['Assign', 't', 5]], ['Add', 't', 'x']], [{ x: -1 }, { x: 1 }]],
   // Loops of run-time counts, nested and one after the other: each is
-  // limited by its own count (the third point runs 15,000 passes in all,
-  // more than the budget of 10,000).
-  [['Sum', ['Sum', ['Multiply', 'k', 'j', 'x'], ['Limits', 'j', 1, 'm']], ['Limits', 'k', 1, 'n']], [{ n: 3, m: 4, x: 0.5 }, { n: 5, m: 0, x: 2 }, { n: 150, m: 100, x: 0.5 }]],
+  // limited by its own count, and all the passes by one counter (the third
+  // point runs 5,050 passes).
+  [['Sum', ['Sum', ['Multiply', 'k', 'j', 'x'], ['Limits', 'j', 1, 'm']], ['Limits', 'k', 1, 'n']], [{ n: 3, m: 4, x: 0.5 }, { n: 5, m: 0, x: 2 }, { n: 50, m: 100, x: 0.5 }]],
   [['Add', ['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 1, 'n']], ['Product', ['Add', 'k', 'x'], ['Limits', 'k', 1, 'm']]], [{ n: 3, m: 4, x: 0.5 }]],
   [['Sum', ['Multiply', ['Sum', ['Sin', ['Multiply', 'j', 'x']], ['Limits', 'j', 1, 'k']], 'y'], ['Limits', 'k', 0, 'n']], [{ n: 6, x: 0.5, y: 2 }]],
 ];
@@ -865,11 +865,7 @@ const chain = (head: string, n = 1_000) =>
   ce.function(
     head,
     Array.from({ length: n }, (_, i) =>
-      ce.box([
-        'At',
-        'S',
-        ['Add', ['Mod', ['Add', 'ix', i], 7], 1],
-      ] as never)
+      ce.box(['At', 'S', ['Add', ['Mod', ['Add', 'ix', i], 7], 1]] as never)
     )
   );
 /** The value of the `Add` chain. */
@@ -893,7 +889,11 @@ function storageShaders(
   const scalars = r.freeSymbols!.filter((n) => n !== sampler);
   const count = Array.isArray(expected) ? expected.length : undefined;
   const result =
-    count === undefined ? 'float' : count <= 4 ? `vec${count}` : `float[${count}]`;
+    count === undefined
+      ? 'float'
+      : count <= 4
+        ? `vec${count}`
+        : `float[${count}]`;
   const body = r.code.includes(';') ? r.code : `return ${r.code};`;
   return Array.from({ length: count ?? 1 }, (_, k) =>
     [
@@ -941,7 +941,9 @@ describe('IR profile on GLSL: storage', () => {
   test('the helper: one for every length; a function parameter is a sampler2D', () => {
     const r = glsl(['Add', ['At', 'S', 'ix'], ['gs', 'x']], STORAGE);
     expect(r.preamble!.match(/float _gpu_ir_texel\(/g)).toHaveLength(1);
-    expect(r.preamble).toMatch(/^float _fn_ir_\w+_gs\(float \w+, sampler2D \w+\)/m);
+    expect(r.preamble).toMatch(
+      /^float _fn_ir_\w+_gs\(float \w+, sampler2D \w+\)/m
+    );
     expect(glsl(['gq', 'S'], STORAGE).preamble).toMatch(
       /^float _fn_ir_\w+_gq\(sampler2D \w+\)/m
     );
@@ -1001,9 +1003,9 @@ describe('IR profile on GLSL: storage', () => {
       );
     }
     // A reduction and At are a loop and a read.
-    expect(glsl(['Sum', 'E65'], { storage: { E65: 'sampler2D' } }).success).toBe(
-      true
-    );
+    expect(
+      glsl(['Sum', 'E65'], { storage: { E65: 'sampler2D' } }).success
+    ).toBe(true);
   });
 
   test('a function that reads a list input of 6 elements declines on GLSL and compiles on JavaScript', () => {
@@ -1032,13 +1034,25 @@ describe('IR profile on GLSL: storage', () => {
     // The inner loop reads the index of the outer one: 2,000 passes of 1 + 7.
     expect(
       declined(
-        ['Sum', ['Sum', ['Multiply', ['At', 'S', 'i'], 'j'], ['Limits', 'i', 1, 7]], ['Limits', 'j', 1, 2000]],
+        [
+          'Sum',
+          ['Sum', ['Multiply', ['At', 'S', 'i'], 'j'], ['Limits', 'i', 1, 7]],
+          ['Limits', 'j', 1, 2000],
+        ],
         STORAGE
       )?.message
     ).toMatch(/more passes than the iterationBudget \(10000\)/);
     expect(
       glsl(
-        ['Sum', ['Sum', ['Multiply', ['At', 'S', 'i'], ['At', 'S', 'j']], ['Limits', 'j', 1, 7]], ['Limits', 'i', 1, 7]],
+        [
+          'Sum',
+          [
+            'Sum',
+            ['Multiply', ['At', 'S', 'i'], ['At', 'S', 'j']],
+            ['Limits', 'j', 1, 7],
+          ],
+          ['Limits', 'i', 1, 7],
+        ],
         STORAGE
       ).success
     ).toBe(true);
@@ -1058,7 +1072,10 @@ describe('IR profile: a point or list result of a user function', () => {
   test.each(RESULTS.map(([label, json, points]) => [label, json, points]))(
     '%s on JavaScript',
     (_, json, points) => {
-      const r = compile(ce.box(json as never), { profile: 'ir', fallback: false });
+      const r = compile(ce.box(json as never), {
+        profile: 'ir',
+        fallback: false,
+      });
       expect(r.profile).toBe('ir');
       for (const p of points as PointValue[]) {
         const value = [r.run!(p as never)].flat() as number[];
@@ -1100,7 +1117,10 @@ describe('IR profile: a point or list result of a user function', () => {
           return failures.push(`${name}: ${v.value} vs ${expected}`);
         if (
           !Number.isNaN(expected) &&
-          !(Math.abs(v.value! - expected) <= tolerance * Math.max(1, Math.abs(expected)))
+          !(
+            Math.abs(v.value! - expected) <=
+            tolerance * Math.max(1, Math.abs(expected))
+          )
         )
           failures.push(`${name}: ${v.value} vs ${expected}`);
       });
@@ -1115,7 +1135,11 @@ describe('IR profile: a point or list result of a user function', () => {
         const r = glsl(json, STORAGE);
         const existing = STORED_DECLINED.test(label)
           ? undefined
-          : compile(ce.box(json as never), { to: 'glsl', fallback: false, ...STORAGE });
+          : compile(ce.box(json as never), {
+              to: 'glsl',
+              fallback: false,
+              ...STORAGE,
+            });
         const first = interpretPoint(json, { ...points[0], S: SV });
         for (const p of points)
           for (const width of [1, 3, 7, 10]) {
@@ -1126,7 +1150,13 @@ describe('IR profile: a point or list result of a user function', () => {
             const textures = { S: { width, values: SV } };
             const at = `${label} at ${JSON.stringify(p)}, width ${width}`;
             storageShaders(r, first).forEach((source, k) =>
-              items.push({ name: `${at} [${k}]`, source, uniforms, textures, expected: expected[k] })
+              items.push({
+                name: `${at} [${k}]`,
+                source,
+                uniforms,
+                textures,
+                expected: expected[k],
+              })
             );
             // The same host shader with the existing target's text.
             if (existing !== undefined)
@@ -1162,7 +1192,10 @@ describe('IR profile: a point or list result of a user function', () => {
         // of 1,000, which the test above compiles without running.
         {
           name: 'Add of 100 reads at ix = 3',
-          source: storageShaders(compile(chain('Add', 100), { ...IR, ...STORAGE }), 0)[0],
+          source: storageShaders(
+            compile(chain('Add', 100), { ...IR, ...STORAGE }),
+            0
+          )[0],
           uniforms: { u_ix: 3 },
           textures: { S: { width: 3, values: SV } },
           expected: chainValue(3, 100),
@@ -1266,7 +1299,12 @@ describe('IR profile on GLSL: callerLocals', () => {
       values.forEach((v, k) => {
         const { name, expected } = items[k];
         if (!v.ok) return failures.push(`${name}: ${v.log}`);
-        if (!(Math.abs(v.value - expected) <= 1e-5 * Math.max(1, Math.abs(expected))))
+        if (
+          !(
+            Math.abs(v.value - expected) <=
+            1e-5 * Math.max(1, Math.abs(expected))
+          )
+        )
           failures.push(`${name}: ${v.value} vs ${expected}`);
       });
       expect(failures).toEqual([]);
@@ -1352,6 +1390,37 @@ describe('IR profile on GLSL: declines', () => {
     ['a reduction in a Sum of a run-time count', ['Sum', ['Multiply', ['Max', 'L6'], 'j'], ['Limits', 'j', 1, 'n']]],
   ])('admitted: %s', (_, json) => {
     expect(glsl(json).success).toBe(true);
+  });
+
+  test('loops of run-time counts over the budget in all: one counter, NaN past it', () => {
+    const nested = [
+      'Sum',
+      ['Sum', ['Multiply', 'k', 'j', 'x'], ['Limits', 'j', 1, 'm']],
+      ['Limits', 'k', 1, 'n'],
+    ];
+    const r = glsl(nested);
+    expect(r.preamble).toMatch(/^int _gpu_ir_passes = 0;$/m);
+    expect(r.code).toMatch(/^_gpu_ir_passes = 0;/);
+    expect(
+      r.code.match(/if \(\+\+_gpu_ir_passes > 10000\) break;/g)
+    ).toHaveLength(2);
+    expect(r.code).toMatch(
+      /return _gpu_ir_passes > 10000 \? uintBitsToFloat\(0x7fc00000u\) : _gpu_ir_result;$/
+    );
+    // A point result: the NaN point.
+    const point = glsl(['Tuple', nested, 'x']);
+    expect(point.code).toMatch(/\? vec2\(uintBitsToFloat\(0x7fc00000u\)\) :/);
+    // A boolean result declines; a single loop has no counter.
+    expect(declined(['Less', nested, 1])?.message).toMatch(
+      /a bool result of a program whose loops/
+    );
+    expect(
+      glsl(['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 1, 'n']]).code
+    ).not.toMatch(/_gpu_ir_passes/);
+    // With no budget, no counter.
+    expect(glsl(nested, { iterationBudget: Infinity }).code).not.toMatch(
+      /_gpu_ir_passes/
+    );
   });
 
   test('admitted: a Loop without iterationBudget, a Sum with one', () => {
@@ -1650,13 +1719,25 @@ describe('IR profile, batch G6: the rows on JavaScript', () => {
     // `Ln(x)/Ln(b)` gave 30 for `Ceil(Log(2^29, 2))` and 2 for
     // `Floor(Log(1000, 10))`.
     const cases: [Json, Point[]][] = [
-      [['Ceil', ['Log', 'x', 2]], [29, 31, 39, 47, 51].map((k) => ({ x: 2 ** k }))],
-      [['Floor', ['Log', 'x', 10]], [{ x: 1000 }, { x: 1e6 }, { x: 1e15 }]],
+      [
+        ['Ceil', ['Log', 'x', 2]],
+        [29, 31, 39, 47, 51].map((k) => ({ x: 2 ** k })),
+      ],
+      [
+        ['Floor', ['Log', 'x', 10]],
+        [{ x: 1000 }, { x: 1e6 }, { x: 1e15 }],
+      ],
       [['Equal', ['Log', 'x', 10], 3], [{ x: 1000 }]],
     ];
     for (const [json, points] of cases) check(json, points);
-    expect(g6(['Ceil', ['Log', 'x', 2]], 'javascript').run!({ x: 2 ** 29 } as never)).toBe(29);
-    expect(g6(['Equal', ['Log', 'x', 10], 3], 'javascript').run!({ x: 1000 } as never)).toBe(true);
+    expect(
+      g6(['Ceil', ['Log', 'x', 2]], 'javascript').run!({ x: 2 ** 29 } as never)
+    ).toBe(29);
+    expect(
+      g6(['Equal', ['Log', 'x', 10], 3], 'javascript').run!({
+        x: 1000,
+      } as never)
+    ).toBe(true);
   });
   test('the complex lane of the hyperbolic and reciprocal rows', () => {
     const engine = new ComputeEngine();

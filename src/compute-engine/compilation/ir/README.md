@@ -1532,11 +1532,17 @@ A program whose bound is over the budget declines: two nested `Sum`s of 10,000
 passes, a reduction of 6 elements that reads the index of a `Sum` of 2,000
 passes (`Sum(Max(L6·j), j = 1..2000)`), a `Loop` of
 10,000 passes around a `Sum` of a run-time count. Loops of run-time counts,
-nested or one after the other, compile, and can run more passes in all than
-the budget, where the existing GLSL target counts every pass in one counter
-and gives NaN past it: `Sum(Sum(i·j·x, j = 1..m), i = 1..n)` at `n = m = 200`
-is its value, 40,000 passes. With `iterationBudget: Infinity` there is no
-bound.
+nested or one after the other, compile. When their bound with a run-time count
+as the budget is over the budget, the code counts every pass in one counter,
+`_gpu_ir_passes`, as the existing GLSL target does (`counted()` of
+`adapter-glsl.ts`): a pass past the budget leaves its loop, and the result is
+NaN: `Sum(Sum(i·j·x, j = 1..m), i = 1..n)` at `n = m = 200` (40,000 passes) is
+NaN, at `n = m = 50` its value. Each `Sum` or `Product` keeps its own test, so
+one whose count is over the budget is NaN without running, and adds no pass
+to the counter. The declaration of the counter is guarded
+(`_GPU_IR_PASSES_DECLARED`). Such a program whose result is not a `float` or
+a `vec2` to `vec4` (a boolean, a list of more than 4 elements) declines. With `iterationBudget: Infinity` there
+is no bound and no counter.
 
 `Loop(body, Element(i, L), …)` is a statement whose value is `Nothing`: one
 counted loop per clause over the source of `L` (an input list, a list, a

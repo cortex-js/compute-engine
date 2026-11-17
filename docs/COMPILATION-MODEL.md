@@ -2412,9 +2412,9 @@ pass cap is the target's (`iterationBudget`, 10,000 by default), counted
 by loop: a `Sum` or a `Product` of more passes is `NaN`, and a program
 whose loops can run more passes in all, bounded at compile time (a constant
 count multiplied down the nesting, a run-time count as one pass), declines.
-Loops of run-time counts, nested or one after the other, are each limited
-by their own count and can run more passes in all than the cap, where the
-existing target counts every pass in one counter and gives `NaN` past it. It has no
+Loops of run-time counts, nested or one after the other, compile; when they
+can run more passes in all than the cap, the code counts every pass in one
+counter and gives `NaN` past the cap, as the existing target does. It has no
 NaN-safe helpers and no exact sine hash (no `float32Bounds`): an operand
 of `Mod` or `Fract` that the existing target flags has the warning
 `float32-unsafe-argument`, also where that target emits an exact form.
@@ -2869,7 +2869,9 @@ compiles the same function with the option itself gets the throw.
 
 The `mode` option selects how the compiled code computes numeric values:
 `strict`, `complex` or `bigint`. The `javascript` target offers the three
-modes, and `interval-js` and `glsl` offer `strict` only. A request for a mode that the target does not offer
+modes, and `interval-js` offers `strict` only. `glsl` offers `strict`, and
+`complex` with the profile `ir` (an input of type `number` is a `vec2`; the
+existing GLSL target offers `strict` only). A request for a mode that the target does not offer
 declines with the code `'unsupported-mode'`. The default is `strict` on
 every target. The first two modes select how the code handles complex
 values (below). The `bigint` mode selects how it computes integers ("The
