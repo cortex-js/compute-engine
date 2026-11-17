@@ -6302,10 +6302,11 @@ function gammaOfRealShifted(x: Expression): Expression | undefined {
  * underflow) means the value underflowed past the exponent
  * range of a big decimal (a decimal exponent below about −9·10¹⁵, where its
  * `exp` saturates to 0): `Γ(-10^15 - 0.5)` would print as an exact-looking
- * `0`, so the expression stays unevaluated. An overflow past that range is
- * kept as `+oo`, as a double overflow is: it reads as "too large", which is
- * true (`Gamma(1e300).N()`, `Gamma(10^15 + 0.5).N()`). At machine precision
- * the double's `0` is kept, as for every machine number.
+ * `0`, so the expression stays unevaluated. An overflow past that range
+ * (`Γ(10^15 + 0.5)` is fine, `Γ(10^16)` is not) is NaN from `bigGamma` too, and
+ * stays unevaluated: the value is finite, so neither `+oo` nor `NaN` is
+ * true. At machine precision the double's `0` and `+oo` are kept, as for
+ * every machine number.
  */
 function gammaInRange(
   ce: ComputeEngine,
@@ -8111,7 +8112,12 @@ function evaluateGamma(
           x,
           (x) => gamma(x),
           (x) => bigGamma(engine, x, engine.precision),
-          (x) => gammaComplex(x)
+          // A real Γ has no complex value: a NaN from the bignum kernel (a
+          // value past the exponent range) must not cascade to the double
+          // kernel, which would answer `~oo` or 0.
+          (isNumber(x) && x.isComplex) || !bignumPreferred(engine)
+            ? (x) => gammaComplex(x)
+            : undefined
         )
       )
     : undefined;
@@ -10017,12 +10023,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               ? undefined
               : boxComplexResult(engine, z.value, false);
           }
-          return apply(
+          const complexArg = isNumber(x) && x.isComplex;
+          const value = apply(
             x,
             zeta,
             (x) => bigZeta(engine, x, engine.precision),
-            zetaComplex
+            // No cascade from a NaN real value (past the exponent range) to
+            // the double kernel, which would answer `~oo`.
+            complexArg || !bignumPreferred(engine) ? zetaComplex : undefined
           );
+          // A finite s with no value at the working precision: ζ(s) is past
+          // the exponent range of a big decimal, so stay unevaluated.
+          return bignumPreferred(engine) &&
+            !complexArg &&
+            value !== undefined &&
+            isNumber(value) &&
+            value.isNaN
+            ? undefined
+            : value;
         }
 
         // Exact values at integer literals (via exact Bernoulli rationals):
@@ -10336,16 +10354,27 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           [a, b].some((x) => !x.isComplex && x.isInteger === true && x.re <= 0)
         )
           return engine.ComplexInfinity;
-        return shouldNumericize(numericApproximation, a, b)
-          ? apply2(
-              a,
-              b,
-              beta,
-              (a, b) => bigBeta(engine, a, b, engine.precision),
-              (a, b) =>
-                betaComplex(a, typeof b === 'number' ? engine.complex(b, 0) : b)
-            )
-          : undefined;
+        if (!shouldNumericize(numericApproximation, a, b)) return undefined;
+        const value = apply2(
+          a,
+          b,
+          beta,
+          (a, b) => bigBeta(engine, a, b, engine.precision),
+          (a, b) =>
+            betaComplex(a, typeof b === 'number' ? engine.complex(b, 0) : b)
+        );
+        // Finite real operands with no value at the working precision: B is
+        // past the exponent range of a big decimal, so stay unevaluated.
+        return bignumPreferred(engine) &&
+          isNumber(a) &&
+          isNumber(b) &&
+          !a.isComplex &&
+          !b.isComplex &&
+          value !== undefined &&
+          isNumber(value) &&
+          value.isNaN
+          ? undefined
+          : value;
       }),
     },
 
