@@ -661,6 +661,90 @@ describe('distribution operators', () => {
     });
   });
 
+  describe('D and Integrate use the closed form (CE-1379)', () => {
+    const realLine = ['Limits', 'x', 'NegativeInfinity', 'PositiveInfinity'];
+    const normal = ['NormalDistribution', 0, 1];
+
+    test('the integral of a density over the real line is 1', () => {
+      expect(ev(['Integrate', ['PDF', normal, 'x'], realLine])).toBe('1');
+      expect(
+        ev(['Integrate', ['Multiply', 'x', ['PDF', normal, 'x']], realLine])
+      ).toBe('0');
+    });
+
+    test('a definite and an indefinite integral of a density', () => {
+      expect(
+        ev(['Integrate', ['PDF', normal, 'x'], ['Limits', 'x', 0, 1]])
+      ).toBe('1/2 * Erf(sqrt(2)/2)');
+      expect(
+        ev([
+          'Integrate',
+          ['PDF', normal, 'x'],
+          ['Limits', 'x', 'Nothing', 'Nothing'],
+        ])
+      ).toBe('1/2 * Erf(sqrt(2)/2 * x)');
+      expect(
+        ev([
+          'Integrate',
+          ['PDF', ['ExponentialDistribution', 3], 'x'],
+          ['Limits', 'x', 0, 1],
+        ])
+      ).toBe('1 - e^(-3)');
+      expect(
+        ev([
+          'Integrate',
+          ['PDF', ['UniformDistribution', 0, 2], 'x'],
+          ['Limits', 'x', 0, 1],
+        ])
+      ).toBe('1/2');
+    });
+
+    test('the derivative of a distribution function is the density', () => {
+      expect(ev(['D', ['CDF', normal, 'x'], 'x'])).toBe(
+        ev(['PDF', normal, 'x'])
+      );
+      expect(ev(['D', ['CDF', ['ExponentialDistribution', 3], 'x'], 'x'])).toBe(
+        'Which(x < 0, 0, "True", 3e^(-3x))'
+      );
+      expect(ev(['D', ['CDF', normal, 'x'], 'x', 'x'])).toBe(
+        ev(['D', ['PDF', normal, 'x'], 'x'])
+      );
+    });
+
+    test('a distribution held by a symbol is read from its value', () => {
+      const ce2 = new ComputeEngine();
+      ce2.assign('d', ce2.box(normal));
+      const ev2 = (e: any) => ce2.box(e).evaluate().toString();
+      expect(ev2(['Integrate', ['PDF', 'd', 'x'], realLine])).toBe('1');
+      expect(ev2(['D', ['CDF', 'd', 'x'], 'x'])).toBe(ev2(['PDF', 'd', 'x']));
+    });
+
+    test('an integral of a closed form that does not evaluate keeps its integrand', () => {
+      expect(
+        ev([
+          'Integrate',
+          ['CDF', normal, 'x'],
+          ['Limits', 'x', 'NegativeInfinity', 0],
+        ])
+      ).toBe('int_(-oo)^(0)(CDF(NormalDistribution(0, 1), x) dx)');
+    });
+
+    test('a discrete distribution keeps its applications', () => {
+      // The mass is 0 off the integers: the closed form, which holds at the
+      // integers only, is not differentiated or integrated.
+      expect(ev(['D', ['CDF', ['PoissonDistribution', 2], 'x'], 'x'])).toBe(
+        'Apply(Derivative("CDF", 0, 1), PoissonDistribution(2), x)'
+      );
+      expect(
+        ev([
+          'Integrate',
+          ['PDF', ['PoissonDistribution', 2], 'x'],
+          ['Limits', 'x', 0, 1],
+        ])
+      ).toBe('int_(0)^(1)(PDF(PoissonDistribution(2), x) dx)');
+    });
+  });
+
   describe('exactness contract', () => {
     test('Normal CDF stays exact (no floats), .N() numericizes', () => {
       const s = ev(['CDF', ['NormalDistribution', 0, 1], 1]);

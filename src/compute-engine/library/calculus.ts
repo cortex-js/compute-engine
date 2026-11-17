@@ -67,6 +67,7 @@ import {
   RAW_ROLE,
   operandRolesFrom,
 } from './operand-roles.js';
+import { continuousDistributionClosedForms } from './distributions.js';
 import { isFunctionSymbolName } from '../boxed-expression/implicit-variable-rule.js';
 import {
   conditionalValue,
@@ -7414,6 +7415,11 @@ volumes
                   callOfFunctionParameter(ce, app, appOps, shadowed, replaced)
               );
 
+              // A density or a distribution function of a continuous
+              // distribution is differentiated in its closed form:
+              // `D(CDF(NormalDistribution(0, 1), x), x)` is the density.
+              f = continuousDistributionClosedForms(f, diffVars);
+
               return withOperandBindings(ce, f, replaced, () => {
                 const params = ops.slice(1);
                 if (params.length === 0) f = undefined;
@@ -8175,6 +8181,39 @@ volumes
             } finally {
               substitutedIntegrands.pop();
             }
+          }
+        }
+
+        // A density or a distribution function of a continuous distribution
+        // is integrated in its closed form:
+        // `∫_{−∞}^{+∞} PDF(NormalDistribution(0, 1), x) dx` is `1`
+        // (`continuousDistributionClosedForms`). When the integral of the
+        // closed form does not evaluate, the integral keeps the integrand as
+        // written, and the routes below try it. This needs bounds with no
+        // effect, since the routes below evaluate them again: with a bound
+        // such as `Random()`, the result stands as it is, and an integral
+        // that does not evaluate shows the closed form.
+        {
+          const lifted = liftedHere();
+          const names = ops.slice(1).flatMap((l) => {
+            const v = isFunction(l) ? sym(l.op1) : undefined;
+            return v !== undefined && v !== 'Nothing' ? [v] : [];
+          });
+          const closed = continuousDistributionClosedForms(lifted, names);
+          if (closed !== lifted) {
+            const value = ce
+              .function('Integrate', [closed, ...ops.slice(1)])
+              .evaluate({ numericApproximation });
+            if (
+              value.operator !== 'Integrate' ||
+              ops.slice(1).some((l) => l.isPure !== true)
+            )
+              return rebindIntegralResult(
+                ce,
+                value,
+                expression,
+                numericApproximation
+              );
           }
         }
 

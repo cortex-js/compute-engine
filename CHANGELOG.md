@@ -174,6 +174,16 @@
 
 ### Bug Fixes
 
+- **`Integrate` and `D` use the closed form of the density and the
+  distribution function of a continuous distribution.**
+  `∫_{−∞}^{+∞} PDF(NormalDistribution(0, 1), x) dx` is `1`, and
+  `D(CDF(NormalDistribution(0, 1), x), x)` is the density
+  `e^{−x²/2}/√(2π)`; the integral stayed unevaluated, and the derivative was
+  `Apply(Derivative(CDF, 0, 1), NormalDistribution(0, 1), x)`. This applies to
+  the normal, uniform and exponential distributions. The binomial and Poisson
+  distributions are discrete, and their `PDF` and `CDF` stay unevaluated in an
+  integral or a derivative.
+
 - **Several special functions evaluate without `N` at points where their
   exact value is a simple number.** `BesselJ(0, 0)` and `BesselI(0, 0)` are
   `1`, and `BesselJ(n, 0)` and `BesselI(n, 0)` are `0` for every other

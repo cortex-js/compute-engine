@@ -12,6 +12,7 @@ import {
   isAbsentValue,
   isFunction,
   isNumber,
+  isSymbol,
 } from '../boxed-expression/type-guards.js';
 import {
   dataConstraintError,
@@ -31,6 +32,7 @@ import {
   isRealLiteral,
 } from '../boxed-expression/infinite-point.js';
 import { parseType } from '../../common/type/parse.js';
+import { rewriteWithBinders } from '../boxed-expression/binders.js';
 import {
   evaluateGammaBetween,
   evaluateRegularizedBetaBetween,
@@ -57,8 +59,11 @@ import type {
 // (`NormalDistribution`, …), Mathematica-style. The generic `PDF`/`CDF`/
 // `Quantile` operators consume them and **lower to a closed form** — a plain
 // expression in the remaining symbolic arguments — so display, `simplify`,
-// `D`, `Integrate`, `compile`, and plotting all work with no
-// distribution-specific support. See `docs/plans/2026-07-04-statistics-design.md`.
+// `compile`, and plotting all work with no distribution-specific support.
+// `D` and `Integrate` hold their operand, and replace each `PDF` and `CDF` of
+// a continuous distribution by its closed form before they work
+// (`continuousDistributionClosedForms`). See
+// `docs/plans/2026-07-04-statistics-design.md`.
 //
 // The two regularized incomplete functions the discrete CDFs lower to
 // (`GammaRegularized`, `BetaRegularized`) are exposed as first-class special
@@ -1387,6 +1392,66 @@ function distributionCDF(
     }
   }
   return undefined;
+}
+
+/**
+ * `expr` with each `PDF(dist, x)` and `CDF(dist, x)` of a continuous
+ * distribution replaced by its closed form, or `expr` itself when it has
+ * none. `Integrate` and `D` hold their operand, so these applications reach
+ * them unevaluated, and the integration and the differentiation have no rule
+ * for them: `∫_{−∞}^{+∞} PDF(NormalDistribution(0, 1), x) dx` stayed
+ * unevaluated where the integral of the closed form is `1`.
+ *
+ * A discrete distribution keeps its applications. Its mass is `0` at every
+ * point that is not an integer, so a rule for the closed form, which holds
+ * at the integers only, would give a derivative that is not `0`. An
+ * application whose operator is not the library `PDF` or `CDF` (a user
+ * definition with the same name in a local scope) is kept too.
+ *
+ * A distribution held by a symbol (`d := NormalDistribution(0, 1)`) is read
+ * from its value, as `PDF` reads it when it evaluates. A symbol in
+ * `boundNames` (a variable of the integration or the differentiation) or
+ * bound inside `expr` is not read: its value is not the value of the bound
+ * variable.
+ */
+export function continuousDistributionClosedForms(
+  expr: Expression,
+  boundNames: readonly string[] = []
+): Expression {
+  if (!expr.has('PDF') && !expr.has('CDF')) return expr;
+  const ce = expr.engine;
+  const library = ce.contextStack[0]?.lexicalScope.bindings;
+  return rewriteWithBinders(
+    expr,
+    (s) => s,
+    undefined,
+    false,
+    undefined,
+    (app, ops, shadowed) => {
+      const name = app.operator;
+      if ((name !== 'PDF' && name !== 'CDF') || ops.length !== 2)
+        return undefined;
+      const x = ops[1];
+      let dist = ops[0];
+      if (
+        isSymbol(dist) &&
+        !boundNames.includes(dist.symbol) &&
+        !shadowed?.has(dist.symbol)
+      )
+        dist = dist.evaluate();
+      if (!isDistributionExpression(dist) || isDiscrete(dist)) return undefined;
+      const def = library?.get(name);
+      if (
+        def === undefined ||
+        !('operator' in def) ||
+        def.operator !== app.operatorDefinition
+      )
+        return undefined;
+      return name === 'PDF'
+        ? distributionPDF(ce, dist, x, false)
+        : distributionCDF(ce, dist, x, false);
+    }
+  );
 }
 
 function distributionQuantile(
