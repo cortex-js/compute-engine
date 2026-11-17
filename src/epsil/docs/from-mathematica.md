@@ -73,7 +73,7 @@ answers `True` or `False`.
 
 ```epsil
 (sqrt(2) == 1.4142135623730951, sqrt(2) === 1.4142135623730951, x === y, 1 === 1.0)
-// ➔ (True, False, False, True)
+// ➔ (true, false, false, true)
 ```
 
 One caveat for Wolfram users: `SameQ[1, 1.]` is `False` there, because `1` and

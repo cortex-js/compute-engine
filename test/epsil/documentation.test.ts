@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
+import { epsilValueText } from '../../src/cli/format';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -75,7 +76,7 @@ function headingSlug(heading: string): string {
 }
 
 function normalizeOutput(output: string): string {
-  return output.replace(/\s+/g, '').replace(/"(True|False)"/g, '$1');
+  return output.replace(/\s+/g, '');
 }
 
 describe('EPSIL DOCUMENTATION', () => {
@@ -208,10 +209,10 @@ describe('EPSIL DOCUMENTATION', () => {
       )
         continue;
 
-      let actual = result.value.toString();
+      let actual = epsilValueText(result.value);
       if (actual.includes('...') && expected.trim().startsWith('[')) {
         actual = `[${[...result.value.each()]
-          .map((item) => item.toString())
+          .map((item) => epsilValueText(item))
           .join(',')}]`;
       }
 

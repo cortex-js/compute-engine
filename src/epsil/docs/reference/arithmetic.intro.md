@@ -85,7 +85,7 @@ type of a value with `is`:
 
 ```epsil
 [5 is integer, 1/2 is integer, 1/3 is rational, sqrt(2) is rational, sqrt(2) is real]
-// ➔ [True, False, True, False, True]
+// ➔ [true, false, true, false, true]
 ```
 
 The types `integer`, `rational`, `real` and `complex` hold **finite** values
@@ -93,7 +93,7 @@ only. An infinity is a `number`, but it is not a `real`:
 
 ```epsil
 [oo is real, oo is number]
-// ➔ [False, True]
+// ➔ [false, true]
 ```
 
 A complex number is written with the imaginary unit `i`. The square root of a

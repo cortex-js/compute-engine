@@ -99,7 +99,7 @@ type of a value with `is`:
 
 ```epsil
 [5 is integer, 1/2 is integer, 1/3 is rational, sqrt(2) is rational, sqrt(2) is real]
-// ➔ [True, False, True, False, True]
+// ➔ [true, false, true, false, true]
 ```
 
 The types `integer`, `rational`, `real` and `complex` hold **finite** values
@@ -107,7 +107,7 @@ only. An infinity is a `number`, but it is not a `real`:
 
 ```epsil
 [oo is real, oo is number]
-// ➔ [False, True]
+// ➔ [false, true]
 ```
 
 A complex number is written with the imaginary unit `i`. The square root of a
@@ -593,7 +593,7 @@ Digamma function, the logarithmic derivative of the gamma function
 
 ```epsil
 [digamma(1), N(digamma(1))]
-// ➔ [-"EulerGamma",-0.577215664901532860607]
+// ➔ [-eulerGamma,-0.577215664901532860607]
 ```
 
 ### dirichletBeta
@@ -943,7 +943,7 @@ MathJSON `IsComposite` · `(number) -> boolean`
 
 ```epsil
 [isComposite(21), isComposite(7)]
-// ➔ ["True","False"]
+// ➔ [true,false]
 ```
 
 ### isEven
@@ -954,7 +954,7 @@ MathJSON `IsEven` · `(number) -> boolean`
 
 ```epsil
 [isEven(7), isEven(8)]
-// ➔ ["False","True"]
+// ➔ [false,true]
 ```
 
 ### isOdd
@@ -965,7 +965,7 @@ MathJSON `IsOdd` · `(number) -> boolean`
 
 ```epsil
 [isOdd(7), isOdd(8)]
-// ➔ ["True","False"]
+// ➔ [true,false]
 ```
 
 ### isPrime
@@ -976,7 +976,7 @@ MathJSON `IsPrime` · `(number) -> boolean`
 
 ```epsil
 [isPrime(17), isPrime(21)]
-// ➔ ["True","False"]
+// ➔ [true,false]
 ```
 
 ### lcm
@@ -1184,7 +1184,7 @@ Negative infinity (−∞).
 
 ```epsil
 [negativeInfinity - 1, negativeInfinity < -10^100]
-// ➔ [-oo,"True"]
+// ➔ [-oo,true]
 ```
 
 ### numerator
@@ -1244,7 +1244,7 @@ Positive infinity (+∞).
 
 ```epsil
 [positiveInfinity + 1, positiveInfinity > 10^100]
-// ➔ [+oo,"True"]
+// ➔ [+oo,true]
 ```
 
 ### Power

@@ -127,6 +127,30 @@ describe('Epsil CLI fancy symbols', () => {
   });
 });
 
+describe('Epsil CLI value output', () => {
+  // The value mode writes a symbol as Epsil writes it, so a boolean, an
+  // absence marker or a symbol does not look like a string.
+  test.each([
+    ['congruent(26, 11, 5)', 'true'],
+    ['[congruent(26, 11, 5), 1 == 2]', '[true,false]'],
+    ['let a = 3; [a, x, "s", 1 == 1]', '[3,x,"s",true]'],
+    ['[12, nothing, missing]', '[12,nothing,missing]'],
+    ['quotientRing(Integers, 3)', 'QuotientRing(integers, 3)'],
+    ['a1 && b', 'a1 && b'],
+    ['"True"', '"True"'],
+    ['`if`', '`if`'],
+    ['let integers = 2; Integers', 'Integers'],
+    [
+      'type P = object{flag: boolean, n: integer}\nlet p = P(flag: 1 == 1, n: 2)\np',
+      'P(flag: true, n: 2)',
+    ],
+  ])('%s', async (source, expected) => {
+    const { io, stdout } = makeIo();
+    expect(await main(['-e', source], io)).toBe(0);
+    expect(stdout()).toBe(`${expected}\n`);
+  });
+});
+
 describe('Epsil CLI LaTeX', () => {
   test('parses the LaTeX input and output options', () => {
     expect(parseCliArguments(['--latex'], {})).toMatchObject({

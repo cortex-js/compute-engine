@@ -1,5 +1,13 @@
 import { serializeEpsil } from '../epsil.js';
-import { isSymbol } from '../compute-engine/boxed-expression/type-guards.js';
+import { DISPLAY_MATERIALIZATION } from '../compute-engine/boxed-expression/abstract-boxed-expression.js';
+import { toAsciiMath } from '../compute-engine/boxed-expression/ascii-math.js';
+import {
+  isDictionary,
+  isFunction,
+  isObject,
+  isSymbol,
+} from '../compute-engine/boxed-expression/type-guards.js';
+import type { Expression } from '../compute-engine/types-expression.js';
 import type {
   DiagnosticNote,
   ParsingDiagnostic,
@@ -74,7 +82,66 @@ export function formatValue(
   // LaTeX mode is for display, and suppresses it too.
   if (isSymbol(result.value, 'Nothing')) return '';
   if (mode === 'latex') return result.value.latex;
-  return result.value.toString();
+  return epsilValueText(result.value);
+}
+
+/** The Epsil words of the constants that the engine's textual form quotes. */
+const LITERAL_WORDS: Readonly<Record<string, string>> = {
+  True: 'true',
+  False: 'false',
+  Nothing: 'nothing',
+  Missing: 'missing',
+};
+
+/**
+ * The text of a value in the human-facing value mode: the engine's textual
+ * form (`toString()`), with the symbols written as Epsil writes them. The
+ * textual form puts a symbol of more than one character in quotes, so `True`
+ * and the string `"True"` would print the same; here `True` is `true`, a
+ * library constant has its Epsil spelling (`integers`), and another symbol is
+ * written as Epsil writes it (`a1`). A symbol that the textual form does not
+ * quote (`x`, `pi`) keeps its form, and so does the name of a function,
+ * which the textual form does not quote (`QuotientRing(integers, 3)`). A lazy
+ * collection shows the same preview as `toString()`.
+ */
+export function epsilValueText(value: Expression): string {
+  try {
+    let shown = value;
+    if (value.isLazyCollection && !isSymbol(value)) {
+      const materialized = value.evaluate({
+        materialization: DISPLAY_MATERIALIZATION,
+      });
+      if (!materialized.isLazyCollection) shown = materialized;
+    }
+    const engine = value.engine;
+    const symbols: Record<string, string> = {};
+    // Every place that `toAsciiMath` prints a symbol from: the operands of a
+    // function, the values of a dictionary and the slots of an object. The
+    // set of visited nodes stops the walk at a cycle of objects.
+    const visited = new Set<Expression>();
+    const collect = (node: Expression): void => {
+      if (visited.has(node)) return;
+      visited.add(node);
+      if (isSymbol(node)) {
+        const name = node.symbol;
+        if (Object.hasOwn(symbols, name)) return;
+        if (!toAsciiMath(node).startsWith('"')) return;
+        symbols[name] =
+          LITERAL_WORDS[name] ??
+          serializeEpsil(name, {
+            isBound: (spelling) =>
+              engine.lookupDefinition(spelling) !== undefined,
+          });
+      } else if (isFunction(node)) node.ops.forEach(collect);
+      else if (isDictionary(node)) node.values.forEach(collect);
+      else if (isObject(node)) node._slots.forEach(collect);
+    };
+    collect(shown);
+    return toAsciiMath(shown, { symbols });
+  } catch {
+    // `toString()` never throws and turns a failure into a message.
+    return value.toString();
+  }
 }
 
 export function formatDiagnostics(

@@ -85,7 +85,7 @@ Membership works on every collection:
 
 ```epsil
 3 in {1, 2, 3}
-// ➔ True
+// ➔ true
 ```
 
 ## Nested collections

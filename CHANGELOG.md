@@ -60,6 +60,19 @@
   is now unchanged. A host that computes with `BigDecimal` directly at the
   precision of an engine passes it: `x.div(y, ce.precision)`. Setting
   `BigDecimal.precision` does not change the results of any engine.
+- **`Repeat` evaluates a value that is not pure once per element, in every
+  position.** `Repeat(Random(), 3)` was three copies of one random number,
+  and so were `Max` of it and its sum with `[1, 2, 3]`, while its `Sum` and
+  its sum with `1` used three random numbers. It is now three random numbers
+  in every case, as `Map(_ ↦ Random(), Range(1, 3))` is. With `c` set to 1,
+  `Repeat(Block(Assign(c, c + 1), c), 3)` was `[2, 2, 2]` and left `c` at 2;
+  it is now `[2, 3, 4]` and leaves `c` at 4. A count of 0 evaluates nothing,
+  and the unbounded `Repeat(Random())` evaluates the value at each element
+  read. Above `maxCollectionSize` elements, such a `Repeat` evaluates to the
+  lazy `Map(_ ↦ v, Range(1, n))` of its value. The count is now evaluated
+  before the value. A pure value is evaluated once, as before. The
+  experimental profile `'ir'` of `compile()` gives the same values, where it declined; the default
+  JavaScript compiler declines such a `Repeat`, so the interpreter runs it.
 - **Runtime-local self-quotients evaluate before cancellation.**
   `const x = 0; x/x` returned `1`; it now returns `NaN`. Nonzero library
   constants retain their ordinary self-quotient simplification.
@@ -128,6 +141,14 @@
 
 ### Bug Fixes
 
+- **The `epsil` command line tool writes booleans and symbols without
+  quotes.** A result printed a symbol of more than one letter in quotes, so it
+  looked like a string: `epsil -e '[1 == 1, x, "s", a1]'` printed
+  `["True",x,"s","a1"]`. It now prints `[true,x,"s",a1]`. `Nothing` and
+  `Missing` print as `nothing` and `missing`, and a library constant prints
+  with its Epsil spelling (`integers`). The name of a function keeps the
+  engine's form (`QuotientRing(integers, 3)`). The examples of the Epsil library
+  reference show the same form.
 - **`NDSolve` and `NDSolveFunction` evaluate on a fresh engine.** Before,
   `["NDSolve", ["Equal", ["D", ["y", "x"], "x"], ["y", "x"]], "y",
   ["Limits", "x", 0, 1], 1, 100]` stayed unevaluated unless the caller

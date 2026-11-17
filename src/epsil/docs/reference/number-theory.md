@@ -168,7 +168,7 @@ MathJSON `Divides` · `(integer, integer) -> boolean`
 
 ```epsil
 divides(3, 12)
-// ➔ "True"
+// ➔ true
 ```
 
 ### divisorSigma
@@ -360,7 +360,7 @@ Return `"True"` if `n` is a perfect power `a^b` for integers `a` and `b ≥ 2` (
 
 ```epsil
 isPerfectPower(64)
-// ➔ "True"
+// ➔ true
 ```
 
 ### isSquare
@@ -377,12 +377,12 @@ Return `"True"` if `n` is square-free (not divisible by any perfect square &gt; 
 
 ```epsil
 isSquareFree(30)
-// ➔ "True"
+// ➔ true
 ```
 
 ```epsil
 isSquareFree(6/35)
-// ➔ "True"
+// ➔ true
 ```
 
 ### isTriangular

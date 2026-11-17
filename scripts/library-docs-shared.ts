@@ -10,6 +10,7 @@
 import { ComputeEngine } from '../src/compute-engine/index.js';
 import { STANDARD_LIBRARIES } from '../src/compute-engine/library/library.js';
 import { describeName, type DocEntry } from '../src/cli/doc.js';
+import { epsilValueText } from '../src/cli/format.js';
 import { executeEpsil } from '../src/epsil/execute-epsil.js';
 import {
   canonicalLibraryName,
@@ -196,7 +197,7 @@ export function evaluateExample(
     return broken(`reports ${JSON.stringify(errors.map((d) => d.message))}`);
   if (result.value.operator === 'Error')
     return broken(`evaluates to the error ${result.value.toString()}`);
-  return { value: result.value.toString().replace(/\s+/g, ' ').trim() };
+  return { value: epsilValueText(result.value).replace(/\s+/g, ' ').trim() };
 }
 
 /** An example as a fenced `epsil` block in the Epsil spelling, annotated

@@ -188,7 +188,7 @@ describe('the --workers option: the epsil command', () => {
     const plain = makeIo();
     // No time limit: the synchronous scan takes seconds on a loaded machine.
     expect(await main(['--time-limit', '0', '-e', source], plain.io)).toBe(0);
-    expect(plain.stdout()).toMatch(/^\["Missing",/);
+    expect(plain.stdout()).toMatch(/^\[missing,/);
 
     const factory = countingFactory();
     const pooled = makeIo(factory.createWorker);
@@ -202,7 +202,7 @@ describe('the --workers option: the epsil command', () => {
     expect(pooled.stdout()).toMatch(/^\["pool",/);
     // The parameters are the parameters of the synchronous route.
     expect(pooled.stdout().replace('"pool"', '')).toBe(
-      plain.stdout().replace('"Missing"', '')
+      plain.stdout().replace('missing', '')
     );
     expect(factory.created()).toBeGreaterThan(0);
     expect(factory.created()).toBeLessThanOrEqual(2);

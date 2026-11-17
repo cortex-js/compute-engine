@@ -122,7 +122,7 @@ when they have the same contents, and that is all `==` ever asks:
 
 ```epsil
 [1, 2, 3] == [1, 2, 3]
-// ➔ True
+// ➔ true
 ```
 
 **A parameter is a binding of its own.** A function may reassign its

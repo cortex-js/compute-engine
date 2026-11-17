@@ -359,7 +359,7 @@ describe('THE PRINTED VALUE OF A LAZY VIEW KEEPS A NOTHING RESULT', () => {
     const result = executeEpsil(engine, source, { parseLatex });
     expect(result.diagnostics).toEqual([]);
     const evaluated = { ...result, source, elapsedMs: 0 };
-    expect(formatValue(evaluated, 'value')).toBe('[1,"Nothing"]');
+    expect(formatValue(evaluated, 'value')).toBe('[1,nothing]');
     expect(JSON.parse(formatValue(evaluated, 'json'))).toEqual([
       'List',
       1,

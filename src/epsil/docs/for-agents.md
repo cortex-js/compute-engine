@@ -244,7 +244,7 @@ keys):
 ```epsil
 let d = {one -> 1, two -> 2}
 (d.two, d["two"], isMissing(d.missing), Coalesce(d.missing, 0))
-// ➔ (2, 2, True, 0)
+// ➔ (2, 2, true, 0)
 ```
 
 An absent numeric field evaluates to `NaN`; an absent nonnumeric field remains
@@ -309,12 +309,13 @@ sort([3, 1, 4, 1, 5], (a, b) => a > b)
   gives its value at the assignment, and the inline function reads its
   variables when an element is computed. List a finite part with `listFrom`
   to keep the elements of that time.
-- **Output is the engine's textual form**: strings and booleans print
-  *quoted* (`"True"`, `"florb"`) — that quoted `"True"` is a boolean, not a
-  string. Derived collections (`Range`, `map`/`filter` results, loop-built
-  lists) preview-elide above 10 elements (`[1,2,3,4,5,...,]`); the value is
-  complete — the CLI's `--json` output materializes the full elements (up to
-  10,000). Literals print in full.
+- **Output is the engine's textual form, with Epsil symbols**: a string
+  prints in quotes (`"florb"`), a boolean as `true`/`false`, the absence
+  markers as `nothing`/`missing`, and a symbol unquoted (`a1`). Derived
+  collections (`Range`, `map`/`filter` results, loop-built lists)
+  preview-elide above 10 elements (`[1,2,3,4,5,...,]`); the value is complete
+  — the CLI's `--json` output materializes the full elements (up to 10,000).
+  Literals print in full.
 - **Arguments are evaluated before a call** — `f(a + 1)` receives the value
   — except for a `hold` function (`hold f(e) = …`), which receives the
   expression as written and evaluates it wherever the body reads it

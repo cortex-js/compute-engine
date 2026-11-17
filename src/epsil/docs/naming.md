@@ -275,7 +275,7 @@ and serialization writes the library spelling (`pi` for `π`):
 
 ```epsil
 3.1 ∈ ℝ
-// ➔ True
+// ➔ true
 ∫(1/x, x)
 // ➔ Integrate(1/x, x)
 ```

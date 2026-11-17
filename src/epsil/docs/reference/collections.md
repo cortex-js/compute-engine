@@ -99,7 +99,7 @@ Membership works on every collection:
 
 ```epsil
 3 in {1, 2, 3}
-// ➔ True
+// ➔ true
 ```
 
 ## Nested collections
@@ -294,7 +294,7 @@ Inert: the adjunction is not expanded, and membership in it is not decided.
 
 ```epsil
 adjoin(integers, sqrt(2))
-// ➔ Adjoin("Integers", sqrt(2))
+// ➔ Adjoin(integers, sqrt(2))
 ```
 
 ### all
@@ -305,7 +305,7 @@ Return True if the predicate holds for every element of the collection (or if ev
 
 ```epsil
 all([2, 4, 6], x => x % 2 == 0)
-// ➔ "True"
+// ➔ true
 ```
 
 ### any
@@ -318,7 +318,7 @@ To test membership of a specific value, use `Contains(xs, v)` — the structural
 
 ```epsil
 any([1, 3, 4], x => x % 2 == 0)
-// ➔ "True"
+// ➔ true
 ```
 
 ### append
@@ -414,7 +414,7 @@ Closed(x): the endpoint x of an Interval, marked as included. A marker with no v
 
 ```epsil
 1 in interval(0, closed(1))
-// ➔ "True"
+// ➔ true
 ```
 
 ### complement
@@ -436,7 +436,7 @@ The set of all finite complex numbers.
 
 ```epsil
 2 + 3i in complexNumbers
-// ➔ "True"
+// ➔ true
 ```
 
 ### contains
@@ -449,7 +449,7 @@ Equivalent to `Any(xs, (e) => e === v)`; use `Any` to test an arbitrary predicat
 
 ```epsil
 contains([1, 2, 3], 2)
-// ➔ "True"
+// ➔ true
 ```
 
 ### containsSequence
@@ -462,7 +462,7 @@ Unlike `Contains`, which tests membership of a single element, the needle is rea
 
 ```epsil
 containsSequence([1, 2, 3, 4], [2, 3])
-// ➔ "True"
+// ➔ true
 ```
 
 ### count
@@ -620,7 +620,7 @@ Type-style membership works with:
 
 ```epsil
 3 in {1, 2, 3}
-// ➔ "True"
+// ➔ true
 ```
 
 ### emptySet
@@ -631,7 +631,7 @@ The empty set, a set containing no elements.
 
 ```epsil
 isEmpty(emptySet)
-// ➔ "True"
+// ➔ true
 ```
 
 ### endsWith
@@ -644,7 +644,7 @@ On a string the suffix is matched character by character, so a suffix that would
 
 ```epsil
 endsWith([1, 2, 3], [2, 3])
-// ➔ "True"
+// ➔ true
 ```
 
 ### extendedComplexNumbers
@@ -655,7 +655,7 @@ The set of all complex numbers, including infinities.
 
 ```epsil
 complexInfinity in extendedComplexNumbers
-// ➔ "True"
+// ➔ true
 ```
 
 ### extendedIntegers
@@ -666,7 +666,7 @@ The set of all integers, including infinities.
 
 ```epsil
 Infinity in extendedIntegers
-// ➔ "True"
+// ➔ true
 ```
 
 ### extendedRationalNumbers
@@ -677,7 +677,7 @@ The set of all rational numbers, including infinities.
 
 ```epsil
 -Infinity in extendedRationalNumbers
-// ➔ "True"
+// ➔ true
 ```
 
 ### extendedRealNumbers
@@ -688,7 +688,7 @@ The set of all real numbers, including infinities.
 
 ```epsil
 -Infinity in extendedRealNumbers
-// ➔ "True"
+// ➔ true
 ```
 
 ### field
@@ -786,7 +786,7 @@ The set of all imaginary numbers.
 
 ```epsil
 3i in imaginaryNumbers
-// ➔ "True"
+// ➔ true
 ```
 
 ### indexOf
@@ -834,7 +834,7 @@ The set of all finite integers.
 
 ```epsil
 -7 in integers
-// ➔ "True"
+// ➔ true
 ```
 
 ### intersection
@@ -856,7 +856,7 @@ A set of real numbers between two endpoints. The endpoints may or may not be inc
 
 ```epsil
 0.5 in interval(0, 1)
-// ➔ "True"
+// ➔ true
 ```
 
 ### isEmpty
@@ -867,7 +867,7 @@ Return True if the collection is empty, False otherwise.
 
 ```epsil
 isEmpty([])
-// ➔ "True"
+// ➔ true
 ```
 
 ### iterate
@@ -1072,7 +1072,7 @@ The set of all negative integers.
 
 ```epsil
 -3 in negativeIntegers
-// ➔ "True"
+// ➔ true
 ```
 
 ### negativeNumbers
@@ -1083,7 +1083,7 @@ The set of all negative real numbers.
 
 ```epsil
 -0.5 in negativeNumbers
-// ➔ "True"
+// ➔ true
 ```
 
 ### nonNegativeIntegers
@@ -1094,7 +1094,7 @@ The set of all non-negative integers.
 
 ```epsil
 0 in nonNegativeIntegers
-// ➔ "True"
+// ➔ true
 ```
 
 ### nonNegativeNumbers
@@ -1105,7 +1105,7 @@ The set of all non-negative real numbers.
 
 ```epsil
 0 in nonNegativeNumbers
-// ➔ "True"
+// ➔ true
 ```
 
 ### nonPositiveIntegers
@@ -1116,7 +1116,7 @@ The set of all non-positive integers.
 
 ```epsil
 0 in nonPositiveIntegers
-// ➔ "True"
+// ➔ true
 ```
 
 ### nonPositiveNumbers
@@ -1127,7 +1127,7 @@ The set of all non-positive real numbers.
 
 ```epsil
 0 in nonPositiveNumbers
-// ➔ "True"
+// ➔ true
 ```
 
 ### NotElement
@@ -1138,7 +1138,7 @@ Test whether a value is not an element of a collection.
 
 ```epsil
 4 !in {1, 2, 3}
-// ➔ "True"
+// ➔ true
 ```
 
 ### NotSubset
@@ -1149,7 +1149,7 @@ Test whether the first collection is not a strict subset of the second.
 
 ```epsil
 NotSubset({1, 4}, {1, 2, 3})
-// ➔ "True"
+// ➔ true
 ```
 
 ### NotSuperset
@@ -1160,7 +1160,7 @@ Test whether the first collection is not a strict superset of the second.
 
 ```epsil
 NotSuperset({1, 2}, {1, 2, 3})
-// ➔ "True"
+// ➔ true
 ```
 
 ### NotSupersetEqual
@@ -1171,7 +1171,7 @@ Test whether the first collection is not a superset (possibly equal) of the seco
 
 ```epsil
 NotSupersetEqual({1, 2}, {1, 2, 3})
-// ➔ "True"
+// ➔ true
 ```
 
 ### numbers
@@ -1182,7 +1182,7 @@ The set of all numbers.
 
 ```epsil
 2 + 3i in numbers
-// ➔ "True"
+// ➔ true
 ```
 
 ### open
@@ -1193,7 +1193,7 @@ Open(x): the endpoint x of an Interval, marked as excluded. A marker with no val
 
 ```epsil
 0 in interval(open(0), 1)
-// ➔ "False"
+// ➔ false
 ```
 
 ### ordering
@@ -1310,7 +1310,7 @@ The set of all positive integers.
 
 ```epsil
 0 in positiveIntegers
-// ➔ "False"
+// ➔ false
 ```
 
 ### positiveNumbers
@@ -1321,7 +1321,7 @@ The set of all positive real numbers.
 
 ```epsil
 0 in positiveNumbers
-// ➔ "False"
+// ➔ false
 ```
 
 ### primes
@@ -1349,7 +1349,7 @@ The elements of ℤ/nℤ are `ResidueClass(0, n)` … `ResidueClass(n - 1, n)`, 
 
 ```epsil
 quotientRing(integers, 5)
-// ➔ QuotientRing("Integers", 5)
+// ➔ QuotientRing(integers, 5)
 ```
 
 ### randomShuffle
@@ -1401,7 +1401,7 @@ The set of all finite rational numbers.
 
 ```epsil
 sqrt(2) in rationalNumbers
-// ➔ "False"
+// ➔ false
 ```
 
 ### realNumbers
@@ -1412,7 +1412,7 @@ The set of all finite real numbers.
 
 ```epsil
 i in realNumbers
-// ➔ "False"
+// ➔ false
 ```
 
 ### reduce
@@ -1430,7 +1430,7 @@ reduce([1, 2, 3, 4], (a, b) => a * b)
 
 MathJSON `Repeat` · `(value: any, count: integer?) -> list`
 
-Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies.
+Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies. A value that is not pure (`Random()`) is evaluated once per element, in order, and each read of an element of a lazy `Repeat` evaluates it again.
 
 ```epsil
 repeat(0, 3)
@@ -1639,7 +1639,7 @@ On a string the prefix is matched character by character, so a prefix that would
 
 ```epsil
 startsWith([1, 2, 3], [1, 2])
-// ➔ "True"
+// ➔ true
 ```
 
 ### subset
@@ -1650,7 +1650,7 @@ Test whether the first collection is a strict subset of the second.
 
 ```epsil
 subset({1, 2}, {1, 2, 3})
-// ➔ "True"
+// ➔ true
 ```
 
 ### subsetEqual
@@ -1661,7 +1661,7 @@ Test whether the first collection is a subset (possibly equal) of the second.
 
 ```epsil
 subsetEqual({1, 2, 3}, {1, 2, 3})
-// ➔ "True"
+// ➔ true
 ```
 
 ### superset
@@ -1672,7 +1672,7 @@ Test whether the first collection is a strict superset of the second.
 
 ```epsil
 superset({1, 2, 3}, {1, 2})
-// ➔ "True"
+// ➔ true
 ```
 
 ### supersetEqual
@@ -1683,7 +1683,7 @@ Test whether the first collection is a superset (possibly equal) of the second.
 
 ```epsil
 supersetEqual({1, 2}, {1, 2})
-// ➔ "True"
+// ➔ true
 ```
 
 ### symmetricDifference
@@ -1791,7 +1791,7 @@ A fixed number of heterogeneous elements. Nothing retains its slot, and a tuple 
 
 ```epsil
 (1, "a", True)
-// ➔ (1, "a", "True")
+// ➔ (1, "a", true)
 ```
 
 ### tupleFrom

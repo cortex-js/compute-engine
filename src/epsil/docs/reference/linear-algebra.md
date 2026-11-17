@@ -524,7 +524,7 @@ Whether the matrix is diagonal (all off-diagonal entries are zero).
 
 ```epsil
 isDiagonal([[1, 0], [0, 5]])
-// ➔ "True"
+// ➔ true
 ```
 
 ### isSquareMatrix
@@ -535,7 +535,7 @@ Whether the value is a square matrix.
 
 ```epsil
 isSquareMatrix([[1, 2], [3, 4]])
-// ➔ "True"
+// ➔ true
 ```
 
 ### isSymmetric
@@ -546,7 +546,7 @@ Whether the matrix is symmetric (A equals its transpose).
 
 ```epsil
 isSymmetric([[1, 2], [2, 3]])
-// ➔ "True"
+// ➔ true
 ```
 
 ### kernel

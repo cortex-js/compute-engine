@@ -60,12 +60,12 @@ gives `missing`:
 
 ```epsil
 [12, nothing, 34]
-// ➔ [12,"Nothing",34]
+// ➔ [12,nothing,34]
 ```
 
 ```epsil
 [missing + 1, 2]
-// ➔ ["Missing",2]
+// ➔ [missing,2]
 ```
 
 `isMissing` is true for `missing` and `NaN`. `Coalesce` returns
@@ -124,7 +124,7 @@ the operands are evaluated:
 
 ```epsil
 head(x^2)
-// ➔ "Power"
+// ➔ Power
 ```
 
 ```epsil
@@ -152,7 +152,7 @@ its value. Its body can then inspect the expression:
 let a = 3
 hold f(e) = head(e)
 f(a + 1)
-// ➔ "Add"
+// ➔ Add
 ```
 
 ## Comparing expressions
@@ -164,13 +164,13 @@ It never uses a tolerance and never reads the value of a name.
 
 ```epsil
 (sqrt(2) == 1.4142135623730951, sqrt(2) === 1.4142135623730951)
-// ➔ (True, False)
+// ➔ (true, false)
 ```
 
 ```epsil
 let x = 5
 (x == 5, x === 5)
-// ➔ (True, False)
+// ➔ (true, false)
 ```
 
 `===` always gives `True` or `False`. `==` can stay unevaluated when the
@@ -179,7 +179,7 @@ equal to itself with `==`, but it is the same as itself with `===`:
 
 ```epsil
 (NaN == NaN, NaN === NaN)
-// ➔ (False, True)
+// ➔ (false, true)
 ```
 
 ## Exact evaluation and approximation
@@ -227,7 +227,7 @@ error value:
 
 ```epsil
 isError(ln("a"))
-// ➔ True
+// ➔ true
 ```
 
 To make an error value of your own, use `RuntimeError`. Its argument is a
@@ -262,12 +262,12 @@ of a type value. The `is` operator tests whether a value has a type, and
 
 ```epsil
 (3 is integer, 3 is string)
-// ➔ (True, False)
+// ➔ (true, false)
 ```
 
 ```epsil
 Subtype("integer", "real")
-// ➔ True
+// ➔ true
 ```
 
 ## Strings
@@ -481,7 +481,7 @@ caseFold("Straße")
 
 ```epsil
 caseFold("Hello") == caseFold("HELLO")
-// ➔ "True"
+// ➔ true
 ```
 
 ### characterFrom
@@ -710,7 +710,7 @@ When the residual is above `tolerance`, the residual itself must confirm the Jac
 
 ```epsil
 findRoot(x^2 - 2, [(x, 1)])
-// ➔ {"parameters" -> {"x" -> 1.4142135624638652}, "converged" -> "True", "residualNorm" -> 2.567368539985182e-10, "iterations" -> 4, "stationary" -> "True"}
+// ➔ {"parameters" -> {"x" -> 1.4142135624638652}, "converged" -> true, "residualNorm" -> 2.567368539985182e-10, "iterations" -> 4, "stationary" -> true}
 ```
 
 ### Function
@@ -761,7 +761,7 @@ Return the head of an expression, the name of the operator
 
 ```epsil
 head(x^2)
-// ➔ "Power"
+// ➔ Power
 ```
 
 ### Hold
@@ -865,12 +865,12 @@ True if the expression is an `Error` value, or a frozen expression embedding one
 
 ```epsil
 isError(ln("a"))
-// ➔ "True"
+// ➔ true
 ```
 
 ```epsil
 isError(1 + 1)
-// ➔ "False"
+// ➔ false
 ```
 
 ### isMissing
@@ -881,7 +881,7 @@ True for `Missing`, `NaN`, or a point whose coordinates are all `NaN`, regardles
 
 ```epsil
 [isMissing(missing), isMissing(NaN), isMissing(0)]
-// ➔ ["True","True","False"]
+// ➔ [true,true,false]
 ```
 
 ### Latex
@@ -914,7 +914,7 @@ True iff the first operand, EVALUATED, is a value of the given type — the engi
 
 ```epsil
 MatchesType([1, 2], "list<integer>")
-// ➔ "True"
+// ➔ true
 ```
 
 ### missing
@@ -925,7 +925,7 @@ A value that is absent but whose position is preserved (Julia `missing`, R `NA`)
 
 ```epsil
 missing + 1
-// ➔ "Missing"
+// ➔ missing
 ```
 
 ### Module
@@ -1005,7 +1005,7 @@ The value of an empty block or of a statement with no value; the sole member of 
 
 ```epsil
 [1, nothing, 2]
-// ➔ [1,"Nothing",2]
+// ➔ [1,nothing,2]
 ```
 
 ### numberFrom
@@ -1292,7 +1292,7 @@ Construct an error value when evaluated: the runtime counterpart of a written `E
 
 ```epsil
 isError(RuntimeError("oops"))
-// ➔ "True"
+// ➔ true
 ```
 
 ### segment
@@ -1515,7 +1515,7 @@ True iff the FIRST operand is a subtype of the second — `Subtype("integer", "n
 
 ```epsil
 Subtype("integer", "number")
-// ➔ "True"
+// ➔ true
 ```
 
 ### symbol
@@ -1526,7 +1526,7 @@ Construct a new symbol with a name formed by concatenating the arguments
 
 ```epsil
 symbol("x", 2)
-// ➔ "x2"
+// ➔ x2
 ```
 
 ### tail
@@ -1674,7 +1674,7 @@ A type expression as a first-class value, constructed from its text: `TypeFrom("
 
 ```epsil
 TypeFrom("integer | real") == TypeFrom("real")
-// ➔ "True"
+// ➔ true
 ```
 
 ### Typed

@@ -94,7 +94,7 @@ type Circle = tuple<radius: number> is Area {
 }
 
 area(Circle(1)) == pi
-// ➔ True
+// ➔ true
 ```
 
 Conformance may also be declared **ahead of** its implementation — declare

@@ -158,7 +158,7 @@ total
 let x = 4
 let y = 5
 (1 < x <= 4, 1 < y <= 4)
-// ➔ (True, False)
+// ➔ (true, false)
 ```
 
 **A truth table**, over the four boolean pairs. The tuple pattern `(p, q)`
@@ -167,7 +167,7 @@ takes each pair apart, so the stage is applied to each pair:
 ```epsil
 [(True, True), (True, False), (False, True), (False, False)] 
   |> ((p, q)) => p && q
-// ➔ [True, False, False, False]
+// ➔ [true, false, false, false]
 ```
 
 The same table with a [tuple pattern
@@ -178,7 +178,7 @@ ONE parameter taking a pair, rather than two parameters:
 ```epsil
 [(True, True), (True, False), (False, True), (False, False)]
   |> map(((p, q)) => p && q, _)
-// ➔ [True, False, False, False]
+// ➔ [true, false, false, false]
 ```
 
 ## Integers and Number Theory
@@ -253,7 +253,7 @@ defines is resolved when that definition runs, in every form above.
 even(n) = true if n == 0 else odd(n - 1)
 odd(n) = false if n == 0 else even(n - 1)
 [even(4), odd(7)]
-// ➔ [True, True]
+// ➔ [true, true]
 ```
 
 ## Higher-Order Functions
@@ -379,7 +379,7 @@ nest, and the innermost one wins. Outside any frame, draws are live:
 let a = withRandomSeed(7, [random(1..100), random(1..100)])
 let b = withRandomSeed(7, [random(1..100), random(1..100)])
 a == b
-// ➔ True
+// ➔ true
 ```
 
 ## Calculus
@@ -662,7 +662,7 @@ let anagram = sort(characters("listen")) == sort(characters("silent"))
 let s = "racecar"
 let palindrome = characters(s) == reverse(characters(s))
 (anagram, palindrome)
-// ➔ (True, True)
+// ➔ (true, true)
 ```
 
 ## Collections
@@ -878,7 +878,7 @@ with the same elements.
 let d48 = [1, 2, 3, 4, 6, 8, 12, 16, 24, 48]
 let d36 = [1, 2, 3, 4, 6, 9, 12, 18, 36]
 intersection(d48, d36) == {1, 2, 3, 4, 6, 12}
-// ➔ True
+// ➔ true
 ```
 
 ## A Complete Program: Parsing JSON
@@ -1065,7 +1065,7 @@ let src = """
 """
 let doc = jsonParse(src)
 (doc.name, doc.tags[2], doc.born + 1, doc.ratio, doc.active, isMissing(doc.note))
-// ➔ ("Ada Lovelace", "computing", 1816, 1/4, "True", "True")
+// ➔ ("Ada Lovelace", "computing", 1816, 1/4, true, true)
 ```
 
 Some details worth noticing: the exponent `2.5e-1` came back as the exact

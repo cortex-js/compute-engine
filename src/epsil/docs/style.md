@@ -90,7 +90,7 @@ declared first.
 even(n) = true if n == 0 else odd(n - 1)
 odd(n) = false if n == 0 else even(n - 1)
 [even(10), odd(7)]
-// ➔ [True, True]
+// ➔ [true, true]
 ```
 
 **A lambda is for an argument.** Write `x => x^2` where a function is passed
@@ -194,7 +194,7 @@ function reciprocal(x: number) {
   if x == 0 { RuntimeError("zero-has-no-reciprocal") } else { 1 / x }
 }
 [reciprocal(4), reciprocal(0) is error]
-// ➔ [1/4, True]
+// ➔ [1/4, true]
 ```
 
 **Handle an error where the value is used.** `if let v: !error = f(x)`
@@ -237,7 +237,7 @@ surprising a caller; leave inference to the rest.
 function roll(n: integer) random -> integer { random(1..n) }
 let r = roll(6)
 1 <= r <= 6
-// ➔ True
+// ➔ true
 ```
 
 **Keep effects at the edges.** A pure core is easy to test, easy to reuse
@@ -278,7 +278,7 @@ function canGo(t: light) -> boolean {
   }
 }
 canGo(red())
-// ➔ False
+// ➔ false
 ```
 
 See [`match`](/epsil/control-flow/#match).

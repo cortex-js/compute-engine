@@ -155,7 +155,7 @@ function parity(n) {
   isEven(n)
 }
 parity(10)
-// ➔ True
+// ➔ true
 ```
 
 A call of a local function before its statement is the error

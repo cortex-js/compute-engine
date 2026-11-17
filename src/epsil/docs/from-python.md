@@ -236,7 +236,7 @@ floating-point gotcha does not appear:
 let exact = 1/3 + 1/6
 let approx = N(1/3 + 1/6)
 (exact, approx, 0.1 + 0.2 == 0.3)
-// ➔ (1/2, 0.5, True)
+// ➔ (1/2, 0.5, true)
 ```
 
 `round` rounds halves **away from zero**; Python rounds halves to even. This
@@ -325,7 +325,7 @@ These transfer straight across — no translation needed:
 ```epsil
 let xs = [10, 20, 30]
 (xs[-1], 20 in xs, 1 < 2 < 3, 2**10, -7 % 3)
-// ➔ (30, True, True, 1024, 2)
+// ➔ (30, true, true, 1024, 2)
 ```
 
 - Negative indices count from the end; `in` tests membership.

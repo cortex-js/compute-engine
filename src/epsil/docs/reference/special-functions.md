@@ -172,7 +172,7 @@ Generalized Stieltjes constants γₙ(a), the Laurent coefficients of ζ(s, a) a
 
 ```epsil
 stieltjesGamma(0)
-// ➔ "EulerGamma"
+// ➔ eulerGamma
 ```
 
 ```epsil

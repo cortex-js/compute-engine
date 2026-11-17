@@ -473,7 +473,7 @@ function frac(n: integer, d: integer) {
   {n -> n / gcd(n, d), d -> d / gcd(n, d)}
 }
 frac(2, 4) == frac(1, 2)
-// ➔ True
+// ➔ true
 ```
 
 A value that already satisfies the definition can be handed to the
@@ -568,7 +568,7 @@ constructed value and a plain one of the same shape:
 type point = tuple<x: number, y: number>
 type polar = tuple<r: number, t: number>
 (point(1, 2) == point(1, 2), point(1, 2) == (1, 2), polar(1, 2) == point(1, 2))
-// ➔ (True, False, False)
+// ➔ (true, false, false)
 ```
 
 ### Types are global, and re-running a cell
@@ -912,7 +912,7 @@ last one unchanged.
 ```epsil-live
 (length([1, missing, 3]), isMissing(missing), isMissing(NaN),
   Coalesce(missing, 0), missing + 1)
-// ➔ (3, True, True, 0, "Missing")
+// ➔ (3, true, true, 0, missing)
 ```
 
 A missing dictionary field follows the expected value domain: a numeric field

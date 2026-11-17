@@ -370,7 +370,7 @@ binds a name to each component:
 
 ```epsil
 [(True, True), (True, False)] |> map(((p, q)) => p && q, _)
-// ➔ [True, False]
+// ➔ [true, false]
 ```
 
 The doubled parentheses are the whole difference: `(p, q) => p && q` is the
@@ -561,7 +561,7 @@ defaults idiom:
 ```epsil-live
 let defaults = {"verbose" -> false, "depth" -> 3}
 {...defaults, "verbose" -> true}
-// ➔ {"verbose" -> "True", "depth" -> 3}
+// ➔ {"verbose" -> true, "depth" -> 3}
 ```
 
 (Duplicate **literal** keys are different: they are almost certainly typos,
