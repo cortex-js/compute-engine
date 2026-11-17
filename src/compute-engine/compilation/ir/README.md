@@ -254,6 +254,15 @@ rows (`Sec`, `Csc`, `Coth`, `Sech`, `Csch`) are builtins or their reciprocals.
 The other real functions (`Erf`, `Gamma`, `Zeta`, `Arccot`, `Arcsec`, ...)
 decline there.
 
+`Mod` on JavaScript is `floorMod()` (the remainder with the sign of the
+divisor). For a divisor of 1 it computes `x - floor(x)`, the same double
+with no `%`: the remainder of a large operand is slow, and `Mod(10^4·sin(…),
+1)` is the hash of Tycho's noise documents (`neyret/cucxkogo6q` #4: 620 ns
+a call to 250 ns, the existing compiler 350 ns). A zero has no sign there
+(`Mod(-3, 1)` is 0, as the interpreter gives, where the remainder gave -0),
+and the fold of the row is the same function, so a constant `Mod(c, 1)` of a
+negative integer `c` prints `0` where it printed `-0`.
+
 Inputs: a union whose every member is a real type (ranged or not), `nan` or an
 infinity (`nan | real | signed_infinity`) is a real, also as the element of a
 list: a double holds each of its values (a `NaN` or infinite value gives an

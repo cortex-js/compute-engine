@@ -7063,6 +7063,10 @@ export function makeLazyStreamHelpers(
  *  guard: for an operand of 2^53 or more the value is the remainder of the
  *  double, unspecified (`Mod(25!, 7)` is 0, the remainder of the double 6). */
 export function floorMod(a: number, b: number): number {
+  // The fractional part, `Mod(x, 1)`: the same double as the remainder
+  // below (`x - floor(x)` is the rounding of `r + 1` for a negative `x`),
+  // with no `%`, which is slow for a large `x` (`Mod(10^4·sin(…), 1)`).
+  if (b === 1) return a - Math.floor(a);
   const r = a % b;
   return r !== 0 && r < 0 !== b < 0 ? r + b : r;
 }

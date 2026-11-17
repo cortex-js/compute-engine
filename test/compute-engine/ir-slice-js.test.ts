@@ -211,6 +211,56 @@ describe('IR slice: Mod beyond the safe integer range', () => {
   });
 });
 
+describe('IR slice: Mod(x, 1), the fractional part', () => {
+  // `floorMod()` takes `x - floor(x)` for a divisor of 1: the same double as
+  // the remainder form (a zero has no sign), with no `%`, which is slow for
+  // a large operand (`Mod(10^4·sin(10^4·x), 1)`, a hash in Tycho's noise
+  // documents).
+  test('the interpreter value, at small, large, negative and tiny operands', () => {
+    const f = js(['Mod', 'x', 1]);
+    // Operands that are exact in binary: the interpreter reads a decimal
+    // literal exactly (`Mod(12345.678, 1)` is 0.678).
+    for (const x of [
+      0.25, -0.25, 7.75, -7.75, 12345.6875, -12345.6875, 1e-20, -1e-20, 3, -3,
+      4503599627370495.5, -4503599627370495.5, 1e300, -1e300,
+    ]) {
+      const want = ce
+        .box(['Mod', x, 1] as never)
+        .evaluate()
+        .N().re;
+      expect([x, f.run({ x })]).toEqual([x, want === 0 ? 0 : want]);
+    }
+    expect(Number.isNaN(f.run({ x: Infinity }))).toBe(true);
+    expect(Number.isNaN(f.run({ x: NaN }))).toBe(true);
+  });
+
+  test('the same double as the remainder form, on doubles of every exponent', () => {
+    const remainder = (a: number) => {
+      const r = a % 1;
+      return r !== 0 && r < 0 ? r + 1 : r;
+    };
+    const f = js(['Mod', 'x', 1]);
+    let seed = 99;
+    const bits = new DataView(new ArrayBuffer(8));
+    for (let k = 0; k < 20_000; k++) {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      bits.setUint32(0, seed);
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      bits.setUint32(4, seed);
+      const x = bits.getFloat64(0);
+      if (!Number.isFinite(x)) continue;
+      // `+ 0`: a zero of either sign.
+      expect([x, f.run({ x }) + 0]).toEqual([x, remainder(x) + 0]);
+    }
+  });
+
+  test('a divisor other than 1 keeps the remainder', () => {
+    expect(js(['Mod', 'x', 3]).run({ x: -7.5 })).toBe(1.5);
+    expect(js(['Mod', 'x', 'y']).run({ x: -7.5, y: 1 })).toBe(0.5);
+    expect(js(['Mod', 'x', 'y']).run({ x: 7.5, y: -1 })).toBe(-0.5);
+  });
+});
+
 describe('IR slice: a chain with a list', () => {
   test('of three or more operands declines (no conditional on a list)', () => {
     for (const json of [
