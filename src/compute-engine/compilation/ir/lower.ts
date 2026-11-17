@@ -2202,7 +2202,44 @@ export function lower(
     const { bindings, before } = a;
     const outs: V[] = [];
     const join = (x: V, y: V, cause: string): V => {
-      const t = joinType(type(x), type(y));
+      let t = joinType(type(x), type(y));
+      // Flat lists of reals or integers of two lengths: one constant length
+      // is a stated length; otherwise the length of the arm taken is a
+      // result too, before the list (README, "Lists").
+      const [n, m] = [type(x).shape, type(y).shape];
+      const lane = joinType(scalarType(type(x).lane), scalarType(type(y).lane));
+      const stated = (l: Length) => (typeof l === 'number' ? l : constant(l.v));
+      if (
+        t === undefined &&
+        n.length === 1 &&
+        m.length === 1 &&
+        isSubLane(lane?.lane ?? 'boolean', 'real') &&
+        !tuples.has(x) &&
+        !tuples.has(y)
+      ) {
+        const k = stated(n[0]);
+        // A stated length is at least 1: two empty arms keep the form below.
+        if (k !== undefined && k > 0 && k === stated(m[0]))
+          t = { lane: lane!.lane, shape: [k] };
+        else {
+          if (interval || !options.runtimeLengths)
+            decline(node, 'arms that are lists of two lengths');
+          const length = (r: Region, l: Length) => {
+            if (typeof l !== 'number') return l.v;
+            const out = b.newValue(scalarType('integer'));
+            r.body.push({
+              k: 'const',
+              out,
+              value: { lane: 'integer', value: l },
+            });
+            return out;
+          };
+          a.region.yields.push(length(a.region, n[0]));
+          c.region.yields.push(length(c.region, m[0]));
+          outs.push(b.newValue(scalarType('integer')));
+          t = { lane: lane!.lane, shape: [{ v: outs[outs.length - 1] }] };
+        }
+      }
       if (t === undefined || tuples.get(x) !== tuples.get(y))
         decline(node, t === undefined ? cause : 'arms of a tuple and a list');
       a.region.yields.push(widenIn(a.region, x, t));

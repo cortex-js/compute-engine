@@ -809,6 +809,9 @@ const dce: Pass = (p, rows) => {
   };
   for (const f of p.functions) {
     f.body.params.forEach(read);
+    // A length that a result type names is live: the arm that `fold` takes
+    // of an `if` with a length result can hold it alone (README, "Lists").
+    f.results.forEach((t) => lengthValues(t).forEach((n) => live.add(n)));
     region(f.body);
   }
   return { changed, resolve: (v) => v };

@@ -88,8 +88,9 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
     for (const i of r.body) {
       for (const v of argsOf(i))
         if (!scope.has(v)) fail(`${i.k}: v${v} is not defined before its use`);
-      instr(i);
+      // The regions first: an `if` reads the constants of its arms.
       for (const inner of regionsOf(i)) region(inner, scope);
+      instr(i);
       outsOf(i).forEach(define);
     }
     for (const v of r.yields)
@@ -151,7 +152,11 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
         for (const r of [i.then, i.else]) {
           if (r.params.length !== 0 || r.yields.length !== i.outs.length)
             fail(`if: ${r.yields.length} yields for ${i.outs.length} results`);
-          r.yields.forEach((y, j) => sub(y, type(i.outs[j]), 'if yield'));
+          // A result that is the length of another is the arm's yield there.
+          const arm = (v: V) => r.yields[i.outs.indexOf(v)] ?? v;
+          r.yields.forEach((y, j) =>
+            sub(y, mapLengths(type(i.outs[j]), arm), 'if yield')
+          );
         }
         return;
       case 'loop': {

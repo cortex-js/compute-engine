@@ -669,8 +669,8 @@ through `number`: a bound that is not one integer in the box
 of a real type declines (its count over an interval is not one number in
 general). A comparison of two plain integers (the test of `Max()` of no
 element) is a verdict of numbers. A value whose length is not a plain
-integer declines. An `if` of two list arms (of one length value, as the
-lowering requires) joins element by element (`_IA.hull`). A list result,
+integer declines. An `if` of two list arms (of one length, as the lowering
+requires in the mode) joins element by element (`_IA.hull`). A list result,
 also a root `Tuple`, is an array of kinded results; the return writes no copy,
 because `run()` copies the inputs and the result and no kernel writes to an
 operand. An input of a list or tuple type (`list<real>`, `list<real^3>`,
@@ -970,7 +970,24 @@ A length is a number or an integer SSA value: the length of an input is a
 parameter before it, the count of a `Filter` and of a `Range` an instruction.
 Two lists with the same length value have one length (`D + Map(f, D)`,
 `Range(1, n) + Range(1, n)`, after `cse`); the verifier checks that a length
-value is visible where a type names it. `elem` reads an element from 0; `At` is
+value is visible where a type names it. The arms of an `If` or a `Which` that
+are flat lists of reals or integers of two lengths (two length values, a stated
+length beside a length value, two stated lengths) give a list of the length of
+the arm taken: the `if` has that length as a result before the list, each arm
+yields its own, and the verifier reads the list yield of an arm against that
+yield (`If(x > 0, List(x, 2), D)` is `[x, 2]` or `D`, and its `Length` is 2 or
+the length of `D`). A length value that is a constant at least 1 and equal to
+the other arm's length is that stated length (`If(c, Repeat(x, 400),
+Range(1, 400))` is a list of 400; two empty arms keep the length result). The
+invariant: a value that a type names (of a value or of a function's result)
+is live wherever that type is, so `dce` keeps it; when `fold` takes the arm of
+an `if` whose list is the program's result, the length constant of that arm
+is read by the result type only. GLSL and the interval mode decline lists of two lengths
+("arms that are lists of two lengths"): GLSL has no run-time length, and in
+the interval mode a length is a plain number that an undecided condition
+cannot join. A list arm beside a scalar arm, tuples of two lengths, lists of
+lists and lists of two lanes that do not join (booleans and reals) decline
+with "arms of two types". `elem` reads an element from 0; `At` is
 the interpreter's rule (from 1, from the end when negative, NaN outside; on GLSL
 a conditional that reads the element only in range, with the length as a
 literal, `$#0` in the spelling), and the fold turns an `At` of a constant index
