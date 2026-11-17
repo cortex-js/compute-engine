@@ -282,6 +282,11 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // The interpreter's `At`: from 1, from the end when negative, NaN for an
   // index that is 0, not an integer, or out of range.
   row('At',           2,          [[['list', R], 'element', 'at']], list),
+  // The same read on JavaScript (`lower.ts`): of booleans, `undefined` out
+  // of range, which no operation on a boolean fails on; of points of `n`
+  // coordinates, a point of NaN.
+  row('At',           2,          [[['list', R], 'element', 'atu']], list),
+  row('At',           3,          [[['list', R, I], 'element', 'atp']], list),
   // An element from 0, at an index in range where the lowering puts it.
   row(undefined,      2,          [[['list', I], 'element', 'elem']], list),
   // A draw of the active `WithRandomSeed` frame, or a live draw outside one.

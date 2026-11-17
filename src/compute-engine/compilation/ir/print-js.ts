@@ -176,6 +176,8 @@ export const JS: Syntax = deepFreeze({
     ...LOGIC,
     elem: '$0[$1]',
     at: { text: '_at($0, $1)', helpers: ['_at'] },
+    atu: { text: '_atu($0, $1)', helpers: ['_atu'] },
+    atp: { text: '_atp($0, $1, $2)', helpers: ['_atp'] },
     draw: '_SYS.drawNextRandomNumber()',
     shuffle: '_SYS.shuffle($0)',
     binomial: '_SYS.binomial($0, $1)',
@@ -232,6 +234,8 @@ export const JS: Syntax = deepFreeze({
   helpers: {
     _round: 'const _round = (x) => (x < 0 ? -Math.round(-x) : Math.round(x));',
     _at: 'const _at = (l, i) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : NaN; };',
+    _atu: 'const _atu = (l, i) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : undefined; };',
+    _atp: 'const _atp = (l, i, n) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : new Array(n).fill(NaN); };',
   },
   // A `bigint` literal is made in the bigint mode only (`JS_BIGINT`).
   constant: ({ value: x }) =>

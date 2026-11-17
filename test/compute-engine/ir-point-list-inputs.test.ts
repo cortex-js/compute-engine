@@ -518,8 +518,6 @@ describe('IR profile, batch G14: declines', () => {
     ['a parameter of a run-time length on GLSL', ['fp', 'S'], 'glsl', /a list of rank 2 on glsl/],
     ['an untyped parameter on GLSL', ['gu', 'S'], 'glsl', /a list of rank 2 on glsl/],
     ['an untyped parameter of a run-time length on GLSL', ['gu', 'P'], 'glsl', /a list of rank 2 on glsl|run-time length/],
-    ['At of a run-time length', ['At', 'P', 2], 'javascript', /an index that can be out of range/],
-    ['At with a run-time index', ['At', 'S', ['Floor', 'x']], 'javascript', /an index that can be out of range/],
     ['Sum of a list of points (a point)', ['Sum', 'P'], 'javascript', /a term that is not a number/],
     ['a list of points scaled by a list of another length', ['Multiply', 'P', 'D'], 'javascript', /another shape/],
     ['a list of points read by a function body (a capture)', ['cap', 1], 'javascript', /reads the input P of type list<tuple<real, real>>/],
@@ -535,6 +533,34 @@ describe('IR profile, batch G14: declines', () => {
     const d = failure(() => compile(box(json), { ...IR, to } as never));
     expect(d?.code).toBe('outside-profile');
     expect(d?.message).toMatch(cause);
+  });
+
+  // Batch G30: on JavaScript an index that can be out of range reads a
+  // point of NaN coordinates there, the interpreter's value; GLSL and the
+  // interval mode decline.
+  test('At of a run-time length, and with a run-time index', () => {
+    const S = [
+      [1, 2],
+      [3, 4],
+      [5, 6],
+    ];
+    const cases: [Json, Point][] = [
+      [['At', 'P', 2], { P: [[1, 2]] }],
+      [['At', 'P', 2], { P: S }],
+      ...[0.5, 1, 3.5, 4, -2].map((x): [Json, Point] => [
+        ['At', 'S', ['Floor', 'x']],
+        { S, x },
+      ]),
+    ];
+    for (const [json, point] of cases) {
+      const want = interpreted(json, point);
+      expect(Array.isArray(want) && want.length === 2).toBe(true);
+      expect([json, point, js(json).run(point)]).toEqual([json, point, want]);
+      for (const to of ['glsl', 'interval-js'])
+        expect(
+          failure(() => compile(box(json), { ...IR, to } as never))?.message
+        ).toMatch(/an index that can be out of range|a list of rank 2 on glsl/);
+    }
   });
 
   test('a list of tuples of booleans, and of points of two lengths, decline as inputs', () => {

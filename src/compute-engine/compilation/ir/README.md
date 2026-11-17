@@ -974,11 +974,18 @@ value is visible where a type names it. `elem` reads an element from 0; `At` is
 the interpreter's rule (from 1, from the end when negative, NaN outside; on GLSL
 a conditional that reads the element only in range, with the length as a
 literal, `$#0` in the spelling), and the fold turns an `At` of a constant index
-in range into an `elem`. A boolean or nested list that can be out of range
-declines. `build` and `filter` are region rows. A `Length`, a reduction, a `Map`
-or a `Filter` of a `Range` reads its count and the arithmetic of its elements,
-so `Length(Range(1, n))` makes no list. On GLSL, which has no build, a `Map`
-(and a one-clause `Comprehension`) over a source of a constant length of 1 to 64
+in range into an `elem`. Another index can be out of range. On JavaScript, of
+a list of booleans it is `atu`, `undefined` out of range where the interpreter
+gives `Missing` (`At(X > 0, 5)` of a list `X` of three numbers), a pure read:
+no operation on a boolean fails on `undefined`; of a list of real points it is
+`atp`, a point of NaN coordinates out of range, the interpreter's value
+(`At(P, 0)` is `[NaN, NaN]`). Of a list of complex numbers or another list of
+lists it declines: a read of an absent row must not fail, and no program of
+Tycho's corpus reads one. GLSL, the interval and the bigint modes decline
+every such index. `build` and `filter` are region rows. A `Length`, a reduction, a `Map` or a `Filter` of
+a `Range` reads its count and the arithmetic of its elements, so
+`Length(Range(1, n))` makes no list. On GLSL, which has no build, a `Map` (and a
+one-clause `Comprehension`) over a source of a constant length of 1 to 64
 (`SCALARIZE_LIMIT`) is the list of its elements, the body lowered once per
 element in order: a `vecN` or a `float[n]` (`Map(f, L)` of `L: list<real^3>`,
 `Map(f, List(a, b, c))`). The elements of such builds in one program are at most
@@ -1248,9 +1255,9 @@ makes, of a stated or a run-time length: on JavaScript an array of arrays
 reads the outer value only, as for any list input: a string and a typed array
 throw; a row of another length, or a value that is not an array, gives an
 unspecified result. `At` of it with a constant index in range of a stated length
-is a point; another index declines (the interpreter gives a tuple of NaN out of
-range). A list of tuples of other elements, or of tuples of two lengths,
-declines.
+is a point; on JavaScript another index is `atp`, a point of NaN out of range as
+the interpreter's tuple of NaN, and GLSL and the interval mode decline it. A
+list of tuples of other elements, or of tuples of two lengths, declines.
 
 ## Effects
 

@@ -1040,10 +1040,15 @@ export function lower(
         if (type(i).shape.length > 0)
           decline(e.ops[1], 'a list where a scalar is required');
         const n = t.shape[0];
-        // Out of range, the interpreter gives NaN for a number, `Missing`
-        // for a boolean or a list, and `_at` gives the number NaN, which
-        // is not a complex value; the `fold` pass makes a constant index
-        // in range an element (of colours, `admits()` declines the rest).
+        // Out of range, the interpreter gives NaN for a number or a complex
+        // value, a point of NaN for a point and `Missing` for a boolean or
+        // a list. On JavaScript, of booleans `atu` gives `undefined` and of
+        // real points `atp` a point of NaN, the absent values of
+        // `docs/COMPILATION-MODEL.md`; the other kinds decline (a read of an
+        // absent row must not fail, and no program of Tycho's corpus reads
+        // one), as do GLSL, the interval mode and the bigint mode. The
+        // `fold` pass makes a constant index in range an element (of
+        // colours, `admits()` declines the rest).
         if (
           (t.lane === 'boolean' ||
             t.lane === 'complex' ||
@@ -1055,11 +1060,22 @@ export function lower(
             k !== 0 &&
             Math.abs(k) <= n
           )
-        )
-          decline(
-            e,
-            'an index that can be out of range, of a list of booleans, of complex numbers or of lists'
-          );
+        ) {
+          const reals = points && isSubLane(t.lane, 'real');
+          const booleans = flat(l) && t.lane === 'boolean';
+          if (!options.javascript || bigint || !(reals || booleans))
+            decline(
+              e,
+              'an index that can be out of range, of a list of booleans, of complex numbers or of lists'
+            );
+          if (reals)
+            return apply(e, ofOp('atp'), [
+              l,
+              i,
+              b.constant(t.shape[1] as number, 'integer'),
+            ]);
+          return apply(e, ofOp('atu'), [l, i]);
+        }
         return apply(e, 'At', [l, i]);
       }
       case 'PointX':

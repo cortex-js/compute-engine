@@ -52,9 +52,9 @@ const PINNED: [rule: string, program: unknown][] = [
 ];
 
 describe('IR slice: GLSL text', () => {
-  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a real function with no GLSL form, the factorial of a real, a complex function with no GLSL form, and the conversions to HSL and HSV)', () => {
+  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a run-time index of a list of booleans or of points, a real function with no GLSL form, the factorial of a real, a complex function with no GLSL form, and the conversions to HSL and HSV)', () => {
     // prettier-ignore
-    const jsOnly = new Set(['draw', 'shuffle', 'binomial', 'rangecount', 'factorial', 'ashsl', 'ashsv',
+    const jsOnly = new Set(['draw', 'shuffle', 'binomial', 'rangecount', 'factorial', 'ashsl', 'ashsv', 'atu', 'atp',
       ...Object.keys(REAL_FUNCTIONS).filter((f) => !['fract', 'atan2', 'root', 'coth', 'gcd'].includes(f)),
       ...Object.keys(COMPLEX_FUNCTIONS).filter((f) => !['cplx', 'cadd', 'csub', 'cneg', 'cmul', 'cdiv',
         'cpow', 'cexp', 'cln', 'csqrt', 'csin', 'ccos', 'ctan', 'csinh', 'ccosh', 'ctanh', 'cre', 'cim',

@@ -265,7 +265,7 @@ function atToElem(
   i: Instr,
   constants: ReadonlyMap<V, Constant>
 ): Instr[] | undefined {
-  if (i.k !== 'op' || i.op !== 'at') return undefined;
+  if (i.k !== 'op' || !['at', 'atu', 'atp'].includes(i.op)) return undefined;
   const [l, index] = i.args;
   const k = elementIndex(p.types[l].shape[0], constants.get(index));
   if (k === undefined) return undefined;
