@@ -3057,11 +3057,11 @@ function hurwitzOperandNumber(x: HurwitzOperand, prec: number): number {
   return hurwitzOperandBig(x, prec).toNumber();
 }
 
-function hurwitzOperandIsInteger(x: HurwitzOperand): boolean {
+export function hurwitzOperandIsInteger(x: HurwitzOperand): boolean {
   return isRationalOperand(x) ? x[0] % x[1] === 0n : x.isInteger();
 }
 
-function hurwitzOperandIsNegative(x: HurwitzOperand): boolean {
+export function hurwitzOperandIsNegative(x: HurwitzOperand): boolean {
   return isRationalOperand(x) ? x[0] < 0n : x.isNegative();
 }
 
@@ -3645,6 +3645,141 @@ export function bigZetaGeneralized(
   if (!hurwitzOperandIsNegative(a)) return bigHurwitzZetaEM(ce, s, a, prec);
   return bigZetaFront(ce, s, a, 1, prec);
 }
+
+/**
+ * The principal-branch value ζ(s, a) for a real a < 0 and a real,
+ * non-integer s, which is complex: each front term is
+ * (k + a)^(−s) = e^(−iπs)·|k + a|^(−s), so
+ *
+ *   ζ(s, a) = e^(−iπs)·F + ζ(s, a + m),
+ *
+ * with m = ⌈−a⌉ and F = Σ_{k<m} |k + a|^(−s) (see `bigZetaFront`). The real
+ * part, F·cos πs + ζ(s, a + m), can cancel, and F as a difference of two
+ * Hurwitz values (m large) can too: both are computed with guard digits,
+ * raised once by the digits lost, and the kernel declines when that is not
+ * enough. The imaginary part, −F·sin πs, is as accurate as F.
+ */
+export function bigHurwitzZetaComplex(
+  ce: ComputeEngine,
+  s: HurwitzOperand,
+  a: HurwitzOperand,
+  prec: number
+): { re: BigNum; im: BigNum } | undefined {
+  if (!hurwitzOperandIsNegative(a) || hurwitzOperandIsInteger(s))
+    return undefined;
+  const m = isRationalOperand(a)
+    ? (-a[0] + a[1] - 1n) / a[1]
+    : a.neg().ceil().toBigInt();
+  const rest = hurwitzOperandAddInt(a, m, prec); // in [0, 1)
+  const f = hurwitzOperandOneMinus(rest, prec); // in (0, 1]
+  const sMagnitude = Math.max(
+    0,
+    Math.ceil(Math.log10(Math.abs(hurwitzOperandNumber(s, prec)) + 1))
+  );
+  let guard = SPECIAL_FN_GUARD;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    // |s| digits more: π·s is rounded at the working precision
+    const wp = prec + guard + sMagnitude;
+    const tail = bigHurwitzZetaEM(ce, s, rest, wp);
+    if (tail === undefined) return undefined;
+
+    let front: BigNum;
+    let frontLargest = -Infinity;
+    if (m <= BigInt(HURWITZ_BIG_DIRECT_FRONT)) {
+      const negS = hurwitzOperandBig(s, wp).neg();
+      const fBig = hurwitzOperandBig(f, wp);
+      const count = Number(m);
+      front = BigDecimal.ZERO;
+      for (let j = 0; j < count; j++) {
+        if ((j & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+        front = front.add(fBig.add(j, wp).pow(negS, wp), wp).toPrecision(wp);
+      }
+      frontLargest = front.isZero() ? -Infinity : bigLog10Abs(front);
+    } else {
+      const head = bigHurwitzZetaEM(ce, s, f, wp);
+      const shifted = bigHurwitzZetaEM(
+        ce,
+        s,
+        hurwitzOperandAddInt(f, m, wp),
+        wp
+      );
+      if (head === undefined || shifted === undefined) return undefined;
+      front = head.sub(shifted, wp);
+      for (const p of [head, shifted])
+        if (!p.isZero()) frontLargest = Math.max(frontLargest, bigLog10Abs(p));
+    }
+    if (front.isZero() || !front.isFinite()) return undefined;
+    const frontLost = frontLargest - bigLog10Abs(front);
+
+    const sBig = hurwitzOperandBig(s, wp);
+    const sin = bigSinPi(sBig, wp);
+    const cos = bigSinPi(sBig.add(BigDecimal.HALF, wp), wp);
+    if (sin.isZero()) return undefined; // s is within the working precision of an integer
+    const head = front.mul(cos).toPrecision(wp);
+    const re = head.add(tail, wp);
+    const im = front.mul(sin).neg().toPrecision(wp);
+    let reLargest = -Infinity;
+    for (const p of [head, tail])
+      if (!p.isZero()) reLargest = Math.max(reLargest, bigLog10Abs(p));
+    const reLost =
+      reLargest === -Infinity
+        ? 0
+        : re.isZero()
+          ? Infinity
+          : reLargest - bigLog10Abs(re);
+    const lost = Math.max(frontLost, reLost);
+    if (lost <= guard - 8) {
+      if (!re.isFinite() || !im.isFinite()) return undefined;
+      return { re: re.toPrecision(prec), im: im.toPrecision(prec) };
+    }
+    if (!Number.isFinite(lost)) return undefined;
+    guard = Math.ceil(lost) + SPECIAL_FN_GUARD;
+  }
+  return undefined;
+}
+
+/**
+ * ln Γ(x) on the principal branch (the one continuous from the upper half
+ * plane, so Im = −π⌈−x⌉) at a finite non-integer real x < 0:
+ * ln|Γ(x)| from `bigGammaln` and the exact multiple of π, rounded to
+ * `prec` digits. Declines (`undefined`) past |x| = 10^100, where the
+ * multiple of π needs hundreds of digits of π.
+ */
+export function bigLogGammaNegative(
+  ce: ComputeEngine,
+  x: BigNum,
+  prec: number
+): { re: BigNum; im: BigNum } | undefined {
+  if (!x.isFinite() || !x.isNegative() || x.isInteger()) return undefined;
+  if (x.lt(LOG_GAMMA_MIN_NEGATIVE)) return undefined;
+  const m = new BigDecimal(x.neg().ceil().toBigInt());
+  // ln|Γ(x)| = ln π − ln|sin πx| − ln Γ(1−x) cancels near its zeros (x ≈
+  // −2.457, −3.144, …): the digits lost are the log10 of the largest term
+  // over the result. Raise the guard once by that many; decline if still short.
+  const sizeOf = (v: BigNum) => (v.isZero() ? 0 : bigLog10Abs(v));
+  const largest = Math.max(
+    0.5, // ln π
+    sizeOf(bigGammaln(ce, BigDecimal.ONE.sub(x, 20), 20)),
+    sizeOf(bigSinPi(x, 20).abs().ln(20))
+  );
+  let guard = SPECIAL_FN_GUARD;
+  let re: BigNum | undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = bigGammaln(ce, x, prec + guard);
+    if (!r.isFinite() || r.isZero()) return undefined;
+    const lost = Math.max(0, largest + 1 - bigLog10Abs(r));
+    if (lost <= guard - 8) {
+      re = r.toPrecision(prec);
+      break;
+    }
+    guard = Math.ceil(lost) + SPECIAL_FN_GUARD;
+  }
+  if (re === undefined) return undefined;
+  const digits = prec + 4 + Math.ceil(Math.log10(Number(m.toNumber()) + 1));
+  return { re, im: BigDecimal.pi(digits).mul(m).neg().toPrecision(prec) };
+}
+
+const LOG_GAMMA_MIN_NEGATIVE = new BigDecimal('-1e100');
 
 // --- Dirichlet eta and beta, arbitrary precision ---------------------------
 //   η(s) = (1 − 2^{1−s}) ζ(s)                  (DLMF 25.2.3)

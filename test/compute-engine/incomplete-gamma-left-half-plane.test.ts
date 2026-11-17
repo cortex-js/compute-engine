@@ -9,6 +9,16 @@ import { engine } from '../utils';
 
 const ce = engine;
 
+// The pins are machine-precision values: above machine precision a negative
+// real x declines, as there is no bignum kernel for the complex value.
+const savedPrecision = ce.precision;
+beforeAll(() => {
+  ce.precision = 'machine';
+});
+afterAll(() => {
+  ce.precision = savedPrecision;
+});
+
 // Upper incomplete gamma Γ(s, x) (`Gamma(s, x)`) at machine precision, with
 // the emphasis on Re(x) < 0 (GitHub issue #353). Every expected value is
 // mpmath `gammainc(s, x)` at 30 digits, principal branch; a real negative x is

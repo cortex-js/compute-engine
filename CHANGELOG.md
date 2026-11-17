@@ -1,3 +1,16 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`LogGamma` at a negative real and `HurwitzZeta(s, a)` at a negative `a`
+  with a non-integer `s` are computed at the engine precision.** Their values
+  are complex and were answered in doubles (15 digits) at every precision.
+  `LogGamma(x)` is now `ln|Γ(x)| − iπ⌈−x⌉` and `HurwitzZeta` is the principal
+  front sum plus `ζ(s, a + ⌈−a⌉)`, both in big decimals; a case the kernel
+  cannot vouch for stays unevaluated. `Gamma(s, z)` at `z < 0` stays
+  unevaluated at a precision above 15 digits instead of answering in doubles
+  (#612, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.194.2 _2026-11-19_
 
 ### Breaking Changes

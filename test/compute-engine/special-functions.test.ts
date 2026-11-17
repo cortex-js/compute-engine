@@ -20,6 +20,18 @@ import { engine } from '../utils';
 
 const ce = engine;
 
+// Γ(s, z) at a real z < 0 has no bignum kernel: above machine precision it
+// stays unevaluated, so these pins run at machine precision.
+function atMachinePrecision<T>(fn: () => T): T {
+  const saved = ce.precision;
+  ce.precision = 'machine';
+  try {
+    return fn();
+  } finally {
+    ce.precision = saved;
+  }
+}
+
 // Helper: check numeric approximation within tolerance
 function expectApprox(
   expr: any,
@@ -247,7 +259,9 @@ describe('INCOMPLETE GAMMA FUNCTION Γ(s, z)', () => {
   });
 
   test('Γ(2, -1) = 0 (real, integer s, negative z)', () => {
-    const v = ce.expr(['Gamma', 2, -1]).N();
+    const v = atMachinePrecision(() =>
+      ce.expr(['Gamma', 2, -1]).N()
+    );
     expect(Math.abs(v.re)).toBeLessThan(1e-12);
   });
 
@@ -261,13 +275,17 @@ describe('INCOMPLETE GAMMA FUNCTION Γ(s, z)', () => {
 
   test('Γ(2, -26) large negative z (asymptotic; was catastrophic cancellation)', () => {
     // mpmath: -4893240235720.969 = e²⁶·(−25), exact for integer s
-    const v = ce.expr(['Gamma', 2, -26]).N();
+    const v = atMachinePrecision(() =>
+      ce.expr(['Gamma', 2, -26]).N()
+    );
     expect(Math.abs(v.re - -4893240235720.969) / 4.893e12).toBeLessThan(1e-9);
   });
 
   test('Γ(1/2, -1) complex result', () => {
     // mpmath: 1.77245385090552 - 2.92530349181436j
-    const v = ce.expr(['Gamma', ['Rational', 1, 2], -1]).N();
+    const v = atMachinePrecision(() =>
+      ce.expr(['Gamma', ['Rational', 1, 2], -1]).N()
+    );
     expect(Math.abs(v.re - 1.7724538509055)).toBeLessThan(1e-9);
     expect(Math.abs(v.im - -2.9253034918144)).toBeLessThan(1e-9);
   });
