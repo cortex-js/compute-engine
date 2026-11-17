@@ -14,6 +14,16 @@ import type {
   UnsafeIntegerOperand,
   UnsettledShape,
 } from './compiler-types.js';
+import {
+  antiderivativeBudgets,
+  setExistingCompilationProbe,
+} from './closed-form-integral.js';
+
+export {
+  ANTIDERIVATIVE_ATTEMPT_STEPS,
+  ANTIDERIVATIVE_COMPILATION_HANG_MS,
+  ANTIDERIVATIVE_COMPILATION_STEPS,
+} from './closed-form-integral.js';
 
 /**
  * The targets of a statement list or of a function literal that a
@@ -26,76 +36,6 @@ import type {
  */
 export type EnforcedTargets = ReadonlyMap<string, string | undefined>;
 
-/**
- * Step budget for one `Integrate` node's antiderivative-first attempt (a
- * step is one `checkDeadline` call on the engine frame; see `StepBudget` in
- * `common/interruptible.ts`).
- *
- * The attempt is an **optimization** — every integral it declines still
- * compiles, via the caller's numeric emitter (quadrature on the JavaScript
- * target, a rigorous enclosure on the interval target) — so it must never be
- * able to stall a compilation. Compilation establishes no deadline of its
- * own, and since `ce.timeLimit` was retired (`docs/TIMEOUT-MODEL.md` §5) work
- * outside a span runs unbounded: relying on "the enclosing span, if any"
- * meant the default (no span) case could spin forever. So the attempt arms
- * its own span.
- *
- * Per §3.4 nesting is `min()`, so an enclosing consumer span that is tighter
- * still preempts this budget — this can only shorten, never extend, a
- * caller's bound.
- *
- * The budget counts steps, not milliseconds. With a wall-clock budget the
- * same integral compiled to its closed form on a fast machine and to
- * numeric quadrature on a slow or loaded one, so the compiled code, and its
- * values, depended on the machine. A step budget stops the search at the
- * same point on every machine. A large wall-clock limit
- * ({@link ANTIDERIVATIVE_ATTEMPT_HANG_MS}) stays beside it only as a guard
- * against a hang in code that does not count steps.
- *
- * Sized against the steps of the symbolic resolutions in the
- * compile-integrate suite and the Rubi benchmark, with headroom, so no
- * integral that legitimately closes is pushed onto the numeric path.
- */
-export const ANTIDERIVATIVE_ATTEMPT_STEPS = 300_000;
-
-/** The wall-clock guard of all the attempts of one compilation. An attempt
- *  that spends its time in code that does not count steps (a polynomial
- *  GCD on coefficients with thousands of digits) can use its whole hang
- *  limit while spending few steps, so the step pool alone would not keep
- *  a compilation with many such integrals short. This guard can decide
- *  which integrals get a closed form only when the attempts of one
- *  compilation spend 30 s in total, a case that does not reach the step
- *  pool first unless each step is slow: there the result can still depend
- *  on the machine. */
-export const ANTIDERIVATIVE_COMPILATION_HANG_MS = 30_000;
-
-/**
- * Shared step budget for ALL antiderivative-first attempts in one
- * outermost compilation.
- *
- * The per-node budget above bounds one attempt, but an emission can carry
- * hundreds of `Integrate` nodes — a macro-expanded consumer document
- * produced 728 in one expression (Tycho item 226) — and a fresh budget
- * per node lets the aggregate reach nodes × the budget before the numeric
- * fallback. Since the attempt is purely an optimization, the attempts
- * share this pool: each consumes the steps it actually spends, and
- * once the pool is dry every remaining integral in the compilation skips
- * straight to its numeric emitter. Sized for a handful of hard legitimate
- * resolutions plus dozens of ordinary ones.
- *
- * Reset at each DEPTH-0 entry of `BaseCompiler.compile` — the boundary
- * every route crosses: `compileRoot` (raw custom targets),
- * `compileCseRoot` (registered targets invoked directly), and the public
- * `compile()` entry. Nested
- * compilations consume the outer pool rather than getting a fresh one, so
- * the aggregate is bounded by one pool per depth-0 entry. A caller that
- * deliberately issues several root compilations against one target — a
- * multi-statement shader body compiles each statement separately
- * (`compileShaderBody`) — therefore gets one pool per statement, which
- * keeps each statement's compile time bounded exactly as one expression's
- * is.
- */
-export const ANTIDERIVATIVE_COMPILATION_STEPS = 600_000;
 /**
  * Context shared by the analysis and code generation modules. Temporary
  * changes are restored in finally blocks: evaluation during compilation
@@ -538,22 +478,47 @@ export class CompilerState {
    * compiled to `float[0]()`.
    */
   static _localVector: Map<string, number>[] = [];
-  /** Remaining wall-clock guard of the current compilation — see
-   *  {@link ANTIDERIVATIVE_COMPILATION_HANG_MS}. */
-  static antiderivativeHangMsLeft = ANTIDERIVATIVE_COMPILATION_HANG_MS;
-  /** The per-attempt budget in force: the constant above, unless a test
-   *  shortened it with {@link setAntiderivativeAttemptBudgetForTesting}. */
-  static antiderivativeAttemptSteps = ANTIDERIVATIVE_ATTEMPT_STEPS;
-  /** Remaining shared antiderivative budget for the current compilation —
-   *  see {@link ANTIDERIVATIVE_COMPILATION_STEPS}. Module state is safe:
-   *  compilation is synchronous and single-threaded. */
-  static antiderivativeStepsLeft = ANTIDERIVATIVE_COMPILATION_STEPS;
-  /** The number of compilations of the IR pipeline in progress
-   *  (`withCompilationBudgets()`): while one runs, a compilation that starts
-   *  consumes its antiderivative pool. */
-  static _irCompileDepth = 0;
-  static nextDefinitionId = 1;
-  /** How many antiderivative-first attempts have RUN, as opposed to being
-   *  skipped. Read by tests, before and after a compilation. */
-  static antiderivativeAttemptCount = 0;
+  // The antiderivative budgets are held by `closed-form-integral.ts`
+  // (`antiderivativeBudgets`, where each one is described), which the IR
+  // pipeline shares; these accessors read and write them.
+  static get antiderivativeHangMsLeft(): number {
+    return antiderivativeBudgets.hangMsLeft;
+  }
+  static set antiderivativeHangMsLeft(v: number) {
+    antiderivativeBudgets.hangMsLeft = v;
+  }
+  static get antiderivativeAttemptSteps(): number {
+    return antiderivativeBudgets.attemptSteps;
+  }
+  static set antiderivativeAttemptSteps(v: number) {
+    antiderivativeBudgets.attemptSteps = v;
+  }
+  static get antiderivativeStepsLeft(): number {
+    return antiderivativeBudgets.stepsLeft;
+  }
+  static set antiderivativeStepsLeft(v: number) {
+    antiderivativeBudgets.stepsLeft = v;
+  }
+  static get _irCompileDepth(): number {
+    return antiderivativeBudgets.irCompileDepth;
+  }
+  static set _irCompileDepth(v: number) {
+    antiderivativeBudgets.irCompileDepth = v;
+  }
+  static get nextDefinitionId(): number {
+    return antiderivativeBudgets.nextDefinitionId;
+  }
+  static set nextDefinitionId(v: number) {
+    antiderivativeBudgets.nextDefinitionId = v;
+  }
+  static get antiderivativeAttemptCount(): number {
+    return antiderivativeBudgets.attemptCount;
+  }
+  static set antiderivativeAttemptCount(v: number) {
+    antiderivativeBudgets.attemptCount = v;
+  }
 }
+
+// A compilation of the IR pipeline that starts while one of the existing
+// compilers runs consumes its antiderivative pool (`withCompilationBudgets()`).
+setExistingCompilationProbe(() => CompilerState._compileDepth !== 0);

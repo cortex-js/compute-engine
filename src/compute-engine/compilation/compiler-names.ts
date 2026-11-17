@@ -16,12 +16,11 @@ import {
   isFunction,
   isDictionary,
 } from '../boxed-expression/type-guards.js';
-import { multiClauseState } from '../multi-clause.js';
-import type { CompileTarget } from './types.js';
 import { possiblyCollectionTypedForCompile } from './compiler-type-facts.js';
 import { core } from './compiler-core-hooks.js';
 import { CompilerState } from './compiler-state.js';
-import { userFunctionLiteral } from './compile-assignment-checks.js';
+
+export { reachesExcludedName } from './closed-form-integral.js';
 
 /**
  * A `_tv`/`_cse`-prefixed identifier token, as it appears inside a
@@ -278,112 +277,6 @@ export function mentionsExcludedName(
     return expr.ops.some((op) => mentionsExcludedName(op, vars, ops));
   }
   return false;
-}
-
-/**
- * Whether evaluating `expr` at compile time would bake in something that
- * must stay live at run time: `expr` mentions a `vars`-mapped input or a
- * caller-overridden operator (see `mentionsExcludedName`) either directly,
- * or through the assigned value of a symbol it reads, or through the body
- * of a user-defined function it calls or passes as a value — at any depth.
- *
- * The compile-time folder evaluates a subtree through the engine, and the
- * engine reads every assigned value and applies every user function it
- * reaches. With `a := sin(y_0)` and `y_0` a `vars`-mapped input that also
- * holds a value, `cos(a)` mentions no mapped name itself, yet folding it
- * bakes `y_0`'s current value into the code, and a later write to the input
- * has no effect: a slider-dependent document definition drew outdated
- * geometry (Tycho item 328). The same holds for the body of `u := L ↦ 2L −
- * a` under the call `u(1)`, and for a caller-overridden function reached
- * through a value, which the fold would evaluate through the engine
- * instead of running the caller's implementation.
- *
- * The answer for a name depends only on the engine's definitions, which do
- * not change while one expression compiles, so it is memoized per name in
- * `target.foldReachMemo`, and a function node already walked in this call
- * is not walked again. A name whose walk is in progress (a value that
- * refers to itself) answers `false` at the re-entry, and that answer is
- * provisional: a walk that met such a re-entry may have been cut short by
- * the cycle, so its `false` is not memoized, while a walk that met none is
- * complete and is. A `true` is memoized from any depth. Definitions rarely
- * form a cycle (the engine cannot evaluate one), so in practice every name
- * is walked once and a tower of definitions sharing dependencies costs
- * linear work.
- *
- * A parameter or binder index that shadows a same-named engine symbol is
- * not tracked: its engine value is walked too, which can only report a
- * mention that is not there, and a spurious mention costs one fold, never
- * a wrong value.
- */
-export function reachesExcludedName(
-  expr: Expression,
-  target: Pick<
-    CompileTarget<Expression>,
-    'varsKeys' | 'foldExcludedOps' | 'foldReachMemo'
-  >
-): boolean {
-  const vars = target.varsKeys;
-  const ops = target.foldExcludedOps;
-  if (
-    (vars === undefined || vars.size === 0) &&
-    (ops === undefined || ops.size === 0)
-  )
-    return false;
-  const memo = (target.foldReachMemo ??= new Map());
-  const engine = expr.engine;
-  const walking = new Set<string>();
-  const seen = new Set<Expression>();
-  // How many times a walk short-circuited on a name already in progress.
-  // A name's walk compares the count before and after: unchanged means no
-  // cycle cut it short and its `false` is final.
-  let reentries = 0;
-  const viaName = (s: string): boolean => {
-    const known = memo.get(s);
-    if (known !== undefined) return known;
-    if (walking.has(s)) {
-      reentries += 1;
-      return false;
-    }
-    walking.add(s);
-    const before = reentries;
-    let hit = false;
-    try {
-      const value = engine._getSymbolValue(s);
-      if (value !== undefined) hit = visit(value);
-      if (!hit) {
-        const literal = userFunctionLiteral(engine, s);
-        if (literal !== undefined && literal !== value) hit = visit(literal);
-      }
-      // A multi-clause function has no single literal: each clause's body
-      // is read, as `foldValueImpure` reads them.
-      if (!hit) {
-        const clauses = multiClauseState(engine.lookupDefinition(s))?.clauses;
-        if (clauses !== undefined) hit = clauses.some((c) => visit(c.literal));
-      }
-    } finally {
-      walking.delete(s);
-    }
-    if (hit || reentries === before) memo.set(s, hit);
-    return hit;
-  };
-  const visit = (e: Expression): boolean => {
-    if (isSymbol(e)) {
-      const s = e.symbol;
-      if (vars?.has(s) === true || ops?.has(s) === true) return true;
-      return viaName(s);
-    }
-    if (isDictionary(e)) return e.values.some(visit);
-    if (isFunction(e)) {
-      if (seen.has(e)) return false;
-      seen.add(e);
-      const h = e.operator;
-      if (ops?.has(h) === true) return true;
-      if (e.ops.some(visit)) return true;
-      return viaName(h);
-    }
-    return false;
-  };
-  return visit(expr);
 }
 
 /**

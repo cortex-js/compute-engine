@@ -717,23 +717,23 @@ input and is computed once per call. Not with a bound that is a number literal
 that is infinite only at run time keeps the hoisting.
 
 The closed form is the existing target's rule: the engine's antiderivative
-(`integralClosedForm()`, which calls `closedFormIntegral()` of the shared layer
-of the old compilers, under the antiderivative budget of the compilation and
-with no fold of a `vars` name that holds a value; none with an angular unit
-other than radians, because that function reads operands written in radians and
-the lowering scales the closed form again, where an indefinite integral declines
-with that reason; none when the operands reach an `NIntegrate`, directly or
-through the value of a symbol or the body of a user function, which the engine
-would evaluate by quadrature to a number that the closed form holds as exact). A
-definite integral with a closed form has a second region, of no parameter, whose
-yield is the closed form, and is printed as
-`_IA.integrateClosed(() => closed, f, a, b, n)`: the library gives the closed
-form when its scan of the integrand finds no pole, gap or unbounded stretch
-(`∫ dt/t²` from −1 to 1 closes to −2 and is `singular`), and with an infinite
-bound, and the enclosure otherwise. A closed form that the lowering declines
-(`SinIntegral`, `FresnelS`: no row), that is not real, or that holds a loop or a
-call (a function lowered in a discarded region would stay defined) is not
-lowered, and one that the mode does not print is removed before `admits()`
+(`integralClosedForm()`, which calls `closedFormIntegral()` of
+`closed-form-integral.ts`, shared with the old compilers, under the
+antiderivative budget of the compilation and with no fold of a `vars` name that
+holds a value; none with an angular unit other than radians, because that
+function reads operands written in radians and the lowering scales the closed
+form again, where an indefinite integral declines with that reason; none when
+the operands reach an `NIntegrate`, directly or through the value of a symbol or
+the body of a user function, which the engine would evaluate by quadrature to a
+number that the closed form holds as exact). A definite integral with a closed
+form has a second region, of no parameter, whose yield is the closed form, and
+is printed as `_IA.integrateClosed(() => closed, f, a, b, n)`: the library gives
+the closed form when its scan of the integrand finds no pole, gap or unbounded
+stretch (`∫ dt/t²` from −1 to 1 closes to −2 and is `singular`), and with an
+infinite bound, and the enclosure otherwise. A closed form that the lowering
+declines (`SinIntegral`, `FresnelS`: no row), that is not real, or that holds a
+loop or a call (a function lowered in a discarded region would stay defined) is
+not lowered, and one that the mode does not print is removed before `admits()`
 (`dropClosedForms()`): the enclosure, of the same `n`, stands alone. The reads
 of `vars` entries in a closed form are not counted as effects (in the mode they
 read the inputs object). An integral that is not pure (`e.isPure`: a draw in a

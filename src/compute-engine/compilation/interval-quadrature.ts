@@ -16,7 +16,7 @@ import {
 import {
   closedFormIntegral,
   withCompilationBudgets,
-} from './compile-integrals.js';
+} from './closed-form-integral.js';
 
 /**
  * How much integration work a subtree can demand at run time, measured from
@@ -162,12 +162,6 @@ const NUMERIC_INTEGRALS: ReadonlySet<string> = new Set(['NIntegrate']);
  * lowering scales the trigonometric functions of the closed form again.
  * There is none either when the operands reach an `NIntegrate`, directly
  * or through a definition.
- *
- * This and `withIntegralClosedFormBudgets()` are the IR pipeline's one
- * dependency on the shared layer of the old compilers
- * (`compile-integrals.ts`, `CompilerState`), which moves here when that
- * layer is deleted (`docs/plans/2026-11-15-ir-interval-mode.md`, section
- * 13).
  */
 export function integralClosedForm(
   args: ReadonlyArray<Expression>,
