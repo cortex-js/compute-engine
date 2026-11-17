@@ -2574,6 +2574,29 @@ deep nest of few terms still compiles in seconds (14 levels of 3 terms:
 21 s). Codex's reviews are owed for G20 and G23 to G29 (recorded with
 `~/.claude/review-common/owed.sh`, seven `range` entries of 2026-11-16).
 
+User, 2026-11-16, evening, on that finding: "I am very lenient regarding
+iteration cap checks and other deadline while executing compiled code. Hosts
+that care about this can run in a worker to avoid blocking the main thread."
+So G27 drops its deadline charge for written-out code (no `Region.ticks`, no
+carry in the passes, no charge in `scalarize`): a program made of written-out
+passes can run past `timeLimit`, stated in the README. The compile-time bound
+for deep nests stays in the batch: that is compile time, not execution.
+
+The replay on main `edf0cacf9` (G26 to G29 landed; the typing of function
+values corrected; three shards on a loaded machine, so the times are
+indicative; records `replay-t12/medf0-*.jsonl`): JavaScript 9,261 of the
+9,503 programs the existing compiler compiles (97.5%), GLSL 3,786 of 3,855
+(98.2%); no internal error; values 9,064 same, 6 finite differences (the
+known ones), 21 shape, 9 throws. Median time 0.745 of the existing compiler;
+77 programs above 1.5, 9 above 3, 2 above 10 (`neyret/vwbagbcerj`, a sample
+artefact: a list shorter than the sum reads). Largest decline causes left,
+JavaScript: a run-time index of a list of booleans, complex numbers or lists
+51 (batch G30, in review: on JavaScript the read compiles and gives NaN or a
+point of NaN out of range; 33 of the 51 then compile, 12 of the others meet
+`Repeat`), a list or tuple argument of `Apply` 29, `Repeat` 23, a list where
+a scalar is required 15, `Multiply` of a list of points and another shape 10;
+GLSL: loops that can run more passes than the budget 42, a `vars` entry 13.
+
 Queue from here (the items of this paragraph that the table above lists are
 done). Speed: colour constants computed once (59 programs), the two
 `vwbagbcerj` programs, the written-out sums on JavaScript (`unrollSums`,
