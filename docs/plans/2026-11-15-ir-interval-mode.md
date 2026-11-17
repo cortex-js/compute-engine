@@ -1455,3 +1455,67 @@ exception), `buddhabrot` #0 (4.9: an artefact of the sweep's list input),
 `3mhkarzpoz` #3 (1.21), `3mssd5t0lj` #2 and #4 (1.15), `ccoc40kfhj` #9
 (1.12: no `_IA.scale` spelling of a point constant times an interval), and
 three at 1.10. Their causes are not diagnosed yet, except where stated.
+
+### 18.5 The evening of 2026-11-16: the programs above 1.1, cause by cause
+
+The user asked what the run-time exponent costs and what could be gained
+back. On main `d6e29c7e9`, 427 corpus programs hold `_IA.powReal`; 71 ran
+above 1.1 times the existing target after a quiet re-timing (median 1.17,
+about 0.1 µs more per call). In the sweep's boxes no box of that class goes
+from `empty` on the existing target to a value in the mode, so the corpus
+sample shows the cost of the decision and not its benefit; the witness
+stays `x^a` at `x = -8`, `a = 0.2`. A diagnosis of every other program
+above 1.1 followed (each cause confirmed by a hand edit of the emitted code
+and a quiet timing). On main since section 18.4, newest last, each with the
+Claude reviewer (the Codex reviews are owed):
+
+- `7fbb0870f4179f70bad96eba412f1381407a6944`: a run-time real exponent over
+  a base whose printed enclosure is proved to have a lower end `>= 0`
+  (`nonnegative(v, depth, enclosed)`: a constant, `abs`, `exp`, `square`,
+  `sqrt`, an even power, sums and a `max` of such) is `_IA.powInterval`, as
+  on the existing target: the reading of the exponent cannot matter there;
+  and `_IA.powReal` goes through one `liftJump`. 253 programs change. The
+  reading stays where the base can be negative: the decision is unchanged.
+- `0641b9c6203e79594734aef23ed58545e0cc062d`: a wrong value, found by
+  `ce-compiler`: `facts()` did not read the values of the dictionary of a
+  `Declare`, so a sum written out gave every term the first term's value
+  (`[2.5, 2.5]` for 7.5). No corpus program.
+- `2bf11ff24140ee82fc09fc8ff515dd3bedb1ddc6`: the pass `hoist` is off in
+  the mode, and a boolean `if` one of whose arms is the deciding constant
+  is printed lazily (`verdictIf.lazy`): an operand of `And` or `Or` after
+  the first runs only where the operands before it do not decide. 171
+  programs, geometric mean of time 0.845, results byte-identical.
+- `b5e5f4a554a087d9113ecfa3a9a37a7103aaa86c`: a rational times an inexact
+  constant is one constant (`(π / q)·p`, the existing target's, at machine
+  precision); an `add` of an exact zero is its other operand (a sum written
+  out starts at its first term); `div(neg(a), b)` is `_IA.negDiv`. 316
+  programs.
+
+Three reviews of this period found a wrong value before or after a
+landing that no corpus program shows: `Reduce(L, f, init)` over a short
+list (section 18.4), a constant near 0 marked inexact taken as never
+negative, and a constant that occurs twice in a product with a rational.
+Each was reached by a reviewer's probe, not by the sweep.
+
+Filed: `issues/CE-1372.md`: both interval targets answer `[1, 1]` for
+`0^0` with a run-time exponent, where the interpreter and the JavaScript
+targets give `NaN`.
+
+**The baseline on main `b5e5f4a55`** (`sweep-t12-at-b5e5f4a55`,
+`retime-slow-at-b5e5f4a55.json`): admission and classes as in section 18.4
+(4,848 of 5,155; 28,520 boxes equal, 292 tighter, 123 wider; 51 containment
+misses in 5 programs, the same on both targets). After the quiet re-timing
+of the 244 programs that the sweep put above 1.05, 12 programs are above
+1.1 times the existing target (84 on `d6e29c7e9`), 6 above 1.25, 4 above
+1.5, 2 above 3, and none of them holds `_IA.powReal`:
+
+| Program | Ratio | Cause |
+| --- | --- | --- |
+| `neyret/nbbj88wunw` #1 | 159 | a comparison that the existing target decides at compile time (recommended as an exception) |
+| `showcase/buddhabrot` #0 | 6.2 | an artefact of the sweep's list input |
+| `neyret/jdnefd99lw` #0 | 1.78 (0.16 µs) | an undecided bound throws where the existing target returns `entire` in place; the mode gives up in those boxes either way |
+| `art/mavxszbvzk` #0 | 1.52 (0.07 µs) | a constant program; not diagnosed |
+| `neyret/zrklhsz34x` #4, `neyret/n3nirm8khz` #4 | 1.46, 1.43 | the same `Sum` loop computed twice (`cse` does not merge loops: `ce-compiler`'s CE-1373) |
+| `neyret/pvzphgx1eo` #1 | 1.20 | invariants computed before a loop that makes no pass in the sweep's boxes |
+| `neyret/sjjo3qgnfp` #69, #118, #76 | 1.14, 1.13, 1.10 | not diagnosed |
+| `art/h2rbqjefo3` #0, `neyret/7vqnkhdhoj` #12 | 1.10 | not diagnosed |
