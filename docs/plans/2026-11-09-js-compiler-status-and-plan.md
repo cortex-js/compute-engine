@@ -2892,6 +2892,26 @@ Landed on 2026-11-16, night:
   deletes the existing interval target first, in its own commit; this
   session deletes the rest after an inventory of what depends on the shared
   core.
+- More decisions of the user, 2026-11-17: the deletion ships in 0.194.0.
+  Also dropped, in the same migration note: the `target` option and custom
+  targets (`registerCompilationTarget`, the exported target classes),
+  `compileShader`/`compileFunction`, operator compile handlers that return
+  code text, `compileHelpers`/`compileShippable`, the value-kind compile
+  contract. Concurrency (`parallel for`, `runAsync` parallel loops) is
+  required with the new compiler, in a follow-up phase (my call: the old
+  parallel lowering emits through the old compiler; the kernel pool, the
+  workers and `runAsync` stay and are reused); until then `ParallelLoop`
+  runs in the interpreter on one thread. Issues for 0.194.0: CE-1205 and
+  CE-1199 are right or bounded with the profile and close with the
+  deletion; CE-1168: `FresnelC`/`FresnelS` are added to the profile.
+- The inventory of what depends on the existing compilers (2026-11-17,
+  `scratchpad/inventory/`): 110 files, about 135,000 lines of
+  `compilation/` go; 19 files, about 19,000 lines stay (the runtime, the
+  types, broadcast, the kernel pool). Blockers before the deletion: the
+  pipeline imports about ten functions from old modules and the GLSL and
+  interval adapters ask the old targets for `freeSymbols`/`freeSymbolTypes`
+  (being moved); the interpreter-fallback result of `compile()` is built by
+  the old target; `storage-hints.ts` uses `BaseCompiler`.
 - Corpus declines to weigh before the deletion (timing record `quiet3` on
   `000f57677`): the profile declines 157 JavaScript programs and 27 GLSL
   shaders that the existing compiler compiles. The largest causes: a list
