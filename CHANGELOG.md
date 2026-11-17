@@ -1,3 +1,19 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`Binomial`, `Choose`, `Factorial`, `GammaRegularized`, `BetaRegularized`
+  and `ClausenCl` read an exact operand with guard digits under `.N()`.** The
+  operand `1/3`, rounded to the working precision, reached the last digits of
+  the result multiplied by the condition number of the function: at 30 to 100
+  digits the last 2 to 8 digits were wrong, and up to 10^8 units at large
+  arguments (`Factorial(328/6).N()`). `Binomial` of float operands computes
+  the Γ quotient with guard digits and rounds once (it ended 2 units off), and
+  its poles are decided on the exact operands: `Binomial(19/6, 385/6).N()` is
+  `0`, not a rounding residue. `GammaRegularized` of an integer order sums
+  its series with guard digits and rounds once (#608, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 ## 0.194.2 _2026-11-19_
 
 ### Breaking Changes

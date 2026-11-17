@@ -9125,7 +9125,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             : undefined,
       canonical: (args, { engine }) =>
         engine._fn('Factorial', [...checkArity(engine, args, 1)]),
-      evaluate: ([x], { numericApproximation }) => {
+      evaluate: guardDigitsN(([x], { numericApproximation }) => {
         const ce = x.engine;
 
         // If argument is symbolic (not a number literal), keep unevaluated
@@ -9204,7 +9204,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // We can get here if the factorial is too large
           return undefined;
         }
-      },
+      }),
       evaluateAsync: async ([x], options) => {
         const { signal, numericApproximation } = options;
         const ce = x.engine;
