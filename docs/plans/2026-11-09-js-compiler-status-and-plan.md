@@ -2634,6 +2634,34 @@ Landed on 2026-11-16, night:
   right. `ce-interval` fixes it. It is the cause of the replay's "finite"
   difference of `neyret/h3k6mi4qfo`, recorded above as a boundary case.
 
+- `2b64e14ccfb4aeca5c563bd1c8198b52ea2173b6` (G32): `Apply` of a function
+  literal of several parameters to list arguments compiles when the
+  interpreter maps the literal over its lists (the lists zipped, each scalar
+  bound whole in every cell; a literal that takes a collection binds whole
+  and declines). 20 of the 29 JavaScript programs compile. `ir/` is 11,121
+  lines.
+- `dddd103622498bdeb5c51a485609b8a8ff61573a` (CE-1396, the user's decision
+  of 2026-11-16: "if the argument is pure, it can be evaluated once, then
+  copied n time, otherwise, it should be evaluated n times"): the
+  interpreter evaluates a `Repeat` value that is not pure once per element
+  in every position (above `maxCollectionSize`, as the lazy `Map` of the
+  value); the profile compiles it as a build, in place of G31's decline; the
+  existing JavaScript compiler declines it. Three review rounds: a first
+  version evaluated the value when an expression was built; a second left
+  the list above the limit unevaluated and `Sort` of 10,001 draws came back
+  unsorted. Its CHANGELOG entry and one regenerated line of the Epsil
+  reference are not committed yet (another session has hunks in the same
+  files). `ir/` is 11,126 lines.
+- Filed from that work: CE-1405 (a lazy `Map` returned from `WithRandomSeed`
+  draws after the frame ends: P2), CE-1409 (above the limit, `Sort` of a
+  lazy `Map` of an impure body evaluates each element twice: P3), a witness
+  added to CE-657.
+- CE-1372 (the interval `0^0`): the user decided option 1; `ce-interval`
+  implemented it and did not land it: marking `partial` every box whose base
+  and exponent hold 0 reverses two fixes made for Tycho (item 260, row 417)
+  and makes a power series from `k = 0` `partial` at 0. It is back with the
+  user, with the narrow form (`empty` only for the point box) recommended.
+
 Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
 states, each step gated by a render audit with no lost series, no new hang
 and no build or render over 1.5 times): its `At` handler on GLSL and the
