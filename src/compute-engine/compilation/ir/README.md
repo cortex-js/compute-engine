@@ -1142,6 +1142,23 @@ over the sum of the lengths, whose element at `k` is read from the first list
 whose end is after `k` (a chain of `n − 1` tests per element); its lists are of
 numbers, or all of points. On GLSL it declines (a build).
 
+`Repeat(v, n)` is a build of `n` copies of `v`, whose value is lowered once
+before it. The value must be pure: the interpreter evaluates `v` once when it
+evaluates the `Repeat` (as a result, under `At`, `Max`, `Map`), but once per
+element, and not at all for a count of 0, when a consumer reads the list
+lazily (`Sum`, `Add`), so a value with a draw or a write
+(`Sum(Repeat(Random(), 3))`) declines. The count is that of `Range(1, n)`
+(`rangecount`): 0 below 1, the floor of a real count (a count that is not an
+integer is an error of the interpreter, unspecified); a constant count is a
+stated length, so a short list is written out (`Repeat(-1, 2)` is `[-1, -1]`).
+The length guard of a build applies to a run-time count: one of 2^32 or more
+throws on JavaScript and is `entire` in the interval mode, where the
+interpreter keeps the list lazy; a constant count of 2^32 or more throws on
+JavaScript and declines in the interval mode (a list whose length is not one
+number). On GLSL a count known at run time declines (`rangecount`), as do a
+count below 1 and one above 64 (a build). `Repeat(v)` (an unbounded list) and
+a value of a run-time length (a list of lists of run-time length) decline.
+
 `Map(f, L1, …, Ln)` of two lists or more is the interpreter's list as long as
 the shortest list (`Map((a, b) ↦ a + b, [1, 2, 3], [10, 20])` is `[11, 22]`): a
 build over the `Min` of the lengths (the least stated length, and the length
