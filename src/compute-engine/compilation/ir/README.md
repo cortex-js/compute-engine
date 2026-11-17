@@ -934,17 +934,11 @@ is logged. The result has `target: 'interval-js'`, `success`, `runtimeVersion`,
 two, in that order), `calling` (`'expression'`, or `'lambda'` for a root
 `Function` literal, which declines when its body reads a free name),
 `booleanInputs`, `listInputs`, `run`, `freeSymbols`, `freeSymbolTypes`,
-`unsupported` (empty) and `mode` (`'strict'`), as on the existing target: the
-free names of `analyzeReferences()` with the interval target object, then the
-inputs of the entry and the names of `vars` that the code reads (through a call
-too) that the walk does not list, and their types from `freeSymbolTypes()`. The
-walk reads the expression, where the existing target reads its rewritten tree,
-so the order can differ (a name read in the body of a user function comes after
-the names of the expression), and so can the type of a name read only there
-(`provenance` and `type` of its definition, where the existing target reads its
-occurrence in the rewritten body), in 302 and 14 of the 4,815 programs of
-Tycho's corpus that both compile. `profile: 'ir'`, and for an expression
-`broadcast()`, `broadcastAsync()`, `shippable` and `willUsePool()`, built by
+`unsupported` (empty) and `mode` (`'strict'`), as on the existing target, with
+`freeSymbols` and `freeSymbolTypes` by the rule of every target ("The report of
+the inputs", in "Selecting the pipeline"; `lowered` is `interval` for a real or
+integer input). `profile: 'ir'`, and for an expression `broadcast()`,
+`broadcastAsync()`, `shippable` and `willUsePool()`, built by
 `createIntervalRuntime()` (`loadBroadcast()`, `loadBroadcastSlice()`) over the
 stored result. Options: `inputs`, `symbolic`, `symbolDeps`, `varsObjectRefs` and
 `cse: false` as on JavaScript; `constantFold: false`, no closed node evaluated;
@@ -1998,7 +1992,7 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it.
   function of a text other than a read of the inputs object (see "User
   functions"), a call of a mapped name, a list or complex type, and a text with
   `$` or `$#` and a digit (a placeholder of a spelling) decline. A mapped name
-  is not an input (`freeSymbols`).
+  whose text the code holds is in `freeSymbols` ("The report of the inputs").
 - **Calling convention.** The result is `calling: 'expression'`, `run(inputs)`,
   or, for a root `Function` literal, `calling: 'lambda'`, `run(a0, a1, …)`, as
   the existing compiler's result is called by `implicitCompile()`; a literal of
@@ -2029,7 +2023,30 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it.
   `shippable` is the rule of the existing compiler: false for code that draws or
   integrates (`isShippableCode()`) and for a `vars` text that is not a read of
   the inputs object (`readsVarsObject()`: `_.E` is shippable). There is no
-  `pure` or `freeSymbolTypes`.
+  `pure`.
+- **The report of the inputs.** The same rule on JavaScript, GLSL and
+  interval-js (`inputReport()` of `adapter.ts`). `freeSymbols` holds the names
+  that the code reads: the inputs of the entry (a parameter of the entry that is
+  not a length or a positional one) and the names of `vars` whose text the code
+  holds (`hostReads()`, in a function body too; on GLSL a name of `vars` is a
+  parameter), in the order the lowering first reads them (`Program.inputs`), so
+  a name read only in the body of a user function comes after the names of the
+  expression read before the call. A name whose value the code holds as a
+  literal is not read: it is in `symbolDeps`. A program that reads no input, a
+  constant predicate too, has `[]`. `freeSymbolTypes` has an entry for each name
+  of `freeSymbols`: `type` is the declared type of the binding read at the entry
+  (for a name read only in a function body, the binding in the scope of the
+  compilation, or the type the `inputs` option gives it) when that binding
+  declares one (also a binding of a scope popped before `compile()`:
+  `u: real<0..5>` stays `real<0..5>`), with `provenance: 'declared'`, else the
+  engine type that the lowering gives the input, with `'inferred'`, spelled as a
+  declaration (`declaredTypeText()`); `lowered` is the type that the code reads
+  it as, from the IR type of its parameter or the lane of its `vars` read: on
+  JavaScript `number`, `boolean`, `complex` (a complex input, in the complex
+  mode an input of type `number` too), `color`, `point` for a tuple, `array` for
+  another list; on interval-js the same with `interval` for `number`; on GLSL
+  the type of the parameter (below). The report reads no module of the existing
+  compilers.
 - **Batches and `runAsync()`.** The result of an expression (not of a literal)
   has `broadcast()`, `broadcastAsync()`, `willUsePool()`, `runAsync()` and
   `willParallelize()`, and `broadcastOutputs` for a type of more than one value
@@ -2075,20 +2092,20 @@ decimal that reads back as the same float32 and is not above the largest float
 (`0.1`, `250.0`, `1.1754944e-38`; the largest float is `3.4028234663852886e+38`,
 since `3.4028235e+38` is above it and a compiler can read it as Infinity), so a
 table of 1,024 numbers in [0, 1) takes about 12 characters per element;
-`freeSymbols` are the inputs; `freeSymbolTypes` has the `type` and `provenance`
-of the existing target (`freeSymbolTypes()` of `compile-references.ts`) and the
-`lowered` type that the code reads (`float`, `bool`, `vec2`, `bvec3`,
-`float[6]`: the existing target's for each input it compiles; `vec2` for a
-complex input); `warnings` holds the `float32-unsafe-argument` warning of the
-existing target (`kind: 'correctness'`, `value` the operand), once per operand
-of a `Mod` or a `Fract` in which a constant of magnitude 1000 or more amplifies
-a trigonometric value (the rule of `isAmplifiedTrig()` of `gpu-exact-trig.ts`,
-with a memo per node: `amplifiedTrigMemo()`, linear in a shared graph), in the
-expression and the bodies of the user functions it calls (each node once); there
-is no exact sine hash and no `float32Bounds`, so such an operand warns also
-where the existing target emits an exact form (a host that sends a flagged curve
-to its CPU lane does so for these too), except in a `Mod` or a `Fract` that is
-closed as a whole (numbers and library constants under library rows that are not
+`freeSymbols` and `freeSymbolTypes` follow the rule of every target ("The report
+of the inputs"), with as `lowered` the GLSL type of the entry parameter, which
+the host binds the uniform as (`float`, `bool`, `vec2`, `bvec3`, `float[6]`: the
+existing target's for each input it compiles; `vec2` for a complex input);
+`warnings` holds the `float32-unsafe-argument` warning of the existing target
+(`kind: 'correctness'`, `value` the operand), once per operand of a `Mod` or a
+`Fract` in which a constant of magnitude 1000 or more amplifies a trigonometric
+value (the rule of `isAmplifiedTrig()` of `gpu-exact-trig.ts`, with a memo per
+node: `amplifiedTrigMemo()`, linear in a shared graph), in the expression and
+the bodies of the user functions it calls (each node once); there is no exact
+sine hash and no `float32Bounds`, so such an operand warns also where the
+existing target emits an exact form (a host that sends a flagged curve to its
+CPU lane does so for these too), except in a `Mod` or a `Fract` that is closed
+as a whole (numbers and library constants under library rows that are not
 effectful, `Mod(10000·Sin(100000), 1)`), which the lowering folds in doubles: it
 warns only with `constantFold: false`. A closed operand of a `Mod` by an input
 is not folded and warns (`Mod(10000000·Sin(1), x)`); `unsupported` is empty,

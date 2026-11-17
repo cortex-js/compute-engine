@@ -5,6 +5,7 @@
 
 import type { Type } from '../../common/type/types.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
+import { typeToString } from '../../common/type/serialize.js';
 import {
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
   stripMissingFromType,
@@ -40,4 +41,38 @@ export function broadcastStrideOfType(t: Type): number {
   const n = t.elements.length;
   if (n < 2) return 1;
   return t.elements.every((e) => couldMatch(e.type, 'number')) ? n : 1;
+}
+
+/**
+ * The type `t` as a host writes it in a declaration. The type printer
+ * leaves out the entry type `number` of a vector or a matrix
+ * (`matrix<number>` prints `matrix`), and a diagnostic that asks for
+ * `matrix<real>` must show the `number` it replaces. The type report of a
+ * compilation (`freeSymbolTypes`) and the run-time entry diagnostic of the
+ * JavaScript runner both use this spelling, so that one symbol has one
+ * spelling in both.
+ */
+export function declaredTypeText(t: Type): string {
+  // A tensor of unknown rank with `number` cells prints `tensor` (the
+  // printer leaves the cell type out); the diagnostic shows the cells.
+  if (
+    typeof t !== 'string' &&
+    t.kind === 'list' &&
+    t.elements === 'number' &&
+    t.dimensions === null
+  )
+    return 'tensor<number>';
+  if (
+    typeof t !== 'string' &&
+    t.kind === 'list' &&
+    t.elements === 'number' &&
+    t.dimensions &&
+    (t.dimensions.length === 1 || t.dimensions.length === 2)
+  ) {
+    const head = t.dimensions.length === 1 ? 'vector' : 'matrix';
+    if (t.dimensions.every((d) => d < 0)) return `${head}<number>`;
+    const dims = t.dimensions.map((d) => (d < 0 ? '?' : `${d}`)).join('x');
+    return `${head}<number^${dims}>`;
+  }
+  return typeToString(t);
 }

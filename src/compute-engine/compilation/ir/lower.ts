@@ -41,7 +41,7 @@
 
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import type { Type } from '../../../common/type/types.js';
-import type { Expression } from '../../global-types.js';
+import type { BoxedValueDefinition, Expression } from '../../global-types.js';
 import type { NumericValue } from '../../numeric-value/types.js';
 import { BigNumericValue } from '../../numeric-value/big-numeric-value.js';
 import { ExactNumericValue } from '../../numeric-value/exact-numeric-value.js';
@@ -391,9 +391,24 @@ export function lower(
   // occurrence or a declaration types (`program()`).
   const seen = new Set<string>();
   const typed = new Set<string>();
-  const note = (name: string, t: Type) => {
+  // The type of each of these names for the report (`Program.inputs`), in
+  // the order the entry first reads them (a name read in a function body at
+  // the call, `free()`): the type of the first binding `def` read at the
+  // entry that declares it (a body reads its own binding, which the entry
+  // does not give), else the type that the lowering gives the input
+  // (`given()`).
+  const inputs = new Map<string, { type: Type; declared: boolean }>();
+  const note = (name: string, t: Type, def?: BoxedValueDefinition) => {
     seen.add(name);
     if (!isUntyped(t)) typed.add(name);
+    if (inputs.get(name)?.declared === true || cx.inFunction !== undefined)
+      return;
+    if (def !== undefined && !def.inferredType)
+      inputs.set(name, { type: def.type.type, declared: true });
+  };
+  const given = (name: string, t: Type) => {
+    if (inputs.get(name)?.declared !== true && cx.inFunction === undefined)
+      inputs.set(name, { type: t, declared: false });
   };
   // The root `Tuple`, or the last operand of a root `Block` that is one.
   let rootTuple: Expression | undefined = root;
@@ -2056,11 +2071,13 @@ export function lower(
         e,
         `${name} read with two types, ${typeToString(type(known.binding.v))} and ${engineTypeToString(e.type.type)}`
       );
-    if (known?.binding.role === 'input') note(name, e.type.type);
+    if (known?.binding.role === 'input')
+      note(name, e.type.type, resolvedValueDefinition(e));
     if (known) return known.binding.v;
     const k = options.vars?.indexOf(name) ?? -1;
     if (k >= 0) {
-      note(name, e.type.type);
+      note(name, e.type.type, resolvedValueDefinition(e));
+      given(name, e.type.type);
       // The host's text, in the scope of the entry, read at each use.
       // A function body and a root function literal have no such scope:
       // a read of the inputs object there is an input that each call
@@ -2129,6 +2146,8 @@ export function lower(
     // A `vars` name (`symbol()`): its text, read here at the entry.
     if (k >= 0) {
       if (cx.inFunction !== undefined) return fns.capture(e, name, t);
+      note(name, t, held(name)?.definition);
+      given(name, t);
       const lane = inputType(isUntyped(t) ? 'real' : t)!.lane;
       return b.op(hostVarOp(k, lane), [], scalarType(lane));
     }
@@ -2175,7 +2194,16 @@ export function lower(
     t: Parameters<typeof inputType>[0],
     positional = false
   ): V => {
-    if (!positional) note(name, t);
+    if (!positional) {
+      // The binding of the occurrence, or, for a read in a function that
+      // `e` calls, of the name in the scope of the compilation (`free()`).
+      note(
+        name,
+        t,
+        isSymbol(e) ? resolvedValueDefinition(e) : held(name)?.definition
+      );
+      given(name, t);
+    }
     const ir = positional ? tupleOrInputType(t, cx.wide) : inputIR(t);
     if (ir === undefined)
       decline(e, `the input ${name} of type ${engineTypeToString(t)}`);
@@ -2962,7 +2990,7 @@ export function lower(
     const p = b.program(f);
     const names = [...seen].filter((name) => !typed.has(name));
     if (names.length > 0) throw new UntypedInputs(names);
-    return p;
+    return { ...p, inputs };
   };
   // A root function literal: its parameters, by position, come first.
   if (isFunction(root, 'Function') && isLibrary(root)) {

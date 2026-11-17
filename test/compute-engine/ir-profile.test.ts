@@ -113,6 +113,78 @@ describe('the option selects the IR compiler', () => {
     });
     expect(r.run!({ x: 1, y: 2 })).toBe(5);
   });
+  test('the report of the inputs: freeSymbols and freeSymbolTypes', () => {
+    const e = new ComputeEngine();
+    const report = (json: Json, options: object = {}) => {
+      const r = compile(box(json, e), { ...IR, fallback: false, ...options });
+      return [r.freeSymbols, r.freeSymbolTypes];
+    };
+    // A declared bounded real of a scope popped before the compilation
+    // keeps its declared type.
+    e.pushScope();
+    e.declare('u', 'real<0..5>');
+    const popped = box(['Add', 'u', 1], e);
+    e.popScope();
+    const r = compile(popped, { ...IR, fallback: false });
+    expect([r.freeSymbols, r.freeSymbolTypes]).toEqual([
+      ['u'],
+      { u: { type: 'real<0..5>', lowered: 'number', provenance: 'declared' } },
+    ]);
+    // An input of type `number` in the complex mode is read as a complex.
+    e.declare('z', 'number');
+    expect(report(['Add', 'z', 1], { mode: 'complex' })).toEqual([
+      ['z'],
+      { z: { type: 'number', lowered: 'complex', provenance: 'declared' } },
+    ]);
+    // A list and a tuple; an undeclared input has the type of the lowering.
+    // (The canonical `Add` puts `w` first.)
+    e.declare('L', 'list<real^4>');
+    e.declare('P', 'tuple<real, real>');
+    expect(report(['Add', ['Sum', 'L'], ['At', 'P', 1], 'w'])).toEqual([
+      ['w', 'L', 'P'],
+      {
+        L: { type: 'vector<real^4>', lowered: 'array', provenance: 'declared' },
+        P: { type: 'tuple<real, real>', lowered: 'point', provenance: 'declared' },
+        w: { type: 'number', lowered: 'number', provenance: 'inferred' },
+      },
+    ]);
+    // In the order the program first reads them: `b`, which the body of `g`
+    // reads, at the call; a name of `vars` whose text the code holds is
+    // listed with its type.
+    e.declare('a', 'real');
+    e.declare('b', 'real');
+    e.assign('g', box(['Function', ['Multiply', 'b', 't'], 't'], e));
+    const first = (x: Json, y: Json) => ['If', ['Greater', x, 0], y, 1];
+    expect(report(first(['g', 2], 'a'))[0]).toEqual(['b', 'a']);
+    expect(report(first('a', ['g', 2]))[0]).toEqual(['a', 'b']);
+    e.declare('q', 'integer');
+    expect(report(first('q', 'a'), { vars: { q: '_.k' } })).toEqual([
+      ['q', 'a'],
+      {
+        q: { type: 'integer', lowered: 'number', provenance: 'declared' },
+        a: { type: 'real', lowered: 'number', provenance: 'declared' },
+      },
+    ]);
+    // A constant predicate reads no input: the value of `c` is a literal of
+    // the code; the interval mode decides `0 ≤ |a|` (a program of Tycho's
+    // corpus), which JavaScript computes from `a`.
+    e.declare('c', { type: 'real', value: 2 });
+    for (const to of ['javascript', 'glsl', 'interval-js']) {
+      expect(report(['Less', 'c', 3], { to })).toEqual([[], {}]);
+      // No dependency is lost: the folded `c` is in `symbolDeps`.
+      const symbolDeps = new Set<string>();
+      compile(box(['Less', 'c', 3], e), {
+        ...IR,
+        fallback: false,
+        to,
+        symbolDeps,
+      } as never);
+      expect([...symbolDeps]).toEqual(['c']);
+    }
+    const abs = ['LessEqual', 0, ['Abs', 'a']];
+    expect(report(abs, { to: 'interval-js' })).toEqual([[], {}]);
+    expect(report(abs)[0]).toEqual(['a']);
+  });
   test('the out-parameters are filled: free names and user functions', () => {
     const symbolDeps = new Set<string>();
     const varsObjectRefs = new Set<string>();
@@ -223,9 +295,10 @@ describe('a decline', () => {
       vars: { av: '_.b' },
       fallback: false,
     });
-    // The engine value of `av` is not read; `_.b` is.
+    // The engine value of `av` is not read; `_.b` is. A vars name whose
+    // text the code holds is in `freeSymbols`.
     expect(r.run!({ x: 1, b: 3 } as never)).toBe(10);
-    expect(r.freeSymbols).toEqual(['x']);
+    expect(r.freeSymbols).toEqual(['av', 'x']);
     const n = compile(box(['Add', 'y', 1]), {
       ...IR,
       vars: { y: '-8' },
@@ -2466,7 +2539,7 @@ describe('a vars name that reads the inputs object, in a function body', () => {
       }
     );
     expect(r.shippable).toBe(true);
-    expect(r.freeSymbols).toEqual(['x']);
+    expect(r.freeSymbols).toEqual(['x', 'P', 'Q']);
     // Each call reads the texts at the call.
     expect(r.code.match(/_\.P/g)).toHaveLength(2);
   });

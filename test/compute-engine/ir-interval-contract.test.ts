@@ -1879,33 +1879,45 @@ describe('the interval mode: the references of the result', () => {
       mode: r.mode,
     };
   };
+  // The rule of every target ("The report of the inputs", `ir/README.md`):
+  // the names that the code reads, in the order the lowering first reads
+  // them, each with its declared type.
+  const real = { type: 'real', lowered: 'interval', provenance: 'declared' };
   test.each([
-    [['Sin', 'x'], {}],
-    [['Add', ['Power', 'x', 2], 'y'], {}],
-    [['Add', 'x', 'n'], { vars: { n: '_.n' } }],
-    [['Add', ['Sum', 'L'], 'x'], {}],
-    [['Add', 2, ['Sin', 1]], {}],
-  ])('%j %j: those of the existing target', (json, options) => {
+    [['Sin', 'x'], {}, ['x']],
+    [['Add', ['Power', 'x', 2], 'y'], {}, ['x', 'y']],
+    // The canonical `Add` puts `n` first.
+    [['Add', 'x', 'n'], { vars: { n: '_.n' } }, ['n', 'x']],
+    [['Add', 2, ['Sin', 1]], {}, []],
+  ])('%j %j: the names the code reads', (json, options, names) => {
     const got = fields(json, { ...options, profile: 'ir' });
-    expect(got).toEqual(fields(json, options));
-    expect(got.unsupported).toEqual([]);
-    expect(got.mode).toBe('strict');
+    expect(got).toEqual({
+      freeSymbols: names,
+      freeSymbolTypes: Object.fromEntries(names.map((n) => [n, real])),
+      unsupported: [],
+      mode: 'strict',
+    });
   });
 
   test('the types of an input and of a list input', () => {
     const got = fields(['Add', ['Sum', 'L'], 'x'], { profile: 'ir' });
     expect(got.freeSymbols).toEqual(['x', 'L']);
     expect(got.freeSymbolTypes).toEqual({
-      x: { type: 'real', lowered: 'interval', provenance: 'declared' },
+      x: real,
       L: { type: 'vector<real^3>', lowered: 'array', provenance: 'declared' },
     });
     // A vars name that only the body of a user function reads is listed
-    // after the names of the expression; the existing target, which writes
-    // the body in place first, lists it before them.
+    // after the names of the expression, where the call reads it; the
+    // existing target, which writes the body in place first, lists it
+    // before them.
     const vars = { vars: { n: '_.n' } };
     expect(fields(['hv', 'x'], { profile: 'ir', ...vars }).freeSymbols).toEqual(['x', 'n']);
     expect(fields(['hv', 'x'], vars).freeSymbols).toEqual(['n', 'x']);
-    expect(fields(['Add', 2, ['Sin', 1]], { profile: 'ir' }).freeSymbols).toEqual([]);
+    // A predicate that the mode decides reads no input; the existing
+    // target lists the name of the expression.
+    const abs = ['LessEqual', 0, ['Abs', 'x']];
+    expect(fields(abs, { profile: 'ir' }).freeSymbols).toEqual([]);
+    expect(fields(abs, {}).freeSymbols).toEqual(['x']);
   });
 });
 

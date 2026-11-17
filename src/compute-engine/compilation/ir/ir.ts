@@ -23,6 +23,8 @@
  * The representation names no target.
  */
 
+import type { Type } from '../../../common/type/types.js';
+
 export type Lane = 'real' | 'integer' | 'boolean' | 'complex' | 'color';
 
 /** The value of a constant of the `complex` lane. */
@@ -152,6 +154,16 @@ export type Program = {
   readonly entry: string;
   /** The names whose engine value the program holds as a literal. */
   readonly captures?: readonly string[];
+  /** The names read as inputs (of the entry, lifted into a function,
+   *  `vars`), in the order the entry first reads them (a name read in a
+   *  function body: at the call), each with its engine type: the declared
+   *  type of its binding at the entry when it has one
+   *  (`declared`), else the type that the lowering gives the input. The
+   *  report of the adapters (`inputReport()`) reads it. */
+  readonly inputs?: ReadonlyMap<
+    string,
+    { readonly type: Type; readonly declared: boolean }
+  >;
 };
 
 export const scalarType = (lane: Lane): IRType => ({ lane, shape: [] });

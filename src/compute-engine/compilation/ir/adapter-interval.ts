@@ -19,13 +19,15 @@ import { createIntervalRuntime } from '../interval-runtime.js';
 import { readsVarsObject } from '../vars-inputs.js';
 import { withIntegralClosedFormBudgets } from '../interval-quadrature.js';
 import { isBooleanBindingType } from '../type-facts.js';
-import { analyzeReferences, freeSymbolTypes } from '../compile-references.js';
 import { compileSlice } from './index.js';
-import { entryOf, regionsOf, type Region } from './ir.js';
+import { entryOf } from './ir.js';
 import {
   decline,
   entryInputs,
+  hostReads,
+  inputReport,
   optionDecline,
+  runnerLowered,
   sliceError,
   sliceOptions,
   IR_OPTIONS,
@@ -108,35 +110,14 @@ function compileInterval(
         )
       ),
     ];
-    // The references, the types and the mode as the existing target reports
-    // them (`withReferences()`).
-    const target = expr.engine
-      ._getCompilationTarget('interval-js')!
-      .createTarget();
-    const occurrences = new Map<string, Expression>();
-    const refs = analyzeReferences(
-      expr,
-      target,
-      new Set(Object.keys(vars)),
-      occurrences
+    // The inputs and the names of `vars` that the code reads, also through
+    // a call (`inputReport()`).
+    const reads = hostReads(p, Object.keys(vars));
+    const report = inputReport(
+      p,
+      [...inputs, ...reads.keys()],
+      runnerLowered(p, reads, true)
     );
-    // A name of `vars` that the code reads (`hostVarOp()`), also through a
-    // call, is listed too.
-    const keys = Object.keys(vars);
-    const read = (r: Region): string[] =>
-      r.body.flatMap((i) => [
-        ...(i.k === 'op' && /^host\d+\./.test(i.op)
-          ? [keys[parseInt(i.op.slice(4))]]
-          : []),
-        ...regionsOf(i).flatMap(read),
-      ]);
-    const free = [
-      ...new Set([
-        ...refs.freeSymbols,
-        ...inputs,
-        ...p.functions.flatMap((f) => read(f.body)),
-      ]),
-    ];
     const once = s.preambleOnce;
     const perCall = s.preamblePerCall;
     const shippable = isShippableCode(`${once}\n${perCall ?? ''}\n${s.code}`);
@@ -158,8 +139,8 @@ function compileInterval(
       ...(booleans.length > 0 ? { booleanInputs: booleans } : {}),
       ...(lists.length > 0 ? { listInputs: lists } : {}),
       run: s.run as CompilationResult<'interval-js', IntervalValue>['run'],
-      freeSymbols: free,
-      freeSymbolTypes: freeSymbolTypes(expr, target, free, occurrences),
+      freeSymbols: report.freeSymbols,
+      freeSymbolTypes: report.freeSymbolTypes,
       unsupported: [],
       mode: 'strict',
       profile: 'ir',

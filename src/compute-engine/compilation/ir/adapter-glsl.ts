@@ -10,7 +10,6 @@ import type { Expression } from '../../global-types.js';
 import type { CompilationResult, CompileDiagnostic } from '../types.js';
 import type { Fn } from './lower-context.js';
 import { userBinding } from './lower-functions.js';
-import { analyzeReferences, freeSymbolTypes } from '../compile-references.js';
 import { gpuIsReservedWord } from '../gpu-reserved.js';
 import { gpuExactConstant } from '../gpu-exact-constant.js';
 import {
@@ -37,6 +36,7 @@ import {
 import {
   addSymbolDeps,
   decline,
+  inputReport,
   optionDecline,
   sliceError,
   sliceOptions,
@@ -371,13 +371,9 @@ export function compileWithIrProfileGlsl(
       lowered[name] = typeName({ ...p.types[v], storage: undefined });
     });
     addSymbolDeps(p, options?.symbolDeps);
-    // The engine type and the provenance as the existing target reports
-    // them; `lowered` is the type that the code reads.
-    const target = expr.engine._getCompilationTarget('glsl')!.createTarget({
-      loweredSymbolType: (x) => (isSymbol(x) ? lowered[x.symbol] : undefined),
-    });
-    const occurrences = new Map<string, Expression>();
-    analyzeReferences(expr, target, new Set(Object.keys(vars)), occurrences);
+    // A name of `vars` is an entry parameter (`bareInputs`); `lowered` is
+    // the GLSL type of the parameter, which the host binds the uniform as.
+    const report = inputReport(p, inputs, (name) => lowered[name]);
     const warnings = float32Warnings(expr, options?.constantFold !== false);
     return {
       target: 'glsl',
@@ -385,8 +381,8 @@ export function compileWithIrProfileGlsl(
       code,
       ...(preamble === '' ? {} : { preamble }),
       ...(warnings.length === 0 ? {} : { warnings }),
-      freeSymbols: [...inputs],
-      freeSymbolTypes: freeSymbolTypes(expr, target, inputs, occurrences),
+      freeSymbols: report.freeSymbols,
+      freeSymbolTypes: report.freeSymbolTypes,
       unsupported: [],
       mode: options?.mode === 'complex' ? 'complex' : 'strict',
       profile: 'ir',

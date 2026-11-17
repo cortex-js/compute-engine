@@ -13,7 +13,13 @@
  */
 
 import type { Expression } from '../../global-types.js';
-import type { CompilationResult, CompileDiagnostic } from '../types.js';
+import type { Type } from '../../../common/type/types.js';
+import type {
+  CompilationResult,
+  CompileDiagnostic,
+  FreeSymbolType,
+} from '../types.js';
+import { isTupleShapedType } from '../../collection-utils.js';
 import {
   bigintBroadcastError,
   checkEntry,
@@ -36,7 +42,7 @@ import {
   makeWillParallelize,
   type RunAsyncSpec,
 } from '../run-async.js';
-import { broadcastStrideOfType } from '../type-facts.js';
+import { broadcastStrideOfType, declaredTypeText } from '../type-facts.js';
 import { readsVarsObject } from '../vars-inputs.js';
 import { withIntegralClosedFormBudgets } from '../interval-quadrature.js';
 import { realPowerReconstructionDigits } from '../../numerics/real-power.js';
@@ -44,7 +50,15 @@ import { ALL_PASSES } from './passes.js';
 import { Decline, UntypedInputs } from './lower-context.js';
 import { compileSlice, type Extension, type Warning } from './index.js';
 import type { JavaScriptResult } from './print-js.js';
-import { argumentIndex, entryOf, type Program } from './ir.js';
+import {
+  argumentIndex,
+  entryOf,
+  regionsOf,
+  scalarType,
+  type Lane,
+  type Program,
+  type Region,
+} from './ir.js';
 
 const PREFIX = "Could not compile with the profile 'ir'";
 
@@ -180,6 +194,91 @@ export function decline(
     message: `${PREFIX}: ${message}`,
     ...extra,
   });
+}
+
+/** The names of `vars` (of the keys `keys`) whose text the code of `p`
+ *  holds (`hostVarOp()`), in a function too, each with the lane it is read
+ *  on. */
+export function hostReads(
+  p: Program,
+  keys: readonly string[]
+): Map<string, Lane> {
+  const reads = new Map<string, Lane>();
+  const walk = (r: Region): void =>
+    r.body.forEach((i) => {
+      const m = i.k === 'op' ? /^host(\d+)\.(\w+)$/.exec(i.op) : null;
+      if (m !== null) reads.set(keys[Number(m[1])], m[2] as Lane);
+      regionsOf(i).forEach(walk);
+    });
+  p.functions.forEach((f) => walk(f.body));
+  return reads;
+}
+
+/**
+ * The report of the inputs of `p`, by one rule on every target.
+ * `freeSymbols` holds the names in `read` (the inputs of the entry and the
+ * names of `vars` that the code reads), in the order the lowering first
+ * reads them (`Program.inputs`). A name whose engine value or definition
+ * the code holds as a literal is not read: it is a dependency of the code
+ * (`symbolDeps`, from `Program.captures`), and it would be added here if
+ * the pipeline recorded a name that it folds and that the host must still
+ * give; it records none. `freeSymbolTypes` has an entry for each name: its
+ * declared type when its binding declares one (`provenance: 'declared'`),
+ * else the type that the lowering gave the input (`'inferred'`), spelled
+ * as a declaration (`declaredTypeText()`), and `lowered(name, type)`, the
+ * type that the code reads it as.
+ */
+export function inputReport(
+  p: Program,
+  read: Iterable<string>,
+  lowered: (name: string, type: Type) => string
+): { freeSymbols: string[]; freeSymbolTypes: Record<string, FreeSymbolType> } {
+  const names = new Set(read);
+  const order = [...(p.inputs?.keys() ?? [])].filter((n) => names.has(n));
+  const freeSymbols = [...new Set([...order, ...names])];
+  const freeSymbolTypes: Record<string, FreeSymbolType> = {};
+  for (const name of freeSymbols) {
+    const input = p.inputs?.get(name);
+    const type = input?.type ?? 'unknown';
+    // Defined, not assigned: a name `__proto__` is an own entry.
+    Object.defineProperty(freeSymbolTypes, name, {
+      value: {
+        type: declaredTypeText(type),
+        lowered: lowered(name, type),
+        provenance: input?.declared === true ? 'declared' : 'inferred',
+      },
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return { freeSymbols, freeSymbolTypes };
+}
+
+/** The `lowered` of the report on JavaScript and interval-js: the value
+ *  convention of the runner (`FreeSymbolType.lowered`) for the IR type of
+ *  the entry parameter of the name, or the lane of its `vars` read
+ *  (`reads`): `number` (`interval` on interval-js), `boolean`, `complex`,
+ *  `color`, `point` for a tuple, `array` for another list. */
+export function runnerLowered(
+  p: Program,
+  reads: ReadonlyMap<string, Lane>,
+  interval: boolean
+): (name: string, type: Type) => string {
+  const entry = entryOf(p);
+  return (name, type) => {
+    const k = entry.paramNames.findIndex(
+      (n, j) => n === name && !entry.lengthOf[j]
+    );
+    const t =
+      k >= 0
+        ? p.types[entry.body.params[k]]
+        : scalarType(reads.get(name) ?? 'real');
+    if (t.shape.length > 0) return isTupleShapedType(type) ? 'point' : 'array';
+    if (t.lane === 'real' || t.lane === 'integer')
+      return interval ? 'interval' : 'number';
+    return t.lane;
+  };
 }
 
 /** The user functions compiled in `p` and the names whose engine value the
@@ -391,6 +490,12 @@ function compileIr(
   const shippable =
     Object.values(vars).every(readsVarsObject) && isShippableCode(code);
   const once = slice.preambleOnce;
+  const reads = hostReads(p, Object.keys(vars));
+  const report = inputReport(
+    p,
+    [...inputs, ...reads.keys()],
+    runnerLowered(p, reads, false)
+  );
   const result: CompilationResult<'javascript'> = {
     target: 'javascript',
     success: true,
@@ -411,7 +516,8 @@ function compileIr(
     calling: literal ? 'lambda' : 'expression',
     entryPlan: storeEntryPlan(entryPlan),
     run: run as CompilationResult<'javascript'>['run'],
-    freeSymbols: inputs,
+    freeSymbols: report.freeSymbols,
+    freeSymbolTypes: report.freeSymbolTypes,
     unsupported: [],
     mode,
     profile: 'ir',
