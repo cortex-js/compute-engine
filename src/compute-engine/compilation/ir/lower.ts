@@ -460,6 +460,16 @@ export function lower(
       size: 1,
     });
     if (isSymbol(e)) return leaf(new Set([e.symbol]), true);
+    // The attributes of a `Declare` read the names of their values: in a sum
+    // written out, `Declare(t, {value: k})` is lowered at each term.
+    if (isDictionary(e)) {
+      const parts = e.values.map(facts);
+      return {
+        ...leaf(new Set(parts.flatMap((t) => [...t.names])), false),
+        writes: new Set(parts.flatMap((t) => [...t.writes])),
+        loop: parts.some((t) => t.loop),
+      };
+    }
     if (!isFunction(e)) return leaf(none, isNumber(e));
     const f = known.get(e);
     if (f !== undefined) return f;

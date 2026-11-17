@@ -1554,6 +1554,69 @@ describe('the interval mode: batch 7, the order of a sum', () => {
       value: { lo: -1, hi: 2 },
     });
   });
+
+  // A term written out whose `Block` reads the index only through the
+  // attributes of a `Declare`: each term has its own value, not the value
+  // of the first term (main `cc24cd740` gave 2.5 for the first sum).
+  const dict = (value: unknown, more: object = {}) => [
+    'Dictionary',
+    ...Object.entries({ value, ...more }).map(([k, v]) => ['KeyValuePair', { str: k }, v]),
+  ];
+  const halved = (attributes: unknown, type?: string) => [
+    'Block',
+    ['Declare', 't', ...(type ? [type] : []), attributes],
+    ['Assign', 't', ['Divide', 't', 2]],
+    't',
+  ];
+  const sum = (body: unknown, hi: unknown = 5) => ['Sum', body, ['Limits', 'k', 1, hi]];
+  const point = (v: number) => ({ kind: 'interval', value: { lo: v, hi: v } });
+
+  test('a local declared with a value that reads the index has the value of each term', () => {
+    expect(mode(sum(halved(dict('k')))).run({})).toEqual(point(7.5));
+    expect(mode(sum(halved(dict('k'), "'real'"))).run({})).toEqual(point(7.5));
+    expect(mode(sum(halved(dict('k', { constant: 'False' })))).run({})).toEqual(point(7.5));
+    const constant = ['Block', ['Declare', 't', dict('k', { constant: 'True' })], ['Multiply', 't', 2]];
+    expect(mode(sum(constant)).run({})).toEqual(point(30));
+    // Terms of equal values (k = 1, 2) and of unequal ones: 1/2 + 1/2 + 1 + 1.
+    expect(mode(sum(halved(dict(['Ceil', ['Divide', 'k', 2]])), 4)).run({})).toEqual(point(3));
+    // A Product written out, and a Map over a short list.
+    expect(mode(['Product', halved(dict('k')), ['Limits', 'k', 1, 4]]).run({})).toEqual(point(1.5));
+    expect(
+      mode(['Sum', ['Map', ['Function', halved(dict('k')), 'k'], ['List', 1, 2, 3, 4]]]).run({})
+    ).toEqual(point(5));
+    // A nested Block that declares the same name.
+    const nested = [
+      'Block',
+      ['Declare', 't', dict('k')],
+      ['Add', ['Block', ['Declare', 't', dict(['Multiply', 2, 'k'])], ['Assign', 't', ['Add', 't', 1]], 't'], 't'],
+    ];
+    expect(mode(sum(nested)).run({})).toEqual(point(50));
+    // Not written out: a Loop, a Sum of a bound known at run time.
+    const loop = [
+      'Block',
+      ['Declare', 's', "'real'", 0],
+      ['Loop', ['Assign', 's', ['Add', 's', halved(dict('k'))]], ['Element', 'k', ['Range', 1, 5]]],
+      's',
+    ];
+    expect(mode(loop).code).toMatch(/for \(/);
+    expect(mode(loop).run({})).toEqual(point(7.5));
+    const late = mode(sum(halved(dict('k')), ['Floor', 'n']));
+    expect(late.code).toMatch(/for \(/);
+    expect(late.run({ n: 5 })).toEqual(point(7.5));
+  });
+
+  test('a local declared with a value that reads the index and an input contains the value', () => {
+    const json = sum(halved(dict(['Multiply', 'k', 'x'])));
+    const r = mode(json);
+    for (const [lo, hi] of [[0.5, 1.25], [-2, -0.5], [-1, 3], [0.7, 0.7]]) {
+      const { value } = r.run({ x: { lo, hi } });
+      for (const x of [lo, (lo + hi) / 2, hi]) {
+        const want = ce.box(json as never).subs({ x }).N().re;
+        expect(value.lo <= want && want <= value.hi).toBe(true);
+      }
+    }
+    expect(r.run({ x: 0.5 })).toEqual(point(3.75));
+  });
 });
 
 describe('the interval mode: a subtraction and a power of a rational exponent', () => {

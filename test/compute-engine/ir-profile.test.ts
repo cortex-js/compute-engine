@@ -3652,6 +3652,35 @@ describe('a Sum or a Product of constant bounds written out (the internal switch
     expect(45 - looped).toBeLessThanOrEqual(40);
   });
 
+  test('a local declared with a value that reads the index has the value of each term', () => {
+    // The index is read only through the attributes of a `Declare` (main
+    // `cc24cd740` gave the first term's value for every term written out).
+    const dict = (value: Json) => ['Dictionary', ['KeyValuePair', { str: 'value' }, value]];
+    const halved = (value: Json) => [
+      'Block',
+      ['Declare', 't', dict(value)],
+      ['Assign', 't', ['Divide', 't', 2]],
+      't',
+    ];
+    const sum = (value: Json) => ['Sum', halved(value), ['Limits', 'k', 1, 5]];
+    for (const [json, want] of [
+      [sum('k'), 7.5],
+      [sum(['Ceil', ['Divide', 'k', 2]]), 4.5],
+      [['Product', halved('k'), ['Limits', 'k', 1, 4]], 1.5],
+      [['Sum', ['Map', ['Function', halved('k'), 'k'], ['List', 1, 2, 3, 4]]], 5],
+    ] as const) {
+      expect(box(json, e).N().re).toBe(want);
+      expect(slice(json, true).run({})).toBe(want);
+      expect(
+        (compile(box(json, e), { profile: 'ir', fallback: false } as never) as unknown as Slice).run({})
+      ).toBe(want);
+    }
+    const json = sum(['Multiply', 'k', 'x']);
+    expect(loopCount(json)).toBe(0);
+    sameAsLoop(json);
+    for (const x of [0.5, -2, 3]) expect(slice(json, true).run({ x })).toBe(7.5 * x);
+  });
+
   test('off by default on JavaScript, and never on GLSL', () => {
     const json = ['Sum', ['Divide', ['Sin', ['Multiply', 'k', 'x']], 'k'], ['Limits', 'k', 1, 3]];
     expect(compileSlice(box(json, e), { target: 'javascript' }).code).toMatch(/for \(/);
