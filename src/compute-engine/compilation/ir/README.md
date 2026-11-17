@@ -8,7 +8,14 @@ pipeline" below), and on `interval-js` ("The interval mode"). The entry is
 it returns the code and its `warnings`. Anything out of scope throws a `Decline`
 with the fields `node`, `head` and `cause`, also for a refusal of the target
 profile. A failure of the verifier or of the effect-trace check is a
-`SliceInternalError`: a defect of the compiler, not a decline.
+`SliceInternalError`: a defect of the compiler, not a decline. The program is
+verified after the passes. The checks of the lowering and of each pass (a
+verification after the lowering and after each pass, and the effect-trace check
+of each pass) run only when they are on: `setPassChecks(true)` (`verify.ts`), or
+the environment variable `CE_IR_CHECKS=1` when the module loads. The Jest setup
+(`test/jest-config.ts`) sets the variable, so the test suite runs them; the
+library does not, because they take about 40% of the time of a compile of a long
+list literal.
 
 ## Layers
 
@@ -1329,9 +1336,9 @@ so a sub-expression that the source writes several times as separate nodes is
 lowered once per region; a node of another kind is equal only to itself. The
 operands of `And`, `Or` and a chain are lowered lazily, in arms; the `hoist`
 pass makes a speculatable arm a plain `and` or `or` (not in the interval mode).
-After each pass a check compares the sequence of effectful instructions
-(operation, operands, results and region); the same check runs over the
-printer's order.
+With the checks on (above), after each pass a check compares the sequence of
+effectful instructions (operation, operands, results and region); the same check
+runs over the printer's order in any case.
 
 The pass `cse` merges an instruction with an earlier one of the same operation
 and operands whose value is visible (written before it in its region or in a

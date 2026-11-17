@@ -38,7 +38,8 @@
  * `fold`, `hoist`, `strength`, `inline`, `cse`, `invariants` and `dce` run
  * again while
  * one of them changes the program: `cse` then merges a value moved out of
- * two loops. After each pass the program is verified, and its
+ * two loops. When the checks are on (`setPassChecks()`, on in the test
+ * suite), after each pass the program is verified, and its
  * effectful instructions must be the same, in the same regions and order,
  * on the same operands (renamed by the pass).
  */
@@ -71,7 +72,7 @@ import {
   rowOfOp,
   type OperatorRow,
 } from './operators.js';
-import { SliceInternalError, verify } from './verify.js';
+import { passChecksOn, SliceInternalError, verify } from './verify.js';
 
 export type PassOptions = {
   scalarize?: boolean;
@@ -128,6 +129,7 @@ export function runPasses(
 ): Program {
   const ids = new Map<Region, number>();
   const run = (name: string, pass: Pass): boolean => {
+    if (!passChecksOn()) return pass(p, rows).changed;
     const before = effectTrace(p, rows, ids).map((x) => ({
       ...x,
       args: [...x.args],

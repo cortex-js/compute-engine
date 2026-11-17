@@ -4,9 +4,11 @@
  * `compile()` reaches it through the adapters. See `README.md`.
  *
  * The pipeline: `lower()` (the one walk, which declines what the slice does
- * not compile) → `verify()` → the warnings of the random frames → the
- * passes (each verified) → the target's profile check → a printer (whose
- * order of effectful instructions is checked against the IR's).
+ * not compile) → the warnings of the random frames → the passes →
+ * `verify()` → the target's profile check → a printer (whose order of
+ * effectful instructions is checked against the IR's). With the checks on
+ * (`setPassChecks()`, on in the test suite), the program is also verified
+ * after the lowering and after each pass.
  *
  * The tables (`OPERATORS`, the printers' spellings) are frozen; `extend`
  * adds rows and spellings for one compilation. Nothing persists between
@@ -16,7 +18,7 @@
 import type { Expression } from '../../global-types.js';
 import { Decline, hostVarOp, lower } from './lower.js';
 import { readsVarsObject } from '../vars-inputs.js';
-import { SliceInternalError, verify } from './verify.js';
+import { passChecksOn, SliceInternalError, verify } from './verify.js';
 import {
   ALL_PASSES,
   runPasses,
@@ -532,12 +534,15 @@ export function sliceProgram(
     unroll = sums = false;
     p = lower(expr, rows, { ...lowering, unrollSums: 0, unrollBuilds: 0 });
   }
-  verify(p, rows);
+  // The checks of the lowering and of each pass (`setPassChecks()`); the
+  // program after the passes is verified in any case, below.
+  const checks = passChecksOn();
+  if (checks) verify(p, rows);
   // The interval mode draws nothing: a frame has no warning.
   const warnings = interval ? [] : seededWarnings(p, rows);
   if (interval) {
     narrow(p);
-    verify(p, rows);
+    if (checks) verify(p, rows);
   }
   const passes = options.passes === false ? {} : (options.passes ?? ALL_PASSES);
   // The passes that the bigint mode (README, "The `bigint` mode") and the
@@ -595,8 +600,8 @@ export function sliceProgram(
     const refused = plain(p);
     if (refused !== undefined)
       throw new Decline('program', `${refused} on interval-js`);
-    verify(p, rows);
   }
+  verify(p, rows);
   const lanes: Lane[] = bigint
     ? ['integer', 'boolean']
     : interval

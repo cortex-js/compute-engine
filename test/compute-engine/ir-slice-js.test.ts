@@ -33,6 +33,10 @@ import {
   REDUCTIONS,
 } from '../../src/compute-engine/compilation/ir/operators';
 import { ALL_PASSES } from '../../src/compute-engine/compilation/ir/passes';
+import {
+  passChecksOn,
+  setPassChecks,
+} from '../../src/compute-engine/compilation/ir/verify';
 import type { Program } from '../../src/compute-engine/compilation/ir/ir';
 import { foldSeed } from '../../src/compute-engine/numerics/random';
 import type { Expression } from '../../src/compute-engine/global-types';
@@ -1837,5 +1841,16 @@ describe('IR slice: the fixes of the review of 2026-11-12', () => {
       'WithRandomSeed(1, Add(x, Random()))',
       'WithRandomSeed',
     ]);
+  });
+});
+
+describe('the checks of the passes', () => {
+  // Off by default in the library; `test/jest-config.ts` turns them on.
+  test('are on under Jest', () => expect(passChecksOn()).toBe(true));
+  test('setPassChecks() returns the previous state', () => {
+    expect(setPassChecks(false)).toBe(true);
+    expect(passChecksOn()).toBe(false);
+    expect(setPassChecks(true)).toBe(false);
+    expect(passChecksOn()).toBe(true);
   });
 });

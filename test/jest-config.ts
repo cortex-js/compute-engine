@@ -2,6 +2,11 @@ import { stripVTControlCharacters } from 'node:util';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { CustomConsole, LogType, LogMessage } from '@jest/console';
 
+// The checks of the passes of the slice compiler (`compilation/ir/verify.ts`,
+// `setPassChecks()`), off by default in the library, run in every test. The
+// module reads the variable when it loads, after this file.
+process.env.CE_IR_CHECKS ??= '1';
+
 const RESET = '\u001b[0;0m';
 const GREY = '\u001b[30;1m';
 // const GREY = '\u001b[90;1m'; // BRIGHT BLACK

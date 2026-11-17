@@ -46,6 +46,27 @@ export class SliceInternalError extends Error {
   }
 }
 
+/** Whether the passes check their own work: `verify()` after each pass,
+ *  and the comparison of the effectful instructions before and after it
+ *  (`runPasses()`). Off by default: the checks take about 40% of the time
+ *  of a compile of a long list literal. On when the environment variable
+ *  `CE_IR_CHECKS` is `1` when this module loads (the Jest setup sets it),
+ *  or after `setPassChecks(true)`. */
+let passChecks =
+  (globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env?.CE_IR_CHECKS === '1';
+
+/** Turn the checks of the passes on or off; returns the previous state. */
+export function setPassChecks(on: boolean): boolean {
+  const was = passChecks;
+  passChecks = on;
+  return was;
+}
+
+export function passChecksOn(): boolean {
+  return passChecks;
+}
+
 export function verify(p: Program, rows: readonly OperatorRow[]): void {
   const defined = new Set<V>();
   const constants = new Map<V, number>();
