@@ -39,6 +39,36 @@ describe('IsOctahedral — REVIEW.md B11', () => {
   });
 });
 
+const isCenteredSquare = (n: number | bigint) =>
+  ce
+    .expr(['IsCenteredSquare', ce.number(n)])
+    .evaluate()
+    .toString()
+    .replace(/"/g, '');
+
+describe('IsCenteredSquare — CE-1391', () => {
+  // The centered square numbers are t² + (t + 1)² = 2t(t + 1) + 1:
+  // 1, 5, 13, 25, 41, 61, 85, 113, … (OEIS A001844).
+  test('the members up to 120 are those of A001844', () => {
+    const members: number[] = [];
+    for (let n = -2; n <= 120; n++)
+      if (isCenteredSquare(n) === 'True') members.push(n);
+    expect(members).toEqual([1, 5, 13, 25, 41, 61, 85, 113]);
+  });
+
+  // 17 and 37 are 4t² + 1, the formula that the earlier code tested.
+  test.each([17, 37, 2, 9, 26, 146])('IsCenteredSquare(%d) is False', (n) =>
+    expect(isCenteredSquare(n)).toEqual('False')
+  );
+
+  test('large centered square numbers are detected exactly (bigint)', () => {
+    const t = 10n ** 20n;
+    const c = t * t + (t + 1n) * (t + 1n);
+    expect(isCenteredSquare(c)).toEqual('True');
+    expect(isCenteredSquare(c + 4n)).toEqual('False');
+  });
+});
+
 // REVIEW.md B21: IsHappy threw on negative input (`BigInt('-')`).
 describe('IsHappy on non-positive input (REVIEW.md B21)', () => {
   it('returns False for negative/zero instead of throwing', () => {

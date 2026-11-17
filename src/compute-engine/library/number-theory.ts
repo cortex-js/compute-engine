@@ -2666,7 +2666,8 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     },
 
     IsCenteredSquare: {
-      description: 'True if n is a centered square number.',
+      description:
+        'True if n is a centered square number, n = t² + (t + 1)² for an integer t ≥ 0: 1, 5, 13, 25, 41, ...',
       signature: '(integer) -> boolean',
       broadcastable: true,
       evaluate: ([n], { engine: ce }) => {
@@ -2677,10 +2678,12 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (!isNumber(n)) return undefined;
         const k = toBigint(n);
         if (k === null || k < 1n) return ce.False;
-        if ((k - 1n) % 4n !== 0n) return ce.False;
-        const t = (k - 1n) / 4n;
-        const sqrt = BigInt(ce.bignum(t).sqrt(ce.precision).toFixed(0));
-        return ce.symbol(sqrt * sqrt * 4n + 1n === k ? 'True' : 'False');
+        // k = t² + (t + 1)² = 2t(t + 1) + 1, so 2k − 1 = (2t + 1)²: k is a
+        // centered square number exactly when 2k − 1 is a perfect square
+        // (an odd square, since 2k − 1 is odd).
+        const m = 2n * k - 1n;
+        const r = bigintSqrt(m);
+        return r * r === m ? ce.True : ce.False;
       },
     },
 

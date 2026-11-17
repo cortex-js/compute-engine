@@ -163,6 +163,10 @@
 
 ### Bug Fixes
 
+- **`IsCenteredSquare` recognizes the centered square numbers.** It tested
+  `n = 4t² + 1`, so it answered `False` for 13, 25 and 41 and `True` for 17
+  and 37. It now answers `True` exactly for `n = t² + (t + 1)²`: 1, 5, 13,
+  25, 41, 61, 85, 113, … (OEIS A001844).
 - **The `epsil` command line tool writes booleans and symbols without
   quotes.** A result printed a symbol of more than one letter in quotes, so it
   looked like a string: `epsil -e '[1 == 1, x, "s", a1]'` printed
