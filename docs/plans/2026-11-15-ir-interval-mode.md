@@ -1598,3 +1598,13 @@ dividends below 10^4): no change there.
 The Codex reviews of this period are owed (a usage limit until
 2026-11-18): entries `20261116-221107-4116` (CE-1372) and
 `20261116-224342-71991` (the parentheses fix), after those of section 18.5.
+
+**After `ce-compiler`'s CE-1373** (`000f5767715f32269b499dbcd6a294161bd5ca77`, `cse` merges equal loops), on a bundle of main `beb28a48d`
+(`sweep-t12-bundle-at-beb28a48d.*`, `retime-slow-bundle-at-beb28a48d.json`): admission, classes and
+containment as on `cb30c24c8`; `zrklhsz34x` #4 and `n3nirm8khz` #4 are under 1.05. Above 1.1:
+`nbbj88wunw` #1 (160), `jdnefd99lw` #0 (1.75, the undecided throw), and four in the band 1.1 to 1.25,
+which moves between runs with no change of text (`sjjo3qgnfp` #91 1.16, `art/mavxszbvzk` #0 1.14,
+`art/h2rbqjefo3` #0 1.13, `neyret/7vqnkhdhoj` #20 1.11). The user accepted all of them on 2026-11-17
+("I accept all five", with the exception of `nbbj88wunw` #1 accepted the day before): the speed goal of
+the mode is met, and the proposed small fixes (a fast path in `freshIntervalValue()`, a guard for the
+invariants of a loop that makes no pass, no throw for an undecided loop bound) are not scheduled.
