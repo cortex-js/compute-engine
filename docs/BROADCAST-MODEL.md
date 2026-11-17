@@ -447,7 +447,10 @@ Two behaviors that differ on purpose, and that a reader may not expect:
 - `Exp` of a matrix, and a power of a matrix with an exponent that is not an
   integer, apply to each entry: `Exp([[0, 1], [1, 0]])` is `[[1, e], [e, 1]]`,
   not the matrix exponential, and `[[4, 9], [16, 25]]^{1/2}` is `[[2, 3], [4,
-  5]]`. An integer power is the matrix power. Because `Multiply` of two
+  5]]`. An integer power is the matrix power. An exponent that is not known
+  to be an integer or a non-integer (`A^n` with `n` an unknown or a `real`)
+  keeps the power unevaluated until `n` has a value; an exponent declared
+  `integer` gives `MatrixPower(A, n)`. Because `Multiply` of two
   matrices is the matrix product but these functions apply to each entry, a
   rewrite rule that combines powers of the same base (`e^a·e^b = e^{a+b}`,
   `x^{1/2}·x^{1/2} = x`) is wrong when the factors are matrices.

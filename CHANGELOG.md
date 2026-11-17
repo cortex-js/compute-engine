@@ -52,6 +52,17 @@
 
 ### Behavior Changes
 
+- **A matrix to a symbolic power is no longer computed entry by entry.**
+  `ce.box(['Power', [[1, 2], [3, 4]], 'n']).evaluate()`, with `n` an unknown,
+  gave `[[1, 2^n], [3^n, 4^n]]`, which is wrong once `n` holds an integer: an
+  integer power of a matrix is the matrix power. The power now stays
+  `[[1, 2], [3, 4]]^n` and evaluates when `n` gets a value (with `n = 2`, to
+  `[[7, 10], [15, 22]]`). An exponent declared `integer` gives
+  `MatrixPower([[1, 2], [3, 4]], k)`, or the `expected-square-matrix` error
+  for a matrix that is not square. An exponent that is known not to be an
+  integer, or a constant such as `π`, still applies to each entry, as for a
+  vector.
+
 - **Creating an engine or setting its `precision` no longer changes
   `BigDecimal.precision`.** `BigDecimal.precision` is now only the default
   precision of the `BigDecimal` operations called without a precision

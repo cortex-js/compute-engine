@@ -9368,7 +9368,8 @@ export class BoxedFunction
             options,
             this._ops![1]
           );
-          if (matrixPower !== undefined) return matrixPower.evaluate(options);
+          if (matrixPower !== undefined)
+            return finishMatrixPower(matrixPower, options);
         }
         const mismatch = zipLengthMismatch(this.engine, bops);
         if (mismatch) return mismatch;
@@ -10150,7 +10151,8 @@ export class BoxedFunction
             options,
             this._ops![1]
           );
-          if (matrixPower !== undefined) return matrixPower.evaluate(options);
+          if (matrixPower !== undefined)
+            return finishMatrixPower(matrixPower, options);
         }
         // Hybrid laziness: past the eager threshold — and for a materialized
         // infinite (`Cycle`) or uncountable-finite (`Filter`) source, gated by
@@ -10931,7 +10933,7 @@ export class BoxedFunction
                 this._ops![1]
               );
               if (matrixPower !== undefined)
-                return matrixPower.evaluateAsync(options);
+                return finishMatrixPowerAsync(matrixPower, options);
             }
             const mismatch = zipLengthMismatch(this.engine, bops);
             if (mismatch) return mismatch;
@@ -11664,7 +11666,7 @@ export class BoxedFunction
               this._ops![1]
             );
             if (matrixPower !== undefined)
-              return matrixPower.evaluateAsync(options);
+              return finishMatrixPowerAsync(matrixPower, options);
           }
           // Hybrid laziness: past the eager threshold — and always for an
           // unknown/infinite-length source — return the lazy `Map` form over
@@ -13064,12 +13066,65 @@ function withBroadcastThrowContext(
   return e;
 }
 
+/** The result of `squareMatrixPower()`. */
+type MatrixPowerResult = {
+  result: Expression;
+  evaluate: boolean | 'base';
+};
+
+/** The value of a `MatrixPowerResult` (`squareMatrixPower()`). */
+function finishMatrixPower(
+  { result, evaluate }: MatrixPowerResult,
+  options: Partial<EvaluateOptions> | undefined
+): Expression {
+  if (evaluate === true) return result.evaluate(options);
+  if (evaluate === false || !isFunction(result)) return result;
+  return result.engine._fn('Power', [
+    result.op1.evaluate(operandOptions(options)),
+    result.op2,
+  ]);
+}
+
+/** The value of a `MatrixPowerResult`, evaluated asynchronously. */
+async function finishMatrixPowerAsync(
+  { result, evaluate }: MatrixPowerResult,
+  options: Partial<EvaluateOptions> | undefined
+): Promise<Expression> {
+  if (evaluate === true) return result.evaluateAsync(options);
+  if (evaluate === false || !isFunction(result)) return result;
+  return result.engine._fn('Power', [
+    await result.op1.evaluateAsync(operandOptions(options)),
+    result.op2,
+  ]);
+}
+
 /**
- * The matrix power for `Power(base, exponent)` when the base is a square
- * matrix value and the exponent is an integer, as an unevaluated
- * `MatrixPower` call, or the `expected-square-matrix` error when the base
- * is a matrix value that is not square. `undefined` when the element-wise
- * broadcast of `Power` must apply.
+ * The result of `Power(base, exponent)` when the base is a matrix value and
+ * the broadcast must not apply, with `evaluate` telling what the caller
+ * evaluates (`finishMatrixPower()`):
+ * - for a square matrix and an integer exponent, an unevaluated
+ *   `MatrixPower` call (`evaluate: true`);
+ * - for a matrix that is not square and an integer exponent, the
+ *   `expected-square-matrix` error (`evaluate: false`);
+ * - for an exponent that is neither known to be an integer nor known not to
+ *   be one, `Power(value, exponent)`, where `value` is the value of the
+ *   base: a literal `List` base is not evaluated yet, and the caller
+ *   evaluates it (`evaluate: 'base'`); the value of a symbol or of a call is
+ *   already evaluated (`evaluate: false`). The exponent is not evaluated
+ *   again.
+ * `undefined` when the element-wise broadcast of `Power` applies.
+ *
+ * An exponent whose value is not a number literal (`A^n` with `n` an
+ * unknown) decides from what is known of it. When it is known to be an
+ * integer (its written type is `integer`, or `isInteger` is `true`), the
+ * result is the matrix power `MatrixPower(A, n)`, which stays as it is
+ * while `n` has no value. When it is known not to be an integer, or has no
+ * unknowns (an exact constant such as `π`), the broadcast applies.
+ * Otherwise the result is `Power(A, n)`, because the entry-by-entry power
+ * `[[1, 2^n], [3^n, 4^n]]` is wrong once `n` holds an integer. The test for
+ * a non-integer is `isInteger === false`, which a compound exponent rarely
+ * has: with `k: integer`, `A^{k + 0.5}` stays `Power(A, k + 0.5)`, although
+ * it is never an integer power.
  *
  * Canonicalization writes `A^n` as `MatrixPower(A, n)` when the type of `A`
  * is a matrix and `n` is an integer (`canonicalPower()` in
@@ -13082,7 +13137,8 @@ function withBroadcastThrowContext(
  *
  * The result is a matrix power only when all of these conditions are true:
  * - the exponent is a number literal that is an integer (`0` gives the
- *   identity matrix, a negative integer gives a power of the inverse),
+ *   identity matrix, a negative integer gives a power of the inverse), or
+ *   an expression that is known to be an integer (see above),
  * - the base value is a nested list of rank 2, with as many rows as
  *   columns,
  * - every entry of the base is a number (the base value has a `matrix`
@@ -13111,11 +13167,29 @@ function squareMatrixPower(
   ops: ReadonlyArray<Expression>,
   options: Partial<EvaluateOptions> | undefined,
   written: Expression | undefined
-): Expression | undefined {
+): MatrixPowerResult | undefined {
   if (ops.length !== 2) return undefined;
   const [base, exponent] = ops;
-  // The exponent is already evaluated, and the matrix power needs a number.
-  if (!isNumber(exponent) || exponent.isInteger !== true) return undefined;
+  // The exponent is already evaluated. A number literal that is not an
+  // integer is an element-wise power; an exponent that is not a number
+  // literal is read below, and a collection exponent is broadcast over.
+  const literal = isNumber(exponent);
+  if (literal && exponent.isInteger !== true) return undefined;
+  if (!literal && isBroadcastParticipant(exponent)) return undefined;
+  // An exponent that is not a literal is an integer when its written form
+  // or its value says so. Otherwise it is a non-integer when it is known
+  // not to be an integer, or when it has no unknowns: an exact constant
+  // that the evaluation leaves as it is (`π`, `ln(3)`) is not an integer.
+  const integer =
+    !literal &&
+    (integerExponentOf(written ?? exponent) === true ||
+      exponent.isInteger === true);
+  if (
+    !literal &&
+    !integer &&
+    (exponent.isInteger === false || exponent.unknowns.length === 0)
+  )
+    return undefined;
   const isMatrixValue = (x: Expression): boolean =>
     x.type.type !== 'never' && x.type.matches('matrix');
   const readValue =
@@ -13128,15 +13202,43 @@ function squareMatrixPower(
   // `List` value has both extents, so the shape is known.
   const shape = matrixShapeOf(value.type);
   if (shape !== 'square' && shape !== 'non-square') return undefined;
+  if (!literal) {
+    // Neither an integer nor a non-integer: the power stays as it is.
+    // The broadcast does not evaluate a `List` base that supplies the
+    // cells, so the caller evaluates its entries (`[[x, 2], [3, 4]]^n` with
+    // `x` holding 5 is `[[5, 2], [3, 4]]^n`), with `evaluateAsync()` on the
+    // asynchronous path.
+    if (!integer)
+      return {
+        result: ce._fn('Power', [value, exponent]),
+        evaluate: value === base ? 'base' : false,
+      };
+    if (shape === 'square')
+      return {
+        result: ce.function('MatrixPower', [value, exponent]),
+        evaluate: true,
+      };
+    return {
+      result: ce.error('expected-square-matrix', value.toString()),
+      evaluate: false,
+    };
+  }
   // The written exponent decides, not its value: see `isSquareMatrixPower`.
   if (!isMatrixPowerExponent(written ?? exponent, exponent)) return undefined;
-  if (shape === 'square') return ce.function('MatrixPower', [value, exponent]);
+  if (shape === 'square')
+    return {
+      result: ce.function('MatrixPower', [value, exponent]),
+      evaluate: true,
+    };
   // `B^2` parsed after `B` holds a matrix that is not square is
   // `MatrixPower(B, 2)`, which is the `expected-square-matrix` error. The
   // same `Power` built before the assignment gives the same error. The
   // exponent 1 keeps the broadcast, which gives the matrix itself.
   if (exponent.re !== 1)
-    return ce.error('expected-square-matrix', value.toString());
+    return {
+      result: ce.error('expected-square-matrix', value.toString()),
+      evaluate: false,
+    };
   return undefined;
 }
 
