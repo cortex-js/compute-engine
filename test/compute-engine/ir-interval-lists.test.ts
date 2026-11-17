@@ -147,6 +147,12 @@ const CASES: Case[] = [
   C(['Comprehension', ['Multiply', 'j', 'k', x], ['Element', 'j', 'V'], ['Element', 'k', 'V']]),
   C(['Comprehension', ['Add', 'j', ['Multiply', 'k', x]], ['Element', 'j', 'L'], ['Element', 'k', 'V']]),
   C(['Sum', ['Comprehension', ['Multiply', 'j', 'k', x], ['Element', 'j', 'V'], ['Element', 'k', 'L']]]),
+  // A `Comprehension` of two clauses over constant ranges (Tycho's
+  // `min([T(x, y, i, j) for j = [0...1], i = [0...1]]) - 0.3`), and one
+  // constant range with one of a run-time length.
+  C(['Comprehension', ['Multiply', 'j', 'k', x], ['Element', 'j', ['Range', 1, 3]], ['Element', 'k', ['Range', 1, 3]]]),
+  C(['Add', ['Min', ['Comprehension', ['Add', ['Multiply', 'i', x], ['Multiply', 'j', y]], ['Element', 'j', ['Range', 0, 1]], ['Element', 'i', ['Range', 0, 1]]]], -0.3]),
+  C(['Sum', ['Comprehension', ['Multiply', 'j', 'k', x], ['Element', 'j', ['Range', 1, 'n']], ['Element', 'k', ['Range', 1, 3]]]]),
   // Builds and filters.
   C(['Map', T(['Multiply', ['Sin', 't'], x]), 'L']),
   C(['Add', 'L', ['Map', T(['Sin', 't']), 'L']]),
@@ -646,7 +652,9 @@ describe('the interval mode, lists: declines', () => {
     [['At', 'Q', ['Floor', x]], /an index that can be out of range/],
     [['Linspace', 0, 1, 5], /the operator Linspace is not in the slice/],
     [['RandomChoice', 'L', 2], /RandomChoice of another domain than Interval\(0, 1\)/],
-    [['Comprehension', ['Multiply', 'j', 'k'], ['Element', 'j', ['Range', 1, 3]], ['Element', 'k', ['Range', 1, 3]]], /a list whose length is not one number/],
+    // Two clauses whose counts are both run-time values: the length of the
+    // list has no bound below 2^53.
+    [['Comprehension', ['Multiply', 'j', 'k'], ['Element', 'j', ['Range', 1, 'n']], ['Element', 'k', ['Range', 1, 'n']]], /a list whose length is not one number/],
     // `Apply` over a list still declines where the interpreter does not map
     // a flat list: a nested list, a tuple.
     [['Apply', K(['Multiply', 'k', x]), ['List', ['List', 1, 2], ['List', 3, 4]]], /a list or a tuple argument of Apply/],

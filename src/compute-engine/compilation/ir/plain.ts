@@ -18,6 +18,7 @@ import {
   type V,
 } from './ir.js';
 import { deepFreeze, type OperatorRow, type Signature } from './operators.js';
+import { rangeCount } from '../../numerics/range-count.js';
 
 const LIMIT = 2 ** 53;
 const INDEX = 2 ** 32;
@@ -197,8 +198,17 @@ export function plain(p: Program): string | undefined {
       if (i.k === 'op' && (i.op === 'rangecount' || i.op === 'rangestep')) {
         if (i.args.some((a) => p.types[a].lane !== I))
           refusal ??= 'a Range of a real operand';
+        // A count of constant operands is bounded by its value, so that a
+        // product of counts (a Comprehension of several clauses) stays plain.
+        const c = i.args.map((a) => constants.get(a));
+        const n =
+          i.op === 'rangecount' && c.every((x) => x !== undefined)
+            ? rangeCount(c[0]!, c[1]!, c[2]!) || 0
+            : undefined;
+        if (i.op === 'rangestep' && c.every((x) => x !== undefined))
+          constants.set(i.out, c[1]! >= c[0]! ? 1 : -1);
         i.args = i.args.map((a) => asNumber(a, body));
-        bound.set(i.out, i.op === 'rangestep' ? 1 : INDEX);
+        bound.set(i.out, i.op === 'rangestep' ? 1 : (n ?? INDEX));
       } else if (i.k === 'op' && i.op === 'elem')
         i.args = [i.args[0], asNumber(i.args[1], body)];
       else if (i.k === 'call') {
