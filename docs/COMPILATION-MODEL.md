@@ -581,6 +581,11 @@ interpreter's value. A line is removed when the case declines or is fixed.
   (crafted: a matrix that is not square): `Trace(A)` gives `6` and
   `MatrixPower(A, 1)` gives `A`; the interpreter gives the error
   `expected-square-matrix`.
+- `javascript` (crafted), profile `ir`: a node shared by both arms of an
+  `If`, nested: `e_k = If(x > k, e_(k-1) + 1, 2·e_(k-1))` over `Sin(x)` is
+  copied into each arm, so the code doubles with each level (930,611
+  characters at depth 12); past 50,000 nodes the compilation declines
+  (CE-1199).
 - `javascript` (crafted), profile `ir`: a root function literal whose
   untyped parameter is read as a number by its type (`unknown`) but whose
   body threads a list there: `w ↦ Sum(List(w))` applied to `[3, 1, 2]`
