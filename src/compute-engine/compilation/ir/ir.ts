@@ -297,13 +297,14 @@ export function typeToString(
   );
 }
 
-/** An upper bound of the passes of every loop (`Loop`, `Sum`, `Product`,
- *  a reduction) of one evaluation of the program, at compile time: a
- *  constant count is itself, a run-time count is `budget` (the count of a
- *  `Sum` or a `Product`, which the lowering tests against it), multiplied
- *  down the nesting and through the calls (both arms of an `if` are
- *  added). GLSL counts no pass at run time. `unbounded`: the run-time
- *  count of a `Loop` (`passes`), which no test bounds on JavaScript. */
+/** A bound of the passes of every loop (`Loop`, `Sum`, `Product`, a
+ *  reduction) of one evaluation of the program, at compile time: a
+ *  constant count is itself, a run-time count is `budget` (JavaScript: the
+ *  count of a `Sum` or a `Product`, which the lowering tests against it;
+ *  GLSL, which counts no pass at run time, passes 1: a run-time count is
+ *  not multiplied in), multiplied down the nesting and through the calls
+ *  (both arms of an `if` are added). `unbounded`: the run-time count of a
+ *  `Loop` (`passes`), which no test bounds on JavaScript. */
 export function loopPasses(
   p: Program,
   budget: number,

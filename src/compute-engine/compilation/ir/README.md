@@ -1469,8 +1469,8 @@ the budget, the call throws a `CancellationError` with the cause
 `iteration-limit-exceeded` (`docs/COMPILATION-MODEL.md`, "A limit on `Loop`
 passes"). No pass is counted when the count cannot reach the budget: an
 infinite budget, or a program with no recursive function whose bound of the
-passes of a call at compile time (`loopPasses()` of `ir.ts`, the bound of
-GLSL below, with a run-time count of a `Loop` unbounded, and a `Loop` in a body
+passes of a call at compile time (`loopPasses()` of `ir.ts`, with a run-time
+count of a `Sum` or a `Product` as the budget and of a `Loop` unbounded, and a `Loop` in a body
 that runs once per element or sample unbounded too: the callback of a `Map`
 or a `Filter`, an integrand) is within the budget (the `Loop` of 128 passes of
 Tycho's `showcase/burning-ship` under a budget of 10^6). A bound of a `Sum` or a `Product` with `Limits` of a real type is its
@@ -1498,12 +1498,17 @@ and a reduction of a list count no pass. GLSL has no deadline and counts no
 target's default), a `Sum` or a `Product` over it is NaN as above, and the
 adapter bounds the passes of every loop (`Loop`, `Sum`, `Product`, a reduction)
 at compile time (`loopPasses()`): a constant count is itself, a run-time count
-is the budget (the test above ensures it), multiplied down the nesting and
-through the calls, both arms of an `if` added. A program whose bound is over the
-budget declines: two nested `Sum`s of 10,000 passes, a loop nested in a `Sum` of
-a run-time count (`Sum(Max(L6)·j, j = 1..n)`), a `Loop` of 10,000 passes around
-such a `Sum`. A single `Sum` of a run-time count compiles. With
-`iterationBudget: Infinity` there is no bound.
+is one pass (it is not known, and the test above limits that loop alone),
+multiplied down the nesting and through the calls, both arms of an `if` added.
+A program whose bound is over the budget declines: two nested `Sum`s of 10,000
+passes, a reduction of 6 elements that reads the index of a `Sum` of 2,000
+passes (`Sum(Max(L6·j), j = 1..2000)`), a `Loop` of
+10,000 passes around a `Sum` of a run-time count. Loops of run-time counts,
+nested or one after the other, compile, and can run more passes in all than
+the budget, where the existing GLSL target counts every pass in one counter
+and gives NaN past it: `Sum(Sum(i·j·x, j = 1..m), i = 1..n)` at `n = m = 200`
+is its value, 40,000 passes. With `iterationBudget: Infinity` there is no
+bound.
 
 `Loop(body, Element(i, L), …)` is a statement whose value is `Nothing`: one
 counted loop per clause over the source of `L` (an input list, a list, a

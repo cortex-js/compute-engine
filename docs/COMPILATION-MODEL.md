@@ -2400,8 +2400,11 @@ the user functions (`_fn_ir_…`); `freeSymbolTypes[name].lowered` is `float`,
 `bool`, `vecN` or `float[n]`, as the existing GLSL target reports it. The
 pass cap is the target's (`iterationBudget`, 10,000 by default), counted
 by loop: a `Sum` or a `Product` of more passes is `NaN`, and a program
-whose loops can run more passes in all, bounded at compile time (a run-time
-count as the cap, multiplied down the nesting), declines. It has no
+whose loops can run more passes in all, bounded at compile time (a constant
+count multiplied down the nesting, a run-time count as one pass), declines.
+Loops of run-time counts, nested or one after the other, are each limited
+by their own count and can run more passes in all than the cap, where the
+existing target counts every pass in one counter and gives `NaN` past it. It has no
 NaN-safe helpers and no exact sine hash (no `float32Bounds`): an operand
 of `Mod` or `Fract` that the existing target flags has the warning
 `float32-unsafe-argument`, also where that target emits an exact form.

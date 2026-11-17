@@ -151,6 +151,12 @@ const PROGRAMS: [Json, Point[]][] = [
   [['Add', 'x', 'h'], [{ x: 0.5 }]],
   [['Round', 'x'], [{ x: 2.5 }, { x: -2.5 }, { x: 0.25 }]],
   [['Block', ['Declare', 't', 'real', 0], ['If', ['Less', 'x', 0], ['Assign', 't', 1], ['Assign', 't', 5]], ['Add', 't', 'x']], [{ x: -1 }, { x: 1 }]],
+  // Loops of run-time counts, nested and one after the other: each is
+  // limited by its own count (the third point runs 15,000 passes in all,
+  // more than the budget of 10,000).
+  [['Sum', ['Sum', ['Multiply', 'k', 'j', 'x'], ['Limits', 'j', 1, 'm']], ['Limits', 'k', 1, 'n']], [{ n: 3, m: 4, x: 0.5 }, { n: 5, m: 0, x: 2 }, { n: 150, m: 100, x: 0.5 }]],
+  [['Add', ['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 1, 'n']], ['Product', ['Add', 'k', 'x'], ['Limits', 'k', 1, 'm']]], [{ n: 3, m: 4, x: 0.5 }]],
+  [['Sum', ['Multiply', ['Sum', ['Sin', ['Multiply', 'j', 'x']], ['Limits', 'j', 1, 'k']], 'y'], ['Limits', 'k', 0, 'n']], [{ n: 6, x: 0.5, y: 2 }]],
 ];
 
 describe('IR profile on GLSL: the result', () => {
@@ -1014,7 +1020,7 @@ describe('IR profile on GLSL: storage', () => {
     );
   });
 
-  test('a loop over S in a Sum: within the pass bound, or declined', () => {
+  test('a loop over S in a Sum: a run-time count is not multiplied in', () => {
     const nested = (hi: Json) => [
       'Sum',
       ['Multiply', ['Sum', 'S'], 'j'],
@@ -1022,9 +1028,14 @@ describe('IR profile on GLSL: storage', () => {
     ];
     // 10 passes of 1 + 7 passes.
     expect(glsl(nested(10), STORAGE).success).toBe(true);
-    expect(declined(nested('n'), STORAGE)?.message).toMatch(
-      /more passes than the iterationBudget \(10000\)/
-    );
+    expect(glsl(nested('n'), STORAGE).success).toBe(true);
+    // The inner loop reads the index of the outer one: 2,000 passes of 1 + 7.
+    expect(
+      declined(
+        ['Sum', ['Sum', ['Multiply', ['At', 'S', 'i'], 'j'], ['Limits', 'i', 1, 7]], ['Limits', 'j', 1, 2000]],
+        STORAGE
+      )?.message
+    ).toMatch(/more passes than the iterationBudget \(10000\)/);
     expect(
       glsl(
         ['Sum', ['Sum', ['Multiply', ['At', 'S', 'i'], ['At', 'S', 'j']], ['Limits', 'j', 1, 7]], ['Limits', 'i', 1, 7]],
@@ -1306,17 +1317,17 @@ describe('IR profile on GLSL: declines', () => {
     ['a Loop of more passes than the default cap', ['Block', ['Declare', 's', 'real', 0],
       ['Loop', ['Assign', 's', ['Add', 's', 'k']], ['Element', 'k', ['Range', 1, 20000]]], 's'],
       {}, /more passes than the iterationBudget \(10000\)/],
-    ['a Loop in a Sum of a run-time count', ['Sum', ['Block', ['Declare', 's', 'real', 0],
-      ['Loop', ['Assign', 's', ['Add', 's', 'k']], ['Element', 'k', ['Range', 1, 5]]], 's'], ['Limits', 'j', 1, 'n']],
+    ['a Loop of 5 passes in a Sum of 2,000', ['Sum', ['Block', ['Declare', 's', 'real', 0],
+      ['Loop', ['Assign', 's', ['Add', 's', ['Multiply', 'k', 'j']]], ['Element', 'k', ['Range', 1, 5]]], 's'], ['Limits', 'j', 1, 2000]],
       {}, /more passes than the iterationBudget \(10000\)/],
     ['two nested Sums of 10,000 passes', ['Sum', ['Sum', ['Multiply', 'i', 'j', 'x'], ['Limits', 'j', 1, 10000]], ['Limits', 'i', 1, 10000]],
       {}, /more passes than the iterationBudget \(10000\)/],
-    ['two nested Sums of run-time counts', ['Sum', ['Sum', ['Multiply', 'i', 'j', 'x'], ['Limits', 'j', 1, 'm']], ['Limits', 'i', 1, 'n']],
+    ['a Sum of a run-time count around two nested Sums of 200 passes', ['Sum', ['Sum', ['Sum', ['Multiply', 'i', 'j', 'x'], ['Limits', 'j', 1, 200]], ['Limits', 'i', 1, 200]], ['Limits', 'k', 1, 'n']],
       {}, /more passes than the iterationBudget \(10000\)/],
     ['a Loop of 10,000 passes around a Sum of a run-time count', ['Block', ['Declare', 's', 'real', 0],
       ['Loop', ['Assign', 's', ['Add', 's', ['Sum', ['Multiply', 'j', 'x'], ['Limits', 'j', 1, 'n']]]], ['Element', 'k', ['Range', 1, 10000]]], 's'],
       {}, /more passes than the iterationBudget \(10000\)/],
-    ['a reduction in a Sum of a run-time count', ['Sum', ['Multiply', ['Max', 'L6'], 'j'], ['Limits', 'j', 1, 'n']],
+    ['a reduction in a Sum of 2,000 passes', ['Sum', ['Max', ['Multiply', 'L6', 'j']], ['Limits', 'j', 1, 2000]],
       {}, /more passes than the iterationBudget \(10000\)/],
     ['an input named v8', ['Add', 'v8', 1], {}, /the input name `v8`/],
     ['an input named float', ['Add', 'float', 1], {}, /the input name `float`/],
@@ -1328,6 +1339,19 @@ describe('IR profile on GLSL: declines', () => {
     const d = declined(json, options);
     expect(d?.code).toBe('outside-profile');
     expect(d?.message).toMatch(message);
+  });
+
+  // The count of a run-time loop is not known at compile time: it counts
+  // as one pass in the bound, and the loop is limited by its own count.
+  // prettier-ignore
+  test.each([
+    ['two nested Sums of run-time counts', ['Sum', ['Sum', ['Multiply', 'i', 'j', 'x'], ['Limits', 'j', 1, 'm']], ['Limits', 'i', 1, 'n']]],
+    ['two Sums of run-time counts, one after the other', ['Add', ['Sum', 'k', ['Limits', 'k', 1, 'n']], ['Sum', 'k', ['Limits', 'k', 1, 'm']]]],
+    ['a Loop in a Sum of a run-time count', ['Sum', ['Block', ['Declare', 's', 'real', 0],
+      ['Loop', ['Assign', 's', ['Add', 's', 'k']], ['Element', 'k', ['Range', 1, 5]]], 's'], ['Limits', 'j', 1, 'n']]],
+    ['a reduction in a Sum of a run-time count', ['Sum', ['Multiply', ['Max', 'L6'], 'j'], ['Limits', 'j', 1, 'n']]],
+  ])('admitted: %s', (_, json) => {
+    expect(glsl(json).success).toBe(true);
   });
 
   test('admitted: a Loop without iterationBudget, a Sum with one', () => {

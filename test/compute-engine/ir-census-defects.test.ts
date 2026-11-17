@@ -567,9 +567,9 @@ describe('IR profile, batch G13: robustness', () => {
     const start = performance.now();
     const r = check(json, [{ n: 30 }, { n: 7 }, { n: 0 }]);
     expect(r.code).toMatch(/\/ 7/);
-    // GLSL: a loop nested in a Sum of a run-time count can run more passes
-    // than the budget.
-    expect(failure(() => glsl(json))?.message).toMatch(/iterationBudget/);
+    // GLSL: a loop nested in a Sum of a run-time count compiles (each is
+    // limited by its own count).
+    expect(glsl(json).success).toBe(true);
     expect(performance.now() - start).toBeLessThan(30_000);
   });
 });

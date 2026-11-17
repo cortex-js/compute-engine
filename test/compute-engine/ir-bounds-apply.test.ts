@@ -260,14 +260,14 @@ describe('IR profile, batch G12: real bounds, real Ranges and Apply', () => {
     // spelling there.
     expect(glsl(['Max', ['Range', 0, 1, 0.1], 'x']).success).toBe(true);
     // An inner bound read from the outer index is a run-time count in a
-    // loop: JavaScript compiles it, GLSL declines (the passes multiply).
+    // loop: JavaScript and GLSL compile it.
     const inner = [
       'Sum',
       ['Sum', ['Multiply', 'i', 'j'], ['Limits', 'j', 0.5, ['Divide', 'i', 2]]],
       ['Limits', 'i', 1, 4.5],
     ];
     check(inner, [{}]);
-    expect(failure(() => glsl(inner))?.message).toMatch(/iterationBudget/);
+    expect(glsl(inner).success).toBe(true);
     expect(failure(() => glsl(['Sum', ['Range', 'r', 3]]))?.message).toMatch(
       /rangecount/
     );
@@ -435,7 +435,7 @@ describe('IR profile, batch G12: real bounds, real Ranges and Apply', () => {
     expect(glsl(json).success).toBe(true);
   });
 
-  test('GLSL: nested loops of run-time counts still decline (neyret/4hi9use9t2)', () => {
+  test('GLSL: nested loops of run-time counts compile (neyret/4hi9use9t2)', () => {
     const inner = (hi: Json) => [
       'Sum',
       [
@@ -462,8 +462,9 @@ describe('IR profile, batch G12: real bounds, real Ranges and Apply', () => {
       ['Sum', ['Sin', inner('i')], ['Limits', 'i', 0, ['Floor', 't']]],
       ['Multiply', ['Sin', inner(['Add', ['Floor', 't'], 1])], ['Mod', 't', 1]],
     ];
-    const d = failure(() => glsl(json, { symbolic: ['T'] }));
-    expect(d?.message).toMatch(/iterationBudget \(10000\) on glsl/);
+    // It declined before batch G37: a run-time count was the budget in the
+    // bound of the passes, so two such loops were over it.
+    expect(glsl(json, { symbolic: ['T'] }).success).toBe(true);
     expect(js(json, { symbolic: ['T'] }).success).toBe(true);
   });
 
@@ -549,15 +550,15 @@ describe('IR profile, batch G12: robustness', () => {
 
   test('nested loops with real bounds', () => {
     // Six Sums, each bound a real input: JavaScript compiles one loop per
-    // Sum (a loop of blocks and a loop in a block); GLSL declines (the passes
-    // multiply past the budget).
+    // Sum (a loop of blocks and a loop in a block); GLSL compiles too (each
+    // loop is limited by its own count).
     let e: Json = ['Multiply', 'x', 'k0'];
     for (let i = 0; i < 6; i++)
       e = ['Sum', e, ['Limits', `k${i}`, 0.5, ['Add', 'r', i]]];
     const start = performance.now();
     const r = js(e);
     expect(r.code.match(/for \(/g)?.length).toBe(12);
-    expect(failure(() => glsl(e))?.message).toMatch(/iterationBudget/);
+    expect(glsl(e).success).toBe(true);
     expect(performance.now() - start).toBeLessThan(30_000);
     check(e, [
       { x: 0.5, r: 1.5 },

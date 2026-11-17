@@ -214,8 +214,9 @@ export function compileWithIrProfileGlsl(
       });
     // The existing target's cap (`GLSL_DEFAULT_PASS_BUDGET`, which is not
     // imported: a cycle of modules): a `Sum` or a `Product` of more passes
-    // is NaN (the lowering's test), and a program whose loops can run more
-    // passes in all declines (`loopPasses()`).
+    // is NaN (the lowering's test), and a program whose loops of constant
+    // counts can run more passes in all declines (`loopPasses()`, with a
+    // run-time count as one pass).
     const budget = options?.iterationBudget ?? 10_000;
     const s = compileSlice(expr, {
       target: 'glsl',
@@ -279,7 +280,7 @@ export function compileWithIrProfileGlsl(
       throw decline(
         'a colour in OKLab or sRGB that is not the result position of the expression on glsl (an AsOklab or an AsRgb there)'
       );
-    if (!(loopPasses(p, budget, def) <= budget))
+    if (!(loopPasses(p, 1, def) <= budget))
       throw decline(
         `loops that can run more passes than the iterationBudget (${budget}) on glsl`
       );
