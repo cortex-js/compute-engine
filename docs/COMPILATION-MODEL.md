@@ -581,6 +581,16 @@ interpreter's value. A line is removed when the case declines or is fixed.
   (crafted: a matrix that is not square): `Trace(A)` gives `6` and
   `MatrixPower(A, 1)` gives `A`; the interpreter gives the error
   `expected-square-matrix`.
+- `javascript` (crafted), profile `ir`: a root function literal whose
+  untyped parameter is read as a number by its type (`unknown`) but whose
+  body threads a list there: `w ↦ Sum(List(w))` applied to `[3, 1, 2]`
+  gives the string `"03,1,2"`; the interpreter gives `[3, 1, 2]`, and the existing
+  compiler declines (`unsettled-shape`).
+- `javascript` (crafted), profile `ir`: a `Range` whose exact rational
+  bound is within about 10^-12 of an integer is counted on the double of the
+  bound: `Length(Range(0, 9999999999999/1000000000000, 1))` gives 11, where
+  `evaluate()` gives 10 (and `N()` 11); `Sum` and `Max` of it likewise. The
+  existing compiler declines.
 - `javascript`, `v: list<real>` at `v = []` (crafted):
   `Diagonal(v)` gives `[]`; the interpreter keeps `Diagonal([])`
   unevaluated.

@@ -827,14 +827,15 @@ function compileInScope<
       constantFold: options?.constantFold,
       storage: options?.storage,
     };
+    // The removed mode `auto` takes the existing route, which declines it
+    // (with its fallback, as without the profile).
+    const irProfile =
+      options?.profile === 'ir' && (options.mode as string) !== 'auto';
     // The profile `ir` (experimental) compiles with the IR compiler
     // (`ir/adapter.ts`); a decline falls back in the catch below. On
     // `glsl` (`ir/adapter-glsl.ts`) and `interval-js`
     // (`ir/adapter-interval.ts`), a decline falls back to that target.
-    if (
-      options?.profile === 'ir' &&
-      (targetName === 'glsl' || targetName === 'interval-js')
-    )
+    if (irProfile && (targetName === 'glsl' || targetName === 'interval-js'))
       try {
         return (targetName === 'glsl'
           ? compileWithIrProfileGlsl(expr, options)
@@ -857,7 +858,7 @@ function compileInScope<
           languageTarget
         );
       }
-    if (options?.profile === 'ir')
+    if (irProfile)
       return compileWithIrProfile(
         expr,
         options

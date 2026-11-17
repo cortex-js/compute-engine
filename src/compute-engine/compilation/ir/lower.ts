@@ -2967,14 +2967,34 @@ export function lower(
   // A root function literal: its parameters, by position, come first.
   if (isFunction(root, 'Function') && isLibrary(root)) {
     b.literal = true;
+    // A parameter of no declared type is a real. One that the body reads as
+    // a collection (`w ↦ Sum(w)`: the type of the literal is `(w:
+    // collection) -> number`) has no settled shape: a list there would be
+    // read as a number.
+    const own = root.type.type;
     return program(() => {
-      root.ops.slice(1).forEach((p) => {
+      root.ops.slice(1).forEach((p, i) => {
         const name = parameterName(p);
         if (name === undefined) decline(root, 'a parameter that is not a name');
         const declared =
           isFunction(p, 'Typed') && isString(p.ops[1])
             ? ce.type(p.ops[1].string).type
             : 'unknown';
+        const read =
+          typeof own === 'object' && own.kind === 'signature'
+            ? own.args?.[i]?.type
+            : undefined;
+        if (
+          declared === 'unknown' &&
+          read !== undefined &&
+          read !== 'unknown' &&
+          read !== 'any' &&
+          inputType(read)?.shape.length !== 0
+        )
+          decline(
+            root,
+            `the parameter ${name} of no declared type, read as ${engineTypeToString(read)}`
+          );
         input(p, name, declared, true);
       });
       return value(root.ops[0])!;
