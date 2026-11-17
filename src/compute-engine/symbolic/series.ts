@@ -71,8 +71,9 @@ import {
 // **log-aware** expansions — `ln(sin x)`, `ln(x²(1+x))`, `x^x`, `log_b(g)` —
 // about a zero or pole of the logarithm's argument. On the `+∞` side the log
 // atom is rewritten back to `x` (`Ln(s) = −Ln(x)`), so `ln x`, `ln(x²+x)` and
-// the log-gamma Stirling asymptotic `GammaLn(x)` (a divergent asymptotic
-// series, its `BigO` placed at the first omitted term) expand there.
+// the log-gamma Stirling asymptotic of `GammaLn(x)` and `LogGamma(x)` (a
+// divergent asymptotic series, its `BigO` placed at the first omitted term)
+// expand there.
 //
 // When the retained sum is *provably equal* to the whole function (verified by
 // `.simplify()`, with a `Together` fallback for rational functions), the `BigO`
@@ -1987,6 +1988,16 @@ function expandLaurent(
 
   const op = expr.operator;
   const ops = expr.ops;
+
+  // `LogGamma`, the continuous branch of ln Γ, is `GammaLn` where the
+  // argument goes to +∞ (a positive real), so it has the same Stirling
+  // series there. On the negative axis the two differ by a multiple of iπ,
+  // so `LogGamma` does not take the `ln(Γ(u))` path of `GammaLn` at a pole:
+  // it keeps the generic path below.
+  if (op === 'LogGamma' && ops.length === 1) {
+    const stirling = gammaLnLaurent(ce, ops[0], x, x0, W);
+    if (stirling) return stirling;
+  }
 
   switch (op) {
     case 'Add': {

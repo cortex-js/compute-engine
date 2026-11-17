@@ -1039,6 +1039,25 @@ describe('Series — GammaLn Stirling asymptotics', () => {
     );
   });
 
+  test('LogGamma(x) at +∞ is the Stirling series of GammaLn(x)', () => {
+    const logGamma = (arg: Expression) =>
+      ce
+        .function('Series', [
+          ce.function('LogGamma', [arg]),
+          ce.symbol('x'),
+          ce.PositiveInfinity,
+        ])
+        .evaluate();
+    expect(logGamma(ce.symbol('x')).latex).toBe(
+      series('\\operatorname{GammaLn}(x)', '+\\infty').latex
+    );
+    expect(logGamma(ce.parse('x^2')).latex).toBe(
+      series('\\operatorname{GammaLn}(x^2)', '+\\infty').latex
+    );
+    // The leading coefficient must be a positive real: i·x declines.
+    expect(logGamma(ce.parse('ix')).operator).toBe('Series');
+  });
+
   test('GammaLn(x²) at +∞ matches numerically', () => {
     const p = normal('\\operatorname{GammaLn}(x^2)', '+\\infty');
     for (const xv of [5, 10]) {

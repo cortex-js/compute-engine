@@ -163,6 +163,10 @@
 
 ### Bug Fixes
 
+- **`Series(LogGamma(x), x, +∞)` gives Stirling's series.** It stayed
+  unevaluated; it now gives the series of `GammaLn(x)` at `+∞`,
+  `x(ln x − 1) − ½ ln x + ½ ln(2π) + 1/(12x) − 1/(360x³) + O(x⁻⁵)`. The two
+  functions are equal where the argument goes to `+∞`.
 - **`ND` evaluates the derivative of a function given by its name.**
   `ND(Sin, 1)` stayed unevaluated, also under `N`; it now gives
   0.5403023058595877, the value of `ND(Sin(x), 1)`, as `NIntegrate(Sin, 0, 1)`
