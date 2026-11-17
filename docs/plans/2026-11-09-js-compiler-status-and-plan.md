@@ -2735,6 +2735,31 @@ Landed on 2026-11-16, night:
   and the hash magnifies it to the ninth digit. The precision of the target;
   not a defect.
 
+- The replay timed alone (two passes, one process at a time, on a bundle of
+  main `612a76f83`, the better time of each program; records
+  `replay-t12/quiet{a,b}-*.jsonl`, the list in `quiet-above-1.1.json`): 307
+  programs above 1.1 times the existing compiler, 199 above 1.25, 18 above
+  1.5, 7 above 3; median 0.711. 256 of the 307 are one document,
+  `art/u53yhut60h` (curves `(2t + i) / i^(t + c)` in the complex mode, at
+  1.19 to 1.36).
+- `c0e55ae7fbb878ed9e1f3215bd1a1d3185f753a4` (G36, speed): the complex
+  quotient on JavaScript is the interpreter's `complexQuotient()` (the
+  textbook formula where its intermediate values are ordinary doubles, the
+  scaled division elsewhere), where it took the scaled division for every
+  quotient. `art/u53yhut60h`: median 0.94, 4 of 256 above 1.1 in a loaded
+  sweep; that sweep has 73 programs above 1.1 in all (320 before under the
+  same conditions), 34 above 1.25, 20 above 1.5. To do: the quiet two-pass
+  measure again on this head, for the count of exceptions to the 1.1 goal.
+- Above 1.5 when timed alone, with causes (before G36, which changes none
+  of them): `vwbagbcerj` #2, #3 (a sample artefact); `lrpzqnemhy` #0, #2,
+  #3, #5 (the existing compiler returns at the first NaN term);
+  `odyxeaoouk` #0, `nqfechxzqp` #0, `lg5hblqpel` #8, #9 (CE-1373);
+  `kthjqzwc4g` #0 (4.0: `WithRandomSeed(k, Random())` with no input is a
+  constant that the existing compiler folds; 7 such frames in the corpus);
+  `art/lrhjtkkyls` #1, `art/13obrwvjag` #2, `art/kotqpqjiiy` #0 (complex:
+  a power of a small integer exponent through the general `cpow`; 5 corpus
+  programs have the form).
+
 Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
 states, each step gated by a render audit with no lost series, no new hang
 and no build or render over 1.5 times): its `At` handler on GLSL and the
