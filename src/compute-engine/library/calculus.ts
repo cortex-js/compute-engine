@@ -2263,6 +2263,25 @@ function constantIntegral(
 const NINTEGRATE_VARIABLE = 'NIntegrateVariable';
 
 /**
+ * The literal `t ↦ f(t)` for a function given by its name (`Sin`), for
+ * `NIntegrate` and `ND`; `undefined` when `f` is not a symbol. Compiled
+ * alone, the symbol compiles to a function that RETURNS the function, so
+ * every sample would read `NaN`.
+ */
+function functionLiteralOfName(
+  ce: ComputeEngine,
+  f: Expression
+): Expression | undefined {
+  const name = sym(f);
+  if (!name) return undefined;
+  return ce.expr([
+    'Function',
+    [name, NINTEGRATE_VARIABLE],
+    NINTEGRATE_VARIABLE,
+  ]);
+}
+
+/**
  * The function literal `(p_1, …, p_n) ↦ body`, where the parameter named
  * `params[i]` replaces each occurrence of the symbol named `holes[i]` in
  * `body`, typed `types[i]` when `types` has that entry. Returns `undefined`
@@ -7451,7 +7470,11 @@ volumes
 
     // Evaluate a numerical approximation of a derivative at point x
     ND: {
-      description: 'Numerical derivative evaluated at a point.',
+      description: [
+        'Numerical derivative evaluated at a point.',
+        'The function is an expression (ND(Sin(x), 1)), a function literal or',
+        'the name of a function (ND(Sin, 1)): each gives cos(1).',
+      ],
       broadcastable: false,
       lazy: true,
       signature: '(function, at:number) -> number | tuple | list<number>',
@@ -7496,9 +7519,32 @@ volumes
         if (isNaN(xValue)) return undefined;
         // A function NAME is resolved to the literal it is bound to, so the
         // stencil runs the compiled literal — the same code the compiled
-        // JavaScript route runs — rather than an interpreted application.
-        const lit = resolveDerivativeFunctionLiteral(body) ?? body;
-        return stencilDerivativeAt(engine, lit, xValue, 1);
+        // JavaScript route runs — rather than an interpreted application. The
+        // name of an operator with no literal (`Sin`) is wrapped in a
+        // one-parameter literal, as for `NIntegrate`. A symbol that holds a
+        // value (`y := 5`) is not: it is the body of a constant function.
+        // An operator that is not pure (`Random`, `Print`) stays
+        // unevaluated: the stencil would run its effect at every sample. So
+        // does an operator that takes no number (`Length`): its compiled
+        // call throws for a number argument.
+        const lit = resolveDerivativeFunctionLiteral(body);
+        if (lit !== undefined)
+          return stencilDerivativeAt(engine, lit, xValue, 1);
+        if (
+          !isSymbol(body) ||
+          !isOperatorDef(engine.lookupDefinition(body.symbol))
+        )
+          return stencilDerivativeAt(engine, body, xValue, 1);
+        const wrapped = functionLiteralOfName(engine, body);
+        if (!isFunction(wrapped, 'Function') || wrapped.op1.isPure !== true)
+          return undefined;
+        try {
+          return stencilDerivativeAt(engine, wrapped, xValue, 1);
+        } catch (e) {
+          if (e instanceof RangeError || e instanceof TypeError)
+            return undefined;
+          throw e;
+        }
       },
       compile: (args, compile, context) =>
         compileDerivative('ND', args, compile, context),
@@ -9794,16 +9840,8 @@ volumes
         if (pole !== undefined) return poleVerdictValue(engine, pole);
 
         // A function given by its name (`Sin`) is wrapped in a one-parameter
-        // `Function` literal: compiled alone, the symbol compiles to a
-        // function that RETURNS the function, so every sample read `NaN`.
-        const name = isFunction(f, 'Function') ? undefined : sym(f);
-        const fn = name
-          ? engine.expr([
-              'Function',
-              [name, NINTEGRATE_VARIABLE],
-              NINTEGRATE_VARIABLE,
-            ])
-          : f;
+        // `Function` literal (`functionLiteralOfName`).
+        const fn = functionLiteralOfName(engine, f) ?? f;
         // The integrand may be complex-valued: integrate its real part, and
         // its imaginary part too when a sample carried one (see
         // `numericIntegrandParts` and the `Integrate` numeric path).

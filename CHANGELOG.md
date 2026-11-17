@@ -163,6 +163,10 @@
 
 ### Bug Fixes
 
+- **`ND` evaluates the derivative of a function given by its name.**
+  `ND(Sin, 1)` stayed unevaluated, also under `N`; it now gives
+  0.5403023058595877, the value of `ND(Sin(x), 1)`, as `NIntegrate(Sin, 0, 1)`
+  already did for an integral. In Epsil, `nd(sin, 1)` gives the same value.
 - **A product of the factors of `SVD` keeps its order.** `SVD` had no result
   type for its three matrices, so a name bound to one of them by a
   destructuring had no type when a product was read, and the factors of the
