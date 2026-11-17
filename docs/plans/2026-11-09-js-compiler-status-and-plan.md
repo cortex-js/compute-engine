@@ -2620,6 +2620,20 @@ Landed on 2026-11-16, night:
   is required 20, `Multiply` of a list of points and another shape 10. `ir/`
   is 11,082 lines.
 
+- `d079da3f48932a91dc4464ee6568cf903691e50c` (G31): `Repeat(v, n)` compiles
+  (the value lowered once, the length the count of `Range(1, n)`, the shared
+  `over()`; a value with an effect declines). 22 of the 35 JavaScript
+  programs compile, 8 GLSL and 10 interval programs that the existing
+  targets decline; the 13 others meet "arms of two types" (a `Which` whose
+  list arms have different run-time lengths). `ir/` is 11,106 lines. The
+  review found that the interpreter evaluates the value of a `Repeat` once or
+  once per element depending on the consumer: CE-1396, needs-decision.
+- Found by `ce-interval`'s widened sweep on 2026-11-16: CE-1397 (P1), a
+  wrong value of the existing, released JavaScript compiler
+  (`1 - Sqrt(x^2 + y^2)^2` compiles to `-(x·x) + (y·y) + 1`); the profile is
+  right. `ce-interval` fixes it. It is the cause of the replay's "finite"
+  difference of `neyret/h3k6mi4qfo`, recorded above as a boundary case.
+
 Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
 states, each step gated by a render audit with no lost series, no new hang
 and no build or render over 1.5 times): its `At` handler on GLSL and the
