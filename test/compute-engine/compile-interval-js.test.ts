@@ -2348,3 +2348,33 @@ describe('INTERVAL JS - APPLIED DERIVATIVE OF A FUNCTION OF TWO ARGUMENTS', () =
     );
   });
 });
+
+describe('INTERVAL JS COMPILATION - ZERO TO THE POWER ZERO (CE-1372)', () => {
+  // `0^0` has no value, as the interpreter and the JavaScript targets read
+  // it (`NaN`): the point is `empty`, and a comparison on it is `'false'`.
+  // A box that holds the point and others keeps its enclosure.
+  test('y^x at (0, 0) is empty', () => {
+    const fn = compile(ce.box(['Power', 'y', 'x']), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    const point = { lo: 0, hi: 0 };
+    expect(fn.run!({ x: point, y: point })).toEqual({ kind: 'empty' });
+    expect(fn.run!({ x: point, y: { lo: 0, hi: 1 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 1, hi: 1 },
+    });
+  });
+
+  test('a comparison on 0^0 is not decided true', () => {
+    const fn = compile(
+      ce.box([
+        'Less',
+        0,
+        ['Add', ['Multiply', 'y', ['Power', 'y', ['Floor', 'x']]], 1],
+      ]),
+      { to: 'interval-js' }
+    );
+    expect(fn.run!({ x: { lo: 0.5, hi: 0.5 }, y: { lo: 0, hi: 0 } })).toBe(
+      'false'
+    );
+  });
+});

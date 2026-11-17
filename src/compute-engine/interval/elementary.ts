@@ -265,6 +265,13 @@ function powRaw(base: Interval | IntervalResult, exp: number): IntervalResult {
   if (isNaNInterval(baseVal) || Number.isNaN(exp)) return ok(NAN_INTERVAL);
   if (Number.isInteger(exp)) {
     if (exp >= 0) {
+      // Zero to the power zero has no value, as in the interpreter and the
+      // JavaScript targets, which answer `NaN` (`docs/COMPILATION-MODEL.md`,
+      // forms with no value): a box that is that one point is `empty`, as
+      // `1/[0, 0]` is. A box that holds it and other points keeps `[1, 1]`,
+      // which encloses the value at every other point of the box.
+      if (exp === 0 && baseVal.lo === 0 && baseVal.hi === 0)
+        return { kind: 'empty' };
       return ok(intPow(baseVal, exp));
     } else {
       return negativeIntegerPower(baseVal, -exp);
@@ -403,12 +410,14 @@ function powIntervalRaw(
   }
   if (baseVal.hi === 0) {
     // The only point of the base in the domain is 0, where the value is 0
-    // for a positive exponent, 1 for the exponent 0 (this file's convention,
-    // see `intPow`) and undefined for a negative one. A wholly negative
-    // exponent leaves no defined point in the box, so the answer is `empty`,
-    // not a clipped enclosure with an infinite bound (without this branch,
-    // the branch below would compute `0^e = +∞` at each corner). The box is
-    // clipped when the base reaches below 0 or the exponent reaches below 0.
+    // for a positive exponent and undefined for a negative one; the bound 1
+    // for an exponent interval that reaches 0 is kept, since `0^0` has no
+    // value only when the box is that one point (see `powRaw`). A wholly
+    // negative exponent leaves no defined point in the box, so the answer is
+    // `empty`, not a clipped enclosure with an infinite bound (without this
+    // branch, the branch below would compute `0^e = +∞` at each corner). The
+    // box is clipped when the base reaches below 0 or the exponent reaches
+    // below 0.
     if (expVal.hi < 0) return { kind: 'empty' };
     const value = {
       lo: expVal.hi > 0 ? 0 : 1,
@@ -449,9 +458,9 @@ function powIntervalRaw(
     ];
     // Three readings of the exponent, over a base reaching 0. The split is on
     // whether a NEGATIVE exponent is present, because that alone creates the
-    // pole: an exponent of exactly 0 does not, since `x^0 = 1` for every `x`
-    // — including `x = 0`, which is this file's own convention (`intPow` with
-    // an exponent of 0 answers `[1, 1]`).
+    // pole: an exponent of exactly 0 does not, since `x^0 = 1` for every
+    // `x > 0` (`0^0` has no value, but only the point box answers so, see
+    // `powRaw`).
     //
     // - NO negative exponent (`expVal.lo >= 0`): every value is defined and
     //   finite. 0 is the infimum — attained at `x = 0` for a positive

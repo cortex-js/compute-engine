@@ -149,6 +149,17 @@
   temporary name**, so the temporaries after it in such a loop
   (`Comprehension(…, Element(Tuple(_, j), Q))`) have other names. The values
   are the same.
+- **On `interval-js`, zero to the power zero no longer gives 1.** The
+  interpreter and the JavaScript targets give `NaN` for `0^0`, but `y^x` at
+  `x = y = [0, 0]` gave the point `[1, 1]`, and a comparison built on it
+  could be decided against the interpreter:
+  `0 < y·y^⌊x⌋ + 1` at `x = 0.5`, `y = 0` was `'true'` where the interpreter
+  gives `False`. The point is now `empty`, so the comparison is `'false'`. A
+  box that holds the point and others keeps its enclosure: `y^x` at
+  `x = [0, 0]`, `y = [0, 1]` is still `[1, 1]`. A sum `∑ x^k` from `k = 0`
+  is `empty` at `x = [0, 0]`, as the interpreter gives `NaN` there. The kernels
+  of the interval library are fixed, so the existing target and the profile
+  `'ir'` both give it.
 
 ### Bug Fixes
 

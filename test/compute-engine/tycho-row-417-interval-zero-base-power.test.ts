@@ -12,10 +12,13 @@
  * nothing.
  *
  * A base whose only point in the domain is 0 has three readings of the
- * exponent: positive (the value 0), zero (the value 1, the file's own
- * convention for `x^0`), negative (undefined). A wholly negative exponent
+ * exponent: positive (the value 0), zero (the bound 1 in an enclosure of an
+ * exponent interval), negative (undefined). A wholly negative exponent
  * leaves no defined point in the box, so the answer is `empty`, not a
  * clipped enclosure with an infinite bound; both kernels gave the latter.
+ * The exact point `[0, 0]^[0, 0]` is `empty` too: zero to the power zero is
+ * a form with no value, `NaN` in the interpreter and the JavaScript targets
+ * (`docs/COMPILATION-MODEL.md`, CE-1372).
  */
 
 import { ComputeEngine, compile } from '../../src/compute-engine';
@@ -113,7 +116,8 @@ describe('Tycho 417 — the point base 0 under an interval exponent', () => {
       1,
     ]);
     expect(shape(powInterval(I(0, 0), I(2, 2)))).toEqual(['interval', 0, 0]);
-    expect(shape(powInterval(I(0, 0), I(0, 0)))).toEqual(['interval', 1, 1]);
+    // `0^0` has no value (CE-1372).
+    expect(shape(powInterval(I(0, 0), I(0, 0)))).toEqual(['empty']);
     const [kind, lo] = shape(powInterval(I(0, 2), I(0.2, 0.4)));
     expect(kind).toBe('interval');
     expect(lo).toBe(0);

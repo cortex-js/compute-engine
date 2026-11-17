@@ -137,6 +137,16 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `2 * _.x + 1`: `2` at `x = 0.5`. The interpreter and the profile `ir`
   give `3`. The code of the ascribed value is written with no parentheses
   (the same cause as CE-1196 and CE-1224).
+- `plausible?` — `javascript` and `interval-js`, both compilers, `x: real`,
+  `y: real`: `D(x^y, x)` at `x = 0`, `y = 1`. The interpreter gives `1`. The
+  compiled derivative is the general form `y·x^(y - 1)`, whose factor is
+  `0^0` there: `javascript` gives `NaN` and `interval-js` gives `empty` at
+  the point box (a box that holds other points is not affected).
+- `interval-js` (crafted), both compilers: `y^x` over `y = [-1, 0]`,
+  `x = [-1.5, -0.5]` gives the interval `[-∞, +∞]` with no mark, where the
+  base 0 is a pole (`0^-1` is `~oo` in the interpreter). The enclosure holds
+  every value; the neighbouring boxes are marked (`y = [0, 2]` with
+  `x = [-1, -0.5]` is `partial`).
 - `javascript` (crafted), the existing compiler, `i: real`: a `compile`
   handler of `At` that returns an expression of another shape than the node,
   `List(args[1], 2)`, in `Add(At([10, 20, 30], i), 1)`: at `i = 1` the code
@@ -1759,7 +1769,12 @@ Contract B's `propagate` policy.
 For a form with no value (`0/0`, `0 · ∞`, `0^0`, `Mod(x, 0)`) the
 interpreter answers `NaN` on the exact route, with a float operand and
 under `.N()`, and every compiled target answers the IEEE `NaN`: `NaN` in
-JavaScript and `_gpu_nan()` in the shaders. The input
+JavaScript and `_gpu_nan()` in the shaders. On `interval-js`, `0^0` and `0/0`
+at a box that is that one point are `empty` (`y^x` and `x/y` at
+`x = y = [0, 0]`), and a comparison with an `empty` operand is `'false'`,
+except `NotEqual`, which is `'true'`; `Mod(x, 0)` is `singular`. A box that
+holds such a point and others encloses the values at its other points
+(`y^x` at `x = [0, 0]`, `y = [0, 1]` is `[1, 1]`). The input
 spelling `Indeterminate` is `NaN` (user decision of 2026-11-02,
 `docs/ERROR-MODEL.md`, "One static error, one dynamic non-value per
 domain").

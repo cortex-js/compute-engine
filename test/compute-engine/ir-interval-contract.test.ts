@@ -2125,3 +2125,51 @@ describe('the interval mode: three spellings of the existing target', () => {
     expect(differ).toBe(0);
   });
 });
+
+describe('the interval mode: zero to the power zero (CE-1372)', () => {
+  // The mode calls the same kernels as the existing target: `0^0` has no
+  // value, as in the interpreter, and a box that is that point is `empty`.
+  // A box that holds the point and others keeps its enclosure.
+  const run = (json: unknown, b: Record<string, unknown>) =>
+    (
+      compile(ce.box(json as never), {
+        to: 'interval-js',
+        profile: 'ir',
+        fallback: false,
+      } as never) as unknown as { run: (b: unknown) => unknown }
+    ).run(b);
+  const point = (v: number) => ({ lo: v, hi: v });
+
+  test('y^x at (0, 0) is empty, a wider box keeps its enclosure', () => {
+    expect(run(['Power', 'y', 'x'], { x: point(0), y: point(0) })).toEqual({
+      kind: 'empty',
+    });
+    expect(
+      run(['Power', 'y', 'x'], { x: { lo: 0, hi: 1 }, y: point(0) })
+    ).toEqual({ kind: 'interval', value: { lo: 0, hi: 1 } });
+  });
+
+  test('a comparison on 0^0 is not decided true', () => {
+    const less = [
+      'Less',
+      0,
+      ['Add', ['Multiply', 'y', ['Power', 'y', ['Floor', 'x']]], 1],
+    ];
+    expect(run(less, { x: point(0.5), y: point(0) })).toBe('false');
+  });
+
+  test('a written-out sum of x^k from k = 0 has no value at x = 0', () => {
+    // The interpreter gives NaN there: its term x^0 is 0^0.
+    const sum = ['Sum', ['Power', 'x', 'k'], ['Limits', 'k', 0, 3]];
+    expect(ce.box(sum as never).subs({ x: 0 }).N().isNaN).toBe(true);
+    expect(run(sum, { x: point(0) })).toEqual({ kind: 'empty' });
+    expect(run(sum, { x: { lo: -1, hi: 1 } })).toEqual({
+      kind: 'interval',
+      value: { lo: -1, hi: 4 },
+    });
+    expect(run(sum, { x: point(2) })).toEqual({
+      kind: 'interval',
+      value: { lo: 15, hi: 15 },
+    });
+  });
+});
