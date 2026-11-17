@@ -1519,3 +1519,82 @@ of the 244 programs that the sweep put above 1.05, 12 programs are above
 | `neyret/pvzphgx1eo` #1 | 1.20 | invariants computed before a loop that makes no pass in the sweep's boxes |
 | `neyret/sjjo3qgnfp` #69, #118, #76 | 1.14, 1.13, 1.10 | not diagnosed |
 | `art/h2rbqjefo3` #0, `neyret/7vqnkhdhoj` #12 | 1.10 | not diagnosed |
+
+### 18.6 The night of 2026-11-16: a wider sweep, timing on a bundle, and three fixes outside the mode
+
+**The sweep checks more.** `sweep-t12.mts` now also checks a program that
+only the mode compiles (against the existing JavaScript, else the profile's
+JavaScript, else the interpreter), a list result element by element, and a
+boolean verdict against the scalar boolean; and it supplies the document's
+values of the names in `options.inputs`, lists too. Of the "51 containment
+misses in 5 programs" of sections 18.4 and 18.5, 39 were this last gap: the
+sweep left a list input out. The reference of a containment check is the
+existing scalar JavaScript, so a miss can be the scalar code's fault: that
+is how CE-1397 was found.
+
+**Timing is done on a bundle.** Under `tsx`, esbuild's `keepNames` wraps
+every named inner closure in a call per evaluation: `_IA.hull` took 238 ns
+there and 20 ns in a bundle, `_IA.less` 116 ns and 8 ns. The scripts take
+`BUNDLE=<ce.mjs>` (an esbuild bundle of the tree) and run under
+`node --experimental-strip-types`. The ratios of sections 18 to 18.5 were
+measured under `tsx` and are provisional; the gain quoted for the lazy
+`And` and `Or` (0.845) is not confirmed on a bundle. A ratio in this note
+is the mode's time per call over the existing target's, both built from the
+same commit.
+
+**The baseline on main `cb30c24c8`, on a bundle**
+(`sweep-t12-bundle-at-cb30c24c8`, `retime-slow-bundle-at-cb30c24c8.json`):
+the mode admits 4,858 of the 5,155 interval programs (the existing target
+4,835); 81,198 points checked, 22 misses in 3 programs, the same on both
+targets (the interpreter has no real value there); 28 programs that only
+the mode compiles, with no miss. Six programs are above 1.1:
+
+| Program | Ratio | Cause |
+| --- | --- | --- |
+| `neyret/nbbj88wunw` #1 | 153 | a comparison that the existing target decides at compile time: an exception, accepted by the user on 2026-11-16 ("I'm OK with an exception") |
+| `neyret/jdnefd99lw` #0, #1 | 1.81, 1.10 | an undecided bound throws where the existing target returns `entire` in place (#1 not diagnosed on the bundle) |
+| `neyret/zrklhsz34x` #4, `neyret/n3nirm8khz` #4 | 1.43, 1.38 | the same `Sum` loop computed twice (`ce-compiler`'s CE-1373) |
+| `neyret/sjjo3qgnfp` #91 | 1.14 | not diagnosed |
+
+Not started, each a few lines: a fast path in `freshIntervalValue()`
+(`interval/run-support.ts`), a guard that skips the invariants of a loop
+that makes no pass, and no throw for an undecided loop bound.
+
+**Three fixes outside the mode**, each found by this work:
+
+- CE-1397, `1d8bf731a80f6db6af96928732afa77eb0f678da`: the existing
+  JavaScript compiler wrote a real radical power through an identity
+  lowering with no parentheses (released since 0.128.0); 24 corpus programs
+  had a wrong value.
+- CE-1372, `8e228cdc14f5e4ba5fcda7ad03ef00dd2703dd83`: on both interval
+  targets `0^0` at the point is `empty`, as the interpreter's `NaN`. The
+  user decided option 1, then, shown that its full form marks every box
+  that holds the point (a power series from `k = 0` at `x = 0`, two tests
+  named after Tycho's requests), the narrow form ("CE-1372: (a2)"): one
+  test in `powRaw()`, the number exponent 0 over the point base 0; every
+  other box keeps its result. Four boxes of the corpus change, in
+  `neyret/b2kz2ptcw2`. Recorded as known limitations: `D(x^y, x)` at
+  `x = 0`, `y = 1` (`plausible?`), and an unmarked pole of `powInterval`
+  (crafted).
+- CE-1196 and CE-1224, `612a76f839dc82c2a756fb1d228d944242969852`: the
+  existing compilers put the code of a head with no infix spelling in
+  parentheses when it is an operand and not a primary
+  (`compilation/code-primary.ts`). The existing interval target and the
+  profile do not change.
+
+**From `ce-compiler` in the period**, on the interval seam: G33
+(`13dfa2cd906ace3aa9bd62df689ab8d512002fed`): an `If` whose arms are lists
+of two lengths compiles on JavaScript; the mode declines it ("arms that are
+lists of two lengths"): an undecided condition has no one length, and no
+interval corpus program has the form. G34
+(`3e69044983f0953374f2e54a912647403690f148`): a NaN range count is an empty
+list on JavaScript; the mode keeps `entire`. G35
+(`65bf232754b043fe95a9aef9c86b804e4d38a7b6`): `Mod(x, 1)` on JavaScript
+without `%`. The interval kernel uses `%` only when the dividend and the
+divisor are both points, and `%` is about 8 ns of the 104 ns of that call
+(75 ns for a dividend with a width; bundle of `interval/`, divisor 1,
+dividends below 10^4): no change there.
+
+The Codex reviews of this period are owed (a usage limit until
+2026-11-18): entries `20261116-221107-4116` (CE-1372) and
+`20261116-224342-71991` (the parentheses fix), after those of section 18.5.
