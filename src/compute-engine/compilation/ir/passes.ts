@@ -336,8 +336,49 @@ const scalarize = (
 const sameLane = (p: Program, a: V, b: V) =>
   p.types[a].lane === p.types[b].lane;
 
+/** The rule of `fold: 'lists'` on an exact zero, which computes no
+ *  number: an `add` with an exact zero as an operand is its other operand.
+ *  An exact zero is printed as the point `[0, 0]` or `[-0, -0]`: the
+ *  integer literal 0, its `neg`, its `elem` at a constant index of a
+ *  `list`, and its `div` by a nonzero integer literal (README, "The
+ *  interval mode"). */
+function zeros(
+  p: Program,
+  i: Instr,
+  defs: Map<V, Instr>,
+  constants: ReadonlyMap<V, Literal['value']>,
+  subst: Map<V, V>
+): Instr[] | undefined {
+  const integer = (v: V) => {
+    const d = defs.get(v);
+    return d?.k === 'const' && d.value.lane === 'integer'
+      ? d.value.value
+      : undefined;
+  };
+  const zero = (v: V): boolean => {
+    const d = defs.get(v);
+    if (d?.k !== 'op') return integer(v) === 0;
+    const [x, y] = d.args;
+    if (d.op === 'neg' || d.op === 'neg.int') return zero(x);
+    const q = integer(y);
+    if (d.op === 'div' || d.op === 'div.q')
+      return zero(x) && q !== undefined && q !== 0;
+    const list = defs.get(x);
+    const k = constants.get(y) as number;
+    return d.op === 'elem' && list?.k === 'list' && zero(list.args[k]);
+  };
+  if (i.k !== 'op' || (i.op !== 'add' && i.op !== 'add.int')) return undefined;
+  const [a, b] = i.args;
+  const other = zero(b) ? a : zero(a) ? b : undefined;
+  if (other === undefined || !sameLane(p, other, i.out)) return undefined;
+  if (p.types[other].shape.length !== p.types[i.out].shape.length)
+    return undefined;
+  subst.set(i.out, other);
+  return [];
+}
+
 /** With `lists`, only the list rules: an element of a list or of an
- *  element-wise operation, and the `At` of `scalarize`. */
+ *  element-wise operation, and the `At` of `scalarize`; and `zeros()`. */
 const fold = (
   p: Program,
   rows: readonly OperatorRow[],
@@ -380,7 +421,7 @@ const fold = (
         return out;
       }
     }
-    if (lists) return undefined;
+    if (lists) return zeros(p, i, defs, constants, subst);
     if (
       i.k === 'op' &&
       fx.speculatable(i) &&

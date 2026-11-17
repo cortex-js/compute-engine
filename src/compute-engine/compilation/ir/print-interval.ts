@@ -122,6 +122,7 @@ export const JS_INTERVAL: Syntax = Object.freeze({
       Object.entries(BINARY).map(([op, k]) => [op, ia(k, 2)])
     ),
     neg: '_IA.negate($0)',
+    negdiv: '_IA.negDiv($0, $1)',
     pow: '_IA.powReal($0, $1)',
     // The exponent is a constant point: its double.
     'pow.branch': '_IA.powRealBranch($0, $1.lo, true)',
@@ -234,6 +235,8 @@ export const INTERVAL_ROWS: readonly OperatorRow[] = deepFreeze([
   ...['pow.branch', 'pow.branch.even', 'pow.principal', 'pow.interval'].map(
     (op) => row(undefined, 2, [[[R, R], R, op]], {})
   ),
+  // `div(neg(a), b)` of the printer (`subtractions()`).
+  row(undefined, 2, [[[R, R], R, 'negdiv']], {}),
   ...['atleast', 'atmost'].map((op) => row(undefined, 2, arith(op, 2), list)),
   ...PLAIN_ROWS,
 ]);
@@ -259,7 +262,9 @@ export function dropClosedForms(
  *  `_IA.sub(b, a)`, one kernel where there were two, as the existing target
  *  writes them. `sub` gives the endpoints of `add` of `negate` in every
  *  kind and rounding (`interval/arithmetic.ts`); an inlined operand is
- *  pure, so the order of the two is not observed. */
+ *  pure, so the order of the two is not observed. A `div` whose dividend is
+ *  such a `neg` is `negdiv`, `_IA.negDiv(a, b)`, the kernel of `div` of
+ *  `negate` (not `neg` of a `div`: its clipped end is not the same). */
 function subtractions(p: Program): Program {
   // The count of the pairs of `q`, rewritten in place with `rewrite`.
   const pairs = (q: Program, rewrite: boolean): number => {
@@ -276,6 +281,16 @@ function subtractions(p: Program): Program {
     const walk = (r: Region): void => {
       for (const i of r.body) {
         regionsOf(i).forEach(walk);
+        // `div(neg(a), b)` is `negdiv(a, b)`.
+        const quotient = i.k === 'op' && (i.op === 'div' || i.op === 'div.q');
+        if (quotient && negation(i.args[0])) {
+          const n = negation(i.args[0])!;
+          dropped.add(n);
+          if (!rewrite) continue;
+          i.op = 'negdiv';
+          i.args = [n.args[0], i.args[1]];
+          continue;
+        }
         if (i.k !== 'op' || (i.op !== 'add' && i.op !== 'add.int')) continue;
         const k = negation(i.args[1]) ? 1 : negation(i.args[0]) ? 0 : -1;
         if (k < 0) continue;

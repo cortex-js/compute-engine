@@ -543,9 +543,19 @@ functions", about 1.5 ms, as on the existing target); `run()` answers both
 errors with `entire`. The pass `fold` runs only its list rules (an element
 of a `list` is that element, an element of an element-wise operation is the
 operation on the elements, an `At` of a constant index in range is an
-`elem`): none of them computes a number, so each value is the one the
-program computed, where an arithmetic fold would give a double, which is not
-an enclosure. The pass `strength` (`x·x` is wider than `x^2` over an
+`elem`) and its rule of an exact zero (`zeros()`): an `add` with an exact
+zero as an operand is its other operand. An exact zero is a value printed as
+the point `[0, 0]` or `[-0, -0]`: the integer literal 0, its `neg`, its
+`elem` at a constant index of a `list`, and its `div` by a nonzero integer
+literal, whose kernel gives `[0, 0]` (`x + 0/3`, `x - List(0, 1)[0]` and the
+identity of a sum written out are `x`; a real literal 0, a `sub` and a `mul`
+by an exact zero stay, the last since `0·∞` is not 0). None of these rules
+computes a number, so each value is the one the program computed, where an
+arithmetic fold would give a double, which is not an enclosure. The kernel of an `add` of an exact
+zero gives its other operand with two differences, both of the kernel and
+not of the value: with `+0` an end `-0` is `+0`, and a `partial` clipped on
+one side is marked clipped on both (`propagatePartial()`); the operand alone
+keeps its mark. The pass `strength` (`x·x` is wider than `x^2` over an
 interval) is off; two passes of the mode run, `narrow` first and `plain`
 last. The pass `hoist` is off too: an operand of `And` or `Or` (and the arm
 of an `If` of a boolean with no else arm) stays in its arm, where a kernel
@@ -561,7 +571,18 @@ pure; another arm keeps `_IA.decided()`.
 Spelled: the arithmetic (`div.q` is `_IA.div`; an `add` of a `neg` that
 has no other use is `_IA.sub`, with the `neg` removed after the passes,
 `subtractions()`: `x - y` is `_IA.sub(_.x, _.y)`, `-x + y` is
-`_IA.sub(_.y, _.x)`, as on the existing target), `Power` (`pow`, also of
+`_IA.sub(_.y, _.x)`, as on the existing target; a `div` whose dividend is
+such a `neg` is `_IA.negDiv(a, b)`, the kernel of `div` of `negate` with the
+same endpoints, kinds and marks (not a `neg` of a `div`, whose clipped end
+differs, as on the existing target); a product with a rational `p/q` and a
+constant marked `inexact` and a factor that is not a constant,
+`Rational(2, 3)·π·x`, is one constant, computed once, times the other
+factors: the product of the rational and the constant factors folded as a
+closed node (`N()` and one ulp, `2π/3`), or, where a closed node is not
+folded (machine precision), `(π / q) · p`, the constant of the existing
+target; with no such constant, or with constant factors only (a term of a
+sum written out, computed once anyway), it is `(p·π·x)/q` (`product()`:
+`1/3 · 6` stays the point 2)), `Power` (`pow`, also of
 integers, is `_IA.powReal`; a power by the exact constant 2 is
 `_IA.square`, the operation `square` that the lowering makes; a float
 literal exponent below), `Root` (`_IA.nthRootInterval`), `Sqrt`, `Abs`, `Exp`,
@@ -967,14 +988,15 @@ complex number they decline: the interpreter leaves them unevaluated). A
 reduction (`Sum`, `Max`, `Min`) of one literal `List` of at least one element,
 each of a number type, is the reduction of its elements, with no array and no
 loop: `Max(List(x, y, x·y))` is `Max(x, y, x·y)`, and `Sum(List(a, b))` is
-`(0 + a) + b`, the fold of the loop (`Product(List(…))` is `Reduce` in the
+`(0 + a) + b`, the fold of the loop, and `a + b` in the interval mode, where
+the `0 +` is an exact zero (`Product(List(…))` is `Reduce` in the
 canonical form and keeps the loop). In the interval mode (on JavaScript by an
 internal switch, `SliceOptions.unrollSums`, off by default; never on GLSL), a
 `Sum` or a `Product` with `Limits` of two integer constant bounds and 1 to 100
 passes is written out: its body is lowered once per index, the index bound to
 the constant, and the terms are folded from the identity in ascending order,
 the operations of the loop (`Sum(sin(k·x)/k, k = 1..3)` is
-`((0 + sin(1·x)/1) + sin(2·x)/2) + sin(3·x)/3`), so that a part that reads
+`((0 + sin(1·x)/1) + sin(2·x)/2) + sin(3·x)/3`, with no `0 +` after `fold`), so that a part that reads
 only the index is a constant (`(-1)^i/i`, computed once). A term that reads
 no index is one value, added once per pass. The sum keeps its loop when its
 body has an effect (a draw, a read of `vars`: n copies would be n draw sites),

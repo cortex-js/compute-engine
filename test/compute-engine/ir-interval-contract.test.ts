@@ -1533,10 +1533,12 @@ describe('the interval mode: batch 7, the order of a sum', () => {
       const e = machine.box(json as never);
       const x = -11.491009020837964;
       const r = compile(e, { ...IR, fallback: false } as never) as unknown as Result;
-      // Written out (at most 100 passes), from the identity and the first
-      // term.
+      // Written out (at most 100 passes), from the first term: the identity
+      // 0 is an exact zero, which `fold` removes.
       expect(r.code).not.toMatch(ascending);
-      expect(inlined(r)).toMatch(/^[^]*?_IA\.add\(\{ lo: 0, hi: 0 \}, /);
+      expect(inlined(r)).toMatch(
+        /^[^]*?_IA\.add\(_IA\.div\(_IA\.sin\(_IA\.mul\(\{ lo: 1, hi: 1 \}, _\.x\)\), \{ lo: 1, hi: 1 \}\), /
+      );
       expect(terms(r, /_IA\.div\(_IA\.sin\(_IA\.mul\(\{ lo: (\d+),/g)).toEqual(upTo(100));
       const want = machine.withValues({ x: machine.number(x) } as never, () =>
         e.evaluate().N()
@@ -1568,10 +1570,10 @@ describe('the interval mode: batch 7, the order of a sum', () => {
     const json = ['Sum', ['Divide', ['Sin', ['Multiply', 'k', 'x']], 'k'], ['Limits', 'k', 1, 3]];
     const r = mode(json);
     expect(r.code).toBe(
-      '_IA.add(_IA.add(_IA.add(v2, _IA.div(_IA.sin(_IA.mul(v0, _.x)), v0)), _IA.div(_IA.sin(_IA.mul(v8, _.x)), v8)), _IA.div(_IA.sin(_IA.mul(v1, _.x)), v1))'
+      '_IA.add(_IA.add(_IA.div(_IA.sin(_IA.mul(v0, _.x)), v0), _IA.div(_IA.sin(_IA.mul(v8, _.x)), v8)), _IA.div(_IA.sin(_IA.mul(v1, _.x)), v1))'
     );
     expect(r.preambleOnce).toBe(
-      'const v0 = { lo: 1, hi: 1 };\nconst v1 = { lo: 3, hi: 3 };\nconst v2 = { lo: 0, hi: 0 };\nconst v8 = { lo: 2, hi: 2 };'
+      'const v0 = { lo: 1, hi: 1 };\nconst v1 = { lo: 3, hi: 3 };\nconst v8 = { lo: 2, hi: 2 };'
     );
     // The JavaScript and GLSL code keep the loop.
     const js = compile(ce.box(json as never), { profile: 'ir', fallback: false } as never) as unknown as Result;
@@ -1581,7 +1583,7 @@ describe('the interval mode: batch 7, the order of a sum', () => {
     // A part that reads only the index is computed once, in `preambleOnce`.
     const alt = mode(['Sum', ['Multiply', ['Divide', ['Power', -1, 'k'], 'k'], ['Sin', ['Multiply', 'k', 'x']]], ['Limits', 'k', 1, 3]]);
     expect(alt.code).toBe(
-      '_IA.add(_IA.add(_IA.add(v2, _IA.mul(v5, _IA.sin(_IA.mul(v0, _.x)))), _IA.mul(v13, _IA.sin(_IA.mul(v11, _.x)))), _IA.mul(v19, _IA.sin(_IA.mul(v1, _.x))))'
+      '_IA.add(_IA.add(_IA.mul(v5, _IA.sin(_IA.mul(v0, _.x))), _IA.mul(v13, _IA.sin(_IA.mul(v11, _.x)))), _IA.mul(v19, _IA.sin(_IA.mul(v1, _.x))))'
     );
     expect(alt.preambleOnce).toContain('const v5 = _IA.div(v4, v0);');
     expect(alt.preambleOnce).toContain('const v18 = _IA.pow({ lo: -1, hi: -1 }, 3);');
@@ -1650,7 +1652,7 @@ describe('the interval mode: batch 7, the order of a sum', () => {
     expect(old(json).run(box)).toEqual(r.run(box));
     const sum = mode(['Sum', ['List', 'x', 'y', ['Multiply', 'x', 'y']]]);
     expect(inlined(sum)).toBe(
-      '_IA.add(_IA.add(_IA.add({ lo: 0, hi: 0 }, _.x), _.y), _IA.mul(_.x, _.y))'
+      '_IA.add(_IA.add(_.x, _.y), _IA.mul(_.x, _.y))'
     );
   });
 
@@ -1901,5 +1903,222 @@ describe('the interval mode: the references of the result', () => {
     expect(fields(['hv', 'x'], { profile: 'ir', ...vars }).freeSymbols).toEqual(['x', 'n']);
     expect(fields(['hv', 'x'], vars).freeSymbols).toEqual(['n', 'x']);
     expect(fields(['Add', 2, ['Sin', 1]], { profile: 'ir' }).freeSymbols).toEqual([]);
+  });
+});
+
+describe('the interval mode: three spellings of the existing target', () => {
+  const old = (json: unknown) =>
+    compile(ce.box(json as never), {
+      to: 'interval-js',
+      fallback: false,
+    } as never) as unknown as Result;
+  /** The interpreter's value of `json` at the point `x`. */
+  const at = (json: unknown, x: number) =>
+    ce.box(json as never).subs({ x }).N().re;
+
+  test('a rational times an inexact constant: the constant is computed once', () => {
+    // Folded as a closed node: `N()` of `2π/3` and one ulp.
+    const json = ['Multiply', ['Rational', 2, 3], 'Pi', 'x'];
+    const r = mode(json);
+    expect(r.code).toBe('_IA.mul(v2, _.x)');
+    expect(r.preambleOnce).toBe(
+      'const v2 = { lo: 2.0943951023931953, hi: 2.094395102393196 };'
+    );
+    // At machine precision a closed node is not folded: `(π / 3) · 2`, the
+    // constant of the existing target.
+    const machine = new ComputeEngine();
+    machine.precision = 'machine';
+    machine.declare('x', 'real');
+    const m = compile(machine.box(json as never), { ...IR, fallback: false } as never) as unknown as Result;
+    expect(m.code).toBe('_IA.mul(v5, _.x)');
+    expect(m.preambleOnce).toBe(
+      'const v3 = _IA.div({ lo: 3.1415926535897927, hi: 3.1415926535897936 }, { lo: 3, hi: 3 });\nconst v5 = _IA.mul(v3, { lo: 2, hi: 2 });'
+    );
+    const k = (r: Result) => r.run({ x: 1 }).value;
+    expect(k(m)).toEqual(old(json).run({ x: 1 }).value);
+    // Both contain 2π/3; the folded one is no wider (two ulps each).
+    const want = at(['Multiply', ['Rational', 2, 3], 'Pi'], 0);
+    for (const v of [k(r), k(m)]) expect(v.lo <= want && want <= v.hi).toBe(true);
+    expect(k(r).hi - k(r).lo).toBeLessThanOrEqual(k(m).hi - k(m).lo);
+    // A product of constants only keeps the division last (it is computed
+    // once anyway): `Rational(1, 50)·π·i` of a term of a sum written out.
+    const sum = ['Sum', ['Multiply', ['Cos', ['Multiply', ['Rational', 1, 50], 'Pi', 'i']], 'x'], ['Limits', 'i', 1, 2]];
+    const pre = mode(sum).preambleOnce;
+    expect(pre).toContain('_IA.mul({ lo: 3.1415926535897927, hi: 3.1415926535897936 }, { lo: 1, hi: 1 })');
+    expect(pre).not.toMatch(/_IA\.div\(\{ lo: 3\.14/);
+    // With no inexact constant the division stays last: the point 6 / 3 is
+    // the point 2.
+    const third = mode(['Multiply', ['Rational', 1, 3], 'x']);
+    expect(third.code).toBe('_IA.div(_.x, v1)');
+    expect(third.run({ x: 6 })).toEqual({
+      kind: 'interval',
+      value: { lo: 2, hi: 2 },
+    });
+    expect(mode(['Multiply', ['Rational', 1, 3], 'x', 'y']).code).toBe(
+      '_IA.div(_IA.mul(_.x, _.y), v3)'
+    );
+  });
+
+  describe.each(['default', 'machine'])('at the %s precision', (precision) => {
+    const engine = new ComputeEngine();
+    if (precision === 'machine') engine.precision = 'machine';
+    engine.declare('x', 'real');
+    engine.declare('y', 'real');
+    test.each([
+      [['Multiply', ['Rational', 2, 3], 'Pi', 'x']],
+      [['Multiply', ['Rational', -5, 7], 'Pi', 'x']],
+      [['Multiply', ['Rational', 1, 3], 'ExponentialE', 'x']],
+      [['Sin', ['Multiply', ['Rational', 1, 3], 'Pi', ['Add', 'x', 1]]]],
+      // A constant repeated is one value of the IR, placed twice.
+      [['Multiply', ['Rational', 1, 3], 'Pi', 'Pi', 'x']],
+      [['Multiply', ['Rational', 1, 3], 'Pi', 'x', 'Pi']],
+      [['Multiply', ['Rational', 1, 3], 'ExponentialE', 'ExponentialE', 'x']],
+      [['Multiply', ['Rational', 2, 5], 'Pi', 'ExponentialE', 'x', 'y']],
+      [['Multiply', ['Rational', -5, 7], 'Pi', 2, 'x']],
+      [['Multiply', ['Rational', 1, 3], 'Pi', ['List', 1, -2], 'x']],
+    ])('%j contains the value of the interpreter', (json) => {
+      for (const options of [{}, { constantFold: false }]) {
+        const r = compile(engine.box(json as never), {
+          ...IR,
+          fallback: false,
+          ...options,
+        } as never) as unknown as Result;
+        const boxes = [[0.5, 2], [-3, -1], [-1, 1], [0, 0], [-1e-300, 1e-300], [3, 3]];
+        for (const [lo, hi] of boxes) {
+          const got = r.run({ x: { lo, hi }, y: { lo: -1.5, hi: -1.5 } });
+          for (const x of [lo, (lo + hi) / 2, hi]) {
+            const n = engine.box(json as never).subs({ x, y: -1.5 }).N();
+            // At x = 0 the interpreter's product with a list is the scalar 0.
+            const want = n.ops ? n.ops.map((t) => t.re) : [n.re];
+            const values = Array.isArray(got) ? got : [got];
+            values.forEach(({ kind, value }, i) => {
+              const w = want[i] ?? want[0];
+              expect(kind).toBe('interval');
+              expect(value.lo <= w && w <= value.hi).toBe(true);
+            });
+          }
+        }
+      }
+    });
+  });
+
+  test('an addition of an exact zero is not written, as on the existing target', () => {
+    const forms: [unknown, unknown][] = [
+      [['Sin', ['Subtract', 'x', ['At', ['List', 0, 1, 2], 1]]], ['Sin', 'x']],
+      [['Add', ['Sqrt', 'x'], ['Divide', ['At', ['List', 0, 1], 1], 3]], ['Sqrt', 'x']],
+      [['Add', ['Floor', 'x'], ['At', ['List', 0, 1.5], 1]], ['Floor', 'x']],
+      [['Subtract', ['Divide', 1, 'x'], ['At', ['List', 0, 1], 1]], ['Divide', 1, 'x']],
+    ];
+    // A partial, a jump, a pole, an empty and an interval operand.
+    const boxes = [
+      { lo: -1, hi: 4 },
+      { lo: 0.5, hi: 1.5 },
+      { lo: -1, hi: 1 },
+      { lo: -2, hi: -1 },
+      { lo: 2, hi: 3 },
+    ];
+    for (const [json, alone] of forms) {
+      const r = mode(json);
+      expect(r.code).toBe(mode(alone).code);
+      expect(r.code).not.toMatch(/_IA\.(add|sub)\(/);
+      for (const x of boxes) {
+        expect(r.run({ x })).toEqual(old(json).run({ x }));
+        expect(r.run({ x })).toEqual(mode(alone).run({ x }));
+      }
+    }
+    expect(mode(forms[1][0]).run({ x: { lo: -1, hi: 4 } }).kind).toBe('partial');
+    expect(mode(forms[2][0]).run({ x: { lo: 0.5, hi: 1.5 } }).kind).toBe('singular');
+    expect(mode(forms[1][0]).run({ x: { lo: -2, hi: -1 } }).kind).toBe('empty');
+    // A product by an exact zero stays: `0·∞` is not 0.
+    expect(mode(['Multiply', ['At', ['List', 0, 1], 1], 'x']).code).toBe(
+      '_IA.mul(_.x, v1)'
+    );
+  });
+
+  test('the kernel of an addition of an exact zero gives its operand, but for a sign of zero and the side of a clip', () => {
+    const ia = IntervalArithmetic as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const ends = [-Infinity, -3, -0.5, -0, 0, 5e-324, 2, Infinity];
+    const operands: unknown[] = [
+      { kind: 'empty' },
+      { kind: 'entire' },
+      { kind: 'singular' },
+      { kind: 'singular', at: 2 },
+      { lo: NaN, hi: NaN },
+    ];
+    for (const lo of ends)
+      for (const hi of ends) {
+        if (lo > hi) continue;
+        const value = { lo, hi };
+        operands.push(value, { kind: 'interval', value }, { kind: 'partial', value, domainClipped: 'both' });
+        if (lo !== hi && Number.isFinite(lo) && Number.isFinite(hi))
+          operands.push({ kind: 'singular', at: 1, continuity: 'left', value });
+      }
+    const wrap = (r: any) => (r?.kind === undefined ? { kind: 'interval', value: r } : r);
+    // `+0` turns an end -0 into +0; `-0` keeps every end.
+    const unsigned = (r: unknown) =>
+      JSON.parse(JSON.stringify(r, (_, x) => (Object.is(x, -0) ? 0 : x)));
+    for (const x of operands) {
+      expect(wrap(ia.add(x, { lo: -0, hi: -0 }))).toEqual(wrap(x));
+      expect(wrap(ia.sub(x, { lo: 0, hi: 0 }))).toEqual(wrap(x));
+      expect(unsigned(wrap(ia.add(x, { lo: 0, hi: 0 })))).toEqual(unsigned(wrap(x)));
+    }
+    // A partial clipped on one side is clipped on both after the kernel.
+    expect(ia.add({ kind: 'partial', value: { lo: 0, hi: 1 }, domainClipped: 'lo' }, { lo: 0, hi: 0 })).toEqual({
+      kind: 'partial',
+      value: { lo: 0, hi: 1 },
+      domainClipped: 'both',
+    });
+    // The quotient of ±0 by a finite nonzero point is [0, 0].
+    for (const c of [-7, -0.5, 5e-324, 3, 1e308])
+      for (const z of [0, -0])
+        expect(ia.div({ lo: z, hi: z }, { lo: c, hi: c })).toEqual({
+          kind: 'interval',
+          value: { lo: 0, hi: 0 },
+        });
+  });
+
+  test('a quotient of a negation is _IA.negDiv, as on the existing target', () => {
+    const json = ['Divide', ['Negate', 'x'], 'y'];
+    expect(mode(json).code).toBe('_IA.negDiv(_.x, _.y)');
+    for (const y of [{ lo: 1, hi: 2 }, { lo: 0, hi: 1 }, { lo: -1, hi: 0 }, { lo: -1, hi: 1 }, { lo: 0, hi: 0 }])
+      for (const x of [{ lo: 1, hi: 2 }, { lo: -2, hi: 3 }, { lo: -0, hi: 0 }])
+        expect(mode(json).run({ x, y })).toEqual(old(json).run({ x, y }));
+    // A negation read twice is computed once, and the quotient reads it.
+    expect(mode(['Add', json, ['Negate', 'x']]).code).toMatch(
+      /_IA\.div\(v1, _\.y\)/
+    );
+    // Not a negation of a quotient: its clipped end differs.
+    expect(mode(['Negate', ['Divide', 'x', 'y']]).code).toBe(
+      '_IA.negate(_IA.div(_.x, _.y))'
+    );
+  });
+
+  test('the kernel _IA.negDiv(a, b) is _IA.div(_IA.negate(a), b)', () => {
+    const ia = IntervalArithmetic as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const ends = [-Infinity, -1e308, -3, -0.5, -5e-324, -0, 0, 5e-324, 0.1, 2, 1e308, Infinity];
+    const operands: unknown[] = [
+      { kind: 'empty' },
+      { kind: 'entire' },
+      { kind: 'singular' },
+      { kind: 'singular', at: 2 },
+      { lo: NaN, hi: NaN },
+    ];
+    for (const lo of ends)
+      for (const hi of ends) {
+        if (lo > hi) continue;
+        const value = { lo, hi };
+        operands.push(value, { kind: 'interval', value });
+        for (const domainClipped of ['lo', 'hi', 'both'])
+          operands.push({ kind: 'partial', value, domainClipped });
+        if (lo !== hi && Number.isFinite(lo) && Number.isFinite(hi))
+          operands.push({ kind: 'singular', at: 0.5, continuity: 'right', value });
+      }
+    const key = (r: unknown) =>
+      JSON.stringify(r, (_, x) => (Object.is(x, -0) ? '-0' : typeof x === 'number' && !Number.isFinite(x) ? String(x) : x));
+    let differ = 0;
+    for (const a of operands)
+      for (const b of operands)
+        if (key(ia.negDiv(a, b)) !== key(ia.div(ia.negate(a), b))) differ++;
+    expect(differ).toBe(0);
   });
 });

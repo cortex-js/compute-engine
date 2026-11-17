@@ -464,7 +464,9 @@
   its bounds. An exponent known at run time over a base whose enclosure
   cannot be negative (`2^y`, `|x|^y`, `(x^2)^y`) is `_IA.powInterval`, as on
   the existing target, without the reading of the exponent, which cannot
-  apply there. `Binomial` and `Choose` of
+  apply there. As on the existing target, a quotient of a negation is one
+  `_IA.negDiv`, `(2/3)·π·x` multiplies `x` by the constant `2π/3`, and an
+  addition of an exact 0 (`x + 0/3`) is not written. `Binomial` and `Choose` of
   real operands compile (`_IA.binomial`). A comparison that the engine
   decides for every value of its inputs (`(x + 1)^2 < 0` or `Equal(x, x)`
   of a real `x`) is that verdict, as on the existing target. A value that

@@ -330,6 +330,14 @@ export function lower(
     const c = b.constants.get(v);
     return typeof c === 'number' ? c : undefined;
   };
+  // The library constants and the closed values marked `inexact` (the
+  // interval mode).
+  const inexacts = new Set<V>();
+  const inexactReal = (x: number, inexact: number): V => {
+    const v = b.constant(x, 'real', inexact);
+    inexacts.add(v);
+    return v;
+  };
   const same = (x: readonly Length[], y: readonly Length[]) =>
     sameShape(x, y, constant);
   const row = (head: string) => rowOfHead(rows, head)!;
@@ -1368,6 +1376,26 @@ export function lower(
       xs.length === 1 ? xs[0] : apply(e, 'Multiply', xs);
     const scalars = rest.filter((v) => type(v).shape.length === 0);
     const lists = rest.filter((v) => type(v).shape.length > 0);
+    // The interval mode, with a constant marked `inexact` among the scalars
+    // (`π`) and a factor that is not a constant: the product of the rational
+    // and the constants is one constant, folded as a closed node (`N()` and
+    // one ulp) or else `(π / q) · p` as on the existing target, computed
+    // once, times the other factors. Else the division stays last: `1/3 · 6`
+    // is the point 2.
+    const c0 = interval ? scalars.find((v) => inexacts.has(v)) : undefined;
+    if (c0 !== undefined && rest.some((v) => constant(v) === undefined)) {
+      const fixed = (i: number) =>
+        i === k || constant(values[i]!) !== undefined;
+      const closed = e.ops.filter((_, i) => fixed(i));
+      const others = values.filter((_, i) => !fixed(i)) as V[];
+      const folded = closedValue(ce.function('Multiply', closed) as Fn);
+      if (folded !== undefined) return mul([folded, ...others]);
+      const cq = apply(e, ofOp('div.q'), [c0, b.constant(q, 'integer')]);
+      const kq = p === 1 ? cq : mul([cq, b.constant(p, 'integer')]);
+      // `c0` once, by position: a constant repeated (`π·π`) is one value.
+      const at = scalars.indexOf(c0);
+      return mul([kq, ...scalars.filter((_, i) => i !== at), ...lists]);
+    }
     let factors = lists;
     if (scalars.length > 0) {
       let s = mul(
@@ -1624,7 +1652,7 @@ export function lower(
       );
     }
     if (e.im === 0 && inexact !== undefined && Number.isFinite(e.re))
-      return b.constant(e.re, 'real', inexact);
+      return inexactReal(e.re, inexact);
     // The interval mode: an exact number that is a double is that double
     // (`e.re` converts the numerator and the denominator of a rational that
     // is not reduced separately).
@@ -1843,7 +1871,7 @@ export function lower(
       // The symbol's binding, and the innermost binding of its name.
       if (isShadowedSymbol(e as never) || held(name)?.library !== true)
         decline(e, `${name} is not the library constant here`);
-      return b.constant(c, 'real', interval ? 1 : undefined);
+      return interval ? inexactReal(c, 1) : b.constant(c, 'real');
     }
     // In a function body the interpreter reads the binding of the body,
     // which need not be the binding of the name where the call is: a name
