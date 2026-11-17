@@ -2805,6 +2805,22 @@ Landed on 2026-11-16, night:
   about 135 result-contract items to decide or implement, and 138 tests to
   read.
 
+- `861a453f35f7fabfde7a19314827ad07d532a30b` (CE-1422, found by the census):
+  a call of a user function maps over a list argument, binds it whole or
+  declines as the interpreter's rule says, per parameter. The profile
+  decided "maps" once for the whole signature and read no parameter type
+  for a name declared with the bare type `function`, so a list that the
+  interpreter maps could be bound whole with another result (`[4, 6]` for
+  `[3, 7]`; `42` for `[42, 42]`; `5` for `(3, 4)`; `3` for `[1, 0, 3]`).
+  Reviewed with a generator of 21,584 programs: no compiled result differs
+  from the interpreter. No corpus program changes. `ir/` is 11,249 lines.
+  Filed from it: CE-1423 (P4: an internal-error message for one crafted
+  call). Of the 31 value failures of the census that were not in the first
+  census, these two were the only defects of the profile on JavaScript;
+  the others are non-finite bounds, NaN or infinite operands, lists of
+  different lengths, inputs outside their type, or tests of the interval
+  mode that compare with "the existing target".
+
 Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
 states, each step gated by a render audit with no lost series, no new hang
 and no build or render over 1.5 times): its `At` handler on GLSL and the
