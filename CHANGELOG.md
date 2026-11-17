@@ -1,3 +1,19 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`DirichletEta(n)` and `DirichletBeta(n)` at an integer `n` carry every
+  digit asked for under `.N()`.** `N(DirichletEta(3))` at 30 digits ended
+  `…49803621132`, where the correct value ends `…49803621134`: the closed form
+  `(1 − 2^(1−n)) ζ(n)` rounded `ζ(n)` and then the product, and the odd
+  `DirichletBeta(n)`, a rational times `π^n`, rounded `π^n` and then the
+  product. Both now run on the arbitrary-precision kernels, which carry their
+  own guard digits, and the exact forms of `evaluate()` are unchanged. Against
+  mpmath at 30, 50 and 100 digits, for `n` from 2 to 99, the integer cases of
+  `DirichletEta` that were 1 to 5 units off and of `DirichletBeta` that were
+  up to 3 units off now agree to the last digit. (#610, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 ## 0.194.2 _2026-11-19_
 
 ### Breaking Changes
