@@ -6511,10 +6511,9 @@ export function appliesToListCoordinateTuple(
 ): boolean {
   if (!overTuples && !LIST_COORDINATE_TUPLE_ARITHMETIC.has(operator))
     return false;
-  const types = typeof operandTypes === 'function' ? operandTypes() : operandTypes;
-  return types.some(
-    (t) => t === 'error' || isListCoordinateTupleType(t)
-  );
+  const types =
+    typeof operandTypes === 'function' ? operandTypes() : operandTypes;
+  return types.some((t) => t === 'error' || isListCoordinateTupleType(t));
 }
 
 /**
@@ -6546,7 +6545,8 @@ export function addsPointToNumberCollection(
   operandTypes: ReadonlyArray<Type> | (() => ReadonlyArray<Type>)
 ): boolean {
   if (operator !== 'Add' && operator !== 'Subtract') return false;
-  const types = typeof operandTypes === 'function' ? operandTypes() : operandTypes;
+  const types =
+    typeof operandTypes === 'function' ? operandTypes() : operandTypes;
   let point = false;
   let numbers = false;
   for (const t of types) {

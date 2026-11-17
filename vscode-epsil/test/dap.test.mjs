@@ -468,13 +468,21 @@ try {
   const out = execFileSync(
     'node',
     [
-      join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'inline-runner.js'),
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '..',
+        'dist',
+        'inline-runner.js'
+      ),
       fixture('program-routes.epsil'),
       '5000',
     ],
     { encoding: 'utf8' }
   );
-  const records = out.trim().split('\n').map((line) => JSON.parse(line));
+  const records = out
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
   check('one record per Program statement', records.length === 3, out);
   check(
     'canonical function order keeps source lines and gives 8',

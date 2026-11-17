@@ -380,8 +380,9 @@ export function withEarlierConstantDeclarations<T>(
   for (const name of declarations)
     overlay.set(name, earlier.has(name) ? 'const' : 'variable');
   CONSTANT_DECLARATIONS.set(scope, overlay);
-  try { return fn(); }
-  finally {
+  try {
+    return fn();
+  } finally {
     if (saved === undefined) CONSTANT_DECLARATIONS.delete(scope);
     else CONSTANT_DECLARATIONS.set(scope, saved);
   }

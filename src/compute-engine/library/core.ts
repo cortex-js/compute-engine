@@ -835,8 +835,13 @@ function withOuterNames<T>(
     const local = scope.bindings.get(name);
     if (local === undefined || !isValueDef(local) || !local.value._blockLocal)
       continue;
-    const priorProgram = local.value._programVariable ? programInitializerOuter(name) : undefined;
-    if (priorProgram !== undefined) { outer.set(name, priorProgram); continue; }
+    const priorProgram = local.value._programVariable
+      ? programInitializerOuter(name)
+      : undefined;
+    if (priorProgram !== undefined) {
+      outer.set(name, priorProgram);
+      continue;
+    }
     for (let s = scope.parent; s; s = s.parent) {
       const found = s.bindings.get(name);
       if (found === undefined) continue;
@@ -4206,7 +4211,8 @@ function joinAssignmentEvidence(
     !def ||
     !isValueDef(def) ||
     !def.value.inferredType ||
-    (def.value.isConstant && !(options?.currentScopeOnly && def.value._programVariable)) ||
+    (def.value.isConstant &&
+      !(options?.currentScopeOnly && def.value._programVariable)) ||
     def.value.value !== undefined
   )
     return;
@@ -4319,7 +4325,8 @@ function functionLocalOf(
   const binding = ce.context.lexicalScope.bindings.get(name);
   return binding !== undefined &&
     isValueDef(binding) &&
-    binding.value._blockLocal === true && !binding.value._programVariable
+    binding.value._blockLocal === true &&
+    !binding.value._programVariable
     ? binding.value
     : undefined;
 }
@@ -4936,7 +4943,6 @@ function addClauseInstalledAhead(
   setClauseInstalledAhead(ce, record, installs);
 }
 
-
 function installsOfThisRun(
   ce: ComputeEngine,
   installs: ReadonlyArray<ClauseInstalledAhead> | undefined
@@ -5303,7 +5309,10 @@ function declareSumTypeStatement(
 function notAtTopLevel(ce: ComputeEngine): boolean {
   if (isProgramStatement()) return false;
   const global = ce._evalContextStack[1]?.lexicalScope;
-  return isInBodyOrBranch() || (global !== undefined && ce.context.lexicalScope !== global);
+  return (
+    isInBodyOrBranch() ||
+    (global !== undefined && ce.context.lexicalScope !== global)
+  );
 }
 
 /**
@@ -8534,8 +8543,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             if (def && isValueDef(def)) isFirstValue(def.value, false);
           }
           if (declaresType || value === undefined) return;
-          if (isSymbol(symbolExpr) &&
-              ((isFunction(value, 'Function') && value.isValid) || value.type.matches('function'))) {
+          if (
+            isSymbol(symbolExpr) &&
+            ((isFunction(value, 'Function') && value.isValid) ||
+              value.type.matches('function'))
+          ) {
             typeFunctionTarget(ce, symbolExpr.symbol);
             return;
           }
@@ -14860,8 +14872,15 @@ function* assignSteps(
   // host `ce.assign` keeps throwing.
   try {
     const binding = ce.lookupDefinition(symbolName);
-    if (binding !== undefined && isValueDef(binding) && binding.value._programVariable &&
-        !(isFunction(val, 'Function') && containsSignatureArm(binding.value.type.type))) {
+    if (
+      binding !== undefined &&
+      isValueDef(binding) &&
+      binding.value._programVariable &&
+      !(
+        isFunction(val, 'Function') &&
+        containsSignatureArm(binding.value.type.type)
+      )
+    ) {
       const local = binding.value;
       if (local.isConstant || isDeclaredLocal(local)) {
         if (assertAssignable(ce, symbolName, val) === 'overlap')
@@ -14917,9 +14936,13 @@ function* declareSteps(
   let displaced: Map<string, BoxedDefinition | undefined> | undefined;
   for (const [name, binding] of programStatementWrites(ops[0])) {
     const current = ce.context.lexicalScope.bindings.get(name);
-    if (current !== binding || (isValueDef(binding) && binding.value.value !== undefined))
+    if (
+      current !== binding ||
+      (isValueDef(binding) && binding.value.value !== undefined)
+    )
       (displaced ??= new Map(previous)).set(name, current);
-    if (current !== binding) ce.context.lexicalScope.bindings.set(name, binding);
+    if (current !== binding)
+      ce.context.lexicalScope.bindings.set(name, binding);
   }
   previous = displaced ?? previous;
   let declared = false;
@@ -14927,10 +14950,19 @@ function* declareSteps(
     if (previous === undefined) return;
     // A prepared declaration that has initialized already retains its own
     // incumbent values on failure; only a fresh hoisted replacement is undone.
-    if (displaced === undefined && ![...previous.keys()].some((name) => {
-      const binding = ce.context.lexicalScope.bindings.get(name);
-      return binding !== undefined && isValueDef(binding) && binding.value._programVariable && binding.value.value === undefined;
-    })) return;
+    if (
+      displaced === undefined &&
+      ![...previous.keys()].some((name) => {
+        const binding = ce.context.lexicalScope.bindings.get(name);
+        return (
+          binding !== undefined &&
+          isValueDef(binding) &&
+          binding.value._programVariable &&
+          binding.value.value === undefined
+        );
+      })
+    )
+      return;
     for (const [name, binding] of previous) {
       if (binding === undefined) ce.context.lexicalScope.bindings.delete(name);
       else ce.context.lexicalScope.bindings.set(name, binding);
@@ -14938,7 +14970,9 @@ function* declareSteps(
     }
   };
   try {
-    const result = yield* declareValueSteps(ce, ops, () => { declared = true; });
+    const result = yield* declareValueSteps(ce, ops, () => {
+      declared = true;
+    });
     if (result?.operator === 'Error' && !declared) restore();
     return result;
   } catch (error) {
@@ -15120,20 +15154,33 @@ function* declareValueSteps(
       existing !== undefined &&
       isValueDef(existing) &&
       existing.value._blockLocal === true &&
-      (existing.value._programVariable || activationRecordOf(existing.value, currentScope) !== undefined)
+      (existing.value._programVariable ||
+        activationRecordOf(existing.value, currentScope) !== undefined)
     ) {
       const local = existing.value;
       if (hasType) {
         const before = effectsContractStateOf(local);
         local.effectsDeclared = effectsDeclared;
-        recordEffectsTransition(local, before, effectsContractStateOf(local), local.type,
-          ce._inferenceCause?.expr ?? undefined);
+        recordEffectsTransition(
+          local,
+          before,
+          effectsContractStateOf(local),
+          local.type,
+          ce._inferenceCause?.expr ?? undefined
+        );
       }
       if (boundHasValue && hasType) {
         const declaredType = ce.type(type!);
         if (!declaredType.isUnknown && !isFunction(boundValue, 'Function')) {
-          const admission = storeAdmission(ce, boundValue!, declaredType, effectsDeclared, symbolName);
-          if (admission === 'refuse') throw declaredTypeError(symbolName, boundValue!, declaredType);
+          const admission = storeAdmission(
+            ce,
+            boundValue!,
+            declaredType,
+            effectsDeclared,
+            symbolName
+          );
+          if (admission === 'refuse')
+            throw declaredTypeError(symbolName, boundValue!, declaredType);
           if (admission === 'overlap') noteOverlapAdmitted(boundValue!);
         }
       }
@@ -15154,7 +15201,8 @@ function* declareValueSteps(
         const flags = local as unknown as { _isConstant: boolean };
         const initializes =
           flags._isConstant &&
-          (local._programVariable || activationRecordOf(local, currentScope)!.get(local) === undefined);
+          (local._programVariable ||
+            activationRecordOf(local, currentScope)!.get(local) === undefined);
         if (initializes) flags._isConstant = false;
         try {
           assignFn(ce, symbolName, boundValue!, { bindsLocal: true });
@@ -15165,7 +15213,11 @@ function* declareValueSteps(
         const flags = local as unknown as { _isConstant: boolean };
         const constant = flags._isConstant;
         flags._isConstant = false;
-        try { local.value = boundValue; } finally { flags._isConstant = constant; }
+        try {
+          local.value = boundValue;
+        } finally {
+          flags._isConstant = constant;
+        }
       }
       forgetConstantDeclaration(ce, symbolName, currentScope);
       return;
@@ -15518,18 +15570,18 @@ function* declareValueSteps(
     // on `y`.
     try {
       const refused = bindTuplePattern(
-          ce,
-          ops[0],
-          value!,
-          (name, el) => {
-            // Each leaf is a part of `value`, which was prepared for
-            // storage as a whole (`assignedValue`) before any name was
-            // declared: the declaration is simultaneous.
-            declareOne(name, el);
-            return null;
-          },
-          validateOne
-        );
+        ce,
+        ops[0],
+        value!,
+        (name, el) => {
+          // Each leaf is a part of `value`, which was prepared for
+          // storage as a whole (`assignedValue`) before any name was
+          // declared: the declaration is simultaneous.
+          declareOne(name, el);
+          return null;
+        },
+        validateOne
+      );
       if (refused !== null) return refused;
       didDeclare?.();
       return value!;
@@ -15554,7 +15606,8 @@ function* declareValueSteps(
     declareOne(symbolName, hasValue ? value : undefined);
   } catch (e) {
     if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
-    if (isTypeCompatibilityError(e)) return typeCompatibilityErrorValue(ce, e, ops[0]);
+    if (isTypeCompatibilityError(e))
+      return typeCompatibilityErrorValue(ce, e, ops[0]);
     throw e;
   }
   didDeclare?.();

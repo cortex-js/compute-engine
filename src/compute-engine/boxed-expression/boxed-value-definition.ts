@@ -1757,7 +1757,10 @@ export class _BoxedValueDefinition
   }
 
   private _writeType(t: Type | TypeString | BoxedType): void {
-    if (this._isConstant && !(this._programVariable && this.inferredType && this._value === undefined))
+    if (
+      this._isConstant &&
+      !(this._programVariable && this.inferredType && this._value === undefined)
+    )
       throw new Error(
         `The type of the constant "${this.name}" cannot be changed`
       );

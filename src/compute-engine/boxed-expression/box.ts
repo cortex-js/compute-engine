@@ -1639,11 +1639,7 @@ function triviallyAdmittedCall(
       // static assignment evidence. A free name (`binding-unit.ts`) is
       // tested on the definition that its name resolves to.
       const def = resolvedValueDefinition(op);
-      if (
-        def !== undefined &&
-        def.value !== undefined
-      )
-        return false;
+      if (def !== undefined && def.value !== undefined) return false;
       // A symbol whose type fits the parameter is admitted outright (the
       // `any` parameters of the set family take this branch). Otherwise the
       // plain path's rule for a symbolic operand applies: admitted when its
@@ -3269,10 +3265,10 @@ function stampableParamType(t: Type): Type | undefined {
  * typed as under the written-out declaration. */
 function calleeSignatureType(def: BoxedValueDefinition): Type | undefined {
   const declared = resolveTypeAlias(def.type.type);
-  if (isWildcardFunctionType(declared)) return def._programVariable ? undefined : def.value?.type.type;
+  if (isWildcardFunctionType(declared))
+    return def._programVariable ? undefined : def.value?.type.type;
   return declared;
 }
-
 
 /** `x` when it is a function literal that annotates at least one of its
  * parameters (`(u: real) ↦ 7`), and `undefined` otherwise. */
@@ -3370,12 +3366,7 @@ function keepProvisionalOperands(
 ): Expression[] {
   return invalid.map((r, i) => {
     const orig = ops[i];
-    if (
-      orig &&
-      orig.isValid &&
-      !r.isValid &&
-      orig.freeVariables.length > 0
-    ) {
+    if (orig && orig.isValid && !r.isValid && orig.freeVariables.length > 0) {
       const params = candidateParamsAt(checkedType, i);
       // `isDisjointFrom` is conservative: it does not read the dimensions of
       // a collection type, so `list<string>` is not disjoint from
@@ -4209,13 +4200,25 @@ function makeCanonicalFunctionCore(
     // its canonical handler intact, and the call it builds — the dispatcher
     // call `scale(c, k: 2)`, or the qualified `Apply(Field(P, m), …)` — comes
     // back through this seam under the head that does carry the names.
-    if (isValueDef(def) && def.value._programVariable &&
-        (isWildcardFunctionType(def.value.type.type) || def.value.type.isUnknown) && def.value.value === undefined) {
+    if (
+      isValueDef(def) &&
+      def.value._programVariable &&
+      (isWildcardFunctionType(def.value.type.type) ||
+        def.value.type.isUnknown) &&
+      def.value.value === undefined
+    ) {
       const written = ops.map((op) => ce.box(op, { form: 'raw' }));
-      const held = written.map((op) => isFunction(op, 'NamedArgument')
-        ? ce._fn('NamedArgument', semiCanonical(ce, op.ops), { metadata: { sourceOffsets: op.sourceOffsets } })
-        : semiCanonical(ce, [op])[0]);
-      const call = new BoxedFunction(ce, name, held, { metadata, canonical: true });
+      const held = written.map((op) =>
+        isFunction(op, 'NamedArgument')
+          ? ce._fn('NamedArgument', semiCanonical(ce, op.ops), {
+              metadata: { sourceOffsets: op.sourceOffsets },
+            })
+          : semiCanonical(ce, [op])[0]
+      );
+      const call = new BoxedFunction(ce, name, held, {
+        metadata,
+        canonical: true,
+      });
       call._refusedOps = written;
       call._stampCallee(undefined, written);
       return call;
@@ -4267,10 +4270,13 @@ function makeCanonicalFunctionCore(
         );
         // A named refusal is checked again after the same callee is
         // replaced, just as a successful named call is below.
-        if (isValueDef(def)
-          ? def.value.inferredType || (def.value._programVariable && isWildcardFunctionType(def.value.type.type))
-          : def.operator.isUserFunctionDefinition)
-        {
+        if (
+          isValueDef(def)
+            ? def.value.inferredType ||
+              (def.value._programVariable &&
+                isWildcardFunctionType(def.value.type.type))
+            : def.operator.isUserFunctionDefinition
+        ) {
           const written = ops.map((op) => ce.box(op, { form: 'raw' }));
           result._refusedOps = written;
           result._stampCallee(undefined, written);
@@ -4300,7 +4306,9 @@ function makeCanonicalFunctionCore(
         if (
           normalized.permutation !== undefined &&
           (isValueDef(def)
-            ? def.value.inferredType || (def.value._programVariable && isWildcardFunctionType(def.value.type.type))
+            ? def.value.inferredType ||
+              (def.value._programVariable &&
+                isWildcardFunctionType(def.value.type.type))
             : def.operator.isUserFunctionDefinition ||
               (def.operator.inferredSignature &&
                 parameterDefaultOperands(ce, def.operator) !== undefined))
@@ -4448,15 +4456,15 @@ function makeCanonicalFunctionCore(
     // the literal is pinned. The same literal assigned with no declaration
     // is an operator definition, whose call is checked against them, so
     // `f("abc")` is invalid on both routes, typed `error` on both.
-    const wildcardLiteral = wildcardCallee && !def.value._programVariable
-      ? annotatedLiteral(def.value.value)
-      : undefined;
+    const wildcardLiteral =
+      wildcardCallee && !def.value._programVariable
+        ? annotatedLiteral(def.value.value)
+        : undefined;
     const pinned = def.value.inferredType || wildcardLiteral !== undefined;
     const valueType = wildcardLiteral?.type.type ?? declaredCalleeType;
     if (
       ce.strict &&
-      (!def.value.inferredType ||
-        wildcardLiteral !== undefined) &&
+      (!def.value.inferredType || wildcardLiteral !== undefined) &&
       typeof valueType !== 'string' &&
       // A plain signature, OR an overload set (an intersection of signatures).
       // Gating on `kind === 'signature'` alone let an overload-typed value

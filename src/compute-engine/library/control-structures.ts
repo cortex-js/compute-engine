@@ -177,7 +177,10 @@ import {
   isStatementArm,
 } from '../boxed-expression/conditional-value.js';
 import { isValueDef } from '../boxed-expression/utils.js';
-import { widenAssignedType, widenLocalType } from '../boxed-expression/boxed-value-definition.js';
+import {
+  widenAssignedType,
+  widenLocalType,
+} from '../boxed-expression/boxed-value-definition.js';
 import {
   elementMemoFillTo,
   ELEMENT_MEMO_CAP,
@@ -389,7 +392,8 @@ export const BLOCK_DEFINITION: OperatorDefinition = {
 /** A caller-scope statement sequence, with independent statement failures. */
 export const PROGRAM_DEFINITION: OperatorDefinition = {
   ...BLOCK_DEFINITION,
-  description: 'Evaluate a program in the caller scope, continuing after statement errors.',
+  description:
+    'Evaluate a program in the caller scope, continuing after statement errors.',
   inspectsErrors: true,
   scoped: false,
   canonical: canonicalProgram,
@@ -397,21 +401,46 @@ export const PROGRAM_DEFINITION: OperatorDefinition = {
     const ce = options.engine;
     const saved = ce._epsilBatchId;
     const frame = ce._deadlineFrame;
-    ce._epsilBatchId = PROGRAM_BATCHES.get(ops[0]) ?? saved ?? nextProgramBatchId();
+    ce._epsilBatchId =
+      PROGRAM_BATCHES.get(ops[0]) ?? saved ?? nextProgramBatchId();
     ce._liftDefaultIterationLimit();
-    try { return evaluateStatements(ce, ops, options.numericApproximation ? { numericApproximation: true } : undefined, true); }
-    finally { ce._epsilBatchId = saved; ce._deadlineFrame = frame; }
+    try {
+      return evaluateStatements(
+        ce,
+        ops,
+        options.numericApproximation
+          ? { numericApproximation: true }
+          : undefined,
+        true
+      );
+    } finally {
+      ce._epsilBatchId = saved;
+      ce._deadlineFrame = frame;
+    }
   },
   evaluateAsync: async (ops, options) => {
     const ce = options.engine;
     const saved = ce._epsilBatchId;
     const frame = ce._deadlineFrame;
-    ce._epsilBatchId = PROGRAM_BATCHES.get(ops[0]) ?? saved ?? nextProgramBatchId();
+    ce._epsilBatchId =
+      PROGRAM_BATCHES.get(ops[0]) ?? saved ?? nextProgramBatchId();
     ce._liftDefaultIterationLimit();
-    try { return await evaluateStatementsAsync(ce, ops, options.signal, options._effects, options._contextStack, options.numericApproximation ? true : undefined, options._precisionWindow, true); }
-    finally {
+    try {
+      return await evaluateStatementsAsync(
+        ce,
+        ops,
+        options.signal,
+        options._effects,
+        options._contextStack,
+        options.numericApproximation ? true : undefined,
+        options._precisionWindow,
+        true
+      );
+    } finally {
       ce._epsilBatchId = saved;
-      ce.withEvaluationContext(options, () => { ce._deadlineFrame = frame; });
+      ce.withEvaluationContext(options, () => {
+        ce._deadlineFrame = frame;
+      });
     }
   },
 };
@@ -4120,7 +4149,6 @@ async function evaluateBlockAsync(
  *
  */
 
-
 export function closedLiteralType(
   ce: ComputeEngine,
   value: Expression
@@ -4192,7 +4220,16 @@ export function staticDeclarations(
     const op = typedStatement(statement);
     if (isFunction(op, 'Declare')) {
       const attributes = op.ops[op.ops.length - 1];
-      const constant = isDictionary(attributes) ? isSymbol(attributes.get('constant'), 'True') : isFunction(attributes, 'Dictionary') && attributes.ops.some((pair) => isFunction(pair, 'KeyValuePair') && (isString(pair.op1) ? pair.op1.string : sym(pair.op1)) === 'constant' && isSymbol(pair.op2, 'True'));
+      const constant = isDictionary(attributes)
+        ? isSymbol(attributes.get('constant'), 'True')
+        : isFunction(attributes, 'Dictionary') &&
+          attributes.ops.some(
+            (pair) =>
+              isFunction(pair, 'KeyValuePair') &&
+              (isString(pair.op1) ? pair.op1.string : sym(pair.op1)) ===
+                'constant' &&
+              isSymbol(pair.op2, 'True')
+          );
       const nameExpr = op.ops[0];
       // A destructuring `Declare((a, b), …)` (`let (a, b) = v`) introduces
       // each leaf of its pattern as a block local, as `Declare(a, …)` does
@@ -4204,7 +4241,10 @@ export function staticDeclarations(
       // pattern carries no type, so nothing else is read here.
       if (nameExpr && isFunction(nameExpr, 'Tuple')) {
         for (const name of tuplePatternNames(nameExpr))
-          if (name !== 'Nothing') { declaredNames.push(name); if (constant) declaredConstants.add(name); }
+          if (name !== 'Nothing') {
+            declaredNames.push(name);
+            if (constant) declaredConstants.add(name);
+          }
         continue;
       }
       if (nameExpr && isSymbol(nameExpr)) {
@@ -4283,14 +4323,22 @@ export function staticDeclarations(
           // one the program builds. Only a closed literal is read: an
           // expression that mentions a symbol would have to be bound here,
           // in the enclosing scope, before the block's own locals exist.
-          const literalType = program && isFunction(valueOp, 'Function') ? 'function' : closedLiteralType(ce, valueOp);
+          const literalType =
+            program && isFunction(valueOp, 'Function')
+              ? 'function'
+              : closedLiteralType(ce, valueOp);
           if (literalType !== undefined)
             declaredTypes.set(nameExpr.symbol, literalType);
         }
       }
     }
   }
-  return { declaredNames, declaredTypes, explicitlyDeclared, declaredConstants };
+  return {
+    declaredNames,
+    declaredTypes,
+    explicitlyDeclared,
+    declaredConstants,
+  };
 }
 
 function canonicalBlock(
@@ -4301,29 +4349,56 @@ function canonicalBlock(
 }
 
 /** Shared binding and canonicalization of Block and Program statements. */
-export function canonicalProgram(ops: ReadonlyArray<Expression>, options: { engine: ComputeEngine; scope?: Scope }): Expression {
+export function canonicalProgram(
+  ops: ReadonlyArray<Expression>,
+  options: { engine: ComputeEngine; scope?: Scope }
+): Expression {
   const ce = options.engine;
   const saved = ce._epsilBatchId;
   const batch = saved ?? nextProgramBatchId();
   ce._epsilBatchId = batch;
   try {
-    const result = canonicalSequence(ops, { ...options, scope: ce.context.lexicalScope }, true);
-    if (isFunction(result)) for (const statement of result.ops) PROGRAM_BATCHES.set(statement, batch);
+    const result = canonicalSequence(
+      ops,
+      { ...options, scope: ce.context.lexicalScope },
+      true
+    );
+    if (isFunction(result))
+      for (const statement of result.ops) PROGRAM_BATCHES.set(statement, batch);
     return result;
-  } finally { ce._epsilBatchId = saved; }
+  } finally {
+    ce._epsilBatchId = saved;
+  }
 }
 
-const PROGRAM_INTERRUPTS = new WeakMap<object, { statements: readonly Expression[]; order: readonly number[]; index: number }>();
+const PROGRAM_INTERRUPTS = new WeakMap<
+  object,
+  { statements: readonly Expression[]; order: readonly number[]; index: number }
+>();
 export function programInterruption(error: unknown) {
-  return error !== null && typeof error === 'object' ? PROGRAM_INTERRUPTS.get(error) : undefined;
+  return error !== null && typeof error === 'object'
+    ? PROGRAM_INTERRUPTS.get(error)
+    : undefined;
 }
 const PROGRAM_BATCHES = new WeakMap<Expression, number>();
-const DECLARATION_REFUSAL_SITES = new WeakMap<Expression, readonly [number, number]>();
-export function declarationRefusalSite(error: Expression | undefined): readonly [number, number] | undefined {
-  return error !== undefined && isFunction(error, 'Error') ? DECLARATION_REFUSAL_SITES.get(error.op1) : undefined;
+const DECLARATION_REFUSAL_SITES = new WeakMap<
+  Expression,
+  readonly [number, number]
+>();
+export function declarationRefusalSite(
+  error: Expression | undefined
+): readonly [number, number] | undefined {
+  return error !== undefined && isFunction(error, 'Error')
+    ? DECLARATION_REFUSAL_SITES.get(error.op1)
+    : undefined;
 }
-const PROGRAM_WRITES = new WeakMap<Expression, ReadonlyMap<string, BoxedDefinition>>();
-export function programStatementWrites(statement: Expression): ReadonlyMap<string, BoxedDefinition> {
+const PROGRAM_WRITES = new WeakMap<
+  Expression,
+  ReadonlyMap<string, BoxedDefinition>
+>();
+export function programStatementWrites(
+  statement: Expression
+): ReadonlyMap<string, BoxedDefinition> {
   return PROGRAM_WRITES.get(statement) ?? new Map();
 }
 export { programSourceOrder } from '../statement-position.js';
@@ -4335,59 +4410,115 @@ function canonicalSequence(
 ): Expression {
   const { engine: ce, scope } = options;
   const order = source.map((_, i) => i);
-  const functions = new Set(source.map((x) => typedStatement(x)).filter((x) => isFunctionDeclarationStatement(ce, x)).map((x) => isFunction(x) ? sym(x.op1)! : ''));
+  const functions = new Set(
+    source
+      .map((x) => typedStatement(x))
+      .filter((x) => isFunctionDeclarationStatement(ce, x))
+      .map((x) => (isFunction(x) ? sym(x.op1)! : ''))
+  );
   const rank = (i: number): number => {
     const op = typedStatement(source[i]);
-    if (['DeclareType', 'DeclareSumType', 'DeclareProtocol'].includes(op.operator)) return 0;
+    if (
+      ['DeclareType', 'DeclareSumType', 'DeclareProtocol'].includes(op.operator)
+    )
+      return 0;
     if (isFunctionDeclarationStatement(ce, op)) return 2;
-    if (isFunction(op, 'Declare') && functions.has(sym(op.op1) ?? '') && !declareHasValue(op.ops)) return 1;
+    if (
+      isFunction(op, 'Declare') &&
+      functions.has(sym(op.op1) ?? '') &&
+      !declareHasValue(op.ops)
+    )
+      return 1;
     return 3;
   };
   if (program) order.sort((a, b) => rank(a) - rank(b) || a - b);
   const ops = order.map((i) => source[i]);
   const head = program ? 'Program' : 'Block';
-  const previousBindings = program ? new Map<string, BoxedDefinition>() : undefined;
-  const sourceIndex = program ? new Map(source.map((statement, i) => [statement, i])) : undefined;
+  const previousBindings = program
+    ? new Map<string, BoxedDefinition>()
+    : undefined;
+  const sourceIndex = program
+    ? new Map(source.map((statement, i) => [statement, i]))
+    : undefined;
   const constantIndexes = program ? new Map<string, number>() : undefined;
   let constantDeclarations: ReadonlySet<string> = new Set();
   const completed = program ? new Map<Expression, Expression>() : undefined;
   const early = program ? new Map<Expression, Expression>() : undefined;
   const canonicalizeStatement = (op: Expression): Expression => {
-    const canonicalize = () => program && isFunction(op) && !op.isCanonical
-      ? ce.function(op.operator, op.ops, { metadata: { sourceOffsets: op.sourceOffsets } })
-      : canonicalStatement(ce, op);
-  let statement: Expression;
-  const savedRoute = ce._epsilDeclarationRoute;
-  try {
-    if (program) {
-      checkDeadline(ce._deadlineFrame);
-      ce._epsilDeclarationRoute = ['DeclareType', 'DeclareSumType', 'DeclareProtocol', 'DeclareConformance', 'DefineFunction'].includes(typedStatement(op).operator);
-      const earlier = constantDeclarations.size === 0 ? constantDeclarations
-        : new Set([...constantIndexes!].filter(([, index]) => index < (sourceIndex!.get(op) ?? 0)).map(([name]) => name));
-      statement = withEarlierConstantDeclarations(ce, constantDeclarations, earlier, () => withProgramInitializerOuters(previousBindings!, () => withProgramStatement(() => withPairedFunctionNames(functions, canonicalize))));
-    } else statement = canonicalize();
-  } catch (error) {
-    if (!program || error instanceof CancellationError) {
-      if (program && error instanceof CancellationError) {
-        const prefixOrder = order.filter((i) => completed!.has(source[i]) || early!.has(source[i]));
-        PROGRAM_INTERRUPTS.set(error, { statements: prefixOrder.map((i) => completed!.get(source[i]) ?? early!.get(source[i])!), order: prefixOrder, index: source.indexOf(op) });
+    const canonicalize = () =>
+      program && isFunction(op) && !op.isCanonical
+        ? ce.function(op.operator, op.ops, {
+            metadata: { sourceOffsets: op.sourceOffsets },
+          })
+        : canonicalStatement(ce, op);
+    let statement: Expression;
+    const savedRoute = ce._epsilDeclarationRoute;
+    try {
+      if (program) {
+        checkDeadline(ce._deadlineFrame);
+        ce._epsilDeclarationRoute = [
+          'DeclareType',
+          'DeclareSumType',
+          'DeclareProtocol',
+          'DeclareConformance',
+          'DefineFunction',
+        ].includes(typedStatement(op).operator);
+        const earlier =
+          constantDeclarations.size === 0
+            ? constantDeclarations
+            : new Set(
+                [...constantIndexes!]
+                  .filter(([, index]) => index < (sourceIndex!.get(op) ?? 0))
+                  .map(([name]) => name)
+              );
+        statement = withEarlierConstantDeclarations(
+          ce,
+          constantDeclarations,
+          earlier,
+          () =>
+            withProgramInitializerOuters(previousBindings!, () =>
+              withProgramStatement(() =>
+                withPairedFunctionNames(functions, canonicalize)
+              )
+            )
+        );
+      } else statement = canonicalize();
+    } catch (error) {
+      if (!program || error instanceof CancellationError) {
+        if (program && error instanceof CancellationError) {
+          const prefixOrder = order.filter(
+            (i) => completed!.has(source[i]) || early!.has(source[i])
+          );
+          PROGRAM_INTERRUPTS.set(error, {
+            statements: prefixOrder.map(
+              (i) => completed!.get(source[i]) ?? early!.get(source[i])!
+            ),
+            order: prefixOrder,
+            index: source.indexOf(op),
+          });
+        }
+        throw error;
       }
-      throw error;
+      statement = ce.error(
+        error instanceof Error ? error.message : String(error)
+      );
+    } finally {
+      ce._epsilDeclarationRoute = savedRoute;
     }
-    statement = ce.error(error instanceof Error ? error.message : String(error));
-  } finally { ce._epsilDeclarationRoute = savedRoute; }
     return statement;
   };
-  if (program) for (const i of order) {
-    if (rank(i) !== 0) break;
-    early!.set(source[i], canonicalizeStatement(source[i]));
-  }
+  if (program)
+    for (const i of order) {
+      if (rank(i) !== 0) break;
+      early!.set(source[i], canonicalizeStatement(source[i]));
+    }
   // An empty block is canonical as it is: its type handler answers `nothing`
   // and its evaluate handler answers `Nothing`. Declining here (`null`) left
   // the node non-canonical and unbound, so neither handler ever ran and
   // `If(True, Block())` evaluated to the inert `Block()` itself, printed
   // `{}`, where the language documents `Nothing` as an empty block's value.
-  if (ops.length === 0) return ce._fn(head, [], program ? undefined : { scope });
+  if (ops.length === 0)
+    return ce._fn(head, [], program ? undefined : { scope });
   // The text of the block, which the effects of a literal that calls one of
   // its locals read (`blockLocalLiteral()`, `effects-inference.ts`).
   if (!program && scope !== undefined) noteBlockStatements(scope, ops);
@@ -4440,14 +4571,16 @@ function canonicalSequence(
   const duplicate = (statement: Expression, name: string): void => {
     const error = ce.error(['variable-redeclaration', name]);
     const span = firstDeclarations.get(name)?.sourceOffsets;
-    if (span !== undefined && isFunction(error, 'Error')) DECLARATION_REFUSAL_SITES.set(error.op1, span);
+    if (span !== undefined && isFunction(error, 'Error'))
+      DECLARATION_REFUSAL_SITES.set(error.op1, span);
     refused.set(statement, error);
   };
   {
     const parentBinderNames = program ? undefined : scope?.parent?.binderNames;
     const redeclares = (name: string): boolean =>
       accepted.has(name) ||
-      (!program && ce._isFunctionLiteralParameter(name) &&
+      (!program &&
+        ce._isFunctionLiteralParameter(name) &&
         scope !== undefined &&
         ce._shadowedParameterBoundary(name) === scope.parent) ||
       parentBinderNames?.has(name) === true;
@@ -4456,14 +4589,20 @@ function canonicalSequence(
       const op = typedStatement(statement);
       const local = localFunctionName(ce, op);
       if (local !== undefined && program) {
-        if (accepted.has(local) && !acceptedFunctions.has(local) && !pairedSignatures.has(local))
+        if (
+          accepted.has(local) &&
+          !acceptedFunctions.has(local) &&
+          !pairedSignatures.has(local)
+        )
           duplicate(statement, local);
-        else { accept(local, statement); acceptedFunctions.add(local); }
+        else {
+          accept(local, statement);
+          acceptedFunctions.add(local);
+        }
         continue;
       }
       if (local !== undefined) {
-        if (redeclares(local))
-          duplicate(statement, local);
+        if (redeclares(local)) duplicate(statement, local);
         else accept(local, statement);
         continue;
       }
@@ -4477,23 +4616,33 @@ function canonicalSequence(
             : []
       ).filter((name) => name !== 'Nothing');
       if (program && scope !== undefined) {
-        try { for (const name of names) assertDeclarationName(ce, name, scope); }
-        catch (error) {
-          refused.set(statement, ce.error(error instanceof Error ? error.message : String(error)));
+        try {
+          for (const name of names) assertDeclarationName(ce, name, scope);
+        } catch (error) {
+          refused.set(
+            statement,
+            ce.error(error instanceof Error ? error.message : String(error))
+          );
           continue;
         }
       }
       const pairsFunction = (name: string): boolean =>
-        program && functions.has(name) && !declareHasValue(op.ops) &&
-        acceptedFunctions.has(name) && !acceptedDeclarations.has(name);
-      const collision = names.find((name) => redeclares(name) && !pairsFunction(name));
-      if (collision !== undefined)
-        duplicate(statement, collision);
-      else for (const name of names) {
-        accept(name, statement);
-        acceptedDeclarations.add(name);
-        if (program && functions.has(name) && !declareHasValue(op.ops)) pairedSignatures.add(name);
-      }
+        program &&
+        functions.has(name) &&
+        !declareHasValue(op.ops) &&
+        acceptedFunctions.has(name) &&
+        !acceptedDeclarations.has(name);
+      const collision = names.find(
+        (name) => redeclares(name) && !pairsFunction(name)
+      );
+      if (collision !== undefined) duplicate(statement, collision);
+      else
+        for (const name of names) {
+          accept(name, statement);
+          acceptedDeclarations.add(name);
+          if (program && functions.has(name) && !declareHasValue(op.ops))
+            pairedSignatures.add(name);
+        }
     }
   }
   // Source-first admission decides which names are function statements;
@@ -4505,18 +4654,30 @@ function canonicalSequence(
   // Only accepted statements contribute declaration metadata. A refused
   // second declaration cannot change the first binding's type or constness.
   const acceptedStatements = ops.filter((statement) => !refused.has(statement));
-  const { declaredNames, declaredTypes, explicitlyDeclared, declaredConstants } =
-    staticDeclarations(ce, acceptedStatements, program);
+  const {
+    declaredNames,
+    declaredTypes,
+    explicitlyDeclared,
+    declaredConstants,
+  } = staticDeclarations(ce, acceptedStatements, program);
   constantDeclarations = declaredConstants;
-  if (program) for (const statement of acceptedStatements) {
-    const op = typedStatement(statement);
-    if (!isFunction(op, 'Declare')) continue;
-    const target = op.op1;
-    const names = isSymbol(target) ? [target.symbol] : isFunction(target, 'Tuple') ? tuplePatternNames(target) : [];
-    for (const name of names)
-      if (declaredConstants.has(name)) constantIndexes!.set(name, sourceIndex!.get(statement)!);
-  }
-  const hoistedNames = declaredNames.filter((name) => (program ? acceptedDeclarations : accepted).has(name));
+  if (program)
+    for (const statement of acceptedStatements) {
+      const op = typedStatement(statement);
+      if (!isFunction(op, 'Declare')) continue;
+      const target = op.op1;
+      const names = isSymbol(target)
+        ? [target.symbol]
+        : isFunction(target, 'Tuple')
+          ? tuplePatternNames(target)
+          : [];
+      for (const name of names)
+        if (declaredConstants.has(name))
+          constantIndexes!.set(name, sourceIndex!.get(statement)!);
+    }
+  const hoistedNames = declaredNames.filter((name) =>
+    (program ? acceptedDeclarations : accepted).has(name)
+  );
 
   // Hoist the block's own locals into the block scope BEFORE canonicalizing
   // the statements. `Declare` only registers its symbol at *evaluation*
@@ -4548,25 +4709,37 @@ function canonicalSequence(
       markCallableHome(existing, scope);
       return;
     }
-    if (program && existing !== undefined) previousBindings!.set(name, existing);
+    if (program && existing !== undefined)
+      previousBindings!.set(name, existing);
     const knownType = declaredTypes.get(name);
-    const persistentType = program && knownType !== undefined && !explicitlyDeclared.has(name) && !declaredConstants.has(name)
-      ? widenLocalType(ce, knownType) : knownType;
+    const persistentType =
+      program &&
+      knownType !== undefined &&
+      !explicitlyDeclared.has(name) &&
+      !declaredConstants.has(name)
+        ? widenLocalType(ce, knownType)
+        : knownType;
     const hoisted = ce._declareSymbolValue(
       name,
       {
         type: persistentType ?? 'unknown',
         isConstant: program && declaredConstants.has(name),
-        inferred: program && typeof knownType === 'string' && knownType !== 'unknown' ? false : !explicitlyDeclared.has(name),
+        inferred:
+          program && typeof knownType === 'string' && knownType !== 'unknown'
+            ? false
+            : !explicitlyDeclared.has(name),
       },
       scope
     );
     // A block local, not a free symbol: see `_blockLocal`.
     if (isValueDef(hoisted)) {
       hoisted.value._blockLocal = !program || !functions.has(name);
-      if (program && !functions.has(name)) hoisted.value._programVariable = true;
+      if (program && !functions.has(name))
+        hoisted.value._programVariable = true;
       if (program && functions.has(name))
-        (hoisted as typeof hoisted & { _declaredByStatement?: boolean })._declaredByStatement = true;
+        (
+          hoisted as typeof hoisted & { _declaredByStatement?: boolean }
+        )._declaredByStatement = true;
       markCallableHome(hoisted, scope);
       if (explicitlyDeclared.has(name)) markDeclaredLocal(hoisted.value);
     }
@@ -4601,12 +4774,15 @@ function canonicalSequence(
   // The scope that encloses the block: the boundary of the shadow of its
   // names (`_shadowedParameterBoundary()`).
   ce._pushShadowedParameters(
-    [...(program ? hoistedNames : accepted)].filter((name) => !UNBINDABLE_NAMES.has(name))
+    [...(program ? hoistedNames : accepted)].filter(
+      (name) => !UNBINDABLE_NAMES.has(name)
+    )
   );
-  if (program && scope !== undefined) for (const name of hoistedNames) {
-    const binding = scope.bindings.get(name);
-    if (binding !== undefined) ce._setShadowedParameterDef(name, binding);
-  }
+  if (program && scope !== undefined)
+    for (const name of hoistedNames) {
+      const binding = scope.bindings.get(name);
+      if (binding !== undefined) ce._setShadowedParameterDef(name, binding);
+    }
   let statements: Expression[];
   enterBody();
   try {
@@ -4621,7 +4797,9 @@ function canonicalSequence(
         ops.map((op) => {
           const refusal = refused.get(op);
           if (refusal !== undefined && isFunction(refusal)) {
-            const result = ce._fn(refusal.operator, refusal.ops, { metadata: { sourceOffsets: op.sourceOffsets } });
+            const result = ce._fn(refusal.operator, refusal.ops, {
+              metadata: { sourceOffsets: op.sourceOffsets },
+            });
             completed?.set(op, result);
             return result;
           }
@@ -4631,8 +4809,16 @@ function canonicalSequence(
           // The repair runs here, once the scope of the block and its locals
           // exist, so that a local `N` stays the local.
           const statement = early?.get(op) ?? canonicalizeStatement(op);
-          if (program && (isFunction(statement, 'Declare') || isFunction(statement, 'Assign'))) {
-            const names = isFunction(statement.op1, 'Tuple') ? tuplePatternNames(statement.op1) : isSymbol(statement.op1) ? [statement.op1.symbol] : [];
+          if (
+            program &&
+            (isFunction(statement, 'Declare') ||
+              isFunction(statement, 'Assign'))
+          ) {
+            const names = isFunction(statement.op1, 'Tuple')
+              ? tuplePatternNames(statement.op1)
+              : isSymbol(statement.op1)
+                ? [statement.op1.symbol]
+                : [];
             const writes = new Map<string, BoxedDefinition>();
             for (const name of names) {
               const binding = ce.lookupDefinition(name);
@@ -4641,11 +4827,20 @@ function canonicalSequence(
             PROGRAM_WRITES.set(statement, writes);
             if (isFunction(statement, 'Declare')) {
               PROGRAM_WRITES.set(statement.op1, writes);
-              noteProgramDeclarationPrevious(statement.op1,
-                new Map([...writes.keys()].map((name) => [name, previousBindings!.get(name)])));
+              noteProgramDeclarationPrevious(
+                statement.op1,
+                new Map(
+                  [...writes.keys()].map((name) => [
+                    name,
+                    previousBindings!.get(name),
+                  ])
+                )
+              );
             }
           }
-          const result = isSymbol(statement) ? canonicalValueOperand(ce, statement) : statement;
+          const result = isSymbol(statement)
+            ? canonicalValueOperand(ce, statement)
+            : statement;
           completed?.set(op, result);
           return result;
         })
@@ -4662,8 +4857,16 @@ function canonicalSequence(
   if (program) {
     for (const name of hoistedNames) {
       const binding = scope?.bindings.get(name);
-      if (binding !== undefined && isValueDef(binding) && binding.value._programVariable) {
-        if (!explicitlyDeclared.has(name) && !binding.value.isConstant && !binding.value.type.matches('function')) {
+      if (
+        binding !== undefined &&
+        isValueDef(binding) &&
+        binding.value._programVariable
+      ) {
+        if (
+          !explicitlyDeclared.has(name) &&
+          !binding.value.isConstant &&
+          !binding.value.type.matches('function')
+        ) {
           const widened = widenLocalType(ce, binding.value.type.type);
           binding.value._setType(() => ce.type(widened));
         }
@@ -4800,7 +5003,8 @@ function withUseBeforeDeclarationErrors(
     const op = typedStatement(raw);
     if (program && !isFunction(statements[i], 'Declare')) return;
     const local = localFunctionName(ce, op);
-    if (!program && local !== undefined && !declaredAt.has(local)) declaredAt.set(local, i);
+    if (!program && local !== undefined && !declaredAt.has(local))
+      declaredAt.set(local, i);
     if (!isFunction(op, 'Declare')) return;
     const names = isFunction(op.ops[0], 'Tuple')
       ? tuplePatternNames(op.ops[0])
@@ -4812,10 +5016,13 @@ function withUseBeforeDeclarationErrors(
   const check = useBeforeDeclarationCheck(ce, declaredAt);
   return statements.map((statement, i) => {
     const error = check(statement, i);
-    return error === undefined || !isFunction(error) ? statement : ce._fn(error.operator, error.ops, { metadata: { sourceOffsets: ops[i].sourceOffsets } });
+    return error === undefined || !isFunction(error)
+      ? statement
+      : ce._fn(error.operator, error.ops, {
+          metadata: { sourceOffsets: ops[i].sourceOffsets },
+        });
   });
 }
-
 
 export function useBeforeDeclarationCheck(
   ce: ComputeEngine,
@@ -5034,7 +5241,6 @@ export function isFunctionDeclarationStatement(
   const type = ce._typeRegistry[name];
   return type?.def === undefined || type.alias === true;
 }
-
 
 export function isHoistedFunctionDefinition(
   ce: ComputeEngine,

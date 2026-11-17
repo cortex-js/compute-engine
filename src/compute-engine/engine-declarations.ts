@@ -4782,11 +4782,17 @@ function assumptionRefusalError(
 }
 
 /** Refuse global shadowing of a library constant whose MathJSON keeps its name. */
-export function assertDeclarationName(ce: IComputeEngine, id: string, scope: Scope): void {
+export function assertDeclarationName(
+  ce: IComputeEngine,
+  id: string,
+  scope: Scope
+): void {
   const systemScope = ce.contextStack[0]?.lexicalScope;
   const globalScope = ce.contextStack[1]?.lexicalScope;
-  const checkingGlobal = ce._staticTypeCheckDepth > 0 &&
-    ce.context.name === 'epsil:static-check' && scope.parent === globalScope;
+  const checkingGlobal =
+    ce._staticTypeCheckDepth > 0 &&
+    ce.context.name === 'epsil:static-check' &&
+    scope.parent === globalScope;
   if (scope === globalScope || checkingGlobal) {
     const visible = lookup(id, scope);
     if (

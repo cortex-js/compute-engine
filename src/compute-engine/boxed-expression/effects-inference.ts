@@ -1940,8 +1940,11 @@ export function functionLiteralCallSignatureType(expr: Expression): Type {
   // The scope of the literal first: the types that its derivation caches on
   // the body are those of that scope.
   const there = ce._inScope(written, () => functionLiteralSignatureType(expr));
-  if (typeof there === 'object' && there.kind === 'signature' &&
-      there.typeParams === undefined) {
+  if (
+    typeof there === 'object' &&
+    there.kind === 'signature' &&
+    there.typeParams === undefined
+  ) {
     // The shape comes from the written scope; only effects are needed here.
     const effects = functionLiteralArrowEffects(expr);
     const { effects: _effects, ...shape } = there;
@@ -4054,7 +4057,8 @@ function valueSignatureOf(
   // (`docs/EFFECTS-MODEL.md`, "Inference").
   if (
     stated === undefined &&
-    def.value._blockLocal === true && !def.value._programVariable &&
+    def.value._blockLocal === true &&
+    !def.value._programVariable &&
     storedFunctionLiteral(ce, name) === undefined
   )
     return 'undeclared';
@@ -4082,7 +4086,8 @@ function storedFunctionLiteral(
   if (
     found !== undefined &&
     'value' in found.def &&
-    found.def.value._blockLocal === true && !found.def.value._programVariable
+    found.def.value._blockLocal === true &&
+    !found.def.value._programVariable
   ) {
     // A node boxed in a run reads the local in the activation of the
     // block: the text is the text of the block that it activates.

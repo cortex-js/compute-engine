@@ -37,9 +37,7 @@ import {
 import { isDeclarationTypeErrorValue } from '../compute-engine/boxed-expression/type-compatibility-error.js';
 import { listedElement } from '../compute-engine/boxed-expression/listed-element.js';
 import { protocolExtendsConflicts } from '../compute-engine/engine-protocols.js';
-import {
-  isValueDef,
-} from '../compute-engine/boxed-expression/definition-guards.js';
+import { isValueDef } from '../compute-engine/boxed-expression/definition-guards.js';
 import {
   programSourceOrder,
   programInterruption,
@@ -72,7 +70,12 @@ export interface ExecuteEpsilOptions {
   /** Opt into the host-state pragmas `#env`/`#navigator` (default `false`). */
   allowHostPragmas?: boolean;
   /** Called after each top-level statement, with its source index and range. */
-  onStatement?: (statement: { index: number; expression: Expression; value: Expression; range: [number, number] }) => void;
+  onStatement?: (statement: {
+    index: number;
+    expression: Expression;
+    value: Expression;
+    range: [number, number];
+  }) => void;
   /** Independent time limit for each statement, in milliseconds. */
   statementTimeLimitMs?: number;
 }
@@ -151,7 +154,6 @@ export function sumVariantNames(ce: ComputeEngine): Record<string, string> {
 /** Source of {@link executeEpsil}'s batch ids. Monotone and never reused: the
  * ids are only ever compared for equality with the stamp an earlier install of
  * the same run left on the protocol registry (ruling P47). */
-
 
 /** A new batch id, for a run of `executeEpsil` or a check by `checkEpsil`. */
 export function nextEpsilBatchId(): number {
@@ -409,7 +411,8 @@ function* executeEpsilSteps(
   // (Set/Dictionary), statement blocks parse only in keyword position, and a
   // program whose only statement is a `do { … }` block is wrapped too, so
   // that block stays a nested scope (`Block(Block(…))`).
-  const sourceStatements = operator(ast) === 'Program' ? [...operands(ast)] : [ast];
+  const sourceStatements =
+    operator(ast) === 'Program' ? [...operands(ast)] : [ast];
   let statements = sourceStatements;
 
   // Where this program binds each of its names, for the "defined here" note a
@@ -492,14 +495,36 @@ function* executeEpsilSteps(
   // Advisory scans read the raw source before canonicalization. They do not
   // install heads or declarations; Program owns all binding preparation.
   for (const stmt of sourceStatements)
-    scanProtocolPropertyCalls(ce, stmt, reportedUnknowns, diagnostics, stmt, source);
+    scanProtocolPropertyCalls(
+      ce,
+      stmt,
+      reportedUnknowns,
+      diagnostics,
+      stmt,
+      source
+    );
   if (budgetExpired !== undefined)
-    return canceledPreparation(ce, budgetExpired, sourceStatements, source, defSites, diagnostics);
+    return canceledPreparation(
+      ce,
+      budgetExpired,
+      sourceStatements,
+      source,
+      defSites,
+      diagnostics
+    );
   let program: Expression;
-  try { program = ce.box(ast); }
-  catch (error) {
+  try {
+    program = ce.box(ast);
+  } catch (error) {
     if (!isTimeoutCancellation(error)) throw error;
-    return canceledPreparation(ce, error, sourceStatements, source, defSites, diagnostics);
+    return canceledPreparation(
+      ce,
+      error,
+      sourceStatements,
+      source,
+      defSites,
+      diagnostics
+    );
   }
   const order = programSourceOrder(program);
   statements = order.map((i) => sourceStatements[i]);
@@ -517,9 +542,18 @@ function* executeEpsilSteps(
   // statement can hold the same failure, which is then not reported again.
   // Each failure maps to the diagnostic that reports it.
   const nestedFailures = new Map<object, ParsingDiagnostic | undefined>();
-  const reportNested = nestedStatementReporter(ce, statements, defSites, diagnostics, nestedFailures);
+  const reportNested = nestedStatementReporter(
+    ce,
+    statements,
+    defSites,
+    diagnostics,
+    nestedFailures
+  );
   ce._epsilStatementResultHook = (boxedStmt, result, i, error) => {
-    if (i === undefined) { reportNested(boxedStmt, result); return; }
+    if (i === undefined) {
+      reportNested(boxedStmt, result);
+      return;
+    }
     const stmt = statements[i];
     value = result;
     const range = statementRange(stmt, source);
@@ -527,11 +561,17 @@ function* executeEpsilSteps(
     valueStatement = stmt;
     const cancellation = cancellationCause(error);
     const constantSite = constantAssignmentSite(error);
-    const declarationCode = isFunction(value, 'Error') && isFunction(value.op1, 'ErrorCode')
-      ? value.op1 : undefined;
-    const redeclared = declarationCode !== undefined &&
-      isString(declarationCode.op1) && declarationCode.op1.string === 'variable-redeclaration' &&
-      isString(declarationCode.op2) ? declarationCode.op2.string : undefined;
+    const declarationCode =
+      isFunction(value, 'Error') && isFunction(value.op1, 'ErrorCode')
+        ? value.op1
+        : undefined;
+    const redeclared =
+      declarationCode !== undefined &&
+      isString(declarationCode.op1) &&
+      declarationCode.op1.string === 'variable-redeclaration' &&
+      isString(declarationCode.op2)
+        ? declarationCode.op2.string
+        : undefined;
     const walkFailure = { error: undefined as unknown };
     if (i === statements.length - 1 && isFunction(value, 'Comprehension')) {
       const reportedBefore = new Set(nestedFailures.keys());
@@ -549,7 +589,13 @@ function* executeEpsilSteps(
     walkValue(walkFailure, () => {
       const heldErrors = value.errors;
       if (heldErrors.length > 0)
-        valueRange = narrowErrorRange(ce, heldErrors[0].json, stmt, range, boxedStmt);
+        valueRange = narrowErrorRange(
+          ce,
+          heldErrors[0].json,
+          stmt,
+          range,
+          boxedStmt
+        );
     });
     // A runtime problem in a NON-final statement would otherwise vanish —
     // only the last statement's value is returned — so surface it as a
@@ -591,80 +637,97 @@ function* executeEpsilSteps(
         ? markerCode[1].string
         : undefined;
     const refusalCode = isFunction(markerError, 'Error')
-      ? isString(markerError.op1) ? markerError.op1.string
-        : isFunction(markerError.op1, 'ErrorCode') && isString(markerError.op1.op1)
-          ? markerError.op1.op1.string : undefined
+      ? isString(markerError.op1)
+        ? markerError.op1.string
+        : isFunction(markerError.op1, 'ErrorCode') &&
+            isString(markerError.op1.op1)
+          ? markerError.op1.op1.string
+          : undefined
       : undefined;
-    const reportedStatically = walkValue(walkFailure, () =>
-      // A declaration refused during preparation and again by its ordinary
-      // runtime owner is one problem at the same authored statement.
-      (['Declare', 'DefineFunction'].includes(operator(stmt)) && markerError !== undefined &&
-        (['variable-redeclaration', 'function-redefinition', 'invalid-clause-definition'].includes(refusalCode ?? '') ||
-          (isFunction(boxedStmt, 'Declare') && isDeclarationTypeErrorValue(markerError, boxedStmt.op1))) &&
-        diagnostics.some((d) =>
-          (d.message[0] === refusalCode ||
-            (d.message[0] === 'static-type-error' && d.message[3] === refusalCode)) &&
-          d.range[0] === range[0] && d.range[1] === range[1])) ||
-      (redeclared !== undefined &&
-        diagnostics.some(
-          (d) =>
-            Array.isArray(d.message) &&
-            d.message[0] === 'variable-redeclaration' &&
-            d.message[1] === redeclared
-        )) ||
-      (markerName !== undefined &&
-        diagnostics.some(
-          (d) =>
-            Array.isArray(d.message) &&
-            d.message[0] === markerKind &&
-            d.message[1] === markerName
-        )) ||
-      // A `function` statement on a `const` binding: the static check reports
-      // it as a `static-type-error` with the engine code
-      // `invalid-clause-definition` at this statement, so the error value of
-      // the statement is not reported a second time as a `runtime-error`.
-      (markerError !== undefined &&
-        errorCode(markerError.json) === 'invalid-clause-definition' &&
-        diagnostics.some(
-          (d) =>
-            Array.isArray(d.message) &&
-            d.message[0] === 'static-type-error' &&
-            d.message[3] === 'invalid-clause-definition' &&
-            d.range[0] === statementRange(stmt, source)[0]
-        )) ||
-      // An assignment to a `const` of the program: the static check reports
-      // it as a `static-type-error` with the engine code
-      // `constant-assignment`, at the range of the `Assign` node. The
-      // assignment can be in a function body that this statement calls. The
-      // engine records on the error the source range of the `Assign` node
-      // that made the write (`constantSite`). The run-time error is the
-      // problem of a static report only when the two ranges are the same and
-      // the report names the same constant. A match by name alone is not
-      // sufficient: the same name can be a constant of the program, a local
-      // constant of a function, and a constant outside the program (a library
-      // constant such as `Pi`, a constant of an earlier program), and a
-      // statement can make a write that the static check did not report. Such
-      // a write is reported here.
-      (markerError !== undefined &&
-        errorCode(markerError.json) === 'constant-assignment' &&
-        constantSite !== undefined &&
-        diagnostics.some(
-          (d) =>
-            Array.isArray(d.message) &&
-            d.message[0] === 'static-type-error' &&
-            d.message[3] === 'constant-assignment' &&
-            d.message[1] === describeError(markerError.json) &&
-            d.range[0] === constantSite?.[0] &&
-            d.range[1] === constantSite?.[1]
-        )) ||
-      // A use of a local before it has a value: see
-      // `reportedAsBlockLocalError()`.
-      (markerError !== undefined &&
-        reportedAsBlockLocalError(
-          markerError,
-          diagnostics,
-          statementRange(stmt, source)
-        ))) ?? false;
+    const reportedStatically =
+      walkValue(
+        walkFailure,
+        () =>
+          // A declaration refused during preparation and again by its ordinary
+          // runtime owner is one problem at the same authored statement.
+          (['Declare', 'DefineFunction'].includes(operator(stmt)) &&
+            markerError !== undefined &&
+            ([
+              'variable-redeclaration',
+              'function-redefinition',
+              'invalid-clause-definition',
+            ].includes(refusalCode ?? '') ||
+              (isFunction(boxedStmt, 'Declare') &&
+                isDeclarationTypeErrorValue(markerError, boxedStmt.op1))) &&
+            diagnostics.some(
+              (d) =>
+                (d.message[0] === refusalCode ||
+                  (d.message[0] === 'static-type-error' &&
+                    d.message[3] === refusalCode)) &&
+                d.range[0] === range[0] &&
+                d.range[1] === range[1]
+            )) ||
+          (redeclared !== undefined &&
+            diagnostics.some(
+              (d) =>
+                Array.isArray(d.message) &&
+                d.message[0] === 'variable-redeclaration' &&
+                d.message[1] === redeclared
+            )) ||
+          (markerName !== undefined &&
+            diagnostics.some(
+              (d) =>
+                Array.isArray(d.message) &&
+                d.message[0] === markerKind &&
+                d.message[1] === markerName
+            )) ||
+          // A `function` statement on a `const` binding: the static check reports
+          // it as a `static-type-error` with the engine code
+          // `invalid-clause-definition` at this statement, so the error value of
+          // the statement is not reported a second time as a `runtime-error`.
+          (markerError !== undefined &&
+            errorCode(markerError.json) === 'invalid-clause-definition' &&
+            diagnostics.some(
+              (d) =>
+                Array.isArray(d.message) &&
+                d.message[0] === 'static-type-error' &&
+                d.message[3] === 'invalid-clause-definition' &&
+                d.range[0] === statementRange(stmt, source)[0]
+            )) ||
+          // An assignment to a `const` of the program: the static check reports
+          // it as a `static-type-error` with the engine code
+          // `constant-assignment`, at the range of the `Assign` node. The
+          // assignment can be in a function body that this statement calls. The
+          // engine records on the error the source range of the `Assign` node
+          // that made the write (`constantSite`). The run-time error is the
+          // problem of a static report only when the two ranges are the same and
+          // the report names the same constant. A match by name alone is not
+          // sufficient: the same name can be a constant of the program, a local
+          // constant of a function, and a constant outside the program (a library
+          // constant such as `Pi`, a constant of an earlier program), and a
+          // statement can make a write that the static check did not report. Such
+          // a write is reported here.
+          (markerError !== undefined &&
+            errorCode(markerError.json) === 'constant-assignment' &&
+            constantSite !== undefined &&
+            diagnostics.some(
+              (d) =>
+                Array.isArray(d.message) &&
+                d.message[0] === 'static-type-error' &&
+                d.message[3] === 'constant-assignment' &&
+                d.message[1] === describeError(markerError.json) &&
+                d.range[0] === constantSite?.[0] &&
+                d.range[1] === constantSite?.[1]
+            )) ||
+          // A use of a local before it has a value: see
+          // `reportedAsBlockLocalError()`.
+          (markerError !== undefined &&
+            reportedAsBlockLocalError(
+              markerError,
+              diagnostics,
+              statementRange(stmt, source)
+            ))
+      ) ?? false;
     if (i < statements.length - 1 && !reportedStatically) {
       walkValue(walkFailure, () => {
         // A `Map` or `Filter` view that holds no error can still give one
@@ -687,11 +750,35 @@ function* executeEpsilSteps(
       });
     }
 
-    walkValue(walkFailure, () => scanUnknownFunctions(ce, value.json, reportedUnknowns, diagnostics, stmt, source));
+    walkValue(walkFailure, () =>
+      scanUnknownFunctions(
+        ce,
+        value.json,
+        reportedUnknowns,
+        diagnostics,
+        stmt,
+        source
+      )
+    );
     if (programNames !== undefined)
-      walkValue(walkFailure, () => scanUnknownFunctions(ce, boxedStmt.json, reportedUnknowns, diagnostics, stmt, source, programNames));
+      walkValue(walkFailure, () =>
+        scanUnknownFunctions(
+          ce,
+          boxedStmt.json,
+          reportedUnknowns,
+          diagnostics,
+          stmt,
+          source,
+          programNames
+        )
+      );
     reportWalkFailure(ce, walkFailure, stmt, source, defSites, diagnostics);
-    options?.onStatement?.({ index: order[i], expression: boxedStmt, value, range: statementRange(stmt, source) });
+    options?.onStatement?.({
+      index: order[i],
+      expression: boxedStmt,
+      value,
+      range: statementRange(stmt, source),
+    });
     nestedFailures.clear();
   };
   try {
@@ -699,8 +786,9 @@ function* executeEpsilSteps(
     // The shared Program evaluator determines the value (declarations and
     // assignments as final statements produce Nothing, as in a Block).
     if (!isFunction(result, 'Comprehension')) value = result;
+  } finally {
+    ce._epsilStatementTimeLimitMs = savedStatementLimit;
   }
-  finally { ce._epsilStatementTimeLimitMs = savedStatementLimit; }
   ce._epsilStatementResultHook = enclosingStatementHook;
 
   // PENDING CONFORMANCES (protocols design P3). A conformance declared without
@@ -798,20 +886,41 @@ function* executeEpsilSteps(
 
 /** A preparation timeout has no statement value to report through the evaluator. */
 function canceledPreparation(
-  ce: ComputeEngine, error: unknown, statements: readonly MathJsonExpression[], source: string,
-  sites: ReturnType<typeof definitionSites>, diagnostics: ParsingDiagnostic[]
+  ce: ComputeEngine,
+  error: unknown,
+  statements: readonly MathJsonExpression[],
+  source: string,
+  sites: ReturnType<typeof definitionSites>,
+  diagnostics: ParsingDiagnostic[]
 ): ExecuteEpsilResult {
   const saved = ce._deadlineFrame;
   ce._deadlineFrame = undefined;
   try {
-    const value = ce._fn('Error', [ce.string(error instanceof Error ? error.message : String(error)), ce.string(budgetCauseOf(error))]);
+    const value = ce._fn('Error', [
+      ce.string(error instanceof Error ? error.message : String(error)),
+      ce.string(budgetCauseOf(error)),
+    ]);
     const index = programInterruption(error)?.index ?? 0;
     const statement = statements[index];
-    const valueRange: [number, number] = statement === undefined ? [0, source.length] : statementRange(statement, source);
+    const valueRange: [number, number] =
+      statement === undefined
+        ? [0, source.length]
+        : statementRange(statement, source);
     if (statement !== undefined && index < statements.length - 1)
-      diagnostics.push(errorValueDiagnostic(ce, value, statement, valueRange, sites, cancellationCause(error)));
+      diagnostics.push(
+        errorValueDiagnostic(
+          ce,
+          value,
+          statement,
+          valueRange,
+          sites,
+          cancellationCause(error)
+        )
+      );
     return { value, diagnostics, valueRange };
-  } finally { ce._deadlineFrame = saved; }
+  } finally {
+    ce._deadlineFrame = saved;
+  }
 }
 
 /**

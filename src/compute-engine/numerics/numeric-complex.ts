@@ -901,8 +901,7 @@ export function complexAcot(z: Complex): Complex {
   // On the imaginary axis: π/2 − arctan(iy) has the real part π/2 from −i
   // to i (the poles included), and the side of the cut of `complexAtan()`
   // beyond them.
-  if (x === 0)
-    return new Complex(ay <= 1 ? Math.PI / 2 : shift, imaginary);
+  if (x === 0) return new Complex(ay <= 1 ? Math.PI / 2 : shift, imaginary);
   // Re of arctan(1/z): −½·arg((z − i)·conj(z + i)) = ½·atan2(2x, |z|² − 1).
   // |z|² − 1 is computed from the larger part, whose difference with 1 is
   // exact.

@@ -766,7 +766,6 @@ export interface IComputeEngine {
    * @internal */
   _evaluationDepth: number;
 
-
   _delegatedEvaluations: number;
 
   /** The `ce.effects` registry captured by the synchronous evaluation that is
@@ -1009,8 +1008,6 @@ export interface IComputeEngine {
    * `complex` parameter must still admit). `undefined` outside the pass.
    * @internal */
 
-
-
   /** `true` only while the Epsil interpreter is canonicalizing or evaluating a
    * top-level statement whose AST head is `DeclareType`, `DeclareSumType` or
    * `DeclareProtocol` — the REDEFINITION DISCIPLINE's statement-route marker
@@ -1065,7 +1062,13 @@ export interface IComputeEngine {
    * value both bundles share.
    * @internal */
   _epsilStatementResultHook:
-    ((statement: Expression, result: Expression, programIndex?: number, error?: unknown) => void) | undefined;
+    | ((
+        statement: Expression,
+        result: Expression,
+        programIndex?: number,
+        error?: unknown
+      ) => void)
+    | undefined;
 
   /** Absolute time (`Date.now()` epoch ms) beyond which evaluation should
    * not proceed, or `undefined` when no time limit is active. A derived view

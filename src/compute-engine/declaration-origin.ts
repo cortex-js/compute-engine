@@ -106,8 +106,14 @@ export function checkSameUnitClauseRedefinition(
 }
 
 /** The shared human-readable refusal on the static and runtime routes. */
-export function clauseRedefinitionMessage(name: string, firstRange?: readonly [number, number]): string {
-  const site = firstRange === undefined ? ' earlier' : ` at characters ${firstRange[0]}-${firstRange[1]}`;
+export function clauseRedefinitionMessage(
+  name: string,
+  firstRange?: readonly [number, number]
+): string {
+  const site =
+    firstRange === undefined
+      ? ' earlier'
+      : ` at characters ${firstRange[0]}-${firstRange[1]}`;
   return `A clause of "${name}" with this parameter list is already defined${site} in this program, and this one would silently replace it. Give the clauses different parameter lists to dispatch between them, or edit the existing clause in place; to redefine it interactively, re-run it as a separate program.`;
 }
 

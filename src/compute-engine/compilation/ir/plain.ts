@@ -67,24 +67,22 @@ export const PLAIN_ROWS: readonly OperatorRow[] = Object.freeze([
 ]);
 
 /** The spellings of the operations of `PLAIN_ROWS` in the interval mode. */
-export const PLAIN_SPELLINGS: Readonly<Record<string, string>> = Object.freeze(
-  {
-    'add.num': '($0 + $1)',
-    'sub.num': '($0 - $1)',
-    'neg.num': '(-$0)',
-    'mul.num': '($0 * $1)',
-    ...Object.fromEntries(
-      Object.entries(COMPARE).map(([op, js]) => [
-        `${op}.num`,
-        `($0 ${js} $1 ? 'true' : 'false')`,
-      ])
-    ),
-    'point': '{ lo: $0, hi: $0 }',
-    'number': '_IA.number($0)',
-    'pow.num': '_IA.pow($0, $1)',
-    'pow.int.num': '_IA.pow($0, $1)',
-  }
-);
+export const PLAIN_SPELLINGS: Readonly<Record<string, string>> = Object.freeze({
+  'add.num': '($0 + $1)',
+  'sub.num': '($0 - $1)',
+  'neg.num': '(-$0)',
+  'mul.num': '($0 * $1)',
+  ...Object.fromEntries(
+    Object.entries(COMPARE).map(([op, js]) => [
+      `${op}.num`,
+      `($0 ${js} $1 ? 'true' : 'false')`,
+    ])
+  ),
+  'point': '{ lo: $0, hi: $0 }',
+  'number': '_IA.number($0)',
+  'pow.num': '_IA.pow($0, $1)',
+  'pow.int.num': '_IA.pow($0, $1)',
+});
 
 /** The pass (README, "The interval mode", "Lists" for the lengths and
  *  indexes). Returns the refusal of a program where a length would not be
@@ -129,7 +127,12 @@ export function plain(p: Program): string | undefined {
   /** `v` as an interval. */
   const asInterval = (v: V, out: Instr[]): V =>
     bound.has(v)
-      ? made(`p ${v}`, out, (w) => ({ k: 'op', out: w, op: 'point', args: [v] }))
+      ? made(`p ${v}`, out, (w) => ({
+          k: 'op',
+          out: w,
+          op: 'point',
+          args: [v],
+        }))
       : v;
   const region = (r: Region): void => {
     scopes.push(new Map());
@@ -220,7 +223,10 @@ export function plain(p: Program): string | undefined {
       } else if (i.k !== 'const' && i.k !== 'if')
         i.args = i.args.map((a) => asInterval(a, body));
       // A length that is a constant is its plain twin.
-      for (const v of [...outsOf(i), ...regionsOf(i).flatMap((r) => r.params)]) {
+      for (const v of [
+        ...outsOf(i),
+        ...regionsOf(i).flatMap((r) => r.params),
+      ]) {
         p.types[v] = mapLengths(p.types[v], (n) =>
           constants.has(n) ? asNumber(n, body) : n
         );

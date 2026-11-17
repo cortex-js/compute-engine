@@ -1797,7 +1797,9 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // which would let expressions like tan(π/2) slip through the guard.
   const op2HasBlockLocal = op2.symbols.some((name) => {
     const binding = ce.lookupDefinition(name);
-    return binding !== undefined && 'value' in binding && binding.value._blockLocal;
+    return (
+      binding !== undefined && 'value' in binding && binding.value._blockLocal
+    );
   });
   const op2IsConstantExpression =
     !isNumber(op2) && (op2.unknowns.length === 0 || op2HasBlockLocal);

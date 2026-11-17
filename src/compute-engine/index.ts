@@ -720,18 +720,19 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._epsilBatchId`. @internal */
   _epsilBatchId: number | undefined = undefined;
 
-
-
-
-
   /** See `IComputeEngine._epsilDeclarationRoute`. @internal */
   _epsilDeclarationRoute = false;
 
   /** See `IComputeEngine._epsilStatementResultHook`. @internal */
   _epsilStatementTimeLimitMs: number | undefined = undefined;
   _epsilStatementResultHook:
-    ((statement: Expression, result: Expression, programIndex?: number, error?: unknown) => void) | undefined =
-    undefined;
+    | ((
+        statement: Expression,
+        result: Expression,
+        programIndex?: number,
+        error?: unknown
+      ) => void)
+    | undefined = undefined;
 
   /** Capture the registry's state and return a rollback thunk restoring it.
    *

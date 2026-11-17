@@ -4100,7 +4100,6 @@ function acceptsNaNArgument(
   );
 }
 
-
 export function refusesAbsentArgument(
   ce: ComputeEngine,
   op: Expression,

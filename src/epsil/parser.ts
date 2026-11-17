@@ -938,15 +938,17 @@ export class Parser {
     }
 
     if (exprs.length === 0 && !program) return null;
-    if (exprs.length === 1 && !program)
-      return exprs[0];
+    if (exprs.length === 1 && !program) return exprs[0];
 
     const first = exprs[0] as { sourceOffsets?: [number, number] };
     const last = exprs[exprs.length - 1] as {
       sourceOffsets?: [number, number];
     };
     return {
-      fn: [program ? 'Program' : 'Block', ...exprs] as [MathJsonSymbol, ...MathJsonExpression[]],
+      fn: [program ? 'Program' : 'Block', ...exprs] as [
+        MathJsonSymbol,
+        ...MathJsonExpression[],
+      ],
       sourceOffsets: [
         first?.sourceOffsets?.[0] ?? this.baseOffset,
         last?.sourceOffsets?.[1] ?? this.baseOffset,

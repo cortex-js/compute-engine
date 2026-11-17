@@ -2576,10 +2576,13 @@ export class BoxedFunction
   get json(): MathJsonExpression {
     const s = this.structural;
     const canonicalOps = isFunction(s) ? s.ops : this._ops;
-    const ops = this._operator === 'Program'
-      ? programSourceOrder(this).map((source, i) => ({source, op: canonicalOps[i]}))
-          .sort((a, b) => a.source - b.source).map((x) => x.op)
-      : canonicalOps;
+    const ops =
+      this._operator === 'Program'
+        ? programSourceOrder(this)
+            .map((source, i) => ({ source, op: canonicalOps[i] }))
+            .sort((a, b) => a.source - b.source)
+            .map((x) => x.op)
+        : canonicalOps;
     // The operands of a scoped node (a `Function` literal, a `Block`) are
     // written with its local scope as the reading scope: a local of the node
     // that shadows a library name makes a library-bound operand write the
@@ -2820,7 +2823,8 @@ export class BoxedFunction
     // type in one place and `error` in the other.
     if (
       this.isCanonical ||
-      (!this.isValid && this._operator !== 'Program' &&
+      (!this.isValid &&
+        this._operator !== 'Program' &&
         !isIterableWithFailedCells(this) &&
         !(this._operator === 'Tuple' && failedCellsAreIterable(this)))
     )
@@ -16691,9 +16695,8 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
     // test as the derivation from operand types (`runsLibraryCanonicalForm`).
     if (
       runsLibraryCanonicalForm(expr.engine, expr.operator, def) &&
-      addsPointToNumberCollection(
-        expr.operator,
-        () => expr.ops.map((x) => x.type.type)
+      addsPointToNumberCollection(expr.operator, () =>
+        expr.ops.map((x) => x.type.type)
       )
     )
       return 'error';
@@ -18364,7 +18367,6 @@ async function evaluatedUnresolvedCallAsync(
     evaluatedUnresolvedCall(expr, ops)
   );
 }
-
 
 function delegateEvaluation<T>(ce: ComputeEngine, evaluate: () => T): T {
   ce._delegatedEvaluations += 1;

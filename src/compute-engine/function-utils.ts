@@ -6,7 +6,13 @@ import {
   invokeDebugHook,
   isDebugHookFailure,
 } from '../common/debug-hook.js';
-import { isThenable, CancellationError, checkDeadline, budgetCauseOf, isTimeoutCancellation } from '../common/interruptible.js';
+import {
+  isThenable,
+  CancellationError,
+  checkDeadline,
+  budgetCauseOf,
+  isTimeoutCancellation,
+} from '../common/interruptible.js';
 import { cmp } from './boxed-expression/compare.js';
 import {
   bindingInContext,
@@ -3614,40 +3620,64 @@ export function evaluateStatements(
     let failure: unknown;
     let reportingFrame = ce._deadlineFrame;
     const savedRoute = ce._epsilDeclarationRoute;
-    if (program) ce._epsilDeclarationRoute = ['DeclareType', 'DeclareSumType', 'DeclareProtocol', 'DeclareConformance', 'DefineFunction'].includes(op.operator);
+    if (program)
+      ce._epsilDeclarationRoute = [
+        'DeclareType',
+        'DeclareSumType',
+        'DeclareProtocol',
+        'DeclareConformance',
+        'DefineFunction',
+      ].includes(op.operator);
     try {
       if (program) checkDeadline(ce._deadlineFrame);
-      const evaluate = () => ce._boxingState.asProgramStatement(() => op.evaluate(i === last ? lastStatementOptions : undefined));
-      result = program && ce._epsilStatementTimeLimitMs !== undefined
-        ? ce.withTimeLimit({ ms: ce._epsilStatementTimeLimitMs, label: 'epsil:statement' }, evaluate)
-        : program ? evaluate() : op.evaluate(i === last ? lastStatementOptions : undefined);
+      const evaluate = () =>
+        ce._boxingState.asProgramStatement(() =>
+          op.evaluate(i === last ? lastStatementOptions : undefined)
+        );
+      result =
+        program && ce._epsilStatementTimeLimitMs !== undefined
+          ? ce.withTimeLimit(
+              { ms: ce._epsilStatementTimeLimitMs, label: 'epsil:statement' },
+              evaluate
+            )
+          : program
+            ? evaluate()
+            : op.evaluate(i === last ? lastStatementOptions : undefined);
     } catch (error) {
       if (!program || isDebugHookFailure(error)) throw error;
       failure = error;
       reportingFrame = ce._deadlineFrame;
       result = programFailureValue(ce, error);
-    } finally { ce._epsilDeclarationRoute = savedRoute; }
-    try {
-    // Before the hooks below, so that they receive the error of a function
-    // that the statement made break a contract.
-    if (result.operator !== 'Error')
-      result = afterFunctionAssignment(ce, run, op) ?? result;
-    // Post-statement debugger hook (break-on-error-value); same guard shape
-    // as the pre-statement hook above.
-    if (
-      debugStatementResultHook !== undefined &&
-      op.sourceOffsets !== undefined
-    )
-      invokeDebugHook(() => debugStatementResultHook!(op, result));
-    // The Epsil interpreter's hook, with the same guard: it reports a
-    // nested statement whose value is discarded and holds an error.
-    if (
-      ce._epsilStatementResultHook !== undefined &&
-      (program || op.sourceOffsets !== undefined)
-    )
-      ce._epsilStatementResultHook(op, result, program ? i : undefined, failure);
     } finally {
-      if (program && isTimeoutCancellation(failure)) ce._deadlineFrame = reportingFrame;
+      ce._epsilDeclarationRoute = savedRoute;
+    }
+    try {
+      // Before the hooks below, so that they receive the error of a function
+      // that the statement made break a contract.
+      if (result.operator !== 'Error')
+        result = afterFunctionAssignment(ce, run, op) ?? result;
+      // Post-statement debugger hook (break-on-error-value); same guard shape
+      // as the pre-statement hook above.
+      if (
+        debugStatementResultHook !== undefined &&
+        op.sourceOffsets !== undefined
+      )
+        invokeDebugHook(() => debugStatementResultHook!(op, result));
+      // The Epsil interpreter's hook, with the same guard: it reports a
+      // nested statement whose value is discarded and holds an error.
+      if (
+        ce._epsilStatementResultHook !== undefined &&
+        (program || op.sourceOffsets !== undefined)
+      )
+        ce._epsilStatementResultHook(
+          op,
+          result,
+          program ? i : undefined,
+          failure
+        );
+    } finally {
+      if (program && isTimeoutCancellation(failure))
+        ce._deadlineFrame = reportingFrame;
     }
     // Short-circuit on a control-flow result — whether the statement was a
     // literal `Break`/`Continue`/`Return` or *evaluated to* one (e.g.
@@ -3667,7 +3697,13 @@ export function evaluateStatements(
     // statement carrying an embedded error operand is an ordinary inert
     // value, not a fault.
     const h = result.operator;
-    if (h === 'Return' || h === 'Break' || h === 'Continue' || (!program && h === 'Error') || (program && isTimeoutCancellation(failure)))
+    if (
+      h === 'Return' ||
+      h === 'Break' ||
+      h === 'Continue' ||
+      (!program && h === 'Error') ||
+      (program && isTimeoutCancellation(failure))
+    )
       break;
   }
   return statementListValue(ce, ops, result);
@@ -3679,7 +3715,14 @@ function programFailureValue(ce: ComputeEngine, error: unknown): Expression {
   const message = error instanceof Error ? error.message : String(error);
   if (error instanceof CancellationError) {
     if (isTimeoutCancellation(error)) ce._deadlineFrame = undefined;
-    const cause = ['timeout', 'step-budget', 'iteration-limit-exceeded', 'recursion-depth-exceeded'].includes(String(error.cause)) ? String(error.cause) : budgetCauseOf(error);
+    const cause = [
+      'timeout',
+      'step-budget',
+      'iteration-limit-exceeded',
+      'recursion-depth-exceeded',
+    ].includes(String(error.cause))
+      ? String(error.cause)
+      : budgetCauseOf(error);
     return ce._fn('Error', [ce.string(message), ce.string(cause)]);
   }
   if (error instanceof Error && error.name === 'ConstantAssignmentError') {
@@ -3943,43 +3986,77 @@ export async function evaluateStatementsAsync(
     let failure: unknown;
     let reportingFrame = ce._deadlineFrame;
     const savedRoute = ce._epsilDeclarationRoute;
-    if (program) ce._epsilDeclarationRoute = ['DeclareType', 'DeclareSumType', 'DeclareProtocol', 'DeclareConformance', 'DefineFunction'].includes(op.operator);
+    if (program)
+      ce._epsilDeclarationRoute = [
+        'DeclareType',
+        'DeclareSumType',
+        'DeclareProtocol',
+        'DeclareConformance',
+        'DefineFunction',
+      ].includes(op.operator);
     try {
       if (program) checkDeadline(ce._deadlineFrame);
-      if (signal?.aborted) throw new CancellationError({ cause: signal.reason });
-      const evaluate = () => op.evaluateAsync({
-        signal,
-        numericApproximation: i === last ? numericApproximation : undefined,
-        _effects: effects, _contextStack: stack, _precisionWindow: precisionWindow,
-      });
+      if (signal?.aborted)
+        throw new CancellationError({ cause: signal.reason });
+      const evaluate = () =>
+        op.evaluateAsync({
+          signal,
+          numericApproximation: i === last ? numericApproximation : undefined,
+          _effects: effects,
+          _contextStack: stack,
+          _precisionWindow: precisionWindow,
+        });
       result = await (program && ce._epsilStatementTimeLimitMs !== undefined
-        ? (() => { let pending!: Promise<Expression>; ce.withTimeLimit({ ms: ce._epsilStatementTimeLimitMs!, label: 'epsil:statement' }, () => { pending = evaluate(); }); return pending; })()
+        ? (() => {
+            let pending!: Promise<Expression>;
+            ce.withTimeLimit(
+              { ms: ce._epsilStatementTimeLimitMs!, label: 'epsil:statement' },
+              () => {
+                pending = evaluate();
+              }
+            );
+            return pending;
+          })()
         : evaluate());
     } catch (error) {
       if (!program || signal?.aborted || isDebugHookFailure(error)) throw error;
       failure = error;
       reportingFrame = ce._deadlineFrame;
       result = programFailureValue(ce, error);
-    } finally { ce._epsilDeclarationRoute = savedRoute; }
-    try {
-    // Before the hooks, as on the synchronous route.
-    if (result.operator !== 'Error')
-      result = afterFunctionAssignment(ce, run, op) ?? result;
-    if (
-      debugStatementResultHook !== undefined &&
-      op.sourceOffsets !== undefined
-    )
-      invokeDebugHook(() => debugStatementResultHook!(op, result));
-    if (
-      ce._epsilStatementResultHook !== undefined &&
-      (program || op.sourceOffsets !== undefined)
-    )
-      ce._epsilStatementResultHook(op, result, program ? i : undefined, failure);
     } finally {
-      if (program && isTimeoutCancellation(failure)) ce._deadlineFrame = reportingFrame;
+      ce._epsilDeclarationRoute = savedRoute;
+    }
+    try {
+      // Before the hooks, as on the synchronous route.
+      if (result.operator !== 'Error')
+        result = afterFunctionAssignment(ce, run, op) ?? result;
+      if (
+        debugStatementResultHook !== undefined &&
+        op.sourceOffsets !== undefined
+      )
+        invokeDebugHook(() => debugStatementResultHook!(op, result));
+      if (
+        ce._epsilStatementResultHook !== undefined &&
+        (program || op.sourceOffsets !== undefined)
+      )
+        ce._epsilStatementResultHook(
+          op,
+          result,
+          program ? i : undefined,
+          failure
+        );
+    } finally {
+      if (program && isTimeoutCancellation(failure))
+        ce._deadlineFrame = reportingFrame;
     }
     const h = result.operator;
-    if (h === 'Return' || h === 'Break' || h === 'Continue' || (!program && h === 'Error') || (program && isTimeoutCancellation(failure)))
+    if (
+      h === 'Return' ||
+      h === 'Break' ||
+      h === 'Continue' ||
+      (!program && h === 'Error') ||
+      (program && isTimeoutCancellation(failure))
+    )
       break;
   }
   return statementListValue(ce, ops, result);
@@ -5730,7 +5807,12 @@ function renameBoundVariables(
     if (parameters.has(name) && def !== undefined && 'value' in def)
       markFunctionLiteralParameter(ce, def.value);
     // The renamed local of a block is a local of the block too.
-    if (old?._blockLocal === true && !old._programVariable && def !== undefined && 'value' in def)
+    if (
+      old?._blockLocal === true &&
+      !old._programVariable &&
+      def !== undefined &&
+      'value' in def
+    )
       def.value._blockLocal = true;
     // `ce.declare` of a value definition (a `type`) makes a value binding,
     // so the symbol exists. Without it the binder could not be renamed, and

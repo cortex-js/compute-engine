@@ -408,7 +408,8 @@ export function markFunctionLiteralCaptures(body: Expression): void {
   for (const op of occurrences) {
     const def = op.valueDefinition;
     if (def !== undefined) {
-      if (def.isConstant || (def._blockLocal === true && !def._programVariable)) continue;
+      if (def.isConstant || (def._blockLocal === true && !def._programVariable))
+        continue;
       if (isFunctionLiteralParameter(def) || bound.has(def)) continue;
     } else if (op.operatorDefinition !== undefined) continue;
     FUNCTION_LITERAL_CAPTURES.add(op);
@@ -994,7 +995,8 @@ export function capturedSymbols(
         result.push({ name, occurrence });
       continue;
     }
-    if (def.isConstant || (def._blockLocal === true && !def._programVariable)) continue;
+    if (def.isConstant || (def._blockLocal === true && !def._programVariable))
+      continue;
     if (isFunctionLiteralParameter(def) || nested.has(def)) continue;
     const own = bodyScope?.bindings.get(name);
     if (own !== undefined && 'value' in own && own.value === def) {

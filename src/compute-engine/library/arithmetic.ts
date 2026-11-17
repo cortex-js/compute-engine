@@ -13236,8 +13236,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // within `10^-25` of the 21-digit decimal, not of `√2`. A zero
           // tolerance is no tolerance.
           if (tol.re > 0 || tol.bignumRe?.isPositive()) {
-            const x =
-              asRational(ops[0]) ?? f.bignumRe ?? new BigDecimal(f.re);
+            const x = asRational(ops[0]) ?? f.bignumRe ?? new BigDecimal(f.re);
             const t =
               asRational(ops[1]) ?? tol.bignumRe ?? new BigDecimal(tol.re);
             if (

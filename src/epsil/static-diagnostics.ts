@@ -1,9 +1,6 @@
 import { clauseRedefinitionMessage } from '../compute-engine/declaration-origin.js';
 import type { MathJsonExpression } from '../math-json/types.js';
-import {
-  CancellationError,
-  checkDeadline,
-} from '../common/interruptible.js';
+import { CancellationError, checkDeadline } from '../common/interruptible.js';
 import {
   isDictionaryObject,
   machineValue,
@@ -51,7 +48,11 @@ import { unboundSignatureHint } from '../compute-engine/boxed-expression/type-co
 // the conversion, `isSingleGraphemeCluster` decides which literals qualify.
 import { expectsCharacterNotString } from '../compute-engine/boxed-expression/validate.js';
 import { isSingleGraphemeCluster } from '../compute-engine/boxed-expression/boxed-character.js';
-import { declarationRefusalSite, programSourceOrder, programInterruption } from '../compute-engine/library/control-structures.js';
+import {
+  declarationRefusalSite,
+  programSourceOrder,
+  programInterruption,
+} from '../compute-engine/library/control-structures.js';
 import { diagnosticFlow } from './diagnostic-flow.js';
 import {
   isDictionary,
@@ -459,7 +460,6 @@ function isCanonicalizationError(code: string): boolean {
   return CANONICALIZATION_ERROR_CODES.has(code) || code.startsWith('expected-');
 }
 
-
 /**
  * The effects the engine inferred for one function the program defines at
  * its top level — what `epsil check --effects` prints and what the editor
@@ -552,7 +552,6 @@ export function staticDiagnostics(
   const narrowingSink = ce._narrowingSink;
   ce._narrowingSink = undefined;
 
-
   ce._factSuppressionDepth += 1;
   let bodyFailed = false;
   try {
@@ -636,7 +635,8 @@ function canonicalizationDiagnostics(
 ): ParsingDiagnostic[] {
   // The parser wraps a multi-statement program in `Block` (see
   // `executeEpsil()`); a single statement is not wrapped.
-  const rawStatements = operator(ast) === 'Program' ? [...operands(ast)] : [ast];
+  const rawStatements =
+    operator(ast) === 'Program' ? [...operands(ast)] : [ast];
   const narrowed = rawStatements.map(narrowGuardedReads);
   let program: ReturnType<ComputeEngine['box']>;
   let preparationFailure: unknown;
@@ -654,525 +654,539 @@ function canonicalizationDiagnostics(
     order = prefix.order;
   }
   try {
-  const statements = order.map((i) => rawStatements[i]);
-  const boxedStatements = isFunction(program) ? program.ops : [];
-  const flow = diagnosticFlow(ce, program);
+    const statements = order.map((i) => rawStatements[i]);
+    const boxedStatements = isFunction(program) ? program.ops : [];
+    const flow = diagnosticFlow(ce, program);
 
-  // Where this program binds each of its names, for the "defined here" note a
-  // signature error carries (see `signatureNotes()`).
-  const defSites = definitionSites(ast);
+    // Where this program binds each of its names, for the "defined here" note a
+    // signature error carries (see `signatureNotes()`).
+    const defSites = definitionSites(ast);
 
+    const constants = new Map<string, [number, number]>();
 
-
-  const constants = new Map<string, [number, number]>();
-
-  // The constants of this program, as the scope-aware walk of the program
-  // (`documentBindings()`) groups the occurrences of their names: each group
-  // of a `const` binding. The assignments to such a constant, which the run
-  // time refuses, are found once, when the constant is registered
-  // (`registerConstant()`), and each is reported with the statement that
-  // holds it. The walk is made only when the program declares a constant.
-  //
-  // A `const` in a function body or a block is registered here, before the
-  // walk of the statements: its assignments are in the same top-level
-  // statement as the declaration. A top-level `const` is registered when the
-  // walk reaches it, because the walk then knows whether the run time
-  // installs it (see below). Then the assignments to it in the function
-  // bodies of the earlier statements are reported at once (a function
-  // defined before the `const` writes the constant when it is called after
-  // it).
-  let constantWrites: ConstantWrites | undefined = undefined;
-  const topLevel = new Set(statements);
-  const localConstants = constantDeclarations(ast).filter(
-    (declaration) => !topLevel.has(declaration)
-  );
-  if (localConstants.length > 0) {
-    constantWrites = constantWritesOf(ce, ast, source, rawStatements);
-    for (const declaration of localConstants) {
-      const range = statementRange(declaration, source);
-      for (const group of declaredGroups(constantWrites.byName, declaration))
-        if (
-          !isRefusedLocalConstant(
-            group,
-            constantWrites.byName.get(group.name) ?? []
-          )
-        )
-          registerConstant(constantWrites, group, range, -1);
-    }
-  }
-
-  // REDEFINITION DISCIPLINE, static tier — the names THIS UNIT declares, and
-  // where. A pass-local map, deliberately not the runtime batch stamp: the
-  // static checker also runs with no batch at all (`epsil check` calls
-  // `staticDiagnostics` directly, without `executeEpsil`), so a
-  // stamp-keyed check could never fire on the tier the diagnostic is promised
-  // for. See `docs/TYPE-SYSTEM.md`.
-  const declaredInThisUnit = new Map<string, [number, number]>();
-
-  // REDEFINITION DISCIPLINE, static tier — the function CLAUSES this unit
-  // defines: name → one entry per clause, holding its parameter domain and the
-  // range of the statement that defined it. Pass-local for the same reason as
-  // `declaredInThisUnit` above, and separate from it because a clause is
-  // identified by its parameter domain rather than by a name: a name may carry
-  // any number of clauses, and only a second clause at the SAME domain is a
-  // redefinition.
-  const clausesInThisUnit = new Map<string, ClauseSite[]>();
-
-  // SAME-SCOPE RE-DECLARATION (ruled 2026-09-05), top level: the range of
-  // the first `let`/`const` of each name this unit declared, so a second one
-  // in the SAME program is reported (`variable-redeclaration`). Across units
-  // — a re-run notebook cell, a later REPL line — a `let` re-declares
-  // legally, so the collector is pass-local, like `declaredInThisUnit`.
-  // Inside a block the same rule is enforced by `canonicalBlock`
-  // (`library/control-structures.ts`), whose error node this pass reports
-  // like any other canonicalization error.
-
-
-
-
-  // The annotations in force for the `match` exhaustiveness lint, threaded
-  // through the whole program so a top-level `let t: light = …` types `t`
-  // for the statements that follow (see `match-exhaustiveness.ts`).
-  const annotations: AnnotationScope = new Map();
-
-  // The protocol function members of the program: a call of a member that
-  // shadows a library binder (`solve`) binds no variable, the same rule
-  // `resolveLibraryNames()` applies, so the two passes read one program the
-  // same way.
-  const members = protocolFunctionMembers(ast);
-  const bindings = documentBindings(ast, source, {
-    binderSites: (node, isBound, declarationOf) =>
-      binderSitesOf(ce, node, source, members, isBound, declarationOf),
-  });
-  diagnostics.push(...absenceMarkerBindingDiagnostics(bindings));
-  diagnostics.push(...equationBodyDiagnostics(ast, source, bindings));
-  diagnostics.push(...qualifiedNameDiagnostics(ce, ast));
-
-  let statementIndex = -1;
-  for (const statement of statements) {
-    statementIndex += 1;
-    const redefinition = redefinitionDiagnostic(
-      statement,
-      source,
-      declaredInThisUnit
+    // The constants of this program, as the scope-aware walk of the program
+    // (`documentBindings()`) groups the occurrences of their names: each group
+    // of a `const` binding. The assignments to such a constant, which the run
+    // time refuses, are found once, when the constant is registered
+    // (`registerConstant()`), and each is reported with the statement that
+    // holds it. The walk is made only when the program declares a constant.
+    //
+    // A `const` in a function body or a block is registered here, before the
+    // walk of the statements: its assignments are in the same top-level
+    // statement as the declaration. A top-level `const` is registered when the
+    // walk reaches it, because the walk then knows whether the run time
+    // installs it (see below). Then the assignments to it in the function
+    // bodies of the earlier statements are reported at once (a function
+    // defined before the `const` writes the constant when it is called after
+    // it).
+    let constantWrites: ConstantWrites | undefined = undefined;
+    const topLevel = new Set(statements);
+    const localConstants = constantDeclarations(ast).filter(
+      (declaration) => !topLevel.has(declaration)
     );
-    if (redefinition !== undefined) diagnostics.push(redefinition);
-    const constantClause = constantClauseDiagnostic(
-      statement,
-      source,
-      constants
-    );
-    if (constantClause !== undefined) diagnostics.push(constantClause);
-    if (constantWrites !== undefined)
-      diagnostics.push(...(constantWrites.pending.get(order[statementIndex]) ?? []));
-
-    // A rule (`name -> value`) passed where the callee expects a function is
-    // the `->`-for-`=>` typo. It is read from the RAW statement, the only tree
-    // that still has the arrow's source offsets, and runs before boxing so a
-    // statement the engine cannot box still gets it. The engine reports the
-    // same mistake as a confusing type error about the key (a key must be a
-    // string) or about the callback (a rule is not a function), so the
-    // canonicalization errors anchored on a reported pair or on its key are
-    // suppressed below. An error anchored inside the VALUE of the pair is a
-    // different mistake and is reported.
-    const ruleSites = ruleAtFunctionSlotDiagnostics(ce, statement, source);
-    for (const site of ruleSites) diagnostics.push(site.diagnostic);
-
-    // Provenance: the `Error` nodes the statement already carries *before*
-    // canonicalization are source-authored values, not static problems.
-    const authored = authoredErrors(statement);
-
-    // The shared sequence has already established every binding and type.
-    checkDeadline(ce._deadlineFrame);
-    narrowedStatement = narrowed[order[statementIndex]] !== statement;
-    const boxed = boxedStatements[statementIndex];
-    if (boxed === undefined) continue;
-    let canonical: MathJsonExpression;
-    try { canonical = boxed.json; }
-    catch (error) {
-      if (error instanceof CancellationError) throw error;
-      // Statement-value traversal has its reporting backstop on execution.
-      // A failing serializer cannot prevent the remaining raw checks.
-      continue;
-    }
-
-    // The `match` exhaustiveness lint runs on the RAW statement (the patterns
-    // are only readable there), but only after the statement is boxed: a
-    // `type` statement registers its sum when it is canonicalized, and the
-    // lint resolves annotations against that registry.
-    matchExhaustivenessDiagnostics(
-      ce,
-      statement,
-      source,
-      diagnostics,
-      annotations
-    );
-
-    // REDEFINITION DISCIPLINE — the statement's names enter the unit's
-    // collector only now, once it has actually been canonicalized WITHOUT a
-    // declaration-blocking error. Recording them earlier would let a statement
-    // rejected for an INDEPENDENT reason (a name a host already declared, a
-    // malformed body) become the recorded "first" declaration, so a following
-    // declaration of that name would be reported as a redefinition of
-    // something that never got declared — while the runtime tier reported the
-    // real cause for both. The two tiers must report the same problem.
-    if (redefinition === undefined)
-      recordDeclaredNames(statement, canonical, source, declaredInThisUnit);
-
-    // REDEFINITION DISCIPLINE, static tier — the clause half. Unlike the
-    // declaration half it can only run AFTER the statement is canonicalized:
-    // clause identity is a TYPE-level test on the parameter domain (renaming a
-    // parameter does not make a new clause, and an unannotated parameter's type
-    // is inferred), so the raw AST cannot answer it. Records as well as
-    // reports; see `clauseRedefinitionDiagnostic`.
-    // …and an ASSIGNMENT to a name discards every clause this unit recorded for
-    // it, because assignment FULL-REPLACES (design rule D6). Without this the
-    // collector kept citing a clause the program had already thrown away:
-    // `f(n) = 1` then `f = x ↦ 42` then `f(m) = 2` reported the third statement
-    // as redefining the first, whose binding no longer existed. Runs BEFORE the
-    // clause check below so a statement that both replaces and defines is read
-    // in that order.
-    forgetReplacedClauses(statement, clausesInThisUnit);
-
-    const clauseRedefinition = clauseRedefinitionDiagnostic(
-      ce,
-      statement,
-      boxed,
-      source,
-      clausesInThisUnit
-    );
-    if (clauseRedefinition !== undefined) diagnostics.push(clauseRedefinition);
-
-    // The effect summary is read now, while the definition the statement
-    // installed is still in the pass scope (the pass rolls it back on exit),
-    // and only for a statement the pass accepted: a redefinition, or a
-    // duplicate clause, was not installed and must not rewrite the entry.
-    if (
-      effects !== undefined &&
-      redefinition === undefined &&
-      clauseRedefinition === undefined
-    )
-      recordEffectSummary(ce, statement, boxed, effects);
-
-    // The rules of the parallel loops and comprehensions of the statement
-    // (`parallel-checks.ts`). Read after the statement is boxed, so the
-    // effects of a function that this statement or an earlier one defines
-    // are known. The boxed statement gives the static types of rule 2.
-    diagnostics.push(...parallelLoopDiagnostics(ce, statement, boxed));
-
-    // A declaration whose initializer PROVABLY cannot satisfy the annotation
-    // is a static problem too, even though `Declare` only enforces it at
-    // evaluation time (see `declaredTypeMismatch`). A provable mismatch
-    // prevents this declaration from contributing constant-write facts. A possibly
-    // absent or possibly `NaN` initializer (`let r: real = zs[i]`) is
-    // reported too, but the run time installs the binding in the usual case,
-    // so the steps below still model it: a later write to that `const`, or
-    // a later use of the name, is checked as for any other binding.
-    const declMismatch = declaredTypeMismatch(ce, boxed);
-    const provableDeclMismatch = declMismatch?.provable === true;
-
-    // A `const` declaration that the run time installs makes a later
-    // `function` statement for the same name, and a later assignment to it,
-    // a runtime error. A `const` that re-declares a name of this program is
-    // refused at run time (`variable-redeclaration`), so the binding of the
-    // name stays the earlier one, which is not a constant when it is a
-    // `let`.
-    if (!provableDeclMismatch && isFunction(boxed, 'Declare')) {
-      const name = constantDeclarationName(boxed);
-      if (name !== undefined)
-        constants.set(name, statementRange(statement, source));
-      // Each name of a destructuring `const` (`const (a, b) = t`) is a
-      // constant too.
-      if (isConstantDeclaration(statement)) {
-        const range = statementRange(statement, source);
-        constantWrites ??= constantWritesOf(ce, ast, source, rawStatements);
-        // All statements are prepared already. Report their source sites
-        // now, including bodies hoisted ahead of this declaration.
-        for (const group of declaredGroups(constantWrites.byName, statement))
-          diagnostics.push(
-            ...registerConstant(constantWrites, group, range, rawStatements.length)
-          );
-      }
-    }
-
-    const errors: MathJsonExpression[] = [];
-    collectErrors(canonical, errors);
-    // Pair each collected JSON error with its BOXED twin, keyed by serialized
-    // identity: the boxed error's site operand carries the faulted operand's
-    // own binding, which the provenance note reads scope-accurately
-    // (`signatureNotes`' `boxedError` option). The boxed walk mirrors
-    // `collectErrors`' traversal (operands AND dictionary values), so the
-    // JSON walk stays authoritative and the map is a lookup aside. Two
-    // byte-identical errors in one statement collide on the key — they also
-    // dedup to one diagnostic below, so the first twin is sufficient. The one
-    // exception is an assignment to an undeclared name, reported at each
-    // assignment: the map keeps every twin in walk order, and the n-th JSON
-    // error of a key is the n-th boxed one.
-    const boxedErrorsByJson = new Map<
-      string,
-      ReturnType<ComputeEngine['box']>[]
-    >();
-    indexBoxedErrors(boxed, boxedErrorsByJson);
-    const firstTwin = (error: MathJsonExpression) =>
-      boxedErrorsByJson.get(JSON.stringify(error))?.[0];
-    const occurrences = new Map<string, number>();
-
-    // The errors inside the held stage of a pipe (`xs |> Filter("a")`). The
-    // canonical form of a pipe does not contain them, because `Pipe` holds
-    // its stage unbound until it is evaluated, so `collectErrors` above
-    // cannot see them. `pipeStageErrors` canonicalizes each held stage as
-    // the evaluation would, and gives the frame of each error: the call
-    // whose argument is at fault, with the argument counted in the stage
-    // AS WRITTEN, so the locator below finds it in the raw statement.
-    const pipeStageFrames = new Map<
-      MathJsonExpression,
-      ErrorFrameRef | undefined
-    >();
-    for (const site of pipeStageErrors(ce, boxed)) {
-      errors.push(site.error);
-      pipeStageFrames.set(site.error, site.frame);
-      const key = JSON.stringify(site.error);
-      if (site.boxed === undefined) continue;
-      const twins = boxedErrorsByJson.get(key);
-      if (twins !== undefined) twins.push(site.boxed);
-      else boxedErrorsByJson.set(key, [site.boxed]);
-    }
-    for (const site of flow.get(boxed) ?? []) {
-      const json = site.error.json;
-      errors.push(json);
-      pipeStageFrames.set(json, site.frame);
-      boxedErrorsByJson.set(JSON.stringify(json), [site.error]);
-    }
-    if (errors.length === 0 && declMismatch === undefined) continue;
-
-    const [start, end] = statementRange(statement, source);
-    const snippet = epsilSnippet(statement);
-    if (declMismatch !== undefined)
-      diagnostics.push({
-        severity: 'error',
-        message: [
-          'static-type-error',
-          declMismatch.message,
-          snippet,
-          'incompatible-type',
-        ],
-        code: 'incompatible-type',
-        range: [start, end, start],
-      });
-    // One diagnostic per distinct problem: every error in a statement shares
-    // the statement's range, so identical descriptions would be N copies of
-    // the same line.
-    const seen = new Set<string>();
-    for (const error of errors) {
-      const twins = boxedErrorsByJson.get(JSON.stringify(error));
-      if (twins !== undefined && twins.length > 0 && twins.every((node) => flow.suppresses(node))) continue;
-      const code = errorCode(error);
-      if (!isCanonicalizationError(code)) continue;
-      // An assignment to an undeclared name is reported at each assignment,
-      // as at the top level, where each assignment is a statement: in
-      // `for k in 1..3 { t = 1; t = 1 }` the second `t = 1` gives the same
-      // error as the first. The source range of its own boxed twin names the
-      // assignment, and the dedup below keys on it. A read of a local before
-      // its declaration is reported at each statement that reads it, at the
-      // name that is read: the `ErrorCode` operand of its twin has the range
-      // of that name, or of the call when the local is called
-      // (`useBeforeDeclarationCheck()`), and the range of a call `h(1)` is
-      // narrowed to the name `h` that starts it.
-      const isAssignment = code === 'assignment-to-undeclared-variable';
-      const perSite = isAssignment || code === 'read-before-declaration';
-      let siteRange: [number, number] | undefined;
-      if (perSite) {
-        const jsonKey = JSON.stringify(error);
-        const n = occurrences.get(jsonKey) ?? 0;
-        occurrences.set(jsonKey, n + 1);
-        const twin = boxedErrorsByJson.get(jsonKey)?.[n];
-        siteRange = sourceOffsetsOfBoxed(
-          isAssignment || !isFunction(twin) ? twin : twin.op1
-        );
-        const name = stringValue(operand(operand(error, 1), 2));
-        if (
-          !isAssignment &&
-          siteRange !== undefined &&
-          name &&
-          source.startsWith(name, siteRange[0])
-        )
-          siteRange = [siteRange[0], siteRange[0] + name.length];
-      }
-      const description = describeError(error);
-      // Dedup and authored-subtraction key on the SITE-LESS description
-      // (`dedupKey`): the site operand the engine now attaches names WHERE,
-      // not WHAT, so it must not split one problem into per-site diagnostics
-      // or stop an authored (site-less) error from matching the engine-minted
-      // equivalent. The rendered `description` keeps the site.
-      const key = dedupKey(error);
-      // Subtract the authored errors, one occurrence at a time: a program that
-      // builds `Error(ErrorCode("incompatible-type", …))` twice and hits one
-      // real type error still gets exactly one diagnostic.
-      const authoredCount = authored.get(key);
-      if (authoredCount !== undefined && authoredCount > 0) {
-        authored.set(key, authoredCount - 1);
-        continue;
-      }
-      // The error is taken out of the dedup below only when it is kept. An
-      // error that is hidden because it is reported as a rule at a function
-      // slot must not hide a different error later in the statement that has
-      // the same description: `(map(x -> x + 1, [1]), f(y -> y + 1))` has
-      // two errors "a key must be a string", and only the one of `map` is
-      // reported as a rule. The errors reported at each site are deduped
-      // after the locator, on their range.
-      if (!perSite && seen.has(key)) continue;
-
-      // Where the error sits in the canonical tree names the call it belongs
-      // to — the stand-in for the `ErrorTrace` breadcrumb a runtime error
-      // carries (canonicalization records none). It does double duty: it
-      // narrows the ANCHOR from the whole statement onto the offending
-      // argument, so a mistake inside a 40-line function definition does not
-      // underline the definition; and it names the callee whose signature the
-      // notes explain.
-      const frame = pipeStageFrames.has(error)
-        ? pipeStageFrames.get(error)
-        : writtenFrame(canonical, error, statement);
-      const located = locateError(
-        frame === undefined ? [] : [frame],
-        statement,
-        [start, end],
-        // A named call was permuted into declaration order, so the frame's
-        // argument index counts declaration slots; the callee's declared
-        // names let the locator find the WRITTEN argument that fills the
-        // faulted slot (see `argumentAtSlot`, error-location.ts). The seam's
-        // own normalization failures were never permuted, so their index
-        // counts written positions and is used directly.
-        (operatorName) => calleeSlotNames(ce, operatorName),
-        frameOrderOf(code),
-        undefined,
-        // When two calls match the frame (`Ln("a") + Ln(2)`), the value that
-        // the error names tells which one made it.
-        offendingValue(error)
-      );
-      // When the locator falls back to the whole statement (two calls match
-      // the frame: two equal errors in one function body), the source range
-      // that the engine recorded on the error names the site.
-      const recorded =
-        located.range[0] === start && located.range[1] === end
-          ? sourceOffsetsOfBoxed(firstTwin(error))
-          : undefined;
-      const [from, to] = siteRange ?? recorded ?? located.range;
-      // The problem is already reported as a rule at a function slot. The
-      // error on a key is recognized by its frame and its operand too, for
-      // the case where the locator cannot find the pair (two pairs in one
-      // statement) and falls back to the range of the statement.
-      const keyError =
-        frame?.name === 'KeyValuePair' && frame.index === 1
-          ? symbol(operand(error, 2))
-          : null;
-      if (
-        ruleSites.some(
-          ({ anchors, keyName }) =>
-            keyName === keyError ||
-            anchors.some(([s, e]) => from === s && to === e)
-        )
-      )
-        continue;
-      if (perSite) {
-        const siteKey = `${key}@${from}:${to}`;
-        if (seen.has(siteKey)) continue;
-        seen.add(siteKey);
-      } else seen.add(key);
-
-      const diagnostic: ParsingDiagnostic = {
-        severity: 'error',
-        // Quote the CALL that failed rather than the whole statement: with
-        // the anchor narrowed onto one argument, quoting a 40-line definition
-        // describes the wrong thing — and a host that shows only the message
-        // (an editor hover) would have nothing else to go on.
-        message: [
-          'static-type-error',
-          description,
-          located.call === undefined
-            ? snippet
-            : epsilSnippet(
-                elementRebindingWithValue(statement, located.call) ??
-                  located.call
-              ),
-          code,
-        ],
-        code,
-        range: [from, to, from],
-      };
-      const notes = signatureNotes(ce, error, {
-        calleeType: flow.calleeType(firstTwin(error)),
-        definitionSites: defSites,
-        primaryRange: [from, to],
-        enclosingFrame: frame,
-        call: located.call,
-        boxedError: firstTwin(error),
-      });
-      const firstDeclaration = code === 'variable-redeclaration'
-        ? declarationRefusalSite(firstTwin(error)) : undefined;
-      if (firstDeclaration !== undefined)
-        notes.push({ message: 'first declared here', range: [...firstDeclaration] });
-      if (notes.length > 0) diagnostic.notes = notes;
-      // Path-2 refinement (user-ruled 2026-08-23): when the mismatch is
-      // only POSSIBLE — the faulted operand is a symbol whose recorded
-      // assignment evidence merely OVERLAPS the expected type (`number`
-      // from `x = g()` at an `integer` slot; the linter is deliberately
-      // stricter than engine admission there) — say so, and suggest the
-      // annotation that would turn the possibility into a checked
-      // contract. A DEFINITE mismatch (evidence provably disjoint, e.g. a
-      // `1.5` initializer at `integer`) gets no such note: no annotation
-      // rescues it.
-      if (code === 'incompatible-type') {
-        const boxedErr = firstTwin(error);
-        // Structural read of the error node's operands, matching the boxed
-        // walk above: `ops` lives on a narrowed interface this module does
-        // not import.
-        const faulted = (
-          boxedErr as
-            { ops?: readonly ReturnType<ComputeEngine['box']>[] } | undefined
-        )?.ops?.[1];
-        const cause = operand(error, 1);
-        const expectedText =
-          cause !== null && operator(cause) === 'ErrorCode'
-            ? text([...operands(cause)][1])
-            : undefined;
-        if (
-          faulted !== undefined &&
-          isSymbol(faulted) &&
-          expectedText !== undefined &&
-          expectedText !== ''
-        ) {
-          const def = faulted.valueDefinition;
-          const evidence =
-            def === undefined
-              ? undefined
-              : flow.evidenceAt(boxed, def);
-          const expected = parseType(expectedText, ce._typeResolver);
+    if (localConstants.length > 0) {
+      constantWrites = constantWritesOf(ce, ast, source, rawStatements);
+      for (const declaration of localConstants) {
+        const range = statementRange(declaration, source);
+        for (const group of declaredGroups(constantWrites.byName, declaration))
           if (
-            evidence !== undefined &&
-            expected !== undefined &&
-            typesOverlap(evidence, expected) &&
-            !isSubtype(evidence, expected)
-          ) {
-            (diagnostic.notes ??= []).push({
-              message:
-                `the assignment gives \`${faulted.symbol}\` the type ` +
-                `\`${typeToString(evidence)}\`, which only POSSIBLY fits ` +
-                `\`${expectedText}\` — annotate the declaration ` +
-                `(\`let ${faulted.symbol}: ${expectedText}\`) to state the ` +
-                `contract and have each assignment checked against it`,
-            });
-          }
+            !isRefusedLocalConstant(
+              group,
+              constantWrites.byName.get(group.name) ?? []
+            )
+          )
+            registerConstant(constantWrites, group, range, -1);
+      }
+    }
+
+    // REDEFINITION DISCIPLINE, static tier — the names THIS UNIT declares, and
+    // where. A pass-local map, deliberately not the runtime batch stamp: the
+    // static checker also runs with no batch at all (`epsil check` calls
+    // `staticDiagnostics` directly, without `executeEpsil`), so a
+    // stamp-keyed check could never fire on the tier the diagnostic is promised
+    // for. See `docs/TYPE-SYSTEM.md`.
+    const declaredInThisUnit = new Map<string, [number, number]>();
+
+    // REDEFINITION DISCIPLINE, static tier — the function CLAUSES this unit
+    // defines: name → one entry per clause, holding its parameter domain and the
+    // range of the statement that defined it. Pass-local for the same reason as
+    // `declaredInThisUnit` above, and separate from it because a clause is
+    // identified by its parameter domain rather than by a name: a name may carry
+    // any number of clauses, and only a second clause at the SAME domain is a
+    // redefinition.
+    const clausesInThisUnit = new Map<string, ClauseSite[]>();
+
+    // SAME-SCOPE RE-DECLARATION (ruled 2026-09-05), top level: the range of
+    // the first `let`/`const` of each name this unit declared, so a second one
+    // in the SAME program is reported (`variable-redeclaration`). Across units
+    // — a re-run notebook cell, a later REPL line — a `let` re-declares
+    // legally, so the collector is pass-local, like `declaredInThisUnit`.
+    // Inside a block the same rule is enforced by `canonicalBlock`
+    // (`library/control-structures.ts`), whose error node this pass reports
+    // like any other canonicalization error.
+
+    // The annotations in force for the `match` exhaustiveness lint, threaded
+    // through the whole program so a top-level `let t: light = …` types `t`
+    // for the statements that follow (see `match-exhaustiveness.ts`).
+    const annotations: AnnotationScope = new Map();
+
+    // The protocol function members of the program: a call of a member that
+    // shadows a library binder (`solve`) binds no variable, the same rule
+    // `resolveLibraryNames()` applies, so the two passes read one program the
+    // same way.
+    const members = protocolFunctionMembers(ast);
+    const bindings = documentBindings(ast, source, {
+      binderSites: (node, isBound, declarationOf) =>
+        binderSitesOf(ce, node, source, members, isBound, declarationOf),
+    });
+    diagnostics.push(...absenceMarkerBindingDiagnostics(bindings));
+    diagnostics.push(...equationBodyDiagnostics(ast, source, bindings));
+    diagnostics.push(...qualifiedNameDiagnostics(ce, ast));
+
+    let statementIndex = -1;
+    for (const statement of statements) {
+      statementIndex += 1;
+      const redefinition = redefinitionDiagnostic(
+        statement,
+        source,
+        declaredInThisUnit
+      );
+      if (redefinition !== undefined) diagnostics.push(redefinition);
+      const constantClause = constantClauseDiagnostic(
+        statement,
+        source,
+        constants
+      );
+      if (constantClause !== undefined) diagnostics.push(constantClause);
+      if (constantWrites !== undefined)
+        diagnostics.push(
+          ...(constantWrites.pending.get(order[statementIndex]) ?? [])
+        );
+
+      // A rule (`name -> value`) passed where the callee expects a function is
+      // the `->`-for-`=>` typo. It is read from the RAW statement, the only tree
+      // that still has the arrow's source offsets, and runs before boxing so a
+      // statement the engine cannot box still gets it. The engine reports the
+      // same mistake as a confusing type error about the key (a key must be a
+      // string) or about the callback (a rule is not a function), so the
+      // canonicalization errors anchored on a reported pair or on its key are
+      // suppressed below. An error anchored inside the VALUE of the pair is a
+      // different mistake and is reported.
+      const ruleSites = ruleAtFunctionSlotDiagnostics(ce, statement, source);
+      for (const site of ruleSites) diagnostics.push(site.diagnostic);
+
+      // Provenance: the `Error` nodes the statement already carries *before*
+      // canonicalization are source-authored values, not static problems.
+      const authored = authoredErrors(statement);
+
+      // The shared sequence has already established every binding and type.
+      checkDeadline(ce._deadlineFrame);
+      narrowedStatement = narrowed[order[statementIndex]] !== statement;
+      const boxed = boxedStatements[statementIndex];
+      if (boxed === undefined) continue;
+      let canonical: MathJsonExpression;
+      try {
+        canonical = boxed.json;
+      } catch (error) {
+        if (error instanceof CancellationError) throw error;
+        // Statement-value traversal has its reporting backstop on execution.
+        // A failing serializer cannot prevent the remaining raw checks.
+        continue;
+      }
+
+      // The `match` exhaustiveness lint runs on the RAW statement (the patterns
+      // are only readable there), but only after the statement is boxed: a
+      // `type` statement registers its sum when it is canonicalized, and the
+      // lint resolves annotations against that registry.
+      matchExhaustivenessDiagnostics(
+        ce,
+        statement,
+        source,
+        diagnostics,
+        annotations
+      );
+
+      // REDEFINITION DISCIPLINE — the statement's names enter the unit's
+      // collector only now, once it has actually been canonicalized WITHOUT a
+      // declaration-blocking error. Recording them earlier would let a statement
+      // rejected for an INDEPENDENT reason (a name a host already declared, a
+      // malformed body) become the recorded "first" declaration, so a following
+      // declaration of that name would be reported as a redefinition of
+      // something that never got declared — while the runtime tier reported the
+      // real cause for both. The two tiers must report the same problem.
+      if (redefinition === undefined)
+        recordDeclaredNames(statement, canonical, source, declaredInThisUnit);
+
+      // REDEFINITION DISCIPLINE, static tier — the clause half. Unlike the
+      // declaration half it can only run AFTER the statement is canonicalized:
+      // clause identity is a TYPE-level test on the parameter domain (renaming a
+      // parameter does not make a new clause, and an unannotated parameter's type
+      // is inferred), so the raw AST cannot answer it. Records as well as
+      // reports; see `clauseRedefinitionDiagnostic`.
+      // …and an ASSIGNMENT to a name discards every clause this unit recorded for
+      // it, because assignment FULL-REPLACES (design rule D6). Without this the
+      // collector kept citing a clause the program had already thrown away:
+      // `f(n) = 1` then `f = x ↦ 42` then `f(m) = 2` reported the third statement
+      // as redefining the first, whose binding no longer existed. Runs BEFORE the
+      // clause check below so a statement that both replaces and defines is read
+      // in that order.
+      forgetReplacedClauses(statement, clausesInThisUnit);
+
+      const clauseRedefinition = clauseRedefinitionDiagnostic(
+        ce,
+        statement,
+        boxed,
+        source,
+        clausesInThisUnit
+      );
+      if (clauseRedefinition !== undefined)
+        diagnostics.push(clauseRedefinition);
+
+      // The effect summary is read now, while the definition the statement
+      // installed is still in the pass scope (the pass rolls it back on exit),
+      // and only for a statement the pass accepted: a redefinition, or a
+      // duplicate clause, was not installed and must not rewrite the entry.
+      if (
+        effects !== undefined &&
+        redefinition === undefined &&
+        clauseRedefinition === undefined
+      )
+        recordEffectSummary(ce, statement, boxed, effects);
+
+      // The rules of the parallel loops and comprehensions of the statement
+      // (`parallel-checks.ts`). Read after the statement is boxed, so the
+      // effects of a function that this statement or an earlier one defines
+      // are known. The boxed statement gives the static types of rule 2.
+      diagnostics.push(...parallelLoopDiagnostics(ce, statement, boxed));
+
+      // A declaration whose initializer PROVABLY cannot satisfy the annotation
+      // is a static problem too, even though `Declare` only enforces it at
+      // evaluation time (see `declaredTypeMismatch`). A provable mismatch
+      // prevents this declaration from contributing constant-write facts. A possibly
+      // absent or possibly `NaN` initializer (`let r: real = zs[i]`) is
+      // reported too, but the run time installs the binding in the usual case,
+      // so the steps below still model it: a later write to that `const`, or
+      // a later use of the name, is checked as for any other binding.
+      const declMismatch = declaredTypeMismatch(ce, boxed);
+      const provableDeclMismatch = declMismatch?.provable === true;
+
+      // A `const` declaration that the run time installs makes a later
+      // `function` statement for the same name, and a later assignment to it,
+      // a runtime error. A `const` that re-declares a name of this program is
+      // refused at run time (`variable-redeclaration`), so the binding of the
+      // name stays the earlier one, which is not a constant when it is a
+      // `let`.
+      if (!provableDeclMismatch && isFunction(boxed, 'Declare')) {
+        const name = constantDeclarationName(boxed);
+        if (name !== undefined)
+          constants.set(name, statementRange(statement, source));
+        // Each name of a destructuring `const` (`const (a, b) = t`) is a
+        // constant too.
+        if (isConstantDeclaration(statement)) {
+          const range = statementRange(statement, source);
+          constantWrites ??= constantWritesOf(ce, ast, source, rawStatements);
+          // All statements are prepared already. Report their source sites
+          // now, including bodies hoisted ahead of this declaration.
+          for (const group of declaredGroups(constantWrites.byName, statement))
+            diagnostics.push(
+              ...registerConstant(
+                constantWrites,
+                group,
+                range,
+                rawStatements.length
+              )
+            );
         }
       }
-      diagnostics.push(diagnostic);
-    }
-  }
-  narrowedStatement = false;
 
-  effects?.sort((a, b) => a.range[0] - b.range[0]);
-  if (preparationFailure !== undefined) throw preparationFailure;
-  return diagnostics;
-  } finally { ce._deadlineFrame = savedFrame; }
+      const errors: MathJsonExpression[] = [];
+      collectErrors(canonical, errors);
+      // Pair each collected JSON error with its BOXED twin, keyed by serialized
+      // identity: the boxed error's site operand carries the faulted operand's
+      // own binding, which the provenance note reads scope-accurately
+      // (`signatureNotes`' `boxedError` option). The boxed walk mirrors
+      // `collectErrors`' traversal (operands AND dictionary values), so the
+      // JSON walk stays authoritative and the map is a lookup aside. Two
+      // byte-identical errors in one statement collide on the key — they also
+      // dedup to one diagnostic below, so the first twin is sufficient. The one
+      // exception is an assignment to an undeclared name, reported at each
+      // assignment: the map keeps every twin in walk order, and the n-th JSON
+      // error of a key is the n-th boxed one.
+      const boxedErrorsByJson = new Map<
+        string,
+        ReturnType<ComputeEngine['box']>[]
+      >();
+      indexBoxedErrors(boxed, boxedErrorsByJson);
+      const firstTwin = (error: MathJsonExpression) =>
+        boxedErrorsByJson.get(JSON.stringify(error))?.[0];
+      const occurrences = new Map<string, number>();
+
+      // The errors inside the held stage of a pipe (`xs |> Filter("a")`). The
+      // canonical form of a pipe does not contain them, because `Pipe` holds
+      // its stage unbound until it is evaluated, so `collectErrors` above
+      // cannot see them. `pipeStageErrors` canonicalizes each held stage as
+      // the evaluation would, and gives the frame of each error: the call
+      // whose argument is at fault, with the argument counted in the stage
+      // AS WRITTEN, so the locator below finds it in the raw statement.
+      const pipeStageFrames = new Map<
+        MathJsonExpression,
+        ErrorFrameRef | undefined
+      >();
+      for (const site of pipeStageErrors(ce, boxed)) {
+        errors.push(site.error);
+        pipeStageFrames.set(site.error, site.frame);
+        const key = JSON.stringify(site.error);
+        if (site.boxed === undefined) continue;
+        const twins = boxedErrorsByJson.get(key);
+        if (twins !== undefined) twins.push(site.boxed);
+        else boxedErrorsByJson.set(key, [site.boxed]);
+      }
+      for (const site of flow.get(boxed) ?? []) {
+        const json = site.error.json;
+        errors.push(json);
+        pipeStageFrames.set(json, site.frame);
+        boxedErrorsByJson.set(JSON.stringify(json), [site.error]);
+      }
+      if (errors.length === 0 && declMismatch === undefined) continue;
+
+      const [start, end] = statementRange(statement, source);
+      const snippet = epsilSnippet(statement);
+      if (declMismatch !== undefined)
+        diagnostics.push({
+          severity: 'error',
+          message: [
+            'static-type-error',
+            declMismatch.message,
+            snippet,
+            'incompatible-type',
+          ],
+          code: 'incompatible-type',
+          range: [start, end, start],
+        });
+      // One diagnostic per distinct problem: every error in a statement shares
+      // the statement's range, so identical descriptions would be N copies of
+      // the same line.
+      const seen = new Set<string>();
+      for (const error of errors) {
+        const twins = boxedErrorsByJson.get(JSON.stringify(error));
+        if (
+          twins !== undefined &&
+          twins.length > 0 &&
+          twins.every((node) => flow.suppresses(node))
+        )
+          continue;
+        const code = errorCode(error);
+        if (!isCanonicalizationError(code)) continue;
+        // An assignment to an undeclared name is reported at each assignment,
+        // as at the top level, where each assignment is a statement: in
+        // `for k in 1..3 { t = 1; t = 1 }` the second `t = 1` gives the same
+        // error as the first. The source range of its own boxed twin names the
+        // assignment, and the dedup below keys on it. A read of a local before
+        // its declaration is reported at each statement that reads it, at the
+        // name that is read: the `ErrorCode` operand of its twin has the range
+        // of that name, or of the call when the local is called
+        // (`useBeforeDeclarationCheck()`), and the range of a call `h(1)` is
+        // narrowed to the name `h` that starts it.
+        const isAssignment = code === 'assignment-to-undeclared-variable';
+        const perSite = isAssignment || code === 'read-before-declaration';
+        let siteRange: [number, number] | undefined;
+        if (perSite) {
+          const jsonKey = JSON.stringify(error);
+          const n = occurrences.get(jsonKey) ?? 0;
+          occurrences.set(jsonKey, n + 1);
+          const twin = boxedErrorsByJson.get(jsonKey)?.[n];
+          siteRange = sourceOffsetsOfBoxed(
+            isAssignment || !isFunction(twin) ? twin : twin.op1
+          );
+          const name = stringValue(operand(operand(error, 1), 2));
+          if (
+            !isAssignment &&
+            siteRange !== undefined &&
+            name &&
+            source.startsWith(name, siteRange[0])
+          )
+            siteRange = [siteRange[0], siteRange[0] + name.length];
+        }
+        const description = describeError(error);
+        // Dedup and authored-subtraction key on the SITE-LESS description
+        // (`dedupKey`): the site operand the engine now attaches names WHERE,
+        // not WHAT, so it must not split one problem into per-site diagnostics
+        // or stop an authored (site-less) error from matching the engine-minted
+        // equivalent. The rendered `description` keeps the site.
+        const key = dedupKey(error);
+        // Subtract the authored errors, one occurrence at a time: a program that
+        // builds `Error(ErrorCode("incompatible-type", …))` twice and hits one
+        // real type error still gets exactly one diagnostic.
+        const authoredCount = authored.get(key);
+        if (authoredCount !== undefined && authoredCount > 0) {
+          authored.set(key, authoredCount - 1);
+          continue;
+        }
+        // The error is taken out of the dedup below only when it is kept. An
+        // error that is hidden because it is reported as a rule at a function
+        // slot must not hide a different error later in the statement that has
+        // the same description: `(map(x -> x + 1, [1]), f(y -> y + 1))` has
+        // two errors "a key must be a string", and only the one of `map` is
+        // reported as a rule. The errors reported at each site are deduped
+        // after the locator, on their range.
+        if (!perSite && seen.has(key)) continue;
+
+        // Where the error sits in the canonical tree names the call it belongs
+        // to — the stand-in for the `ErrorTrace` breadcrumb a runtime error
+        // carries (canonicalization records none). It does double duty: it
+        // narrows the ANCHOR from the whole statement onto the offending
+        // argument, so a mistake inside a 40-line function definition does not
+        // underline the definition; and it names the callee whose signature the
+        // notes explain.
+        const frame = pipeStageFrames.has(error)
+          ? pipeStageFrames.get(error)
+          : writtenFrame(canonical, error, statement);
+        const located = locateError(
+          frame === undefined ? [] : [frame],
+          statement,
+          [start, end],
+          // A named call was permuted into declaration order, so the frame's
+          // argument index counts declaration slots; the callee's declared
+          // names let the locator find the WRITTEN argument that fills the
+          // faulted slot (see `argumentAtSlot`, error-location.ts). The seam's
+          // own normalization failures were never permuted, so their index
+          // counts written positions and is used directly.
+          (operatorName) => calleeSlotNames(ce, operatorName),
+          frameOrderOf(code),
+          undefined,
+          // When two calls match the frame (`Ln("a") + Ln(2)`), the value that
+          // the error names tells which one made it.
+          offendingValue(error)
+        );
+        // When the locator falls back to the whole statement (two calls match
+        // the frame: two equal errors in one function body), the source range
+        // that the engine recorded on the error names the site.
+        const recorded =
+          located.range[0] === start && located.range[1] === end
+            ? sourceOffsetsOfBoxed(firstTwin(error))
+            : undefined;
+        const [from, to] = siteRange ?? recorded ?? located.range;
+        // The problem is already reported as a rule at a function slot. The
+        // error on a key is recognized by its frame and its operand too, for
+        // the case where the locator cannot find the pair (two pairs in one
+        // statement) and falls back to the range of the statement.
+        const keyError =
+          frame?.name === 'KeyValuePair' && frame.index === 1
+            ? symbol(operand(error, 2))
+            : null;
+        if (
+          ruleSites.some(
+            ({ anchors, keyName }) =>
+              keyName === keyError ||
+              anchors.some(([s, e]) => from === s && to === e)
+          )
+        )
+          continue;
+        if (perSite) {
+          const siteKey = `${key}@${from}:${to}`;
+          if (seen.has(siteKey)) continue;
+          seen.add(siteKey);
+        } else seen.add(key);
+
+        const diagnostic: ParsingDiagnostic = {
+          severity: 'error',
+          // Quote the CALL that failed rather than the whole statement: with
+          // the anchor narrowed onto one argument, quoting a 40-line definition
+          // describes the wrong thing — and a host that shows only the message
+          // (an editor hover) would have nothing else to go on.
+          message: [
+            'static-type-error',
+            description,
+            located.call === undefined
+              ? snippet
+              : epsilSnippet(
+                  elementRebindingWithValue(statement, located.call) ??
+                    located.call
+                ),
+            code,
+          ],
+          code,
+          range: [from, to, from],
+        };
+        const notes = signatureNotes(ce, error, {
+          calleeType: flow.calleeType(firstTwin(error)),
+          definitionSites: defSites,
+          primaryRange: [from, to],
+          enclosingFrame: frame,
+          call: located.call,
+          boxedError: firstTwin(error),
+        });
+        const firstDeclaration =
+          code === 'variable-redeclaration'
+            ? declarationRefusalSite(firstTwin(error))
+            : undefined;
+        if (firstDeclaration !== undefined)
+          notes.push({
+            message: 'first declared here',
+            range: [...firstDeclaration],
+          });
+        if (notes.length > 0) diagnostic.notes = notes;
+        // Path-2 refinement (user-ruled 2026-08-23): when the mismatch is
+        // only POSSIBLE — the faulted operand is a symbol whose recorded
+        // assignment evidence merely OVERLAPS the expected type (`number`
+        // from `x = g()` at an `integer` slot; the linter is deliberately
+        // stricter than engine admission there) — say so, and suggest the
+        // annotation that would turn the possibility into a checked
+        // contract. A DEFINITE mismatch (evidence provably disjoint, e.g. a
+        // `1.5` initializer at `integer`) gets no such note: no annotation
+        // rescues it.
+        if (code === 'incompatible-type') {
+          const boxedErr = firstTwin(error);
+          // Structural read of the error node's operands, matching the boxed
+          // walk above: `ops` lives on a narrowed interface this module does
+          // not import.
+          const faulted = (
+            boxedErr as
+              { ops?: readonly ReturnType<ComputeEngine['box']>[] } | undefined
+          )?.ops?.[1];
+          const cause = operand(error, 1);
+          const expectedText =
+            cause !== null && operator(cause) === 'ErrorCode'
+              ? text([...operands(cause)][1])
+              : undefined;
+          if (
+            faulted !== undefined &&
+            isSymbol(faulted) &&
+            expectedText !== undefined &&
+            expectedText !== ''
+          ) {
+            const def = faulted.valueDefinition;
+            const evidence =
+              def === undefined ? undefined : flow.evidenceAt(boxed, def);
+            const expected = parseType(expectedText, ce._typeResolver);
+            if (
+              evidence !== undefined &&
+              expected !== undefined &&
+              typesOverlap(evidence, expected) &&
+              !isSubtype(evidence, expected)
+            ) {
+              (diagnostic.notes ??= []).push({
+                message:
+                  `the assignment gives \`${faulted.symbol}\` the type ` +
+                  `\`${typeToString(evidence)}\`, which only POSSIBLY fits ` +
+                  `\`${expectedText}\` — annotate the declaration ` +
+                  `(\`let ${faulted.symbol}: ${expectedText}\`) to state the ` +
+                  `contract and have each assignment checked against it`,
+              });
+            }
+          }
+        }
+        diagnostics.push(diagnostic);
+      }
+    }
+    narrowedStatement = false;
+
+    effects?.sort((a, b) => a.range[0] - b.range[0]);
+    if (preparationFailure !== undefined) throw preparationFailure;
+    return diagnostics;
+  } finally {
+    ce._deadlineFrame = savedFrame;
+  }
 }
 
 /**
@@ -1818,7 +1832,11 @@ function clauseRedefinitionDiagnostic(
 
   return {
     severity: 'error',
-    message: ['function-redefinition', name, clauseRedefinitionMessage(name, first.range)],
+    message: [
+      'function-redefinition',
+      name,
+      clauseRedefinitionMessage(name, first.range),
+    ],
     range: [range[0], range[1], range[0]],
     notes: [
       {

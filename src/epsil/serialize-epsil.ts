@@ -3146,7 +3146,9 @@ export function serializeEpsil(
   // scope, so the program is written as the inner block alone, which parses
   // back to the same wrapped shape.
   if (operator(expr) === 'Program')
-    return fmt.stack(...mapArgs<FormattingBlock>(expr, serializeExpression)).serialize(0);
+    return fmt
+      .stack(...mapArgs<FormattingBlock>(expr, serializeExpression))
+      .serialize(0);
   return serializeExpression(expr).serialize(0);
 }
 /**

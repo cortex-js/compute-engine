@@ -435,7 +435,11 @@ export function printProgram(
         line('}');
         i.outs.forEach((o, j) =>
           line(
-            syntax.declare(type(o), name(o), v.join(c, arm('a')[j], arm('b')[j]))
+            syntax.declare(
+              type(o),
+              name(o),
+              v.join(c, arm('a')[j], arm('b')[j])
+            )
           )
         );
       } else if (i.k === 'if') {

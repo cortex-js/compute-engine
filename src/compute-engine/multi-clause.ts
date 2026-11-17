@@ -4,7 +4,10 @@ import type {
   FunctionSignature,
   Type,
 } from '../common/type/types.js';
-import { checkSameUnitClauseRedefinition, isSameStatementReRegistration } from './declaration-origin.js';
+import {
+  checkSameUnitClauseRedefinition,
+  isSameStatementReRegistration,
+} from './declaration-origin.js';
 import {
   clauseSignatureOf as clauseSignatureOfType,
   noteSingleClauseDeclared,
@@ -866,10 +869,12 @@ export function defineFunctionClause(
   // Checked BEFORE the prospective state is mutated, so a refused clause
   // leaves the installed definition byte-identical — the same discipline the
   // effect-row checks below observe.
-  const at = clauses.findIndex((c) =>
-    (c.origin !== undefined && origin !== undefined &&
-      isSameStatementReRegistration(c.origin, origin)) ||
-    sameParameterDomain(c.signature, incoming.signature)
+  const at = clauses.findIndex(
+    (c) =>
+      (c.origin !== undefined &&
+        origin !== undefined &&
+        isSameStatementReRegistration(c.origin, origin)) ||
+      sameParameterDomain(c.signature, incoming.signature)
   );
   if (at >= 0) {
     checkSameUnitClauseRedefinition(id, clauses[at].origin, origin);
@@ -1306,8 +1311,11 @@ export function loosenForClauseDefinition(
   // This shell is temporary, not an installation. A committed update
   // would rebuild dependents against the shell and consume the dependency
   // before the final clause signature exists.
-  (binding as { operator: unknown }).operator =
-    new _BoxedOperatorDefinition(ce, id, { signature: 'function' });
+  (binding as { operator: unknown }).operator = new _BoxedOperatorDefinition(
+    ce,
+    id,
+    { signature: 'function' }
+  );
   return () => {
     (binding as { operator: unknown }).operator = saved;
   };

@@ -75,7 +75,10 @@ export function evaluateCompiled(
       staticDiagnostics(engine, parsed.ast, source, diagnostics);
       expr = engine.box(parsed.ast);
       // Empty source has no code to generate and prints no value.
-      if (expr.isSame(engine.Nothing) || (isFunction(expr, 'Program') && expr.nops === 0))
+      if (
+        expr.isSame(engine.Nothing) ||
+        (isFunction(expr, 'Program') && expr.nops === 0)
+      )
         return engine.Nothing;
     }
 

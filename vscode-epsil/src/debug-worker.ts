@@ -851,8 +851,12 @@ function run(): void {
     if (result.diagnostics.length > 0)
       output(
         'stderr',
-        formatDiagnostics(result.diagnostics, sourceText, config.program, false) +
-          '\n'
+        formatDiagnostics(
+          result.diagnostics,
+          sourceText,
+          config.program,
+          false
+        ) + '\n'
       );
 
     if (

@@ -121,25 +121,25 @@ export const JS_INTERVAL: Syntax = Object.freeze({
     ...Object.fromEntries(
       Object.entries(BINARY).map(([op, k]) => [op, ia(k, 2)])
     ),
-    neg: '_IA.negate($0)',
-    negdiv: '_IA.negDiv($0, $1)',
-    pow: '_IA.powReal($0, $1)',
+    'neg': '_IA.negate($0)',
+    'negdiv': '_IA.negDiv($0, $1)',
+    'pow': '_IA.powReal($0, $1)',
     // The exponent is a constant point: its double.
     'pow.branch': '_IA.powRealBranch($0, $1.lo, true)',
     'pow.branch.even': '_IA.powRealBranch($0, $1.lo, false)',
     'pow.principal': '_IA.pow($0, $1.lo)',
     // A run-time exponent over a base whose enclosure is `>= 0`.
     'pow.interval': '_IA.powInterval($0, $1)',
-    root: '_IA.nthRootInterval($0, $1)',
-    deg: `_IA.div(_IA.mul($0, ${enclosure(Math.PI, 1)}), { lo: 180, hi: 180 })`,
-    draw: '{ lo: 0, hi: 1 }',
-    atleast: '_IA.atLeast($0, $1)',
-    atmost: '_IA.atMost($0, $1)',
+    'root': '_IA.nthRootInterval($0, $1)',
+    'deg': `_IA.div(_IA.mul($0, ${enclosure(Math.PI, 1)}), { lo: 180, hi: 180 })`,
+    'draw': '{ lo: 0, hi: 1 }',
+    'atleast': '_IA.atLeast($0, $1)',
+    'atmost': '_IA.atMost($0, $1)',
     // An index and a length are numbers (`plain.ts`).
-    elem: '$0[$1]',
-    at: '_IA.at($0, $1)',
-    rangecount: '_IA.rangeCount($0, $1, $2)',
-    rangestep: '($1 >= $0 ? 1 : -1)',
+    'elem': '$0[$1]',
+    'at': '_IA.at($0, $1)',
+    'rangecount': '_IA.rangeCount($0, $1, $2)',
+    'rangestep': '($1 >= $0 ? 1 : -1)',
     ...PLAIN_SPELLINGS,
   },
   // A loop that fills an array, with no `Array.from()`.

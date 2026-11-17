@@ -1529,15 +1529,12 @@ export function withCodomainForAbsentAnswer(
   operandTypes: ReadonlyArray<Type> | (() => ReadonlyArray<Type>)
 ): Type {
   if (stripMissingFromType(answered) !== 'never') return answered;
-  const types = typeof operandTypes === 'function' ? operandTypes() : operandTypes;
+  const types =
+    typeof operandTypes === 'function' ? operandTypes() : operandTypes;
   // Only when an operand IS absent (typed `missing`, or `never` as a symbol
   // assigned `Missing` is): a handler may answer `never` for a reason of its
   // own — a contradiction it wants surfaced — and that answer is left alone.
-  if (
-    !types.some(
-      (t) => t === 'never' || stripMissingFromType(t) === 'never'
-    )
-  )
+  if (!types.some((t) => t === 'never' || stripMissingFromType(t) === 'never'))
     return answered;
   // A polymorphic signature (`-> collection where T`) reads its result
   // through the bounds of its type variables.
