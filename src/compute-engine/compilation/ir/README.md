@@ -990,22 +990,29 @@ one-clause `Comprehension`) over a source of a constant length of 1 to 64
 element in order: a `vecN` or a `float[n]` (`Map(f, L)` of `L: list<real^3>`,
 `Map(f, List(a, b, c))`). The elements of such builds in one program are at most
 4,096; past that, a `Filter`, a `Range` and a list of a run-time length, the
-build declines on GLSL. The short lists: in the interval mode, a list of a
-constant length of 1 to 16 elements (`MAX_UNROLLED_LIST` of `index.ts`, the
-option `unrollBuilds` of the lowering and of the passes; 0 on JavaScript,
-and GLSL keeps its 64 for builds) is written out. A build over a source of
+build declines on GLSL. The short lists: on JavaScript (the interval mode
+included; not in the bigint and complex modes), a list of a constant length of
+1 to 16 elements (`MAX_UNROLLED_LIST` of `index.ts`, the option
+`unrollBuilds` of the lowering and of the passes; GLSL keeps its 64 for
+builds) is written out. A build over a source of
 such a length, and a list that `built()` makes (a `Range`, a `Comprehension`
-of several clauses), is the list of its elements, as on GLSL. A reduction of
+of several clauses), is the list of its elements, as on GLSL; on JavaScript a
+build whose body has an effect (a draw) keeps its loop, as a sum written out
+does, so that a draw stays one site of its frame and the warnings are the
+loop's. A reduction of
 such a list is folded through the sums written out (below), from the value
 the loop starts from. One exception: for `Sum`, `Product`, `Max` and `Min`
 (`reduction()`), when that value is still the identity (no scalar operand
 and no list before this one), and the loop's accumulator has the lane of the
-first element, the fold starts at the first element: `Sum(L)` of
-`L: list<real^3>` is `(L₁ + L₂) + L₃`. The identity is an exact point (0 for a
-`Sum`, 1 for a `Product`, ∓∞ for `Max` and `Min`), and the kernel on the
-identity and the first element gives that element or a hull of it one
-outward step wider: the fold from the first element gives the same enclosure
-or a tighter one, never a value outside it. `Reduce(L, f, init)` starts
+first element, the fold starts at the first element: in the interval mode
+`Sum(L)` of `L: list<real^3>` is `(L₁ + L₂) + L₃`. The identity is an exact
+point (0 for a `Sum`, 1 for a `Product`, ∓∞ for `Max` and `Min`), and the
+kernel on the identity and the first element gives that element or a hull of
+it one outward step wider: the fold from the first element gives the same
+enclosure or a tighter one, never a value outside it. On doubles
+`1 · a`, `max(−∞, a)` and `min(+∞, a)` are `a` (−0 and NaN included), but
+`0 + −0` is `0`: outside the interval mode a `Sum` starts from 0, as its loop
+(`((0 + L₁) + L₂) + L₃`, so `Sum(L)` of `L = [−0, −0]` is `0`). `Reduce(L, f, init)` starts
 from `init`, as its loop does. A list of one element is that element, and
 a list of 0 elements keeps the loop (and the value of `Max` and `Min` of no
 element, NaN). Builds written out are at most 4,096 elements in a program,
@@ -1026,14 +1033,21 @@ each of a number type, is the reduction of its elements, with no array and no
 loop: `Max(List(x, y, x·y))` is `Max(x, y, x·y)`, and `Sum(List(a, b))` is
 `(0 + a) + b`, the fold of the loop, and `a + b` in the interval mode, where
 the `0 +` is an exact zero (`Product(List(…))` is `Reduce` in the
-canonical form and keeps the loop). In the interval mode (on JavaScript by an
-internal switch, `SliceOptions.unrollSums`, off by default; never on GLSL), a
-`Sum` or a `Product` with `Limits` of two integer constant bounds and 1 to 100
-passes is written out: its body is lowered once per index, the index bound to
+canonical form and keeps the loop). On JavaScript (the interval mode included;
+not in the bigint and complex modes, and never on GLSL; the internal switch
+`SliceOptions.unrollSums` turns it off for a test), a `Sum` or a `Product`
+with `Limits` of two integer constant bounds and 1 to 100 passes is written
+out: its body is lowered once per index, the index bound to
 the constant, and the terms are folded from the identity in ascending order,
 the operations of the loop (`Sum(sin(k·x)/k, k = 1..3)` is
-`((0 + sin(1·x)/1) + sin(2·x)/2) + sin(3·x)/3`, with no `0 +` after `fold`), so that a part that reads
-only the index is a constant (`(-1)^i/i`, computed once). A term that reads
+`((0 + sin(1·x)/1) + sin(2·x)/2) + sin(3·x)/3`, with no `0 +` after `fold` in
+the interval mode), so that a part that reads
+only the index is a constant (`(-1)^i/i`, computed once). One exception to
+the operations of the loop: a constant index selects the kernel of a
+constant operand, so `Log(x, k)` at k = 10 is `log10(x)` and at k = 2
+`log2(x)`, where the loop computes `ln(x)/ln(k)` (`Sum(Floor(Log(x, k)),
+Limits(k, 10, 10))` at x = 1000 is 3, the interpreter's value, where the loop
+gives 2). A term that reads
 no index is one value, added once per pass. The sum keeps its loop when its
 body has an effect (a draw, a read of `vars`: n copies would be n draw sites),
 holds a loop (a `Loop`, an inner sum that is not written out) or calls a
@@ -1044,8 +1058,26 @@ comparison of constants is still an operation), past the `iterationBudget`,
 and when the bodies written out in the program would pass 4,096 (the budget
 of the builds of GLSL, shared) or half the nodes left to lower: in a nest of
 constant sums the inner ones are written out, and the outer one when they all
-are. A decline in a term after a user function began to be lowered is the
-program's: the function stays registered. An input read for the first time in
+are. The attempt stops at the first term that holds a loop, and a sum whose
+term held a loop that no limit made is not attempted again in the lowering
+(`looped`); a sum whose nest of sums of constant bounds (literals, or the
+values that free names hold) counts more bodies than are left is not
+attempted (`bodies()`); after the first sum refused by a limit, the lowering
+attempts no more sums (`limited`), so a small sum that follows it keeps its
+loop: in a nest of few terms each level would double the attempts. A nest of
+fourteen sums of 3 terms or four of 100 compiles in about 0.1 s, where each
+sum tried at each term of the sums around it took seconds or the whole
+memory. The passes written out are not counted by the deadline
+or the `iterationBudget`, so a program made of them can run past `timeLimit`:
+a host that needs a bound runs the compiled function in a worker (the
+user's decision of 2026-11-16). A decline in a term after a user function began to be lowered is the
+program's: the function stays registered. When the lowering declines after it
+attempted to write a sum or a short list out (that decline, or the limit of
+the nodes),
+`sliceProgram()` lowers the program again with neither, and with the rule
+`'loop'` of `inline`: a program compiles when its loops compile, and the
+decline reported is the loops' (`Sum(If(k < 0, g(x), Floor(Sqrt(k))),
+Limits(k, -1, 3))` with a user function `g`). An input read for the first time in
 a term that is refused or declines stays a parameter of the entry: the loop
 reads it too;
 `ElementMax` and `ElementMin` are rows that thread (`ElementMax(D, 0.3)` is a
@@ -1731,18 +1763,23 @@ stated length is a `vecN` or a `float[n]` (`vec2 _fn_ir_u0_pt(float v0)`).
 
 The pass `inline` (`passes.ts`, before `cse` and `invariants`) replaces a call
 in the body of a `loop`, a `build` or a `filter` with a copy of the callee's
-lowered body, so that the passes see the calls it makes; in the interval mode
-also a call of a function that its caller calls twice or more (the pass option
-`inline`, `'loop'` or `'repeated'`, set in `sliceProgram()`), and a call whose
-result is a list of a constant length of at most 16 elements (the pass option
-`unrollBuilds`; "Lists", the short lists), under the conditions below and the
-budget of the rule `'repeated'`. In Tycho's
+lowered body, so that the passes see the calls it makes; where sums and short
+lists are written out (JavaScript, the interval mode included, not the bigint
+and complex modes) also a call of a function that its caller calls twice or
+more (the pass option `inline`, `'loop'` or `'repeated'`, set in
+`sliceProgram()`), and a call whose result is a list of a constant length of
+at most 16 elements (the pass option `unrollBuilds`; "Lists", the short
+lists), under the conditions below and the budget of the rule `'repeated'`.
+A sum written out takes its calls out of the loop that the rule `'loop'`
+copies: with that rule `showcase/voronoi-diagram` #0 of Tycho's corpus is a
+call of `n(x, y, k)` at each term, 6.8 times slower than its loop (38 µs a
+call against 5.6), and 4.4 µs with the rule `'repeated'`. In Tycho's
 `voronoi-diagram`, `n(x, y, k)` is called at each pass of the loops of `Z`, `v`,
 `u` and `H`, and its copy leaves a call `F(x, y)` of no index, which
 `invariants` moves before the loop (from about 40 µs a call to about 6, the
 time of the existing compiler). The callee qualifies when it is not effectful
 and not on a cycle of calls (nor, by the rule `'repeated'`, its caller, whose
-`if` runs one arm in the interval mode), its body holds no `loop` and no
+`if` runs one arm in the interval mode, a rule kept on JavaScript), its body holds no `loop` and no
 region instruction (a function that loops stays a call, which `invariants`
 can move), it has at most `INLINE_SIZE` instructions, nested regions
 included, and one result of the lane of the call's result, each list argument has the lane of its parameter,
@@ -1762,7 +1799,7 @@ a parameter is the argument, and a call stays when that argument has another
 lane than the call's result (`id(k)` of an integer index for a real `id`,
 whose value a build would read as an integer). The copies of a program are at
 most `INLINE_BUDGET` instructions, 1,000 by the rule `'loop'` and 4,000 by the
-rule `'repeated'` (the interval mode's, where the sums written out multiply
+rule `'repeated'` (where the sums written out multiply
 the sites: a function read at the 16 terms of each of four sums needs about
 1,900); past it, calls stay, so a chain of functions each calling the previous
 three times stops there. A copied call of a function
@@ -1807,8 +1844,8 @@ pass is off; `symbolDeps` still names it (`captures`). The `bigint` mode does no
 - The `fold` pass writes the element of an operation on lists (`elem` of an
   `add` of points) once per list and index in a region and the regions in it,
   not once per path of a shared graph.
-- In the interval mode `scalarize` writes an element-wise operation of at
-  most 16 elements one element at a time (the short lists of "Lists"); a
+- On JavaScript (not in the bigint and complex modes) `scalarize` writes an
+  element-wise operation of at most 16 elements one element at a time (the short lists of "Lists"); a
   longer one stays element-wise.
 - On GLSL `scalarize` writes an element-wise operation as one expression per
   element for a list of at most 64 elements (`SCALARIZE_LIMIT`); over a longer

@@ -10,7 +10,10 @@
  * once, before the loop.
  *
  * Each program is compared with the same compilation without the pass
- * (`compileSlice()` with `inline: false`): on JavaScript the values are the
+ * (`compileSlice()` with `inline: false`; with `unrollSums: false`, so that
+ * a `Sum` of constant bounds stays the loop whose calls the rule `'loop'`
+ * copies, as on JavaScript before sums were written out there; the written
+ * out sums are in `ir-js-unroll.test.ts`): on JavaScript the values are the
  * same bit for bit, and they agree with the interpreter. On GLSL the
  * programs run in WebGL2 (the headless Chromium of
  * `scripts/glsl-check/glsl-driver.ts`, skipped without the browser) and
@@ -65,7 +68,8 @@ const slice = (json: Json, inline: boolean) =>
   compileSlice(box(json), {
     target: 'javascript',
     passes: { ...ALL_PASSES, inline: inline && 'loop' },
-  });
+    unrollSums: false,
+  } as never);
 
 function interpreted(json: Json, point: Point): number {
   const values = Object.fromEntries(

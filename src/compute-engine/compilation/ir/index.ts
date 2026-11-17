@@ -345,18 +345,23 @@ export type SliceOptions = {
   readonly storage?: readonly string[];
   /** JavaScript: a `Sum` or a `Product` of constant bounds of at most
    *  `MAX_UNROLLED_SUM` passes is written out (`LowerOptions.unrollSums`).
-   *  Default: in the interval mode only; never on GLSL, whose compiler
-   *  unrolls a constant loop itself. Not an option of `compile()`.
+   *  Default: on, except in the bigint and complex modes; never on GLSL,
+   *  whose compiler unrolls a constant loop itself. `false` (a test of a
+   *  loop of constant bounds) also gives the pass `inline` the rule
+   *  `'loop'` outside the interval mode. Not an option of `compile()`.
    *  @internal */
   readonly unrollSums?: boolean;
+  /** Called at each attempt to write a sum or a short list out (a test of
+   *  the attempts of a nest). @internal */
+  readonly attempted?: () => void;
 };
 
 /** The most passes of a `Sum` or a `Product` written out: the limit of the
  *  existing targets (`MAX_UNROLLED_CONSTANT_LIST_WIDTH`). */
 const MAX_UNROLLED_SUM = 100;
 
-/** The longest list of a constant length that the interval mode writes
- *  out (README, "Lists", the short lists). */
+/** The longest list of a constant length that JavaScript writes out
+ *  (README, "Lists", the short lists). */
 const MAX_UNROLLED_LIST = 16;
 
 /**
@@ -480,7 +485,13 @@ export function sliceProgram(
       `the ${options.mode} mode on ${options.target}`
     );
   const { rows, syntax } = tables(options);
-  const p = lower(expr, rows, {
+  // Sums and short lists written out: JavaScript, the interval mode
+  // included, not the bigint and complex modes (README, "Lists").
+  let unroll =
+    options.target === 'javascript' && !bigint && options.mode !== 'complex';
+  let sums = unroll && (options.unrollSums ?? true);
+  let attempted = false;
+  const lowering = {
     fold: options.constantFold,
     mode: options.mode,
     // The interval mode writes no NaN test of the budget (NaN reads as
@@ -492,23 +503,35 @@ export function sliceProgram(
     // Not past the `iterationBudget`: such a loop is NaN, or refuses to
     // start in the interval mode. Not in the complex mode, where a real
     // term of a constant index is in a loop a complex one.
-    unrollSums:
-      options.target === 'javascript' &&
-      !bigint &&
-      options.mode !== 'complex' &&
-      (options.unrollSums ?? interval)
-        ? Math.min(
-            MAX_UNROLLED_SUM,
-            Math.floor(options.iterationBudget ?? Infinity)
-          )
-        : 0,
-    unrollBuilds: interval ? MAX_UNROLLED_LIST : 0,
+    unrollSums: sums
+      ? Math.min(
+          MAX_UNROLLED_SUM,
+          Math.floor(options.iterationBudget ?? Infinity)
+        )
+      : 0,
+    unrollBuilds: unroll ? MAX_UNROLLED_LIST : 0,
     vars: Object.keys(options.vars ?? {}),
     objectVars: Object.keys(options.vars ?? {}).filter((n) =>
       readsVarsObject(options.vars![n])
     ),
     varsTexts: options.vars,
-  });
+    attempted: () => {
+      attempted = true;
+      options.attempted?.();
+    },
+  };
+  // A lowering that attempted to write a sum or a list out can decline
+  // where the loops do not (a term at a constant index that the loop's
+  // kernel computes, a limit of the nodes): the lowering of the loops is
+  // then the program's, and its decline the one reported.
+  let p: Program;
+  try {
+    p = lower(expr, rows, lowering);
+  } catch (error) {
+    if (!(error instanceof Decline) || !attempted) throw error;
+    unroll = sums = false;
+    p = lower(expr, rows, { ...lowering, unrollSums: 0, unrollBuilds: 0 });
+  }
   verify(p, rows);
   // The interval mode draws nothing: a frame has no warning.
   const warnings = interval ? [] : seededWarnings(p, rows);
@@ -528,13 +551,14 @@ export function sliceProgram(
       ...(bigint
         ? { fold: false, hoist: false, inline: false, invariants: false }
         : {}),
-      // The interval mode also copies a call made twice by its caller.
       ...(interval
+        ? { fold: passes.fold && 'lists', hoist: false, strength: false }
+        : {}),
+      // Where sums are written out, a call made twice by its caller is also
+      // copied (README, "User functions").
+      ...(unroll
         ? {
-            fold: passes.fold && 'lists',
-            hoist: false,
-            strength: false,
-            inline: passes.inline && 'repeated',
+            inline: passes.inline && (interval || sums ? 'repeated' : 'loop'),
             unrollBuilds: options.passes === false ? 0 : MAX_UNROLLED_LIST,
           }
         : {}),

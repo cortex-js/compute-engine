@@ -969,9 +969,14 @@ describe('a user function that reads an input of the compilation', () => {
       { symbolic: ['m_s'] }
     );
     expect(r.freeSymbols).toEqual(['x', 'm_s', 'y']);
-    // One function per definition, and each call passes m_s.
+    // One function per definition, and each call passes m_s: the call of G,
+    // and in G the call of F_s. The two calls of F_s in the entry are
+    // copies (the pass `inline` copies a function called twice), which
+    // read m_s.
     expect(r.preambleOnce.match(/const u\d+_Fs =/g)).toHaveLength(1);
-    expect(r.code.match(/_Fs\([^)]*_\.m_s\)/g)).toHaveLength(2);
+    expect(r.code.match(/_G\(_\.x, _\.m_s\)/g)).toHaveLength(1);
+    expect(r.preambleOnce).toMatch(/u\d+_Fs\(v\d+, 1, v\d+\)/);
+    expect(r.code.match(/_\.m_s/g)).toHaveLength(3);
   });
   test('a recursive function that reads an input passes it to its recursive call', () => {
     const e = engine();
@@ -2773,8 +2778,11 @@ describe('cse merges two calls of a user function with no effect', () => {
     // prettier-ignore
     const other = ['Add', ['f', 'x'], ['Multiply', 2, ['f', ['At', ['Tuple', 'x', 'y'], 1]]]];
     const at = points.map((p) => ({ ...p, y: 1 }));
-    expect(calls(againstInterpreter(e, other, at), 'f')).toBe(1);
-    expect(calls(run(other, { cse: false }), 'f')).toBe(2);
+    // JavaScript copies a function that its caller calls twice (the pass
+    // `inline`, as the interval mode): no call is left; GLSL keeps the two
+    // calls, which `cse` merges.
+    expect(calls(againstInterpreter(e, other, at), 'f')).toBe(0);
+    expect(calls(run(other, { cse: false }), 'f')).toBe(0);
     expect(
       run(other, { to: 'glsl' }).code.match(/_fn_ir_u\d+_f\(/g)
     ).toHaveLength(1);
@@ -2783,10 +2791,12 @@ describe('cse merges two calls of a user function with no effect', () => {
     ).toHaveLength(2);
   });
   test('different arguments are two calls', () => {
-    const r = againstInterpreter(e, ['Add', ['f', 'x'], ['f', 'y']], [
-      { x: 0.3, y: 2 },
-    ]);
-    expect(calls(r, 'f')).toBe(2);
+    const json = ['Add', ['f', 'x'], ['f', 'y']];
+    // JavaScript copies the two calls (the pass `inline`); GLSL keeps them.
+    expect(calls(againstInterpreter(e, json, [{ x: 0.3, y: 2 }]), 'f')).toBe(0);
+    expect(
+      run(json, { to: 'glsl' }).code.match(/_fn_ir_u\d+_f\(/g)
+    ).toHaveLength(2);
   });
   test('a function that draws, directly or through a call, is called each time', () => {
     const r = run(['Subtract', ['D', 'x'], ['D', 'x']]);
@@ -2825,9 +2835,12 @@ describe('cse merges two calls of a user function with no effect', () => {
   });
   test('a call in an arm or in a loop body is not read after it', () => {
     const arm = ['List', ['If', ['Greater', 'x', 0], ['f', 'x'], 0], ['f', 'x']];
-    expect(calls(againstInterpreter(e, arm, points), 'f')).toBe(2);
-    // The interval mode copies a function that its caller calls twice (the
-    // pass `inline`): no call is left.
+    // JavaScript and the interval mode copy a function that its caller calls
+    // twice (the pass `inline`): no call is left. GLSL keeps the two calls.
+    expect(calls(againstInterpreter(e, arm, points), 'f')).toBe(0);
+    expect(
+      run(arm, { to: 'glsl' }).code.match(/_fn_ir_u\d+_f\(/g)
+    ).toHaveLength(2);
     expect(calls(run(arm, { to: 'interval-js' }), 'f')).toBe(0);
     const loop = [
       'List',
@@ -2839,9 +2852,10 @@ describe('cse merges two calls of a user function with no effect', () => {
       { x: -1, n: 0 },
     ]);
     // The call in the loop body is a copy of the body of `f` (the pass
-    // `inline`), computed before the loop: one call, after it. The interval
-    // mode copies that call too, and `cse` merges the two copies.
-    expect(calls(r, 'f')).toBe(1);
+    // `inline`), computed before the loop, and so is the call after it
+    // (JavaScript and the interval mode copy a function called twice):
+    // `cse` merges the two copies.
+    expect(calls(r, 'f')).toBe(0);
     expect(calls(run(loop, { to: 'interval-js' }), 'f')).toBe(0);
   });
   test('a call with two results, a list and its length', () => {
@@ -2867,7 +2881,16 @@ describe('cse merges two calls of a user function with no effect', () => {
       ['Add', ...Array.from({ length: 2000 }, (_, j) => ['f', ['Add', 'x', j + 1]])],
       e
     );
-    expect(calls(compile(sum, { ...IR, fallback: false }), 'f')).toBe(2000);
+    expect(
+      compile(sum, { ...IR, to: 'glsl', fallback: false }).code.match(
+        /_fn_ir_u\d+_f\(/g
+      )
+    ).toHaveLength(2000);
+    // JavaScript copies calls up to the budget of the pass `inline`
+    // (`INLINE_BUDGET.repeated`, 4,000 instructions): the others stay calls.
+    const left = calls(compile(sum, { ...IR, fallback: false }), 'f');
+    expect(left).toBeGreaterThan(0);
+    expect(left).toBeLessThan(2000);
   });
 });
 
@@ -2920,12 +2943,16 @@ describe('invariants: an instruction of a loop body that reads nothing of the bo
   /** The text of the user function `name` in the text `t`. */
   const functionText = (t: string, name: string) =>
     new RegExp(`const u\\d+_${name} = [\\s\\S]*?\\n};`).exec(t)![0];
-  /** The compilation with the pass on and off: the same results. */
+  /** The compilation with the pass on and off: the same results. Here and
+   *  in `entry()` a `Sum` of constant bounds stays a loop
+   *  (`unrollSums: false`): the loops are what the pass moves things out
+   *  of. */
   const sameWithout = (json: Json, points: object[], options: object = {}) => {
     const slice = (invariants: boolean) =>
       compileSlice(box(json, e), {
         target: 'javascript',
         passes: { ...ALL_PASSES, invariants },
+        unrollSums: false,
         ...options,
       } as never) as unknown as { run: (x: object) => unknown; warnings: unknown[] };
     const [on, off] = [slice(true), slice(false)];
@@ -2935,8 +2962,11 @@ describe('invariants: an instruction of a loop body that reads nothing of the bo
   };
   /** The instructions of the entry of `json`, and of its loops' bodies. */
   const entry = (json: Json, options: object = {}) =>
-    sliceProgram(box(json, e), { target: 'javascript', ...options } as never)
-      .functions[0].body.body;
+    sliceProgram(box(json, e), {
+      target: 'javascript',
+      unrollSums: false,
+      ...options,
+    } as never).functions[0].body.body;
   const ops = (body: { k: string; op?: string }[]) =>
     body.filter((i) => i.k === 'op').map((i) => i.op);
   /** The loops of `body`, also those in the arms of its conditionals (the
@@ -3540,14 +3570,19 @@ describe('a Sum or a Product of constant bounds written out (the internal switch
     sameAsLoop(nest(3));
   });
 
-  test('a Sum in the body of a user function is written out; a Sum over a Range is a loop', () => {
+  test('a Sum in the body of a user function is written out; a Sum over a Range of more than 16 is a loop', () => {
     e.assign('u', e.box(['Function', ['Sum', ['Multiply', 'k', 't'], ['Limits', 'k', 1, 3]], 't'] as never));
     const call = ['u', 'x'];
     expect(loopCount(call)).toBe(0);
     sameAsLoop(call);
+    // A constant Range is a list of constants; one of 5 is a short list,
+    // written out ("Lists", the short lists), one of 17 a loop.
     const range = ['Sum', ['Multiply', 'x', ['Range', 1, 5]]];
-    expect(loopCount(range)).toBe(1);
+    expect(loopCount(range)).toBe(0);
     sameAsLoop(range);
+    const long = ['Sum', ['Multiply', 'x', ['Range', 1, 17]]];
+    expect(loopCount(long)).toBe(1);
+    sameAsLoop(long);
   });
 
   test('an iterationBudget below the count keeps the NaN of the loop', () => {
@@ -3681,9 +3716,17 @@ describe('a Sum or a Product of constant bounds written out (the internal switch
     for (const x of [0.5, -2, 3]) expect(slice(json, true).run({ x })).toBe(7.5 * x);
   });
 
-  test('off by default on JavaScript, and never on GLSL', () => {
+  test('on by default on JavaScript, not in the complex mode, and never on GLSL', () => {
     const json = ['Sum', ['Divide', ['Sin', ['Multiply', 'k', 'x']], 'k'], ['Limits', 'k', 1, 3]];
-    expect(compileSlice(box(json, e), { target: 'javascript' }).code).toMatch(/for \(/);
+    expect(
+      compileSlice(box(json, e), { target: 'javascript' }).code
+    ).not.toMatch(/for \(/);
+    expect(
+      compileSlice(box(json, e), {
+        target: 'javascript',
+        mode: 'complex',
+      } as never).code
+    ).toMatch(/for \(/);
     expect(
       compileSlice(box(json, e), { target: 'glsl', unrollSums: true } as never).code
     ).toMatch(/for \(/);

@@ -5,7 +5,7 @@
  *
  * - `scalarize`: an operation on static lists becomes one operation per
  *   element (for a target with no element-wise operations, and for the
- *   short lists of the interval mode, `unrollBuilds`), and an `At` of a
+ *   short lists of JavaScript, `unrollBuilds`), and an `At` of a
  *   constant index in range of a static list an element (`elem`).
  * - `fold`: a pure operation whose operands are constants is the value of
  *   its row's `fold` (the constants that the passes expose: a sub-expression
@@ -83,7 +83,7 @@ export type PassOptions = {
    *  `loop`, a `build` or a `filter`; `'repeated'`, also a call of a
    *  function that its caller calls twice or more. */
   inline?: 'loop' | 'repeated' | false;
-  /** The short lists (the interval mode): `scalarize` writes out an
+  /** The short lists (JavaScript): `scalarize` writes out an
    *  element-wise operation of at most this many elements, and `inline`
    *  copies a call whose result is such a list. Default 0: none. */
   unrollBuilds?: number;
@@ -109,7 +109,7 @@ export const ALL_PASSES: PassOptions = Object.freeze({
 
 /** The most instructions of a body that `inline` copies (arms included),
  *  and of all its copies in one program, by the rule of the sites. The
- *  rule `'repeated'` is the interval mode's, where the sums written out
+ *  rule `'repeated'` is JavaScript's, where the sums written out
  *  multiply the sites: a function read at 16 terms of each of four sums. */
 export const INLINE_SIZE = 64;
 export const INLINE_BUDGET = { loop: 1000, repeated: 4000 } as const;
@@ -611,8 +611,8 @@ const inline = (
       // An `At` whose index the copy makes a constant out of range declines
       // on GLSL, where the call gives NaN.
       (i.args.some((a) => constants.has(a)) && reads.has(i.fn)) ||
-      // In the interval mode (the rule 'repeated') nothing is copied into a
-      // function on a cycle of calls: an `if` there runs one arm
+      // By the rule 'repeated' nothing is copied into a function on a cycle
+      // of calls: in the interval mode an `if` there runs one arm
       // (`verdictIf.decided`), so a copied `if` of the callee would lose
       // its hull.
       (where === 'repeated' && cyclic.has(s.fn)) ||

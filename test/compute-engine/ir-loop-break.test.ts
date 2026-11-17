@@ -385,10 +385,11 @@ describe('IR profile, batch G23: no count of passes that cannot reach the budget
         ...IR,
         iterationBudget: budget,
       } as never) as unknown as Result;
-    // 3 passes of the sum, each with the 100 of the call.
-    expect(counts(run(303))).toBe(false);
-    expect(run(303).run({})).toBe(5050 * 6);
-    expect(counts(run(302))).toBe(true);
+    // The sum of 3 passes is written out (no pass of its own): the 100
+    // passes of each of the 3 calls.
+    expect(counts(run(300))).toBe(false);
+    expect(run(300).run({})).toBe(5050 * 6);
+    expect(counts(run(299))).toBe(true);
   });
 });
 

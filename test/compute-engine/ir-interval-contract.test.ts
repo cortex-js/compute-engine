@@ -1566,7 +1566,7 @@ describe('the interval mode: batch 7, the order of a sum', () => {
     expect(loop.code).not.toMatch(/--\)/);
   });
 
-  test('a sum of constant bounds of at most 100 passes is written out, on the interval mode only', () => {
+  test('a sum of constant bounds of at most 100 passes is written out, on JavaScript and in the interval mode', () => {
     const json = ['Sum', ['Divide', ['Sin', ['Multiply', 'k', 'x']], 'k'], ['Limits', 'k', 1, 3]];
     const r = mode(json);
     expect(r.code).toBe(
@@ -1575,9 +1575,12 @@ describe('the interval mode: batch 7, the order of a sum', () => {
     expect(r.preambleOnce).toBe(
       'const v0 = { lo: 1, hi: 1 };\nconst v1 = { lo: 3, hi: 3 };\nconst v8 = { lo: 2, hi: 2 };'
     );
-    // The JavaScript and GLSL code keep the loop.
+    // JavaScript writes it out too, added in the same order; GLSL keeps the
+    // loop.
     const js = compile(ce.box(json as never), { profile: 'ir', fallback: false } as never) as unknown as Result;
-    expect(js.code).toContain('v10 = (v10 + (Math.sin((v3 * _.x)) / v3));');
+    expect(js.code).toContain(
+      'return (((0 + (Math.sin((1 * _.x)) / 1)) + (Math.sin((2 * _.x)) / 2)) + (Math.sin((3 * _.x)) / 3));'
+    );
     const glsl = compile(ce.box(json as never), { to: 'glsl', profile: 'ir', fallback: false } as never) as unknown as Result;
     expect(glsl.code).toContain('v13 = (v13 + (sin((v6 * x)) / v6));');
     // A part that reads only the index is computed once, in `preambleOnce`.

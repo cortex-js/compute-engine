@@ -186,6 +186,8 @@ export type Lowering = {
   /** The lane of an input of type `number`, `unknown` or none: complex in
    *  `mode: 'complex'`. */
   readonly wide: 'real' | 'complex';
+  /** The interval mode (`LowerOptions.mode`). */
+  readonly interval: boolean;
   /** The name of the user function whose body is being lowered. */
   inFunction?: string;
   /** The `iterationBudget`: a `Sum` or a `Product` of more passes is NaN. */
@@ -198,6 +200,10 @@ export type Lowering = {
   /** The longest list of a constant length that is written out
    *  (`LowerOptions`). */
   readonly unrollBuilds: number;
+  /** `LowerOptions.attempted`. */
+  readonly attempted: () => void;
+  /** The number of `x`: a literal, or the value a free name holds. */
+  numberOf(x: Expression): Expression | undefined;
   /** The value that `f` lowers in a region of its own, whose instructions
    *  then go to the current region; `undefined`, the region discarded, when
    *  `f` gives no value or declines, or `accept` refuses the region. The

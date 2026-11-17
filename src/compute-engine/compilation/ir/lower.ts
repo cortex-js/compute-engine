@@ -234,6 +234,9 @@ export type LowerOptions = {
    *  of a constant length of at most this many elements is written out
    *  (`README.md`, "Lists", the short lists). Default 0: none. */
   readonly unrollBuilds?: number;
+  /** Called when a sum or a short list starts an attempt to be written
+   *  out (`sliceProgram()` lowers the loops again only after one). */
+  readonly attempted?: () => void;
   /** JavaScript, not the interval mode: the numeric derivative of a
    *  derivative with no closed form, and the closed form of a definite
    *  integral in place of the quadrature. */
@@ -1483,19 +1486,20 @@ export function lower(
     );
   };
 
+  /** The number of `x`: a literal, or the value a free name holds. */
+  const numberOf = (x: Expression): Expression | undefined => {
+    if (isNumber(x)) return x;
+    if (!isSymbol(x) || lookup(x.symbol) !== undefined) return undefined;
+    if (options.vars?.includes(x.symbol) || CONSTANTS.has(x.symbol)) return;
+    const v = own(x);
+    return v !== undefined && isNumber(v) ? v : undefined;
+  };
+
   /** A product. With a rational constant `p/q` whose denominator is not a
    *  power of two, it is `(p · factors) / q` (`div.q`): `Floor(x/49)` at 49
    *  is 1, where the product by the double of `1/49` gives 0 (`README.md`,
    *  "The contracts"). The constant can be a free name that holds it. */
   const product = (e: Fn): V => {
-    // The number of `x`: a literal, or the value a free name holds.
-    const numberOf = (x: Expression): Expression | undefined => {
-      if (isNumber(x)) return x;
-      if (!isSymbol(x) || lookup(x.symbol) !== undefined) return undefined;
-      if (options.vars?.includes(x.symbol) || CONSTANTS.has(x.symbol)) return;
-      const v = own(x);
-      return v !== undefined && isNumber(v) ? v : undefined;
-    };
     const ratio = (x: Expression) => {
       const n = numberOf(x);
       const pq = n !== undefined ? n.toRational() : null;
@@ -2819,10 +2823,13 @@ export function lower(
     free,
     widen,
     wide: options.mode === 'complex' ? 'complex' : 'real',
+    interval,
     budget: options.iterationBudget,
     runtimeLengths: options.runtimeLengths ?? true,
     unrollSums: options.unrollSums ?? 0,
     unrollBuilds: options.unrollBuilds ?? 0,
+    attempted: options.attempted ?? (() => {}),
+    numberOf,
     attempt: (f, accept, refund) => {
       const [nodes, begun] = [lowered, fns.begun()];
       const r = trial(() => f(() => lowered - nodes, NODE_LIMIT - nodes));

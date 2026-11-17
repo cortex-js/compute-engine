@@ -6,7 +6,11 @@
  * counted loops, and `Map`, `Filter` and `Comprehension` as builds.
  */
 
-import { isFunction, isSymbol } from '../../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../../boxed-expression/type-guards.js';
 import type { Expression } from '../../global-types.js';
 import {
   elementType,
@@ -15,6 +19,7 @@ import {
   recursiveFunctions,
   regionsOf,
   scalarType,
+  type Instr,
   type Lane,
   type Region,
   type V,
@@ -153,6 +158,37 @@ export function listLowering(cx: Lowering) {
     return out;
   };
 
+  /** The sums whose term held a loop that no limit made: a nest of
+   *  constant sums tries each once, not once per term of the sums around
+   *  it. `limited`: a sum was refused by a limit (the bodies written out,
+   *  the nodes); the lowering then attempts no more sums, since in a nest
+   *  of few terms each level would double the attempts. */
+  const looped = new WeakSet<Expression>();
+  let limited = false;
+  /** The bodies that the sums of `x` with `Limits` of two integers (a
+   *  literal, or the value a free name holds) write out when each of them
+   *  is (a lower bound: a call is 0). */
+  const counted = new WeakMap<Expression, number>();
+  const bodies = (x: Expression): number => {
+    if (!isFunction(x)) return 0;
+    if (counted.has(x)) return counted.get(x)!;
+    let c = x.ops.reduce((s, o) => s + bodies(o), 0);
+    const [body, l] = x.ops;
+    if (/^(Sum|Product)$/.test(x.operator) && isFunction(l, 'Limits')) {
+      const [a, z] = l.ops.slice(1).map((y) => {
+        const v = cx.numberOf(y);
+        return v !== undefined && isNumber(v) ? v.re : NaN;
+      });
+      const n = z - a + 1;
+      if (Number.isInteger(n) && n >= 1 && n <= cx.unrollSums)
+        c = n * (1 + bodies(body));
+    }
+    counted.set(x, c);
+    return c;
+  };
+  const loops = (i: Instr): boolean =>
+    i.k === 'loop' || regionsOf(i).some((r) => r.body.some(loops));
+
   /** The fold of `r` from `init` over the terms at the indices from `lo` to
    *  `hi`, in ascending order, each term lowered with its index a constant:
    *  the loop's operations, with no loop. `undefined`, and the loop runs, in
@@ -170,8 +206,15 @@ export function listLowering(cx: Lowering) {
   ): V | undefined => {
     const [a, z] = [cx.constant(lo), cx.constant(hi)];
     const n = a === undefined || z === undefined ? 0 : z - a + 1;
-    if (n < 1 || !(n <= cx.unrollSums) || unrolled + n > SCALARIZE_LIMIT ** 2)
+    const room = SCALARIZE_LIMIT ** 2 - unrolled;
+    if (n < 1 || !(n <= cx.unrollSums) || looped.has(e) || limited)
       return undefined;
+    // A nest of sums that cannot all be written out keeps this loop: an
+    // attempt would lower the nest below once more per level.
+    if (isFunction(e.ops[1], 'Limits') && n * (1 + bodies(e.ops[0])) > room)
+      return undefined;
+    if (n > room) return void (limited = true);
+    cx.attempted();
     const before = unrolled;
     unrolled += n;
     // A body that holds a loop, a call of a function on a cycle of calls or
@@ -194,8 +237,17 @@ export function listLowering(cx: Lowering) {
         const effects = b.effects;
         let acc = init;
         for (let j = 0; j < n; j++) {
-          if (j > 0 && (spent() * (j + 1)) / j > left / 2) return undefined;
+          if (j > 0 && (spent() * (j + 1)) / j > left / 2)
+            return void (limited = true);
+          const from = b.current().body.length;
           const t = term(integer(a! + j));
+          // A term that holds a loop: the sum keeps its loop (`accept`).
+          // Unless a limit made that loop, the sum is not attempted again
+          // in this lowering (a nest of constant sums).
+          if (b.current().body.slice(from).some(loops)) {
+            if (!limited) looped.add(e);
+            return undefined;
+          }
           const s = signatureOf(r, [type(acc), type(t)]);
           if (type(t).shape.length > 0 || !s) return undefined;
           acc =
@@ -340,7 +392,11 @@ export function listLowering(cx: Lowering) {
     }
     const lane = Number.isFinite(red.identity) ? 'integer' : 'real';
     const init = b.constant(red.identity, lane);
-    return reduce(e, r, items, init, red.empty, true);
+    // A `Sum` of doubles written out starts from 0, as its loop: `0 + -0`
+    // is `0` (`Sum(L)` of `L = [-0, -0]`). The interval mode starts from
+    // the first element.
+    const identity = cx.interval || e.operator !== 'Sum';
+    return reduce(e, r, items, init, red.empty, identity);
   };
 
   /** A `Map` (or, with `filter`, a `Filter`) of the function literal `f`
@@ -443,14 +499,32 @@ export function listLowering(cx: Lowering) {
     const full =
       cx.runtimeLengths && unrolled + (n ?? 0) > SCALARIZE_LIMIT ** 2;
     if (!filter && n !== undefined && n >= 1 && n <= most && !full) {
+      const before = unrolled;
       unrolled += n;
       if (unrolled > SCALARIZE_LIMIT ** 2)
         decline(e, `builds of more than ${SCALARIZE_LIMIT ** 2} elements`);
-      const elements = Array.from({ length: n }, (_, j) => {
-        const x = s.at(integer(j));
-        return indexed(name, x, () => element(x, integer(j)));
-      });
-      return cx.list(e, elements);
+      const write = () => {
+        const effects = b.effects;
+        const elements = Array.from({ length: n }, (_, j) => {
+          const x = s.at(integer(j));
+          return indexed(name, x, () => element(x, integer(j)));
+        });
+        return b.effects === effects || !short
+          ? cx.list(e, elements)
+          : undefined;
+      };
+      // A short list on JavaScript keeps the build when its body has an
+      // effect, as a sum written out: a draw stays one site of the frame.
+      const short = cx.runtimeLengths && !cx.interval;
+      if (short) cx.attempted();
+      const v = short
+        ? cx.attempt(
+            write,
+            () => true,
+            () => (unrolled = before)
+          )
+        : write();
+      if (v !== undefined) return v;
     }
     const k = b.newValue(scalarType('integer'));
     const outs = cx.region(

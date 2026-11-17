@@ -424,7 +424,10 @@ describe('IR profile, batch G11: arithmetic on points', () => {
 
   test('untyped parameters: one definition for a nested first call', () => {
     const json = ['Cmod', ['Cmul', 'P', ['Cmul', 'P', 'Q']]];
-    expect(js(json).preamble!.match(/^const u\d+_Cmul = /gm)).toHaveLength(1);
+    // JavaScript copies a function that its caller calls twice (the pass
+    // `inline`): no definition is left. GLSL keeps the calls.
+    check(json, POINTS);
+    expect(js(json).preamble ?? '').not.toMatch(/u\d+_Cmul/);
     expect(
       glsl(json).preamble!.match(
         /^vec2 _fn_ir_u\d+_Cmul\(vec2 v\d+, vec2 v\d+\) \{$/gm

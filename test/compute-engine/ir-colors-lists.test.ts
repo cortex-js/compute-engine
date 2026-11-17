@@ -394,14 +394,15 @@ describe('IR profile, batch G24: At of a list of colours', () => {
 
   test('a constant index without the fold, and without the passes', () => {
     // The `fold` pass makes `At(P, 3)` an element. With `constantFold:
-    // false`, or with no pass (`compileSlice()`), the `at` stays, and
-    // declines.
+    // false` `scalarize` does, P being a short list ("Lists", the short
+    // lists); with no pass (`compileSlice()`) the `at` stays, and declines.
     check(['At', 'P', 3], [{ x: 0.3 }]);
-    expect(
-      failure(() =>
-        compile(box(['At', 'P', 3]), { ...IR, constantFold: false })
-      )
-    ).toMatch(/of a list of colours/);
+    const unfolded = compile(box(['At', 'P', 3]), {
+      ...IR,
+      constantFold: false,
+    });
+    for (const p of [{ x: 0.3 }, { x: -2 }])
+      agree(unfolded.run!(p as never), interpreted(['At', 'P', 3], p));
     expect(() =>
       compileSlice(box(['At', 'P', 3]), {
         target: 'javascript',

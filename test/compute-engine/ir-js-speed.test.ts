@@ -394,17 +394,18 @@ describe('IR profile, batch G15: the count of the passes', () => {
       (p) => ({ L: list(p) }),
       1,
     ],
-    // Each pass of the outer loop runs 3 passes of the inner one.
+    // Each pass of the outer loop runs 101 passes of the inner one (a sum
+    // of at most 100 passes is written out, with no loop).
     [
       'a nest',
       [
         'Sum',
-        ['Sum', ['Multiply', 'i', 'j'], ['Limits', 'j', 1, 3]],
+        ['Sum', ['Multiply', 'i', 'j'], ['Limits', 'j', 1, 101]],
         ['Limits', 'i', 1, 'n'],
       ],
       {},
       (p) => ({ n: p }),
-      4,
+      102,
     ],
     [
       'the bigint mode',

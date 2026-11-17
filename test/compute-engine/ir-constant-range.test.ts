@@ -82,11 +82,18 @@ function check(json: Json, points: Point[] = [{ x: 0.3, m: 4 }], options = {}) {
 const text = (r: ReturnType<typeof js>) => `${r.preambleOnce ?? ''}\n${r.code}`;
 
 describe('IR profile, batch G25: a Range of constants as a list value', () => {
+  // A list of at most 16 elements is written out ("Lists", the short
+  // lists): the product of each element is in the text.
+  const three = '[(_.x * 1), (_.x * 2), (_.x * 3)]';
   test.each([
-    ['one operand', ['Multiply', 'x', ['Range', 3]], '[1, 2, 3]'],
-    ['two operands', ['Multiply', 'x', ['Range', 1, 3]], '[1, 2, 3]'],
-    ['three operands', ['Multiply', 'x', ['Range', 1, 3, 1]], '[1, 2, 3]'],
-    ['descending', ['Multiply', 'x', ['Range', 5, 1]], '[5, 4, 3, 2, 1]'],
+    ['one operand', ['Multiply', 'x', ['Range', 3]], three],
+    ['two operands', ['Multiply', 'x', ['Range', 1, 3]], three],
+    ['three operands', ['Multiply', 'x', ['Range', 1, 3, 1]], three],
+    [
+      'descending',
+      ['Multiply', 'x', ['Range', 5, 1]],
+      '[(_.x * 5), (_.x * 4), (_.x * 3), (_.x * 2), (_.x * 1)]',
+    ],
     [
       'a negative step',
       ['Multiply', 'x', ['Range', 1, 0, ['Divide', -1, 4]]],
@@ -105,7 +112,7 @@ describe('IR profile, batch G25: a Range of constants as a list value', () => {
     [
       'a bound that is a name with a value',
       ['Multiply', 'x', ['Range', 1, 'N']],
-      '[1, 2, 3, 4, 5]',
+      '(_.x * 4), (_.x * 5)]',
     ],
     ['the result of the program', ['Range', 2, 4], '[2, 3, 4]'],
   ] as [string, Json, string][])('%s is a literal list', (_, json, literal) => {
@@ -132,14 +139,17 @@ describe('IR profile, batch G25: a Range of constants as a list value', () => {
   });
 
   test('the colour programs of the corpus', () => {
-    // `art/njncrg9fkv` #1: the list of the Range is a constant.
+    // `art/njncrg9fkv` #1: the list of the Range is a constant, of 10
+    // elements: each colour is computed once.
     const r = js([
       'Hsv',
       210,
       ['Multiply', ['Rational', 1, 40], ['Range', 1, 10]],
       1,
     ]);
-    expect(text(r)).toContain('[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]');
+    expect(r.preambleOnce?.match(/_SYS\.hsv\(/g)).toHaveLength(10);
+    expect(r.preambleOnce).toContain('_SYS.hsv(210, 0.25, 1)');
+    expect(r.code).not.toMatch(/_SYS\.hsv/);
   });
 });
 
