@@ -240,16 +240,15 @@ describe('A3.5 — Indexing extensions', () => {
     expect(expr.ops!.map((x) => x.re)).toEqual([10, 30]);
   });
 
-  // BREAKING (2026-07-22): a boolean mask's length must EQUAL the collection
-  // length; a mismatch is an error (was a silent min-length prefix).
-  test('boolean mask with mismatched length is an error', () => {
+  // A boolean mask is read up to the shorter of the mask and the collection.
+  test('boolean mask shorter than the collection keeps nothing past its end', () => {
     const ce = new ComputeEngine();
     const expr = ce.expr([
       'At',
       ['List', 10, 20, 30, 40, 50],
       ['List', 'True', 'False', 'True'],
     ]).evaluate();
-    expect(expr.operator).toEqual('Error');
+    expect(expr.ops!.map((x) => x.re)).toEqual([10, 30]);
   });
 
   test('At with empty index list returns empty list', () => {

@@ -384,15 +384,7 @@ export function listLowering(cx: Lowering) {
         e,
         'Map of a list with an effect (the interpreter reads the lists up to the shortest)'
       );
-    const fixed = sources.flatMap((s) => cx.constant(s.length) ?? []);
-    const length = [
-      ...(fixed.length > 0 ? [integer(Math.min(...fixed))] : []),
-      ...new Set(
-        sources.flatMap((s) =>
-          cx.constant(s.length) === undefined ? [s.length] : []
-        )
-      ),
-    ].reduce((m, n) => cx.apply(e, 'Min', [m, n]));
+    const length = shortest(e, sources);
     // The source's element is the index: `over()` binds it to the first
     // name, which the frame of the body binds again to its element.
     const index: Source = { length, at: (k) => k };
@@ -406,18 +398,41 @@ export function listLowering(cx: Lowering) {
     return over(e, index, names[0]!, body, false, f);
   };
 
+  /** The `Min` of the lengths of `sources`: the least stated length and
+   *  the length values. */
+  const shortest = (e: Fn, sources: Source[]): V => {
+    const fixed = sources.flatMap((s) => cx.constant(s.length) ?? []);
+    return [
+      ...(fixed.length > 0 ? [integer(Math.min(...fixed))] : []),
+      ...new Set(
+        sources.flatMap((s) =>
+          cx.constant(s.length) === undefined ? [s.length] : []
+        )
+      ),
+    ].reduce((m, n) => cx.apply(e, 'Min', [m, n]));
+  };
+
+  /** `At(l, m)` of a boolean mask `m`: the elements of `l` at the positions
+   *  up to the shorter length where `m` is true, as the interpreter's. */
+  const mask = (e: Fn, l: V, m: V): V => {
+    const [sl, sm] = [listSource(l), listSource(m)];
+    const s: Source = { length: shortest(e, [sl, sm]), at: sl.at };
+    return over(e, s, '', (_x, k) => sm.at(k), true, e);
+  };
+
   /** A build (with `filter`, a filter) over `s` of `body`, which reads the
-   *  element as `name`, or of `body(x)` for the element `x`. */
+   *  element as `name`, or of `body(x, k)` for the element `x` at the index
+   *  `k`. */
   const over = (
     e: Fn,
     s: Source,
     name: string,
-    body: Expression | ((x: V) => V),
+    body: Expression | ((x: V, k: V) => V),
     filter: boolean,
     site: Expression
   ): V => {
-    const element = (x: V) =>
-      typeof body === 'function' ? body(x) : cx.value(body)!;
+    const element = (x: V, k: V) =>
+      typeof body === 'function' ? body(x, k) : cx.value(body)!;
     // A target with no list of a run-time length has no build (GLSL): a
     // build of a constant length of at most `SCALARIZE_LIMIT` is the list
     // of its elements, the body lowered once per element, in order; so is a
@@ -433,7 +448,7 @@ export function listLowering(cx: Lowering) {
         decline(e, `builds of more than ${SCALARIZE_LIMIT ** 2} elements`);
       const elements = Array.from({ length: n }, (_, j) => {
         const x = s.at(integer(j));
-        return indexed(name, x, () => element(x));
+        return indexed(name, x, () => element(x, integer(j)));
       });
       return cx.list(e, elements);
     }
@@ -446,7 +461,7 @@ export function listLowering(cx: Lowering) {
         cx.withFrame(true, (frame) => {
           const x = s.at(k);
           frame.names.set(name, { v: x, role: 'index' });
-          const v = element(x);
+          const v = element(x, k);
           if (lengthValues(type(v)).length > 0)
             decline(e, 'a list of lists of run-time length');
           if (!filter) return [v];
@@ -582,6 +597,7 @@ export function listLowering(cx: Lowering) {
     reduction,
     build,
     mapLists,
+    mask,
     over,
     comprehension,
     join,

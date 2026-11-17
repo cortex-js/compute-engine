@@ -1118,11 +1118,35 @@ numbers, of points, of colours; a `Range`, a `Map`, a `Filter`, a `Zip`, a call)
 is `L`: every list of the slice is listed. Of a scalar, a tuple, a string or
 several operands (a list of one element, of the elements, of the characters, the
 concatenation, in the interpreter) it declines. `At(L, I)` of a list of numbers
-`L` and a list of numbers `I` (not a tuple; a list of booleans is a mask,
-which declines) is the build of `At(L, i)` over `I`,
+`L` and a list of numbers `I` (not a tuple) is the build of `At(L, i)` over `I`,
 each index under the rule of `At`, as the interpreter's
 (`At([10, 20, 30], [1, -1, 0, 2.5])` is `[10, 30, NaN, NaN]`); of a list of
-points, booleans or lists it declines. `Clamp(x, lo, hi)` is
+points, booleans or lists it declines. `At(L, M)` of a flat list `M` on the
+boolean lane (a mask) and a list of numbers or of points `L` is a `filter`
+over the `Min` of the two lengths (as for `Map` of several lists), keeping
+`L[k]` where `M[k]`, as the interpreter's: a mask shorter than `L` keeps
+nothing past its end, and a longer one is read only as far as `L` goes
+(`At([1, 2, 3, 4, 5], [True, False, True])` is `[1, 3]`). A list of 0 and 1
+is a list of numbers, not a mask; an index typed as a union declines. A list
+on the boolean lane holds only true and false, so no compiled mask has an
+undefined member (the interpreter's `Missing` or `NaN` member, which keeps
+nothing, comes from forms that decline: a `Which` with no default, a literal
+`Missing`). The rows that make a mask thread as the interpreter's: `Equal`
+and `NotEqual` of a list and a scalar (`L[K = 1]`; of two lists the
+interpreter compares the lists, one boolean, which declines, as a chain of
+three operands with a list does), and `Not`, `And` and `Or` of lists, with
+a scalar broadcast (`And(False, M)` is a list of false); an `And` or an `Or`
+of a list lowers every operand, and one with an effect declines. One
+exception to "only true and false": an `And` or an `Or` of lists whose
+run-time lengths differ (an `incompatible-dimensions` error of the
+interpreter, so unspecified) has the first operand's length, with `undefined`
+past the shorter list. `Not` of a tuple of booleans (`Not(Tuple(p, q))`) is
+the tuple of the negations, as the interpreter's. A mask or a base of a mask
+with an effect declines: the interpreter reads a lazy base at the kept
+positions only (`At(Map(k ↦ k + Random(), A), M)` draws twice for two kept
+positions). On GLSL a list of booleans of a stated length is a `bvec`
+(`Or(M3, L3 > x)`), and the filter declines; in the interval mode a mask element undecided over the box
+gives the whole range, as for `Filter`. `Clamp(x, lo, hi)` is
 `ElementMin(ElementMax(x, lo), hi)`, the interpreter's `min(max(x, lo), hi)`:
 `hi` when `lo > hi` (on GLSL `min(max(…))`, not `clamp()`, whose value is
 undefined there), integers stay integers, and each operand threads over a list

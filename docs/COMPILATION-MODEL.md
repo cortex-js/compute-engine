@@ -599,6 +599,17 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `interval-js` encloses that number (`[9.999999999999946e-41,
   9.99999999999995e-41]`), with or without the profile `ir`. At machine
   precision the interpreter gives the code's number.
+- `javascript` (crafted: a boolean mask over a base that draws), `A:
+  list<real>`, `M: list<boolean>`:
+  `WithRandomSeed(3, At(Map(k ↦ k + Random(), A), M))` at `A = [1, 2, 3]`,
+  `M = [False, True, True]` gives other draws with the existing compiler
+  than the interpreter's `[2.4706…, 3.3638…]`: the interpreter reads the
+  lazy `Map` at the kept positions only, and the code builds the whole list
+  first. With the profile `ir`, a mask or a base of a mask with an effect
+  declines, except through a parameter: with `sel(u, c) = At(u, u > c)`,
+  `WithRandomSeed(3, sel(Map(k ↦ k + Random(), A), 2.5))` at
+  `A = [1, 2, 3, 4, 5]` gives `[3.7936…, 4.0769…, 5.7640…]` with both
+  compilers, and the interpreter gives `[3.3489…, 4.6413…, 5.1639…]`.
 
 ## The worker pool and `parallel for`: `runAsync()`
 

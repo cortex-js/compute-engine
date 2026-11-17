@@ -200,9 +200,18 @@ describe('P1 — out-of-band access markers (§3.C)', () => {
     expect(e.nops).toBe(0);
   });
 
-  test('a mask length mismatch is an error (BREAKING)', () => {
+  test('a mask is read up to the shorter length, with no hole', () => {
     const e = ce.box(['At', ['List', 1, 2, 3], ['List', 'True', 'False']]);
-    expect(e.evaluate().operator).toBe('Error');
+    expect(e.evaluate().json).toEqual(['List', 1]);
+  });
+
+  test('a Missing or NaN mask member keeps nothing', () => {
+    for (const m of ['Missing', 'NaN'])
+      expect(
+        ce
+          .box(['At', ['List', 1, 2, 3], ['List', 'True', m, 'True']])
+          .evaluate().json
+      ).toEqual(['List', 1, 3]);
   });
 
   test('chained At absorbs an absent intermediate into the final domain', () => {

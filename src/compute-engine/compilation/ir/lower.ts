@@ -711,6 +711,13 @@ export function lower(
           );
       }
       const types = given.map(type);
+      // `Equal` and `NotEqual` of two lists compare the lists in the
+      // interpreter (one boolean); of a list and a scalar they thread.
+      if (
+        (r.head === 'Equal' || r.head === 'NotEqual') &&
+        types.filter((t) => t.shape.length > 0).length > 1
+      )
+        decline(node, `${r.head} of a list`);
       const signature = signatureOf(r, types, complex, bigint);
       if (signature === undefined)
         decline(
@@ -996,11 +1003,26 @@ export function lower(
       }
       case 'At': {
         if (e.nops !== 2) decline(e, 'At with an index for each level');
+        const effects = b.effects;
         const [l, i] = [value(e.ops[0])!, value(e.ops[1])!];
         const [t, k] = [type(l), constant(i)];
         // A list of indexes into a list of numbers: the list of the `At` of
         // each index, as the interpreter's.
         const flat = (v: V) => type(v).shape.length === 1 && !tuples.has(v);
+        // A boolean mask over a list of numbers or of points: a filter up to
+        // the shorter of the two lengths. The interpreter reads a lazy base
+        // at the kept positions only, so an effect declines.
+        const points = tuples.get(l) === 1 && t.shape.length === 2;
+        if (
+          flat(i) &&
+          type(i).lane === 'boolean' &&
+          (flat(l) || points) &&
+          isSubLane(t.lane, 'real')
+        ) {
+          if (b.effects > effects)
+            decline(e, 'a mask or a base of a mask with an effect');
+          return lists.mask(e, l, i);
+        }
         if (
           flat(i) &&
           flat(l) &&
@@ -1404,6 +1426,18 @@ export function lower(
     )
       decline(e, `a bound of ${e.operator} that assigns a name outside it`);
     if (reduction !== undefined) return lists.reduction(e, r);
+    // Of a list of booleans, every operand is lowered and the operation
+    // threads (`apply()`), as the interpreter's; an effect declines.
+    if (
+      (e.operator === 'And' || e.operator === 'Or') &&
+      e.ops.some((o) => o.type.matches('list<boolean>'))
+    ) {
+      const before = b.effects;
+      const vs = e.ops.map((o) => value(o)!);
+      if (b.effects > before)
+        decline(e, `${e.operator} of a list with an effect`);
+      return apply(e, r, vs);
+    }
     if (e.operator === 'And' || e.operator === 'Or') {
       const boolean = (i: number) => {
         const v = scalar(e.ops[i]);

@@ -1453,6 +1453,23 @@ function indexValue(v: unknown): number {
 }
 
 /**
+ * Whether the `At` index `i` is a boolean mask, as the interpreter reads one:
+ * its members are booleans or holes (`undefined` for `Missing`, `NaN`), with
+ * at least one boolean. An empty index, and one of holes only, are a gather.
+ */
+function isMask(i: unknown[]): boolean {
+  // One pass that stops at the first member that is neither: a list of
+  // numbers is rejected at its first entry.
+  let seen = false;
+  for (const m of i) {
+    if (typeof m === 'boolean') seen = true;
+    else if (!(m === undefined || (typeof m === 'number' && Number.isNaN(m))))
+      return false;
+  }
+  return seen;
+}
+
+/**
  * The element of the array `arr` at the index `i`, for a read whose
  * element type does not decide the absence marker (elements that may be
  * numbers or lists, `number | vector<2>`). An index in range (1-based, a
@@ -1465,8 +1482,7 @@ function indexValue(v: unknown): number {
  * interpreter's `Missing`. Another value that is not an array throws, as
  * the interpreter answers an error. An index that is an array at run time
  * (an index typed `integer | list<integer>`) is a gather, read position by
- * position with the same marker, or, when every entry is a boolean, a mask,
- * read by `_SYS.at`.
+ * position with the same marker, or a mask (`isMask()`), read by `_SYS.at`.
  *
  * `absentIsNaN` is true when the compiler found, from the static type of
  * the base, that the read of an absent base is a number: the read of an
@@ -1497,12 +1513,7 @@ function atWithValueMarker(
   if (!Array.isArray(arr))
     throw new TypeError('At: the collection is not a list at run time');
   // A boolean mask is read by `_SYS.at`: it filters, and has no marker.
-  if (
-    Array.isArray(i) &&
-    i.length > 0 &&
-    i.every((m) => typeof m === 'boolean')
-  )
-    return SYS_HELPERS.at(arr, i);
+  if (Array.isArray(i) && isMask(i)) return SYS_HELPERS.at(arr, i);
   const read = (m: unknown): { found: boolean; value: unknown } => {
     const iv = indexValue(m);
     if (Number.isInteger(iv) && iv !== 0) {
@@ -5515,16 +5526,12 @@ export const SYS_HELPERS = {
     const n = arr.length;
     if (Array.isArray(i)) {
       const picked: unknown[] = [];
-      // A boolean MASK is a filter, but its length must EQUAL the collection
-      // length (BREAKING — was a silent prefix). A mismatch makes the
-      // interpreter decline (an error), projected here as a whole-result NaN.
-      // An EMPTY index is a gather that yields the empty list (not a mask —
-      // `every` on an empty array is true), so guard the length explicitly.
-      if (i.length > 0 && i.every((m) => typeof m === 'boolean')) {
-        if (i.length !== n) return NaN;
-        i.forEach((m, k) => {
-          if (m === true) picked.push(arr[k]);
-        });
+      // A boolean MASK (`isMask()`) is a filter over the positions up to the
+      // shorter of the mask and the collection, as in the interpreter; a
+      // hole keeps nothing.
+      if (isMask(i)) {
+        const len = Math.min(i.length, n);
+        for (let k = 0; k < len; k++) if (i[k] === true) picked.push(arr[k]);
         return picked;
       }
       for (const m of i) {
@@ -5599,8 +5606,7 @@ export const SYS_HELPERS = {
     };
     if (!Array.isArray(i)) return read(i);
     const picked = SYS_HELPERS.at(arr, i);
-    if (!Array.isArray(picked) || i.every((m) => typeof m === 'boolean'))
-      return picked;
+    if (!Array.isArray(picked) || isMask(i)) return picked;
     return i.map((k) => read(k));
   },
   // The form of `atPoint` with the index rules of `atNoWrap`: only an
@@ -5884,10 +5890,8 @@ export const SYS_HELPERS = {
   // read as a plain array. An absent slot of a sparse base is not kept, as
   // `Array.prototype.filter` does not visit it.
   //
-  // It differs from the mask branch of `at` in two ways: the lengths of the
-  // mask and of the base need not agree (`at` answers `NaN` for a mask of
-  // another length), and a hole in the mask is a position not kept rather
-  // than the sign that the index is not a mask.
+  // It differs from the mask branch of `at` in one way: a hole in the mask is
+  // a position not kept rather than the sign that the index is not a mask.
   //
   // A host whose index language reads `L[K = 1]` as this filter emitted the
   // selection as a function expression at every site — 101 sites in the

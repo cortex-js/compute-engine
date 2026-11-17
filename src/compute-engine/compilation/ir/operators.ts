@@ -272,12 +272,13 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('LessEqual',    'chain',    [[[R], B, 'le']],              { fold: (a: number, b: number) => a <= b }),
   row('Greater',      'chain',    [[[R], B, 'gt']],              { fold: (a: number, b: number) => a > b }),
   row('GreaterEqual', 'chain',    [[[R], B, 'ge']],              { fold: (a: number, b: number) => a >= b }),
-  // `Equal` of two lists compares the lists.
-  row('Equal',        'chain',    [[[R], B, 'eq'], [[C], B, 'ceq']], { fold: (a: number, b: number) => a === b, ...list }),
-  row('NotEqual',     2,          [[[R, R], B, 'ne'], [[C, C], B, 'cne']], { fold: (a: number, b: number) => a !== b, ...list }),
-  row('And',          'variadic', [[[B], B, 'and']],             { fold: (a: boolean, b: boolean) => a && b, ...list }),
-  row('Or',           'variadic', [[[B], B, 'or']],              { fold: (a: boolean, b: boolean) => a || b, ...list }),
-  row('Not',          1,          [[[B], B, 'not']],             { fold: (a: boolean) => !a, ...list }),
+  // `Equal` of a list and a scalar threads; of two lists it compares the
+  // lists, which declines (`apply()` in `lower.ts`).
+  row('Equal',        'chain',    [[[R], B, 'eq'], [[C], B, 'ceq']], { fold: (a: number, b: number) => a === b }),
+  row('NotEqual',     2,          [[[R, R], B, 'ne'], [[C, C], B, 'cne']], { fold: (a: number, b: number) => a !== b }),
+  row('And',          'variadic', [[[B], B, 'and']],             { fold: (a: boolean, b: boolean) => a && b }),
+  row('Or',           'variadic', [[[B], B, 'or']],              { fold: (a: boolean, b: boolean) => a || b }),
+  row('Not',          1,          [[[B], B, 'not']],             { fold: (a: boolean) => !a }),
   // The interpreter's `At`: from 1, from the end when negative, NaN for an
   // index that is 0, not an integer, or out of range.
   row('At',           2,          [[['list', R], 'element', 'at']], list),

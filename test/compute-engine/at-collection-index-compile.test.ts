@@ -90,15 +90,16 @@ describe('At with a collection index — boolean mask', () => {
     expect(parity(at(['List', 'False', 'False', 'False']))).toEqual([]);
   });
 
-  // BREAKING (2026-07-22): a mask's length must EQUAL the collection length; a
-  // mismatch is an error (interpreter), projected to a whole-result NaN on a
-  // real target. Both routes agree.
-  test('a mask shorter than the source is an error (→ NaN)', () => {
-    expect(parity(at(['List', 'True', 'False']))).toBeNaN();
+  // A mask is read up to the shorter of the mask and the source. Both routes
+  // agree.
+  test('a mask shorter than the source keeps nothing past its end', () => {
+    expect(parity(at(['List', 'True', 'False']))).toEqual([10]);
   });
 
-  test('a mask longer than the source is an error (→ NaN)', () => {
-    expect(parity(at(['List', 'True', 'True', 'True', 'True']))).toBeNaN();
+  test('a mask longer than the source is read as far as the source goes', () => {
+    expect(parity(at(['List', 'True', 'True', 'True', 'True']))).toEqual([
+      10, 20, 30,
+    ]);
   });
 });
 

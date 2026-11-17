@@ -427,7 +427,7 @@ describe('At — boolean masks (D2)', () => {
     );
   });
 
-  test('a statically mismatched mask length declines (the interpreter errors)', () => {
+  test('a mask of another length than the base declines (the interpreter reads it up to the shorter length)', () => {
     expect(why(['At', 'v', ['List', 'True', 'False']])).toMatch(
       /not a list of reals or of points of one size/
     );

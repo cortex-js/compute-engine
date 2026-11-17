@@ -1228,8 +1228,8 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
 
   // At description-audit pins (2026-07-19): mask/pick forms and the edge
   // conventions documented at the evaluate handler.
-  // BREAKING (2026-07-22): a boolean mask is a filter whose length must EQUAL
-  // the collection length; a mismatch is an error (was a silent prefix apply).
+  // A boolean mask is a filter over the positions up to the shorter of the
+  // mask and the collection.
   test('At with a boolean mask keeps the True positions (mask length matches)', () =>
     expect(
       evaluate([
@@ -1239,14 +1239,19 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
       ])
     ).toMatchInlineSnapshot(`["List", 7, 5]`));
 
-  test('At with a mask of the wrong length is an error', () =>
-    expect(evaluate(['At', list, ['List', 'True', 'False', 'True']]))
-      .toMatchInlineSnapshot(`
-      [
-        "Error",
-        "The mask (length 3) must have the same length as the collection (length 7)"
-      ]
-    `));
+  test('At with a shorter mask keeps nothing past its end', () =>
+    expect(
+      evaluate(['At', list, ['List', 'True', 'False', 'True']])
+    ).toMatchInlineSnapshot(`["List", 7, 5]`));
+
+  test('At with a longer mask reads it as far as the collection goes', () =>
+    expect(
+      evaluate([
+        'At',
+        list,
+        ['List', ...Array(6).fill('False'), 'True', 'True', 'True'],
+      ])
+    ).toMatchInlineSnapshot(`["List", 11]`));
 
   test('At with an integer-list pick selects those indices, in order', () =>
     expect(evaluate(['At', list, ['List', 3, 1]])).toMatchInlineSnapshot(

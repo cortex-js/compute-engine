@@ -630,16 +630,16 @@ function compileGPUAt(
           'lowering at all — it is not a missing tier'
       );
 
-    // Resolve the selected 0-based slots. A literal mask is statically a
-    // gather (its length must EQUAL the base's, as the interpreter requires);
-    // a literal integer list gathers position-preservingly.
+    // Resolve the selected 0-based slots. A literal mask of the base's
+    // length is statically a gather; a literal integer list gathers
+    // position-preservingly.
     let slots: (number | null)[];
     if (set.has('bool')) {
       if (entries.length !== n)
         decline(
           `the index is a boolean mask of length ${entries.length}, but the ` +
-            `base has ${n} elements — a mask's length must equal the ` +
-            `collection's`
+            `base has ${n} elements — the interpreter reads such a mask up ` +
+            `to the shorter length, which this target does not lower`
         );
       slots = [];
       entries.forEach((e, i) => {

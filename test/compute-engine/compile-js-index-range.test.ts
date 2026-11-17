@@ -648,12 +648,17 @@ describe('Tycho row 369: _SYS.atMask reproduces the per-site mask lambda', () =>
     expect(same([, 20, , 40], [true, true, true, true])).toEqual([20, 40]);
   });
 
-  test('it differs from `_SYS.at`, which requires equal lengths', () => {
+  test('it reads lengths that differ as `_SYS.at` does', () => {
     const at = new ComputeEngineFunction(ce as any, '_SYS.at(_.b, _.m)');
-    expect((at as any)({ b: [10, 20, 30], m: [true, false] })).toBeNaN();
-    expect((helper as any)({ b: [10, 20, 30], m: [true, false] })).toEqual([
-      10,
-    ]);
+    for (const m of [
+      [true, false],
+      [true, false, true, true],
+    ]) {
+      expect((at as any)({ b: [10, 20, 30], m })).toEqual(
+        (helper as any)({ b: [10, 20, 30], m })
+      );
+    }
+    expect((at as any)({ b: [10, 20, 30], m: [true, false] })).toEqual([10]);
   });
 
   test('a host `At` lowering to `_SYS.atMask` filters `L[L > 15]`', () => {

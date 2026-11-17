@@ -393,18 +393,19 @@ describe('IR profile, batch G26: the forms of CE-1365 and CE-1366', () => {
     );
   });
 
-  test('a boolean mask as the index declines, with the message of a list index', () => {
-    // The interpreter reads the mask (`[10, 30]`); the profile has no mask.
+  test('a boolean mask as the index is a filter (batch G29, ir-at-mask.test.ts)', () => {
     const engine = new ComputeEngine();
     engine.declare('A', 'list<real>');
     engine.declare('M', 'list<boolean>');
-    for (const json of [
-      ['At', 'A', 'M'],
-      ['At', 'A', ['Greater', 'A', 15]],
-    ])
-      expect(failure(() => compile(engine.box(json as never), IR))).toMatch(
-        /a list where a scalar is required/
-      );
+    const point = { A: [10, 20, 30], M: [true, false, true] };
+    expect(
+      compile(engine.box(['At', 'A', 'M'] as never), IR).run!(point as never)
+    ).toEqual([10, 30]);
+    expect(
+      compile(engine.box(['At', 'A', ['Greater', 'A', 15]] as never), IR).run!(
+        point as never
+      )
+    ).toEqual([20, 30]);
   });
 
   test('a callback that names a parameter twice declines', () => {

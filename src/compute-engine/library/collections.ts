@@ -9989,8 +9989,8 @@ function absentOperandMarker(
 
 /**
  * Whether the `At` index `index` needs the count of the collection: a
- * negative integer counts from the end, a boolean mask must have the length
- * of the collection, and a gather (a list of integer indices) with a negative
+ * negative integer counts from the end, a boolean mask is read up to the
+ * length of the collection, and a gather (a list of integer indices) with a negative
  * entry counts that entry from the end.
  */
 function indexNeedsCount(index: Expression): boolean {
@@ -17164,7 +17164,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Access an element of an indexed collection.',
       'If the index is negative, it is counted from the end.',
       'Multiple indices can be provided to access nested collections (e.g., matrices).',
-      'If the index is a finite collection of booleans, returns the elements where the mask is True (a mask is a filter, and its length must match the collection length; otherwise it is an error).',
+      'If the index is a finite collection of booleans, returns the elements where the mask is True (a mask is a filter over the positions up to the shorter of the mask and the collection; a `Missing` or `NaN` member keeps nothing).',
       'If the index is a finite collection of integers, returns the elements at those indices, preserving position: an out-of-range index yields the absence marker, it is not dropped.',
       'Out-of-band access (an out-of-range index, or a dictionary key that is not present) yields a POSITION-PRESERVING marker: `NaN` when the collection’s elements are numeric, `Missing` otherwise. It never yields `Nothing`, which would erase the position.',
       'An index that is provably not an integer (`2.5`, `3/2`, `5 + √17`), as a scalar or as an entry of an index list, selects no element and yields the same marker. An index that cannot be decided (an unknown, an exact constant within rounding of an integer) leaves `At` unevaluated.',
@@ -17720,9 +17720,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       //    marker in place, so the picked list has the same length as the
       //    index list (BREAKING — previously dropped);
       //  - a missing dictionary key yields the marker;
-      //  - a boolean MASK is a filter (unselected positions are dropped), but
-      //    its length must EQUAL the collection length; a mismatch is an error
-      //    (BREAKING — previously applied to the prefix silently);
+      //  - a boolean MASK is a filter (unselected positions are dropped) over
+      //    the positions up to the shorter of the mask and the collection; a
+      //    `Missing` or `NaN` member keeps nothing;
       //  - a scalar boolean or a non-string dictionary index leaves `At`
       //    unevaluated.
       // Chained `At(x, i₁, i₂, …)`: any absent intermediate (`Missing` OR
@@ -17948,32 +17948,30 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Case B: finite collection index — boolean mask or integer list.
         if (opAtIndex.isCollection && isWalkableFiniteCollection(opAtIndex)) {
           const indices = Array.from(opAtIndex.each()) as Expression[];
-          // An EMPTY index list is a gather that yields the empty list (not a
-          // mask — that would require a length-0 collection). `every` on an
-          // empty array is `true`, so guard the length explicitly.
+          // A MASK: every member `True`, `False` or undefined (`Missing`,
+          // `NaN`), with at least one `True` or `False`. An undefined member
+          // keeps nothing. An EMPTY index list, and one of undefined members
+          // only, are a gather (the empty list; an absence marker per entry).
+          const boolean = (m: Expression) =>
+            sym(m) === 'True' || sym(m) === 'False';
           const isMask =
-            indices.length > 0 &&
-            indices.every((m) => {
-              const name = sym(m);
-              return name === 'True' || name === 'False';
-            });
+            indices.some(boolean) &&
+            indices.every((m) => boolean(m) || isAbsentValue(m));
 
           const picked: Expression[] = [];
           if (isMask) {
-            // Boolean MASK is a filter, but its length must EQUAL the source
-            // length (BREAKING — a mismatch was previously applied silently to
-            // the prefix). Stay symbolic if the source length is unknown.
+            // A boolean MASK is a filter over the positions from 1 to the
+            // SHORTER of the mask and the collection: a shorter mask keeps
+            // nothing past its end, a longer one is read only as far as the
+            // collection goes. Stay symbolic if the source length is unknown.
             const srcLen = expr.count;
             if (srcLen === undefined) return undefined;
-            if (indices.length !== srcLen)
-              return ce.error(
-                `The mask (length ${indices.length}) must have the same length as the collection (length ${srcLen})`
-              );
-            indices.forEach((m, i) => {
-              if (sym(m) !== 'True') return;
+            const n = srcLen < indices.length ? Number(srcLen) : indices.length;
+            for (let i = 0; i < n; i++) {
+              if (sym(indices[i]) !== 'True') continue;
               const v = at(expr, i + 1);
               if (v !== undefined) picked.push(v);
-            });
+            }
           } else {
             // Integer-list pick (gather): select the element at each integer
             // index. POSITION-PRESERVING — an out-of-range index contributes

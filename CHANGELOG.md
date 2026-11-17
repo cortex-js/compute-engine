@@ -64,6 +64,23 @@
   `const x = 0; x/x` returned `1`; it now returns `NaN`. Nonzero library
   constants retain their ordinary self-quotient simplification.
 
+- **A boolean mask of `At` can have another length than the collection.**
+  `At(L, M)` keeps `L[k]` where `M[k]` is `True`, for the positions up to the
+  shorter of the two lengths: with `L = [1, 2, 3, 4, 5]` and `K = [1, 0, 1]`,
+  `L[K = 1]` is `[1, 3]`, where it was the error "The mask (length 3) must
+  have the same length as the collection (length 5)"; a longer mask is read
+  only as far as the collection goes. A `Missing` or `NaN` member of the mask
+  keeps nothing, as `False` does: `At([1, 2, 3], [True, Missing, True])` is
+  `[1, 3]`, where it stayed unevaluated. Compiled JavaScript gives the same
+  list, where it gave `NaN`. In the experimental profile `'ir'`, a mask that
+  is a list of booleans by its static type (an input `list<boolean>`, `L > 2`,
+  `K = 1`, a `Map` to booleans) compiles on JavaScript and in the interval
+  mode, over a list of numbers or of points, where it declined; GLSL
+  declines. For this, `Equal` and `NotEqual` of a list and a scalar, and
+  `Not`, `And` and `Or` of lists, compile in the profile and thread over the
+  list, as in the interpreter (`Equal(K, 1)` is a list of booleans; `Equal`
+  of two lists still declines).
+
 - **A limit with no eligible numeric variable keeps nonnumeric bindings
   constant.** `function f() { let L = [1, 2]; limit(sum(L), 1) }; f()`
   returned `1`; it now returns `3`.
