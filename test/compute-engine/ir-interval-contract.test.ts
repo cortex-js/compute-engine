@@ -1763,7 +1763,7 @@ describe('the interval mode: a subtraction and a power of a rational exponent', 
     // A negation read twice stays.
     [['Add', ['Exp', ['Negate', 'x']], ['Negate', 'x']], '(() => {\n  const v1 = _IA.negate(_.x);\n  return _IA.add(v1, _IA.exp(v1));\n})()', '(() => {\n  const v1 = (-_.x);\n  return (v1 + Math.exp(v1));\n})()', 'float v1 = (-x);\nreturn (v1 + exp(v1));'],
     // A denominator that is a power of 2: the principal power of the double.
-    [['Power', ['Power', 'x', 2], ['Rational', 3, 2]], '_IA.pow(_IA.square(_.x), { lo: 1.5, hi: 1.5 }.lo)', '(() => {\n  return _SYS.ir.pow((_.x * _.x), 1.5);\n})()', '_gpu_ir_pow((x * x), 1.5)'],
+    [['Power', ['Power', 'x', 2], ['Rational', 3, 2]], '_IA.pow(_IA.square(_.x), { lo: 1.5, hi: 1.5 }.lo)', '(() => {\n  return _SYS.ir.pow((_.x * _.x), 1.5);\n})()', '_gpu_ir_pow_nonnegative((x * x), 1.5)'],
     [['Power', 'x', ['Rational', -3, 2]], '_IA.pow(_.x, { lo: -1.5, hi: -1.5 }.lo)', '(() => {\n  return _SYS.ir.pow(_.x, (-1.5));\n})()', '_gpu_ir_pow(x, (-1.5))'],
     [['Power', 'x', ['Rational', 3, 4]], '_IA.pow(_.x, { lo: 0.75, hi: 0.75 }.lo)', '(() => {\n  return _SYS.ir.pow(_.x, 0.75);\n})()', '_gpu_ir_pow(x, 0.75)'],
     // Another denominator: the root, then the integer power.

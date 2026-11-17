@@ -192,10 +192,15 @@ compiler also writes `ce.assign('v', 10)` into `v + x` as `10 + _.x`).
 function (`realPow` of `javascript-runtime.ts`, through `_SYS.ir.pow`), which
 the fold also uses: a negative base with a rational exponent of odd denominator
 gives the interpreter's real root (`(-8)^(1/3)` is -2), also for a run-time
-exponent. On GLSL it is `pow()`, whose value for a negative base is undefined in
-GLSL ES 3.00: the driver gives NaN, 0 or any value. A real literal at or above
-2^53 is a real. An integer value of 2^53 or more is a double and its low digits
-are unspecified (`Mod(2^60 + n, 3)`; rule 3 of
+exponent. On GLSL it is `_gpu_ir_pow`: the exact product for an integer exponent
+from 1 to 16, the sign of an integer exponent of a negative base, NaN for a
+non-integer one and for a NaN operand (GLSL ES 3.00 leaves `pow()` undefined for
+a negative base). A power of a base known `>= 0` (a constant, `Abs`, `Sqrt`, a
+square, or a value that an enclosing `If` condition bounds below by a constant
+`>= 0`) is the builtin `pow()`, exact to a few ulps, so an integer power is not
+always the exact product (`10^3` is 999.99994). A real literal at or above 2^53
+is a real. An integer value of 2^53 or more is a double and its low digits are
+unspecified (`Mod(2^60 + n, 3)`; rule 3 of
 `docs/plans/2026-11-12-js-route-course-correction.md`): the compiler makes no
 analysis of integer ranges. A closed node keeps the interpreter's value
 (`Mod(2^60 + 1, 3)` is 2). At run time there is no guard of any kind for an

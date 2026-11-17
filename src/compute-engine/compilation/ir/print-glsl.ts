@@ -4,12 +4,12 @@
  *
  * Both numeric lanes are `float`: an integer is exact up to 2^24 on this
  * target. A complex value is a `vec2` (re, im), a colour an OKLCh `vec3`.
- * `pow` of a negative base and a non-integer exponent is what the driver
- * gives (GLSL leaves it undefined; NaN is inside the caveats). The driver
- * may reorder and round: no bits are promised. A boolean is `bool`; a list is
- * a vector of 2 to 4 elements, `vec3`, or an array, `float[5]` (GLSL ES 3.00
- * has no array of arrays, and the target declines a nested list). A loop
- * counts with an `int`. The target has no element-wise operations: the
+ * `pow` of a negative base and a non-integer exponent is NaN (GLSL leaves
+ * the builtin undefined there; `_gpu_ir_pow`). The driver may reorder and
+ * round: no bits are promised. A boolean is `bool`; a list is a vector of
+ * 2 to 4 elements, `vec3`, or an array, `float[5]` (GLSL ES 3.00 has no
+ * array of arrays, and the target declines a nested list). A loop counts
+ * with an `int`. The target has no element-wise operations: the
  * `scalarize` pass runs first.
  */
 
@@ -126,6 +126,12 @@ export const GLSL: Syntax = deepFreeze({
     ...ARITHMETIC,
     'div.q': { text: '_gpu_ir_quot($0, $1)', helpers: ['_gpu_ir_quot'] },
     'pow': { text: '_gpu_ir_pow($0, $1)', helpers: ['_gpu_ir_pow'] },
+    // A base `>= 0` (`print.ts`, `nonnegative()`): the builtin, NaN at
+    // `0^b` for `b <= 0` (where it is undefined).
+    'pow.nonnegative': {
+      text: '_gpu_ir_pow_nonnegative($0, $1)',
+      helpers: ['_gpu_ir_pow_nonnegative'],
+    },
     ...calls('', ['sqrt', 'abs', 'exp']),
     // A builtin that GLSL ES 3.00 leaves undefined at some reals is spelled
     // with its domain: NaN outside it, where the interpreter's real value
@@ -259,17 +265,31 @@ export const GLSL: Syntax = deepFreeze({
     },
   },
   helpers: {
+    // The real power: an exact product for an integer exponent from 1 to 16
+    // (the builtin is off by ulps: `10^3` is 999.99994), the sign of an
+    // integer exponent of a negative base, NaN for a non-integer one, at
+    // 0^0 and for a NaN operand (SwiftShader's `pow(NaN, 0.5)` is finite),
+    // ∞ at 0^b for b < 0 (where `pow` is undefined). Each case is a select
+    // of `mix`, with no branch and no loop, which SwiftShader renders
+    // faster.
     _gpu_ir_pow: `float _gpu_ir_pow(float a, float b) {
-  if (b == floor(b) && b >= 1.0 && b <= 16.0) {
-    float r = a;
-    for (int i = 1; i < int(b); i++) r *= a;
-    return r;
-  }
-  if (b == 0.0) return a == 0.0 || isnan(a) || isinf(a) ? ${NAN} : 1.0;
-  if (a >= 0.0) return pow(a, b);
-  if (b != floor(b)) return ${NAN};
-  float r = pow(-a, b);
-  return mod(b, 2.0) == 0.0 ? r : -r;
+  int n = int(clamp(b, 0.0, 16.0));
+  float a2 = a * a, a4 = a2 * a2, a8 = a4 * a4;
+  float q = mix(1.0, a, (n & 1) != 0) * mix(1.0, a2, (n & 2) != 0) * mix(1.0, a4, (n & 4) != 0) * mix(1.0, a8, n >= 8) * mix(1.0, a8, n == 16);
+  bool k = b == floor(b);
+  float r = pow(abs(a), b);
+  r = mix(r, mix(${NAN}, mix(-r, r, mod(b, 2.0) == 0.0), k), a < 0.0);
+  r = mix(r, 1.0, b == 0.0);
+  r = mix(r, uintBitsToFloat(0x7f800000u), a == 0.0 && b < 0.0);
+  r = mix(r, ${NAN}, isnan(a) || isnan(b) || (b == 0.0 && (a == 0.0 || isinf(a))));
+  return mix(r, q, k && b >= 1.0 && b <= 16.0);
+}`,
+    // A base `>= 0` or NaN: the builtin, within a few ulps also for an
+    // integer exponent (the product costs half the render time of a loop
+    // that calls it), NaN at `0^b` for `b <= 0` and for a NaN operand
+    // (`!(a >= 0.0)` is the NaN test of such a base, cheaper than `isnan`).
+    _gpu_ir_pow_nonnegative: `float _gpu_ir_pow_nonnegative(float a, float b) {
+  return mix(pow(a, b), ${NAN}, !(a >= 0.0) || isnan(b) || (a == 0.0 && b <= 0.0));
 }`,
     // Half away from zero, with no addition of 0.5 (which rounds up just
     // below 0.5 and near 2^23).

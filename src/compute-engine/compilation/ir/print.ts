@@ -306,14 +306,64 @@ export function printProgram(
       : { decides, pure: arm.body.every((x) => fx.speculatable(x)) };
   };
 
+  /** The values `>= 0` (or NaN) by the conditions of the `if` arms that
+   *  enclose the instruction printed (`guards()`). */
+  const guarded = new Set<V>();
+  /** Whether the real value `v` is `>= 0` or NaN: a constant `>= 0`, an
+   *  `abs`, `sqrt`, `exp` or `hypot`, a square, a sum, product or `pow` of
+   *  such values (a `pow` of its base), a `max` of one, or a value of
+   *  `guarded`. */
+  const nonnegative = (v: V, depth = 0): boolean => {
+    if (guarded.has(v)) return true;
+    const i = index.def.get(v);
+    if (i?.k === 'const')
+      return typeof i.value.value === 'number' && i.value.value >= 0;
+    if (i?.k !== 'op' || depth > 8 || type(v).lane === 'complex') return false;
+    const op = i.op.split('.')[0];
+    if (['abs', 'sqrt', 'exp', 'hypot'].includes(op)) return true;
+    if (op === 'mul' && i.args[0] === i.args[1]) return true;
+    const next = (a: V) => nonnegative(a, depth + 1);
+    if (op === 'max') return i.args.some(next);
+    const args = op === 'pow' ? [i.args[0]] : i.args;
+    return ['add', 'mul', 'pow'].includes(op) && args.every(next);
+  };
+  /** The values `>= 0` where the condition `c` is true: the operand of a
+   *  comparison with a constant `>= 0` below it, and those of each operand
+   *  of an `and`. */
+  const guards = (c: V, depth = 0): V[] => {
+    const i = index.def.get(c);
+    if (i?.k !== 'op' || depth > 8) return [];
+    const op = i.op.split('.')[0];
+    if (op === 'and') return i.args.flatMap((a) => guards(a, depth + 1));
+    const [lo, hi] =
+      op === 'lt' || op === 'le' ? i.args : i.args.slice().reverse();
+    const bound = index.def.get(lo);
+    return ['lt', 'le', 'gt', 'ge'].includes(op) &&
+      bound?.k === 'const' &&
+      typeof bound.value.value === 'number' &&
+      bound.value.value >= 0
+      ? [hi]
+      : [];
+  };
+
   /** The text of `op` applied to the texts of `operands`; `$#k` is the
-   *  length of the list operand `k` of `i`. */
+   *  length of the list operand `k` of `i`. An operation whose operand 0 is
+   *  `nonnegative()` is spelled `<op>.nonnegative` when the target has that
+   *  spelling. */
   const spell = (
     op: string,
     operands: (k: number) => string,
     i?: Instr & { k: 'op' }
   ): string => {
-    const spelling = spellingOf(syntax, op);
+    const refined = `${op}.nonnegative`;
+    const spelling = spellingOf(
+      syntax,
+      i !== undefined &&
+        syntax.ops[refined] !== undefined &&
+        nonnegative(i.args[0])
+        ? refined
+        : op
+    );
     if (spelling === undefined)
       throw new Error(`slice printer: no spelling for the operation ${op}`);
     for (const h of spelling.helpers) helpers.add(syntax.helpers[h]);
@@ -448,7 +498,10 @@ export function printProgram(
         );
         const c = use(i.cond);
         line(`if (${decided ? syntax.verdictIf!.decided(c) : c}) {`);
+        const facts = guards(i.cond).filter((v) => !guarded.has(v));
+        facts.forEach((v) => guarded.add(v));
         nested(i.then, i.outs.map(name), false);
+        facts.forEach((v) => guarded.delete(v));
         line('} else {');
         nested(i.else, i.outs.map(name), false);
         line('}');
