@@ -625,6 +625,117 @@ describe('the interval mode: verdicts', () => {
   });
 });
 
+describe('the interval mode: the lazy And and Or', () => {
+  type Box = Record<string, { lo: number; hi: number }>;
+  /** The interpreter's truth value at the points `t` of `box` (0 and 1 are
+   *  its ends). */
+  const truth = (json: unknown, box: Box, t: number) => {
+    const at = Object.fromEntries(
+      Object.entries(box).map(([n, b]) => [n, ce.number(b.lo + t * (b.hi - b.lo))])
+    );
+    return ce.box(json as never).subs(at).evaluate().json;
+  };
+  /** A decided verdict is the interpreter's value at 11 points of the box. */
+  const agrees = (json: unknown, box: Box, verdict: string) => {
+    expect(verdict).toMatch(/^(true|false|maybe)$/);
+    if (verdict === 'maybe') return;
+    for (let k = 0; k <= 10; k++)
+      expect(truth(json, box, k / 10)).toBe(verdict === 'true' ? 'True' : 'False');
+  };
+  const I = (lo: number, hi: number) => ({ lo, hi });
+
+  test('the arm runs in an if of the condition, not before it', () => {
+    const r = mode([
+      'If',
+      ['Less', 0, 'x'],
+      ['Less', 0, ['Multiply', 'y', ['Power', 'y', ['Floor', 'x']]]],
+    ]);
+    const code = inlined(r);
+    expect(code).toMatch(/let (v\d+) = 'false', \1_y;\n\s*if \((v\d+) !== 'false'\) \{/);
+    expect(code.indexOf('_IA.powReal')).toBeGreaterThan(code.indexOf("!== 'false'"));
+    expect(code).not.toMatch(/_IA\.and\(_IA\.less/);
+    expect(code).not.toContain('_IA.hull');
+    const or = inlined(mode(['Or', ['Less', 'x', 0], ['Less', ['Sin', 'x'], 'y']]));
+    expect(or).toMatch(/let (v\d+) = 'true', \1_y;\n\s*if \((v\d+) !== 'true'\) \{/);
+    expect(or.indexOf('_IA.sin')).toBeGreaterThan(or.indexOf("!== 'true'"));
+  });
+
+  test('the verdicts of And, Or, a chain, If, Which and Not are the interpreter values', () => {
+    const shapes: unknown[] = [
+      ['And', ['Greater', 'x', 0], ['Greater', ['Ln', 'x'], 'y']],
+      ['And', ['Greater', 'x', 0], ['Greater', 'y', 0], ['Greater', ['Sqrt', 'x'], 'y']],
+      ['Less', 0, 'x', 1],
+      ['Or', ['And', ['Less', 0, 'x'], ['Less', 'y', 1]], ['And', ['Greater', 'x', 2], ['Greater', ['Ln', 'y'], 0]]],
+      ['If', ['Less', 0, 'x'], ['Less', ['Divide', 1, 'x'], 'y']],
+      ['Which', ['Greater', 'x', 0], ['Less', 'y', 1], 'True', ['Greater', 'y', 2]],
+      ['Not', ['And', ['Greater', 'x', 0], ['Greater', ['Ln', 'x'], 1]]],
+      // Both arms are not constants: the three-way if, unchanged.
+      ['If', ['Greater', 'x', 0], ['Less', 'y', 1], ['Less', 'y', 3]],
+    ];
+    const boxes: Box[] = [];
+    for (const x of [I(-2, -1), I(0.5, 0.5), I(-1, 1), I(1.5, 3), I(3, 4)])
+      for (const y of [I(-2, -1), I(0.25, 0.5), I(0, 2), I(1.5, 1.6), I(3, 3)])
+        boxes.push({ x, y });
+    let decided = 0;
+    for (const json of shapes) {
+      const r = mode(json);
+      for (const box of boxes) {
+        const verdict = r.run(box);
+        if (verdict !== 'maybe') decided++;
+        agrees(json, box, verdict);
+      }
+    }
+    expect(decided).toBeGreaterThan(100);
+    expect(inlined(mode(shapes[7]))).toContain('_IA.hull');
+  });
+
+  test('an arm with a pole or a domain error under a false condition: false, as the interpreter', () => {
+    const ln = ['And', ['Greater', 'x', 0], ['Greater', ['Ln', 'x'], 0]];
+    const div = ['And', ['Greater', 'x', 0], ['Greater', ['Divide', 1, 'x'], 2]];
+    for (const json of [ln, div]) {
+      expect(mode(json).run({ x: I(-2, -1) })).toBe('false');
+      expect(mode(json).run({ x: I(0, 0) })).toBe('false');
+      expect(truth(json, { x: I(0, 0) }, 0)).toBe('False');
+    }
+    // Where the condition is undecided the arm runs, at the pole too.
+    expect(mode(div).run({ x: I(-1, 1) })).toBe('maybe');
+  });
+
+  test('an arm that throws the undecided error runs only where the condition does not decide', () => {
+    const json = [
+      'And',
+      ['Greater', 'x', 0],
+      ['Greater', ['Sum', 'k', ['Limits', 'k', 1, ['Floor', 'y']]], 1],
+    ];
+    const r = mode(json);
+    expect(r.run({ x: I(-2, -1), y: I(1.5, 2.5) })).toBe('false');
+    expect(r.run({ x: I(-1, 1), y: I(1.5, 2.5) })).toEqual({ kind: 'entire' });
+    expect(r.run({ x: I(1, 2), y: I(2, 2) })).toBe('true');
+  });
+
+  test('in a function on a cycle of calls, a pure arm keeps the lazy form', () => {
+    const local = new ComputeEngine();
+    local.declare('x', 'real');
+    local.declare('f', '(integer) -> boolean');
+    local.assign(
+      'f',
+      local.box([
+        'Function',
+        ['If', ['LessEqual', 'k', 0], ['And', ['Less', 0, 'x'], ['Less', 'x', 1]], ['f', ['Subtract', 'k', 1]]],
+        'k',
+      ] as never)
+    );
+    const r = compile(local.box(['f', 3] as never), { ...IR, fallback: false } as never) as unknown as Result;
+    expect(r.preambleOnce).toContain('_IA.decided(');
+    expect(r.preambleOnce).toMatch(/= 'false', v\d+_y;/);
+    // An undecided condition of the And does not throw: the other arm is a
+    // constant, so no recursion runs both arms.
+    expect(r.run({ x: I(0.5, 2) })).toBe('maybe');
+    expect(r.run({ x: I(0.25, 0.5) })).toBe('true');
+    expect(r.run({ x: I(-2, -1) })).toBe('false');
+  });
+});
+
 describe('the interval mode: loops at run time', () => {
   const sum = ['Sum', ['Power', 'x', 'k'], ['Limits', 'k', 1, 'n']];
   test('a bound that is not a point is entire', () => {

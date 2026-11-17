@@ -547,7 +547,16 @@ operation on the elements, an `At` of a constant index in range is an
 program computed, where an arithmetic fold would give a double, which is not
 an enclosure. The pass `strength` (`x·x` is wider than `x^2` over an
 interval) is off; two passes of the mode run, `narrow` first and `plain`
-last.
+last. The pass `hoist` is off too: an operand of `And` or `Or` (and the arm
+of an `If` of a boolean with no else arm) stays in its arm, where a kernel
+costs a call. A boolean `if` whose other arm is the verdict that decides it
+is printed `let v = 'false', v_y; if (c !== 'false') { …; v = _IA.and(c,
+v_y); }` (for `Or`, `'true'` and `_IA.or`), `verdictIf.lazy`: the arm runs
+where the condition is `'true'` or `'maybe'`, at most once, as the
+interpreter's `And` evaluates its operands left to right and stops at the
+first `False`, and `_IA.and('maybe', y)` is the hull of `y` and `'false'`.
+In a function on a cycle of calls this form is printed when the arm is
+pure; another arm keeps `_IA.decided()`.
 
 Spelled: the arithmetic (`div.q` is `_IA.div`; an `add` of a `neg` that
 has no other use is `_IA.sub`, with the `neg` removed after the passes,
@@ -1189,7 +1198,8 @@ that a name or a head resolves to, the kind and value of a number and the
 operands, so a sub-expression that the source writes several times as separate
 nodes is lowered once per region; a node of another kind is equal only to
 itself. The operands of `And`, `Or` and a chain are lowered lazily, in arms; the
-`hoist` pass makes a speculatable arm a plain `and` or `or`. After each pass a
+`hoist` pass makes a speculatable arm a plain `and` or `or` (not in the interval
+mode). After each pass a
 check compares the sequence of effectful instructions (operation, operands,
 results and region); the same check runs over the printer's order.
 

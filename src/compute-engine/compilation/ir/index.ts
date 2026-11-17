@@ -532,6 +532,7 @@ export function sliceProgram(
       ...(interval
         ? {
             fold: passes.fold && 'lists',
+            hoist: false,
             strength: false,
             inline: passes.inline && 'repeated',
             unrollBuilds: options.passes === false ? 0 : MAX_UNROLLED_LIST,

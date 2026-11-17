@@ -441,7 +441,11 @@
   result shapes of the target (an `IntervalResult`, or the verdict `'true'`,
   `'false'` or `'maybe'`). Where a condition is undecided over the input
   box, both arms are evaluated and the result is their hull; a local
-  assigned in both arms has the hull of both values. In a recursive
+  assigned in both arms has the hull of both values. An operand of `And`
+  or `Or` after the first, and the arm of a boolean `If` with no else arm,
+  is evaluated only where the operands before it do not decide the result,
+  as the interpreter evaluates them: `If(0 < x, 0 < R·T^⌊x⌋ + K)` computes
+  no power where `x ≤ 0`. In a recursive
   function (a function on a cycle of calls) a condition must be decided, so
   that the recursion ends: where it is undecided, and where the recursion
   does not reach its base case, the result is `entire`.

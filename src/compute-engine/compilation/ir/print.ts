@@ -96,6 +96,10 @@ export type Syntax = {
     /** The test of an `if` in a function on a cycle of calls, which runs
      *  one arm: an undecided verdict throws, so that a recursion ends. */
     decided(cond: string): string;
+    /** A boolean `if` one of whose arms is the constant verdict `decides`
+     *  (`And`: the else arm `false`; `Or`: the then arm `true`): the lines
+     *  before and after the other arm, which yields `${out}_y`. */
+    lazy(cond: string, out: string, decides: boolean): [string[], string[]];
   };
   /** The lines that open a counted loop of the index `k` from `lo` to `hi`,
    *  each bound evaluated once. `passes`: a pass of a `Loop`, which the
@@ -283,6 +287,24 @@ export function printProgram(
   const use = (v: V): string =>
     inlined.has(v) ? text(index.def.get(v)!) : name(v);
   const length = (n: Length) => (typeof n === 'number' ? String(n) : use(n.v));
+  /** The verdict of the arm of a boolean `if` that is the constant deciding
+   *  it (`verdictIf.lazy`), and whether the other arm is pure. */
+  const decidingArm = (i: Instr & { k: 'if' }) => {
+    const verdict = (r: Region) => {
+      const d = index.def.get(r.yields[0]);
+      return r.body.every((x) => x.k === 'const') && d?.k === 'const'
+        ? d.value.value
+        : undefined;
+    };
+    const t = i.outs.length === 1 ? type(i.outs[0]) : undefined;
+    if (t?.lane !== 'boolean' || t.shape.length > 0) return;
+    const decides =
+      verdict(i.else) === false ? false : verdict(i.then) === true || undefined;
+    const arm = decides ? i.else : i.then;
+    return decides === undefined
+      ? undefined
+      : { decides, pure: arm.body.every((x) => fx.speculatable(x)) };
+  };
 
   /** The text of `op` applied to the texts of `operands`; `$#k` is the
    *  length of the list operand `k` of `i`. */
@@ -373,14 +395,31 @@ export function printProgram(
           args: i.args,
           outs: outsOf(i),
         });
-      if (i.k === 'if' && syntax.verdictIf !== undefined && !decided) {
-        // The condition is read three times: a value written at its use is
+      const lazy =
+        i.k === 'if' && syntax.verdictIf !== undefined
+          ? decidingArm(i)
+          : undefined;
+      if (
+        i.k === 'if' &&
+        syntax.verdictIf !== undefined &&
+        (!decided || lazy?.pure === true)
+      ) {
+        // The condition is read more than once (three times in the three-way
+        // form, twice in `verdictIf.lazy`): a value written at its use is
         // bound to a name first (a constant is its text).
         const v = syntax.verdictIf;
         let c = use(i.cond);
         if (inlined.has(i.cond) && index.def.get(i.cond)?.k !== 'const') {
           line(syntax.declare(type(i.cond), name(i.cond), c));
           c = name(i.cond);
+        }
+        if (lazy !== undefined) {
+          const o = name(i.outs[0]);
+          const [open, close] = v.lazy(c, o, lazy.decides);
+          open.forEach((s) => line(s));
+          nested(lazy.decides ? i.else : i.then, [`${o}_y`], false);
+          close.forEach((s) => line(s));
+          continue;
         }
         const arm = (k: string) => i.outs.map((o) => `${name(o)}_${k}`);
         i.outs.forEach((o) =>

@@ -187,6 +187,13 @@ export const JS_INTERVAL: Syntax = Object.freeze({
     join: (c, a, b) =>
       `${c} === 'true' ? ${a} : ${c} === 'false' ? ${b} : _IA.hull(${a}, ${b})`,
     decided: (c) => `_IA.decided(${c})`,
+    // The other arm runs where the condition does not decide, and its
+    // verdict is joined: `_IA.and('maybe', y)` is the hull of `y` and
+    // `'false'`.
+    lazy: (c, o, decides) => [
+      [`let ${o} = '${decides}', ${o}_y;`, `if (${c} !== '${decides}') {`],
+      [`  ${o} = _IA.${decides ? 'or' : 'and'}(${c}, ${o}_y);`, '}'],
+    ],
   },
   loopOpen: loopOpen(2 ** 32),
   constant: (l) =>
