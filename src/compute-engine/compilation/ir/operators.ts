@@ -295,8 +295,9 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // list), drawn as the interpreter draws (`_SYS.shuffle`).
   row('RandomShuffle', 1,         [[['list'], R, 'shuffle']],    { ...list, effect: 'effectful' }),
   // The number of elements of `Range(a, b, step)`: the engine's `rangeCount`
-  // (of reals: `Range(1, 3.5)` is `[1, 2, 3]`).
-  row(undefined,      3,          [[[R, R, R], I, 'rangecount']], { ...list, fold: rangeCount }),
+  // (of reals: `Range(1, 3.5)` is `[1, 2, 3]`); 0 for a count that is NaN
+  // (a bound with no value), as the JavaScript spelling.
+  row(undefined,      3,          [[[R, R, R], I, 'rangecount']], { ...list, fold: (a, b, s) => rangeCount(a, b, s) || 0 }),
   // The step of `Range(a, b)`: 1, or -1 when `b < a`.
   row(undefined,      2,          [[[R, R], I, 'rangestep']],    { ...list, fold: (a: number, b: number) => (b >= a ? 1 : -1) }),
   // Colours (README, "The colour lane"): a constructor of its channels, and

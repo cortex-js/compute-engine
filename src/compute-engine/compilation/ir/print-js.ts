@@ -181,7 +181,8 @@ export const JS: Syntax = deepFreeze({
     draw: '_SYS.drawNextRandomNumber()',
     shuffle: '_SYS.shuffle($0)',
     binomial: '_SYS.binomial($0, $1)',
-    rangecount: '_SYS.rangeCount($0, $1, $2)',
+    // A count that is NaN (a bound with no value) is an empty list.
+    rangecount: '(_SYS.rangeCount($0, $1, $2) || 0)',
     rangestep: '($1 >= $0 ? 1 : -1)',
     ...calls('Math.', ['trunc', 'sign', 'log10', 'log2']),
     hypot: 'Math.hypot($0, $1)',

@@ -1170,6 +1170,11 @@ declines, as in a `Map` body, and so does a draw on GLSL. The count is that of
 (`rangecount`): 0 below 1, the floor of a real count (a count that is not an
 integer is an error of the interpreter, unspecified); a constant count is a
 stated length, so a short list is written out (`Repeat(-1, 2)` is `[-1, -1]`).
+A run-time count that is NaN (a bound with no value: `Range(1, Ceil(Log(a)))`
+at a negative `a`, the digits of a number in Tycho's documents) is an empty
+list on JavaScript (`rangecount` is `_SYS.rangeCount(…) || 0`), as the
+existing compiler gives, where the interpreter leaves the `Range`
+unevaluated; before, the length guard threw. An infinite count still throws.
 The length guard of a build applies to a run-time count: one of 2^32 or more
 throws on JavaScript and is `entire` in the interval mode, where the
 interpreter keeps the list lazy; a constant count of 2^32 or more throws on
