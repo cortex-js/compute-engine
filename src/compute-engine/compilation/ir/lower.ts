@@ -1324,6 +1324,32 @@ export function lower(
       case 'Typed':
         return value(e.ops[0], want);
       case 'WithRandomSeed': {
+        // `WithRandomSeed(537911, Random())`, the random constant of a host:
+        // a number as the seed and one draw give one value at every call,
+        // the interpreter's, as a literal.
+        if (
+          want &&
+          options.fold !== false &&
+          !bigint &&
+          !interval &&
+          e.nops === 2 &&
+          isNumber(e.ops[0]) &&
+          isFunction(e.ops[1], 'Random') &&
+          e.ops[1].nops === 0 &&
+          handled(e) === undefined &&
+          handled(e.ops[1]) === undefined
+        ) {
+          // An evaluation that throws (not a cancellation) keeps the frame.
+          let n: Expression | undefined;
+          try {
+            n = e.N();
+          } catch (error) {
+            if (error instanceof Error && error.name === 'CancellationError')
+              throw error;
+          }
+          if (n && isNumber(n) && n.im === 0 && Number.isFinite(n.re))
+            return number(n);
+        }
         const seed = scalar(e.ops[0]);
         if (e.nops !== 2 || !isSubLane(type(seed).lane, 'real'))
           decline(e, 'a seed that is not a number');

@@ -1443,6 +1443,14 @@ pass; they are called once. A moved call counts the passes of its `Loop`s once
 effectful moves, so the draws of a seeded
 frame and its warnings do not change. The `bigint` mode does not run the pass.
 
+`WithRandomSeed(537911, Random())`, the random constant of a host (a number
+as the seed, one `Random()` as the body), gives one value at every call: the
+lowering takes the interpreter's as a literal, and the code has no frame, on
+GLSL too (not in the `bigint` and interval modes, not with `constantFold:
+false`, and not when a host's handler answers for the frame or the draw). A
+seed that is not a number literal (`WithRandomSeed(Random(), Random())` draws
+its seed from the frame around it) and any other body keep the frame:
+
 A `WithRandomSeed` frame whose body has one draw site evaluated once (not under
 a loop, a `Map`, `Filter`, `Sum` or `Product` body, or a call of an effectful
 function) gives the interpreter's draws bit for bit: its draws start at index 0

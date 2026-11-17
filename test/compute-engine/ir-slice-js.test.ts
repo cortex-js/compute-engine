@@ -1042,7 +1042,7 @@ describe('IR slice: draws', () => {
     expect(
       declineOf(() =>
         compileSlice(
-          ce.box(['Add', 'x', ['WithRandomSeed', 1, ['Random']]] as never),
+          ce.box(['WithRandomSeed', 1, ['Add', 'x', ['Random']]] as never),
           { target: 'glsl' }
         )
       ).message
@@ -1825,12 +1825,16 @@ describe('IR slice: the fixes of the review of 2026-11-12', () => {
   });
   test('a refusal of the target names the node of the region', () => {
     const d = declineOf(() =>
-      sliceProgram(ce.box(['WithRandomSeed', 1, ['Random']] as never), {
-        target: 'glsl',
-      })
+      // (A frame of a number seed and one draw is a literal.)
+      sliceProgram(
+        ce.box(['WithRandomSeed', 1, ['Add', 'x', ['Random']]] as never),
+        {
+          target: 'glsl',
+        }
+      )
     );
     expect([d.node, d.head]).toEqual([
-      'WithRandomSeed(1, Random())',
+      'WithRandomSeed(1, Add(x, Random()))',
       'WithRandomSeed',
     ]);
   });

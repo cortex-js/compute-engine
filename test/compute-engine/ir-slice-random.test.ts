@@ -17,6 +17,7 @@ import {
   OPERATORS,
   sliceProgram,
 } from '../../src/compute-engine/compilation/ir';
+import { compile } from '../../src/compile';
 import type { Expression } from '../../src/compute-engine/global-types';
 import type { ComputeEngine } from '../../src/compute-engine';
 import {
@@ -542,6 +543,102 @@ describe('IR slice: random frames of one draw site', () => {
       }
     }
     expect(differ).toEqual([]);
+  });
+});
+
+describe('IR slice: a random constant is a literal', () => {
+  // `WithRandomSeed(537911, Random())` (a number as the seed, one draw)
+  // gives one value at every call: the lowering takes the interpreter's.
+  // (The frame ran at each call: `neyret/kthjqzwc4g` #0, 3.6 times the
+  // existing compiler, which folds it too.)
+  const ce = makeEngine();
+  const ir = (json: unknown, options: object = {}) =>
+    compile(ce.box(json as never), {
+      profile: 'ir',
+      fallback: false,
+      ...options,
+    });
+  const text = (r: ReturnType<typeof ir>) => `${r.preamble ?? ''}${r.code}`;
+  const frame = /withRandomSeed/;
+
+  // prettier-ignore
+  test.each([
+    ['one draw', ['WithRandomSeed', 537911, ['Random']]],
+    ['a seed that is not an integer', ['WithRandomSeed', 2.5, ['Random']]],
+    ['a negative seed', ['WithRandomSeed', -3, ['Random']]],
+    ['added to an input', ['Add', 'x', ['WithRandomSeed', 537911, ['Random']]]],
+    ['in a frame that reads an input', ['WithRandomSeed', 3, ['Add', ['Multiply', 'x', ['Random']], ['WithRandomSeed', 7, ['Random']], ['Random']]]],
+    ['in the body of a Sum', ['Sum', ['Multiply', 'k', ['WithRandomSeed', 7, ['Random']]], ['Limits', 'k', 1, 3]]],
+  ])('%s: the interpreter value', (_, json) => {
+    const r = ir(json);
+    expect(text(r)).not.toMatch(/withRandomSeed\(7|withRandomSeed\(537911|withRandomSeed\(2\.5|withRandomSeed\(-3/);
+    const expr = ce.box(json as never);
+    for (const point of pointsFor(expr, POINTS.slice(0, 2))) {
+      const want = interpret(ce, expr, point) as number;
+      expect(r.run!(point as never)).toBeCloseTo(want, 13);
+      // The same value at each call.
+      expect(r.run!(point as never)).toBe(r.run!(point as never));
+    }
+  });
+
+  // prettier-ignore
+  test.each([
+    ['a body that reads an input', ['WithRandomSeed', 7, ['Add', ['Random'], 'x']]],
+    ['a seed that is an input', ['WithRandomSeed', 'n', ['Random']]],
+    ['two draws', ['WithRandomSeed', 7, ['Add', ['Random'], ['Random']]]],
+    ['a list', ['WithRandomSeed', 7, ['List', ['Random'], ['Random']]]],
+    ['a loop', ['WithRandomSeed', 7, ['Sum', ['Random'], ['Limits', 'k', 1, 5]]]],
+    ['a seed that is a draw', ['WithRandomSeed', ['Random'], ['Random']]],
+    ['a seed computed from a draw', ['WithRandomSeed', ['Floor', ['Multiply', 1000, ['Random']]], ['Random']]],
+  ])('%s keeps its frame', (_, json) => {
+    expect(text(ir(json))).toMatch(frame);
+  });
+
+  test('a seed drawn in a frame: the interpreter value at each call', () => {
+    // The inner seed is a draw of the outer frame: the value is the same at
+    // every call, and it is not the value of a seed drawn at compile time.
+    // prettier-ignore
+    const json = ['WithRandomSeed', 3, ['Add', ['Multiply', 'x', ['Random']], ['WithRandomSeed', ['Random'], ['Random']], ['Random']]];
+    const r = ir(json);
+    const expr = ce.box(json as never);
+    for (const point of pointsFor(expr, POINTS.slice(0, 2))) {
+      const want = interpret(ce, expr, point) as number;
+      expect(r.run!(point as never)).toBeCloseTo(want, 13);
+    }
+    // Compiling it draws nothing from a frame around the compilation.
+    const draws = (compileInside: boolean) =>
+      ce
+        .box([
+          'WithRandomSeed',
+          11,
+          ['List', ['Random'], ['Random'], ['Random']],
+        ])
+        .evaluate().json;
+    const before = draws(false);
+    ir(['WithRandomSeed', ['Random'], ['Random']]);
+    expect(draws(true)).toEqual(before);
+  });
+
+  test('constantFold: false keeps the frame, with the same value', () => {
+    const json = ['WithRandomSeed', 537911, ['Random']];
+    const r = ir(json, { constantFold: false });
+    expect(text(r)).toMatch(frame);
+    expect(r.run!({} as never)).toBe(ir(json).run!({} as never));
+  });
+
+  test('a draw outside the frame is not the frame value', () => {
+    const r = ir(['Add', ['WithRandomSeed', 7, ['Random']], ['Random']]);
+    const a = r.run!({} as never) as number;
+    const b = r.run!({} as never) as number;
+    expect(a).not.toBe(b);
+  });
+
+  test('GLSL: the literal', () => {
+    const r = compile(
+      ce.box(['Multiply', 'x', ['WithRandomSeed', 537911, ['Random']]]),
+      { to: 'glsl', profile: 'ir', fallback: false }
+    );
+    expect(r.code).toBe('(x * 0.2510949)');
   });
 });
 
