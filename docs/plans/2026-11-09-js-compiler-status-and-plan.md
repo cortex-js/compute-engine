@@ -2662,6 +2662,20 @@ Landed on 2026-11-16, night:
   and makes a power series from `k = 0` `partial` at 0. It is back with the
   user, with the narrow form (`empty` only for the point box) recommended.
 
+- The replay on main `292763d1e` (G31, G32, CE-1396 and `ce-interval`'s
+  CE-1397 fix of the existing compiler landed; records
+  `replay-t12/m2927-*.jsonl`): JavaScript 9,334 of 9,503 (98.2%), GLSL 3,786
+  of 3,855 (98.2%), 30 GLSL programs that only the profile compiles. Values:
+  9,141 same, NO finite difference left (the six of the earlier replays were
+  the existing compiler's CE-1397 family or are `same` since G27), 23 shape,
+  9 throws, 1 non-finite. The times of that run are not usable (a loaded
+  machine: 106 programs above 1.5; four of the documents re-timed alone have
+  none above 1.5): the last usable distribution is the one above (median
+  0.741, 67 above 1.5). Largest decline causes left, JavaScript: a list where
+  a scalar is required 25 (eight forms), arms of two types 18 (12 are a
+  `Which` whose list arms have different run-time lengths), `Multiply` of a
+  list of points and another shape 10, lists of different lengths or ranks 8.
+
 Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
 states, each step gated by a render audit with no lost series, no new hang
 and no build or render over 1.5 times): its `At` handler on GLSL and the
