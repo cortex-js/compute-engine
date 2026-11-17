@@ -2865,6 +2865,22 @@ Landed on 2026-11-16, night:
   (the same picture, in float64 on the CPU), and one is a field,
   `neyret/lgp8zspg1s` #2, whose noise pattern changes at Standard precision
   (accepted). `gpu-exact-trig.ts` goes with the existing GLSL target.
+- `0ebd83c66e07630cc2c9b51ddad8dbafd6056c6e` (G39): `WithRandomSeed` of a
+  number seed and one `Random()` is a literal (`kthjqzwc4g` #0). CE-1424
+  filed (the interpreter draws twice in `Tan(Arctan(Random()))`).
+- `a4dbf3a323c258a456e01bacecad2c3aa92a8b53` (G40), from the audit of the 90
+  census tests that expect a decline or a throw (57 right, 16 unspecified,
+  5 contract, 5 wrong value, 7 the 2^53 guard, accepted): a root literal
+  whose untyped parameter is read as a collection declines; `mode: 'auto'`
+  takes the existing route. Two crafted known limitations recorded.
+- `b131ad60bf5df816f08beaa690780935025b16b7` (G41), by the user's decisions:
+  a GLSL program whose loops can run more passes in all than the budget
+  counts them in one counter and gives NaN past it; `mode: 'complex'` on
+  GLSL with the profile is documented as offered.
+- Tarball for Tycho from G41: `_TASKS/2026-11-17-tycho-build/
+  cortex-js-compute-engine-0.193.0-tycho.b131ad60b.tgz`, SHA-256
+  `69e34bc4564d6f4dcf9f88505a8bb9482eeb25d7fe919ec474d2864a02bf376b`, sent
+  to `tycho-3f` on 2026-11-17.
 
 Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
 states, each step gated by a render audit with no lost series, no new hang
