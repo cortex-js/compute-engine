@@ -27,7 +27,6 @@ import {
 } from './operators.js';
 import {
   decline,
-  hasOwnLowering,
   type Fn,
   type Lowering,
   type Source,
@@ -41,12 +40,10 @@ export function parameterName(p: Expression): string | undefined {
   return isSymbol(p) ? p.symbol : undefined;
 }
 
-/** `l` is a literal `List` of the library (a user definition or a lowering
- *  of its own declines in `cx.value()`). */
+/** `l` is a literal `List` of the library (a user definition declines in
+ *  `cx.value()`, which lowers a host handler's answer). */
 export const literalList = (cx: Lowering, l: Expression): l is Fn =>
-  isFunction(l, 'List') &&
-  cx.isLibrary(l) &&
-  !hasOwnLowering('List', l.operatorDefinition);
+  isFunction(l, 'List') && cx.isLibrary(l);
 
 export function listLowering(cx: Lowering) {
   const { b, type } = cx;
@@ -96,12 +93,9 @@ export function listLowering(cx: Lowering) {
   function source(e: Expression, scalars?: false, tuple?: boolean): Source;
   function source(e: Expression, scalars: true, tuple?: boolean): Source | V;
   function source(e: Expression, scalars = false, tuple = false): Source | V {
-    // A host's `Range` (`hasOwnLowering()`) declines in `cx.value()`.
-    if (
-      !isFunction(e, 'Range') ||
-      !cx.isLibrary(e) ||
-      hasOwnLowering('Range', e.operatorDefinition)
-    ) {
+    // A host's `Range` (a handler, `cx.isLibrary()`) is lowered in
+    // `cx.value()`.
+    if (!isFunction(e, 'Range') || !cx.isLibrary(e)) {
       const l = cx.value(e)!;
       if (cx.tuples.get(l) === 0 && !tuple)
         decline(e, 'a tuple where a list is read');

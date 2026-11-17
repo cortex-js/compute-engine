@@ -716,19 +716,38 @@ export type OperatorCompileContext = {
  * `OperatorDefinition`. It mirrors a built-in compiled-function handler:
  * it receives the (canonical) operands, a `compile` callback to lower a
  * sub-expression to target source, and the compilation `context` (branch on
- * `context.language`). It returns target source, or `undefined` (or
- * an empty string) to fall back to the target's default compilation of this
- * operator (a `null` returned from untyped JavaScript is tolerated and
- * treated the same).
+ * `context.language`: `'javascript'`, `'glsl'`, `'interval-javascript'`).
+ * It returns one of three results:
+ *
+ * - `undefined` (or an empty string; a `null` returned from untyped
+ *   JavaScript is tolerated and treated the same): the target's default
+ *   compilation of this operator.
+ * - an `Expression`: it is compiled in place of the node, with the
+ *   library's definitions. A node of the expression that the handler
+ *   created is compiled with no compile handler consulted, whatever its
+ *   operator (an `At` in the result of a handler of `At` is the library's
+ *   `At`). A node under the operands the handler received (the same
+ *   object), found in the result, is compiled as usual, handlers
+ *   consulted. Reuse the objects you were given: a copy of an operand
+ *   (rebuilt from its JSON) is a created node, and an operator inside it no
+ *   longer gets its handler. A result that holds the node itself declines. The compiler `profile: 'ir'` accepts this result and the
+ *   `undefined` result; it declines a node whose handler returns text or
+ *   calls `compile`.
+ * - target source, as a string.
+ *
+ * The handler can be called more than once for one node in one
+ * compilation: it must be a pure function of its operands and context for
+ * the duration of a `compile()` call.
  *
  * Takes precedence over the target's built-in operator/function mapping and
  * broadcast lowering, so it can override how a built-in operator compiles
  * (e.g. a custom-tolerance `GCD`, or a re-mapped `Add`/`Multiply`/`Power`/
  * relational operator). It does NOT override the structural / control-flow
  * heads (`Sequence`, `Sum`, `Product`, `Function`, `Declare`, `Assign`,
- * `Return`, `Break`, `Continue`, `Loop`, `Comprehension`, `If`, `Which`,
- * `Match`, `Block`), which have their own bespoke lowering; a handler
- * declared on one of those heads is ignored.
+ * `Return`, `Break`, `Continue`, `Loop`, `Comprehension`, `If`, `Match`,
+ * `Block`), which have their own bespoke lowering; a handler declared on
+ * one of those heads is ignored. `Which` is the exception: its handler is
+ * consulted.
  *
  * ```ts
  * ce.declare('MyGcd', {
@@ -746,7 +765,7 @@ export type OperatorCompileHandler = (
   args: ReadonlyArray<Expression>,
   compile: (expr: Expression) => string,
   context: OperatorCompileContext
-) => string | undefined;
+) => string | Expression | undefined;
 
 /**
  * Map of `TensorDataType` to JavaScript type.

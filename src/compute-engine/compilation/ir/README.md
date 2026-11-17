@@ -35,14 +35,43 @@ and helpers with the `extend` option.
 
 The head decides first: a head bound to a user function (by its definition, not
 its name) is a call, also when it is named `At` or `Sin`; a library head is
-compiled only when `isLibraryOperator()` holds; anything else declines. A
-library head whose operator definition has a `compile` handler other than the
-standard library's, or `compileHelpers`, declines (`hasOwnLowering()`, also for
-a `Range` read as a list source): the definition has a lowering of its own,
-which the profile does not call. A host that sets
-`ce.lookupDefinition('At').operator.compile` changes what `At` computes, and the
-row of `At` would give the stock value. The standard handler of `PointList` is
-not such a change (the identity of the function in the library table). Then a
+compiled only when `isLibraryOperator()` holds; anything else declines. A head
+whose operator definition has a `compile` handler other than the standard
+library's (`hasOwnLowering()`; a host that sets
+`ce.lookupDefinition('At').operator.compile`, or a host operator of its own) is
+lowered by that handler's answer (`handlerAnswer()`, called with the node's
+operands, a `compile` callback and the context `{ language, typeOf }`,
+`language` the name of the existing compilers: `'javascript'`, `'glsl'`,
+`'interval-javascript'`), except on a control-flow head other than `Which`,
+whose handler is ignored as in the existing compilers. `undefined` lowers the
+node as the library's; an expression is lowered in place of the node, in its
+frames, and each node of it that the handler created is lowered with no handler
+consulted: a node under the operands of a node that a handler was asked about is
+authored (`authored`, which canonicalization merging an operand into a new
+node does not lose), any other node of an answer is created. The walk ends:
+created nodes never reach a handler, and the operands are smaller than the
+node. Text, a call of the callback, a throw (other than a cancellation, which
+propagates), `compileHelpers` with no handler and an answer that holds the
+node itself decline. The callback gives `'0'`, the placeholder of the
+reference analysis of the existing compilers. No handler is asked about a
+node of more than `MAX_FOLD_EXPANDED_NODES` nodes as a tree (20,000), or
+about a node under one (`oversized()`): a handler can serialize its operands,
+and a value that shares its nodes (a host's height map: 236,663 nodes,
+2.5e10 as a tree) has a text of exponential length; such a node declines,
+as the existing compilers refuse to bake the value in and ask no handler
+inside it. A handler is called once per node of a lowering (the
+`answers` of `lower()`, which live in that call only). `idOf()` keys a created
+node apart, so that it shares no lowering with an authored node of its
+structure that consults a handler. `facts()` reads the answer in place of the
+node (its names, its loops; `answered`): a node with a handler that does not
+defer is not in the slice, so a closed node above it is not evaluated as the
+library's, a `Range` above it is not evaluated by the interpreter, and a `D`
+or an `Integrate` over it declines (its closed form is computed with the
+library's operator). `isLibrary()` is false for such a node, so `literalList()`,
+a `Range` read as a list source and `speculatable()` lower it through
+`value()`; a node whose handler defers is the library's everywhere. The
+standard handler of `PointList` is not such a handler (the identity of the
+function in the library table). Then a
 sub-expression that the slice would lower and that has no free name, no name
 bound by the walk, no effectful operation and no loop is evaluated once with
 `N()` and becomes a literal (`Mod(1, 1/10)` is exactly 0). A closed `Sinc(3)` is

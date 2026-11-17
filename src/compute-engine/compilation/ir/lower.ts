@@ -100,6 +100,7 @@ import {
 import {
   Decline,
   decline,
+  handlerAnswer,
   hasOwnLowering,
   isUntyped,
   text,
@@ -113,6 +114,11 @@ import {
 import { toBigint } from '../../boxed-expression/numerics.js';
 import { listLowering, literalList, parameterName } from './lower-lists.js';
 import { SCALARIZE_LIMIT } from './passes.js';
+import {
+  CONTROL_FLOW_HEADS,
+  MAX_FOLD_EXPANDED_NODES,
+  OVERRIDABLE_CONTROL_FLOW_HEADS,
+} from '../compiler-tables.js';
 import {
   integralClosedForm,
   intervalQuadratureRefusal,
@@ -171,6 +177,8 @@ type Facts = {
   loop: boolean;
   slice: boolean;
   size: number;
+  /** A host's `compile` handler answers for a node of it (`handled()`). */
+  answered: boolean;
 };
 
 /** The largest closed node, counted on every path, that the walk evaluates
@@ -286,7 +294,7 @@ export function lower(
     let k = ids.get(e);
     if (k !== undefined) return k;
     const key = isFunction(e)
-      ? `f${e.operator}\u001f${definitionKey(e)}\u001f${e.ops.map(idOf).join()}`
+      ? `${created.has(e) ? 'c' : 'f'}${e.operator}\u001f${definitionKey(e)}\u001f${e.ops.map(idOf).join()}`
       : isSymbol(e)
         ? `s${e.symbol}\u001f${definitionKey(e)}`
         : isNumber(e)
@@ -300,6 +308,78 @@ export function lower(
     return k;
   };
   const known = new WeakMap<Expression, Facts>();
+  // The answers of the host's `compile` handlers, per node of this lowering
+  // (`handlerAnswer()`; not of a control-flow head other than `Which`, as in
+  // the existing compilers), and the nodes that an answer created (not a
+  // node under the operands of a node that a handler was asked about): the
+  // library lowers those, with no handler, and the memo of `value()` keys
+  // them apart (`idOf()`).
+  const answers = new WeakMap<Expression, Expression | string | undefined>();
+  const created = new WeakSet<Expression>();
+  const authored = new WeakSet<Expression>();
+  const author = (x: Expression) => {
+    if (!isFunction(x) || authored.has(x)) return;
+    authored.add(x);
+    x.ops.forEach(author);
+  };
+  // The size of a node as a tree, up to the limit of the existing compilers
+  // plus one. A handler can serialize its operands, and a value that shares
+  // its nodes has a text of exponential length: no handler is asked about a
+  // node above the limit or about a node under one (`unasked`), as the
+  // existing compilers ask none inside a value they refuse to bake in.
+  const sizes = new WeakMap<Expression, number>();
+  const size = (x: Expression): number => {
+    if (!isFunction(x)) return 1;
+    let n = sizes.get(x);
+    if (n !== undefined) return n;
+    n = 1;
+    for (const op of x.ops)
+      n = Math.min(n + size(op), MAX_FOLD_EXPANDED_NODES + 1);
+    sizes.set(x, n);
+    return n;
+  };
+  const unasked = new WeakSet<Expression>();
+  const refuse = (x: Expression) => {
+    if (!isFunction(x) || unasked.has(x)) return;
+    unasked.add(x);
+    x.ops.forEach(refuse);
+  };
+  const oversized = (e: Fn): boolean => {
+    if (!unasked.has(e) && size(e) > MAX_FOLD_EXPANDED_NODES) refuse(e);
+    return unasked.has(e);
+  };
+  const handled = (e: Fn): Expression | string | undefined => {
+    if (
+      created.has(e) ||
+      (CONTROL_FLOW_HEADS.has(e.operator) &&
+        !OVERRIDABLE_CONTROL_FLOW_HEADS.has(e.operator)) ||
+      !hasOwnLowering(e.operator, e.operatorDefinition)
+    )
+      return undefined;
+    if (answers.has(e)) return answers.get(e);
+    e.ops.forEach(author);
+    let r = oversized(e)
+      ? `the compile handler of ${e.operator} is not asked about a node of a value of more than ${MAX_FOLD_EXPANDED_NODES} nodes as a tree`
+      : handlerAnswer(
+          e,
+          interval
+            ? 'interval-javascript'
+            : options.javascript
+              ? 'javascript'
+              : 'glsl'
+        );
+    const mark = (x: Expression) => {
+      if (x === e)
+        r = `the compile handler of ${e.operator} returns an expression that holds its own node`;
+      if (!isFunction(x) || x === e || authored.has(x) || created.has(x))
+        return;
+      created.add(x);
+      x.ops.forEach(mark);
+    };
+    if (typeof r === 'object') mark(r);
+    answers.set(e, r);
+    return r;
+  };
   const inputLengths = new Set<V>();
   // The names read as inputs of the compilation (of the entry, lifted into
   // a body, `vars`), in the order the lowering reads them, and those that an
@@ -456,7 +536,9 @@ export function lower(
   };
 
   const isLibrary = (e: Fn) =>
-    userBinding(e) === undefined && isLibraryOperator(e as never, e.operator);
+    userBinding(e) === undefined &&
+    isLibraryOperator(e as never, e.operator) &&
+    handled(e) === undefined;
 
   const facts = (e: Expression): Facts => {
     const none = new Set<string>();
@@ -466,6 +548,7 @@ export function lower(
       loop: false,
       slice,
       size: 1,
+      answered: false,
     });
     if (isSymbol(e)) return leaf(new Set([e.symbol]), true);
     // The attributes of a `Declare` read the names of their values: in a sum
@@ -481,9 +564,11 @@ export function lower(
     if (!isFunction(e)) return leaf(none, isNumber(e));
     const f = known.get(e);
     if (f !== undefined) return f;
+    oversized(e);
     const h = e.operator;
     const user = userBinding(e) !== undefined;
     const library = !user && isLibraryOperator(e as never, h);
+    const answer = user ? undefined : handled(e);
     const info: Facts = {
       names: new Set(),
       writes: new Set(),
@@ -493,16 +578,20 @@ export function lower(
         (REDUCTIONS.get(h)?.indexed === true && isFunction(e.ops[1], 'Limits')),
       slice:
         library &&
+        answer === undefined &&
         (CONSTRUCTS.has(h) ||
           REDUCTIONS.has(h) ||
           (rowOfHead(rows, h)?.effect ?? 'effectful') !== 'effectful'),
       size: 1,
+      answered: answer !== undefined,
     };
     if (h === 'Assign' && isSymbol(e.ops[0])) info.writes.add(e.ops[0].symbol);
-    for (const op of e.ops) {
+    // A handler's answer is read in place of the node (its names, its loops).
+    for (const op of typeof answer === 'object' ? [...e.ops, answer] : e.ops) {
       const t = facts(op);
       info.loop ||= t.loop;
       info.slice &&= t.slice;
+      info.answered ||= t.answered;
       info.size = Math.min(CLOSED_SIZE + 1, info.size + t.size);
       t.names.forEach((n) => info.names.add(n));
       t.writes.forEach((n) => info.writes.add(n));
@@ -790,17 +879,20 @@ export function lower(
         return b.constant(claim.value, 'boolean');
     const user = userBinding(e);
     if (user !== undefined || fns.recursive(e)) return fns.call(e, user);
+    // A host's handler (of a library head, or of a host operator): its
+    // expression is lowered in place of `e`.
+    const answer = handled(e);
+    if (typeof answer === 'string') decline(e, answer);
+    if (answer !== undefined) return value(answer, want);
+    // A closed form is computed with the library's operators.
+    if ((e.operator === 'D' || e.operator === 'Integrate') && facts(e).answered)
+      decline(e, `${e.operator} of an operator that a compile handler lowers`);
     if (!isLibraryOperator(e as never, e.operator))
       decline(
         e,
         e.operatorDefinition === undefined && e.valueDefinition === undefined
           ? `${e.operator} is an unknown operator (no definition)`
           : `${e.operator} is not the library operator here (a user definition)`
-      );
-    if (hasOwnLowering(e.operator, e.operatorDefinition))
-      decline(
-        e,
-        `the definition of ${e.operator} has its own lowering (compile or compileHelpers), which the profile does not call`
       );
     const closed = closedValue(e);
     if (closed !== undefined) return closed;
@@ -1009,7 +1101,9 @@ export function lower(
                 ? nv.re
                 : undefined;
         const terms =
-          float !== undefined && Number.isFinite(float) && !Number.isInteger(float)
+          float !== undefined &&
+          Number.isFinite(float) &&
+          !Number.isInteger(float)
             ? (realPowerBranchTerms(
                 undefined,
                 float,
@@ -1099,6 +1193,7 @@ export function lower(
           options.fold !== false &&
           b.effects === effects &&
           facts(e).writes.size === 0 &&
+          !facts(e).answered &&
           e.ops.every((x) => constant(value(x)!) !== undefined);
         const r = closed ? e.evaluate() : undefined;
         if (

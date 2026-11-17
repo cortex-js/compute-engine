@@ -132,6 +132,26 @@ interpreter's value. A line is removed when the case declines or is fixed.
 
 - `javascript`, `x: real`: `Digamma(x)` at `x = +Infinity` gives `NaN`. The
   interpreter gives `+Infinity`.
+- `javascript` (crafted), the existing compiler, `i: real`: a `compile`
+  handler of `At` that returns an expression of another shape than the node,
+  `List(args[1], 2)`, in `Add(At([10, 20, 30], i), 1)`: at `i = 1` the code
+  `[_.i, 2] + 1` gives the string `"1,21"`. The profile `ir` gives `[2, 3]`,
+  the value of the expression the handler returned.
+- every target (crafted), both compilers, `x: real`: a derivative or an
+  integral whose body is reached through a user function, with a `compile`
+  handler of `Sin` that returns `Cos(args[0])` and `g(u) = Sin(u)`:
+  `D(g(x), x)` gives `cos(x)`, the closed form of the library's `Sin`. The
+  program the handler describes, `D(Cos(x), x)`, gives `-sin(x)`. Written
+  without the function, `D(Sin(x), x)` declines in the profile `ir`.
+- `javascript` (crafted), the existing compiler, `i: real`, `x: real`,
+  `L = [1, 2, 3, 4, 5]`, `K = [100, 200, 300, 400, 500]`: a `compile`
+  handler of `At` that keeps the index `Max(Floor(args[1]), 0)` it built in
+  its first call and returns it for every later node, with a handler of
+  `Floor` that returns
+  `Ceil(args[0])`: in `At(L, Floor(i + 0.5)) + 1000·At(K, x)` the authored
+  `Floor` under the kept index is not given its handler at the second `At`.
+  At `i = 1` the code gives `100002`; the profile `ir` gives `200002`, the
+  value of the expressions the handlers returned.
 - `plausible?` — `javascript`, and every other target that compiles the
   closed form, `x: real`: `Apply(Derivative(EllipticK), x)`
   at `x = 0` gives `NaN`, the `0/0` of the closed form

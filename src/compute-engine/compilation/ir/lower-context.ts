@@ -7,7 +7,10 @@
 import type { Expression, FunctionInterface } from '../../global-types.js';
 import type { Type } from '../../../common/type/types.js';
 import { resolveTypeAlias } from '../../../common/type/utils.js';
-import { isFunction } from '../../boxed-expression/type-guards.js';
+import {
+  isExpression,
+  isFunction,
+} from '../../boxed-expression/type-guards.js';
 import type { Builder, IRType, Lane, Region, V } from './ir.js';
 import type { OperatorRow } from './operators.js';
 import { STANDARD_LIBRARIES } from '../../library/library.js';
@@ -62,6 +65,35 @@ export function hasOwnLowering(
     .map((t) => t?.[name] as { compile?: unknown } | undefined)
     .find((d) => d !== undefined);
   return def.compile !== standard?.compile;
+}
+
+/** The answer of the host's `compile` handler of `e` (`hasOwnLowering()`)
+ *  on the target `language`: `undefined` when it defers, the expression it
+ *  returns, or the cause of a decline (text, a call of the `compile`
+ *  callback, a throw, `compileHelpers` with no handler). The callback
+ *  gives `'0'`, the placeholder of the reference analysis of the existing
+ *  compilers, which a handler that records its operands' code already
+ *  tells apart. README, "Selecting the pipeline". */
+export function handlerAnswer(
+  e: Fn,
+  language: string
+): Expression | string | undefined {
+  const own = `the definition of ${e.operator} has its own lowering (compile or compileHelpers), which the profile does not call`;
+  const handler = e.operatorDefinition?.compile;
+  if (handler === undefined) return own;
+  let asked = false;
+  try {
+    const r: unknown = handler(e.ops, () => ((asked = true), '0'), {
+      language,
+      typeOf: (x) => x.type.type,
+    });
+    if (!asked && (r == null || r === '')) return undefined;
+    return !asked && isExpression(r) ? r : own;
+  } catch (error) {
+    if (error instanceof Error && error.name === 'CancellationError')
+      throw error;
+    return `the compile handler of ${e.operator} throws: ${error instanceof Error ? error.message : String(error)}`;
+  }
 }
 
 /** The text of `e`, at most about 120 characters (a shared tree can have
@@ -143,7 +175,8 @@ export type Lowering = {
   /** The list of `elements` (`List(…)`). */
   list(e: Fn, elements: V[]): V;
   /** `e` is a call of the library operator of its name (not a user
-   *  function, not a shadowed name). */
+   *  function, not a shadowed name, no host's `compile` handler that
+   *  answers for it: one that defers keeps the library's). */
   isLibrary(e: Fn): boolean;
   /** The input `name` of the engine type `t`, which a function that the
    *  call `e` calls reads, read at the call. */

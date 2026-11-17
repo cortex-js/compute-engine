@@ -287,6 +287,19 @@
 
 ### Improvements
 
+- **A `compile` handler of an operator definition can return an
+  expression.** The expression is compiled in place of the node, with the
+  library's definitions: a node that the handler created is compiled with
+  no handler consulted, and the operands it received, reused as the same
+  objects, are compiled as usual. For example, a handler of `At` that
+  returns `ce.function('At', [args[0], ce.function('Max',
+  [ce.function('Floor', [args[1]]), ce.number(0)])])` compiles
+  `At([10, 20, 30], i)` to a read at `Max(Floor(i), 0)` on every target,
+  with no text written for any of them. The profile `'ir'` now calls a
+  handler: a handler that returns `undefined` or an expression no longer
+  makes that profile decline; one that returns text or calls `compile`
+  still does. `OperatorCompileHandler` returns
+  `string | Expression | undefined`.
 - **`BigDecimal` operations take an optional precision argument.** Each
   operation that rounds (`div`, `inv`, `pow`, `sqrt`, `cbrt`, `nthRoot`,
   `exp`, `ln`, `log`, and the trigonometric and hyperbolic functions) or

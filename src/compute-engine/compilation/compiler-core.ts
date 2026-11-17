@@ -82,6 +82,7 @@ import {
   isCharacter,
   isFunction,
   isDictionary,
+  isExpression,
 } from '../boxed-expression/type-guards.js';
 import {
   freeAnonymousSlots,
@@ -3776,6 +3777,14 @@ const CUSTOM_HANDLER_DECLINED: unique symbol = Symbol(
   'custom handler declined'
 );
 
+/** The nodes that the expression a compile handler returned created, while
+ *  it is compiled (`compileExprCustomHandler()`), and the depth of the
+ *  expressions returned for a node of no known identity (`node`
+ *  undefined), for which a handler is consulted again: it is bounded. */
+const HANDLER_CREATED = new WeakSet<Expression>();
+const HANDLER_DEPTH = 32;
+let handlerDepth = 0;
+
 /**
  * `compileExpr()` by the compile handler of a user operator definition:
  * the code that the handler wrote, `CUSTOM_HANDLER_DECLINED` when the
@@ -3851,15 +3860,18 @@ function compileExprCustomHandler(
     const customDef = lookupApplicable(h, engine.context.lexicalScope);
     if (
       isOperatorDef(customDef) &&
-      typeof customDef.operator.compile === 'function'
+      typeof customDef.operator.compile === 'function' &&
+      (node === undefined || !HANDLER_CREATED.has(node))
     ) {
-      const custom = customDef.operator.compile(
+      const operands =
         fieldArgsWithDeclaredReceiver(
           engine,
           h,
           args,
           target.declaredVarTypes
-        ) ?? args,
+        ) ?? args;
+      const custom = customDef.operator.compile(
+        operands,
         (expr) => compileValueOperand(expr, target),
         {
           language: target.language ?? 'javascript',
@@ -3877,6 +3889,42 @@ function compileExprCustomHandler(
         CompilerState._callerLowered.get(node) !== false
       )
         CompilerState._callerLowered.set(node, wrote);
+      // An expression: its code, with no handler consulted for a node that
+      // it created (not a node under the operands, by identity).
+      if (isExpression(custom)) {
+        const deep = node === undefined;
+        if (deep && handlerDepth >= HANDLER_DEPTH)
+          throw new Error(
+            `Could not compile \`${h}\`: compile handlers returned expressions ${HANDLER_DEPTH} levels deep`
+          );
+        const authored = new Set<Expression>();
+        const author = (x: Expression) => {
+          if (!isFunction(x) || authored.has(x)) return;
+          authored.add(x);
+          x.ops.forEach(author);
+        };
+        operands.forEach(author);
+        const marked: Expression[] = [];
+        const mark = (x: Expression) => {
+          if (x === node)
+            throw new Error(
+              `Could not compile \`${h}\`: its compile handler returns an expression that holds its own node`
+            );
+          if (!isFunction(x) || authored.has(x) || HANDLER_CREATED.has(x))
+            return;
+          HANDLER_CREATED.add(x);
+          marked.push(x);
+          x.ops.forEach(mark);
+        };
+        if (deep) handlerDepth += 1;
+        try {
+          mark(custom);
+          return compileValueOperand(custom, target);
+        } finally {
+          if (deep) handlerDepth -= 1;
+          for (const x of marked) HANDLER_CREATED.delete(x);
+        }
+      }
       if (wrote) {
         recordCallerHandlerCode(h, customDef.operator, target);
         return custom;
