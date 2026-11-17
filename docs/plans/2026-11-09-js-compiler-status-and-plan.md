@@ -2714,6 +2714,27 @@ Landed on 2026-11-16, night:
   base 0 with the point exponent 0); a fix of the operand splice of the
   existing compilers (CE-1196, CE-1224) in review.
 
+- `65bf232754b043fe95a9aef9c86b804e4d38a7b6` (G35, speed): `Mod(x, 1)` on
+  JavaScript is `x - floor(x)` in `floorMod()`, the same double as the
+  remainder without `%`, which is slow for a large operand; `Mod(10^4·sin(…),
+  1)` is the hash of the noise documents. The timed replay on a bundle,
+  against the bundle of the head before: above 1.1 times the existing
+  compiler 509 to 320; above 1.25: 341 to 264; above 1.5: 79 to 19; above 2:
+  20 to 10; above 3: 9 to 7; median 0.723; no text, admission or value class
+  changes. Left above 1.5 (19): `vwbagbcerj` #2, #3 (a sample artefact),
+  `lrpzqnemhy` (4, the existing compiler returns at the first NaN term),
+  `odyxeaoouk`, `nqfechxzqp`, `lg5hblqpel` #8, #9 (CE-1373), `lb6bi7fio3`
+  #31 (3.5), `kthjqzwc4g` #0 (3.3), `art/lrhjtkkyls` #1 (3.3),
+  `art/13obrwvjag` #2 (2.2), and six between 1.5 and 1.9. The 320 above 1.1
+  are from a loaded sweep: each is to be re-timed alone before it counts as
+  an exception.
+- `neyret/fqiid6jhrd` #0, the one "finite" difference left in the replay, is
+  explained (`ce-interval`): the program holds the hash
+  `Mod(10000·Sin(10000·k/(2^n + 1)^2), 1)`; the existing compiler computes
+  the argument of the sine in another order, one ulp from the interpreter's,
+  and the hash magnifies it to the ninth digit. The precision of the target;
+  not a defect.
+
 Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
 states, each step gated by a render audit with no lost series, no new hang
 and no build or render over 1.5 times): its `At` handler on GLSL and the
