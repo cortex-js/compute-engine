@@ -636,7 +636,7 @@ For a change that must last for one block of code only, use
 
 <MemberCard>
 
-##### ComputeEngine.precision {#precision-1}
+##### ComputeEngine.precision {#precision-2}
 
 ```ts
 get precision(): number
@@ -4035,26 +4035,45 @@ target-specific source without exposing the full internal machinery.
 ### OperatorCompileHandler {#operatorcompilehandler}
 
 ```ts
-type OperatorCompileHandler = (args, compile, context) => string | undefined;
+type OperatorCompileHandler = (args, compile, context) => string | Expression | undefined;
 ```
 
 A custom compilation handler for an operator, set on an
 `OperatorDefinition`. It mirrors a built-in compiled-function handler:
 it receives the (canonical) operands, a `compile` callback to lower a
 sub-expression to target source, and the compilation `context` (branch on
-`context.language`). It returns target source, or `undefined` (or
-an empty string) to fall back to the target's default compilation of this
-operator (a `null` returned from untyped JavaScript is tolerated and
-treated the same).
+`context.language`: `'javascript'`, `'glsl'`, `'interval-javascript'`).
+It returns one of three results:
+
+- `undefined` (or an empty string; a `null` returned from untyped
+  JavaScript is tolerated and treated the same): the target's default
+  compilation of this operator.
+- an `Expression`: it is compiled in place of the node, with the
+  library's definitions. A node of the expression that the handler
+  created is compiled with no compile handler consulted, whatever its
+  operator (an `At` in the result of a handler of `At` is the library's
+  `At`). A node under the operands the handler received (the same
+  object), found in the result, is compiled as usual, handlers
+  consulted. Reuse the objects you were given: a copy of an operand
+  (rebuilt from its JSON) is a created node, and an operator inside it no
+  longer gets its handler. A result that holds the node itself declines. The compiler `profile: 'ir'` accepts this result and the
+  `undefined` result; it declines a node whose handler returns text or
+  calls `compile`.
+- target source, as a string.
+
+The handler can be called more than once for one node in one
+compilation: it must be a pure function of its operands and context for
+the duration of a `compile()` call.
 
 Takes precedence over the target's built-in operator/function mapping and
 broadcast lowering, so it can override how a built-in operator compiles
 (e.g. a custom-tolerance `GCD`, or a re-mapped `Add`/`Multiply`/`Power`/
 relational operator). It does NOT override the structural / control-flow
 heads (`Sequence`, `Sum`, `Product`, `Function`, `Declare`, `Assign`,
-`Return`, `Break`, `Continue`, `Loop`, `Comprehension`, `If`, `Which`,
-`Match`, `Block`), which have their own bespoke lowering; a handler
-declared on one of those heads is ignored.
+`Return`, `Break`, `Continue`, `Loop`, `Comprehension`, `If`, `Match`,
+`Block`), which have their own bespoke lowering; a handler declared on
+one of those heads is ignored. `Which` is the exception: its handler is
+consulted.
 
 ```ts
 ce.declare('MyGcd', {
@@ -5024,6 +5043,21 @@ readonly tolerance: number;
 The engine's numeric tolerance, a read-only configuration value a
 membership handler consults (`Element` declines rather than refute a
 near-match inside it).
+
+</MemberCard>
+
+<MemberCard>
+
+##### PureEngineView.precision {#precision}
+
+```ts
+readonly precision: number;
+```
+
+The engine's precision, the number of significant digits of its
+numeric calculations (`ComputeEngine.precision`): a handler that reads
+a float literal reads it to the digits it was rounded to (the branch of
+`Power` for a negative base and a float exponent).
 
 </MemberCard>
 
@@ -10621,6 +10655,40 @@ detect it.
 
 <MemberCard>
 
+##### NumericValue.bignumReAt() {#bignumreat}
+
+```ts
+bignumReAt(_prec): BigDecimal | undefined
+```
+
+`bignumRe` computed at `prec` significant digits instead of
+`BigDecimal.precision`. Only an exact value computes its big decimal
+(a quotient or a radical); the other values hold it.
+
+####### \_prec
+
+`number`
+
+</MemberCard>
+
+<MemberCard>
+
+##### NumericValue.bignumImAt() {#bignumimat}
+
+```ts
+bignumImAt(_prec): BigDecimal | undefined
+```
+
+`bignumIm` computed at `prec` significant digits (see `bignumReAt`).
+
+####### \_prec
+
+`number`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### NumericValue.isZeroWithTolerance() {#iszerowithtolerance}
 
 ```ts
@@ -10650,10 +10718,21 @@ The sign of complex numbers is undefined
 ##### NumericValue.N() {#n}
 
 ```ts
-abstract N(): NumericValue
+abstract N(prec?): NumericValue
 ```
 
-Return a non-exact representation of the numeric value
+Return a non-exact representation of the numeric value.
+
+The methods that round or bound a result (`N`, `inv`, `add`, `sub`,
+`mul`, `div`, `pow`, `root`, `sqrt`, `abs`, `ln`, `exp`) take an
+optional last argument `prec`, the number of significant digits of the
+working precision. An engine passes its own precision; the default is
+`BigDecimal.precision`, which no engine writes (50 unless the host sets
+it).
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10695,8 +10774,12 @@ abstract neg(): NumericValue
 ##### NumericValue.inv() {#inv}
 
 ```ts
-abstract inv(): NumericValue
+abstract inv(prec?): NumericValue
 ```
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10705,12 +10788,16 @@ abstract inv(): NumericValue
 ##### NumericValue.add() {#add}
 
 ```ts
-abstract add(other): NumericValue
+abstract add(other, prec?): NumericValue
 ```
 
 ####### other
 
 `number` \| [`NumericValue`](#abstract-numericvalue)
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10719,12 +10806,16 @@ abstract add(other): NumericValue
 ##### NumericValue.sub() {#sub}
 
 ```ts
-abstract sub(other): NumericValue
+abstract sub(other, prec?): NumericValue
 ```
 
 ####### other
 
 [`NumericValue`](#abstract-numericvalue)
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10733,12 +10824,16 @@ abstract sub(other): NumericValue
 ##### NumericValue.mul() {#mul}
 
 ```ts
-abstract mul(other): NumericValue
+abstract mul(other, prec?): NumericValue
 ```
 
 ####### other
 
 `number` \| `BigDecimal` \| [`NumericValue`](#abstract-numericvalue)
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10747,12 +10842,16 @@ abstract mul(other): NumericValue
 ##### NumericValue.div() {#div}
 
 ```ts
-abstract div(other): NumericValue
+abstract div(other, prec?): NumericValue
 ```
 
 ####### other
 
 `number` \| [`NumericValue`](#abstract-numericvalue)
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10761,7 +10860,7 @@ abstract div(other): NumericValue
 ##### NumericValue.pow() {#pow}
 
 ```ts
-abstract pow(n): NumericValue
+abstract pow(n, prec?): NumericValue
 ```
 
 ####### n
@@ -10773,6 +10872,10 @@ abstract pow(n): NumericValue
   `im`: `number`;
  \}
 
+####### prec?
+
+`number`
+
 </MemberCard>
 
 <MemberCard>
@@ -10780,10 +10883,14 @@ abstract pow(n): NumericValue
 ##### NumericValue.root() {#root}
 
 ```ts
-abstract root(n): NumericValue
+abstract root(n, prec?): NumericValue
 ```
 
 ####### n
+
+`number`
+
+####### prec?
 
 `number`
 
@@ -10794,8 +10901,12 @@ abstract root(n): NumericValue
 ##### NumericValue.sqrt() {#sqrt}
 
 ```ts
-abstract sqrt(): NumericValue
+abstract sqrt(prec?): NumericValue
 ```
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10818,8 +10929,12 @@ abstract gcd(other): NumericValue
 ##### NumericValue.abs() {#abs}
 
 ```ts
-abstract abs(): NumericValue
+abstract abs(prec?): NumericValue
 ```
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10828,10 +10943,14 @@ abstract abs(): NumericValue
 ##### NumericValue.ln() {#ln}
 
 ```ts
-abstract ln(base?): NumericValue
+abstract ln(base?, prec?): NumericValue
 ```
 
 ####### base?
+
+`number`
+
+####### prec?
 
 `number`
 
@@ -10842,8 +10961,12 @@ abstract ln(base?): NumericValue
 ##### NumericValue.exp() {#exp}
 
 ```ts
-abstract exp(): NumericValue
+abstract exp(prec?): NumericValue
 ```
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10882,12 +11005,16 @@ abstract round(): NumericValue
 ##### NumericValue.eq() {#eq}
 
 ```ts
-abstract eq(other): boolean
+abstract eq(other, prec?): boolean
 ```
 
 ####### other
 
 `number` \| [`NumericValue`](#abstract-numericvalue)
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10896,12 +11023,16 @@ abstract eq(other): boolean
 ##### NumericValue.lt() {#lt}
 
 ```ts
-abstract lt(other): boolean | undefined
+abstract lt(other, prec?): boolean | undefined
 ```
 
 ####### other
 
 `number` \| [`NumericValue`](#abstract-numericvalue)
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10910,12 +11041,16 @@ abstract lt(other): boolean | undefined
 ##### NumericValue.lte() {#lte}
 
 ```ts
-abstract lte(other): boolean | undefined
+abstract lte(other, prec?): boolean | undefined
 ```
 
 ####### other
 
 `number` \| [`NumericValue`](#abstract-numericvalue)
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10924,12 +11059,16 @@ abstract lte(other): boolean | undefined
 ##### NumericValue.gt() {#gt}
 
 ```ts
-abstract gt(other): boolean | undefined
+abstract gt(other, prec?): boolean | undefined
 ```
 
 ####### other
 
 `number` \| [`NumericValue`](#abstract-numericvalue)
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10938,12 +11077,16 @@ abstract gt(other): boolean | undefined
 ##### NumericValue.gte() {#gte}
 
 ```ts
-abstract gte(other): boolean | undefined
+abstract gte(other, prec?): boolean | undefined
 ```
 
 ####### other
 
 `number` \| [`NumericValue`](#abstract-numericvalue)
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10952,11 +11095,18 @@ abstract gte(other): boolean | undefined
 ##### NumericValue.valueOf() {#valueof-1}
 
 ```ts
-valueOf(): string | number
+valueOf(prec?): string | number
 ```
 
 Object.valueOf(): returns a primitive value, preferably a JavaScript
- number over a string, even if at the expense of precision
+ number over a string, even if at the expense of precision. A complex
+ value is a string with `prec` significant digits in each part. Without
+ `prec`, it uses `BigDecimal.precision`, not the precision of an
+ engine.
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10968,7 +11118,8 @@ Object.valueOf(): returns a primitive value, preferably a JavaScript
 toPrimitive: string | number | null
 ```
 
-Object.toPrimitive()
+Object.toPrimitive(). It uses `BigDecimal.precision`, not the
+precision of an engine.
 
 ####### hint
 
@@ -10984,7 +11135,25 @@ Object.toPrimitive()
 toJSON(): unknown
 ```
 
-Object.toJSON
+Object.toJSON. It uses `BigDecimal.precision`, not the precision of
+an engine.
+
+</MemberCard>
+
+<MemberCard>
+
+##### NumericValue.toString() {#tostring-1}
+
+```ts
+abstract toString(prec?): string
+```
+
+A string of the value. A big decimal value is rounded to `prec`
+significant digits (default `BigDecimal.precision`).
+
+####### prec?
+
+`number`
 
 </MemberCard>
 
@@ -10995,6 +11164,9 @@ Object.toJSON
 ```ts
 print(): void
 ```
+
+Print the value to the console. It uses `BigDecimal.precision`, not
+the precision of an engine.
 
 </MemberCard>
 
@@ -13450,7 +13622,7 @@ For a change that must last for one block of code only, use
 
 <MemberCard>
 
-##### IComputeEngine.precision {#precision}
+##### IComputeEngine.precision {#precision-1}
 
 ```ts
 get precision(): number
@@ -18513,7 +18685,7 @@ Similar to`expr.valueOf()` but includes a hint.
 
 <MemberCard>
 
-##### Expression.toString() {#tostring-1}
+##### Expression.toString() {#tostring-2}
 
 ```ts
 toString(): string
@@ -18531,9 +18703,10 @@ Note that lazy collections are eagerly evaluated.
 Used when coercing a `Expression` to a `String`.
 
 For arbitrary-precision numbers (`BigNumericValue`), the output is
-rounded to `BigDecimal.precision` significant digits. Digits beyond the
-working precision are noise from precision-bounded operations (division,
-transcendentals) and are not displayed. Machine-precision numbers use
+rounded to the precision of the engine (`ce.precision`) in significant
+digits. Digits beyond the working precision are noise from
+precision-bounded operations (division, transcendentals) and are not
+displayed. Machine-precision numbers use
 their native `Number.toString()`.
 
 </MemberCard>

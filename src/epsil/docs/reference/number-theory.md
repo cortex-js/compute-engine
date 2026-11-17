@@ -332,7 +332,7 @@ True if n is an abundant number (sum of divisors &gt; 2n).
 
 MathJSON `IsCenteredSquare` · `(integer) -> boolean`
 
-True if n is a centered square number.
+True if n is a centered square number, n = t² + (t + 1)² for an integer t ≥ 0: 1, 5, 13, 25, 41, ...
 
 ### isHappy
 

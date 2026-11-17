@@ -113,6 +113,8 @@ MathJSON `ND` · `(function, at: number) -> list<number> | number | tuple`
 
 Numerical derivative evaluated at a point.
 
+The function is an expression (ND(Sin(x), 1)), a function literal or the name of a function (ND(Sin, 1)): each gives cos(1).
+
 ### ndSolve
 
 MathJSON `NDSolve` · `(expression, symbol, limits: symbol | tuple, number, number?) -> list`
