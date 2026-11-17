@@ -2692,6 +2692,28 @@ Landed on 2026-11-16, night:
   to 2.3), `F(3, x)` and `F(2, x)` of `ltjak2qii0`, `bygw3kdipo` and
   `p0kazir1l9` at about 2.2: the next speed work.
 
+- `13dfa2cd906ace3aa9bd62df689ab8d512002fed` (G33): on JavaScript an `If`
+  or a `Which` whose arms are flat lists of two lengths compiles (the `if`
+  yields the length beside the list; `dce` keeps a length that a function's
+  result type names). The 12 programs of `art/mavxszbvzk` compile; a list
+  arm beside a scalar arm keeps its decline (R3). GLSL and the interval mode
+  decline two lengths.
+- `3e69044983f0953374f2e54a912647403690f148` (G34): on JavaScript a `Range`
+  or a `Repeat` whose run-time count is NaN is an empty list, where the
+  length guard threw (`Range(1, Ceil(Log(a)))` at a negative `a`, the digits
+  of a number in Tycho's documents): 8 corpus programs go from a throw to
+  the existing compiler's values, and one still throws
+  (`neyret/frqpa78i6s` #14).
+- The replay on a bundle with both: JavaScript 9,346 of 9,503 (98.3%);
+  median time 0.729; values: 9,161 same, 22 shape, 1 finite
+  (`neyret/fqiid6jhrd` #0: the profile equals the interpreter, the existing
+  compiler differs in the ninth digit; passed to `ce-interval`), 1 throw.
+  `ir/` is 11,173 lines.
+- `ce-interval` on 2026-11-16, night: CE-1372 fixed in the narrow form the
+  user chose (`8e228cdc1`: the interval power is `empty` only for the point
+  base 0 with the point exponent 0); a fix of the operand splice of the
+  existing compilers (CE-1196, CE-1224) in review.
+
 Tycho, on the tarball `d583f9aa5` (`tycho-3f`, row MK, local worktrees, 44
 states, each step gated by a render audit with no lost series, no new hang
 and no build or render over 1.5 times): its `At` handler on GLSL and the
