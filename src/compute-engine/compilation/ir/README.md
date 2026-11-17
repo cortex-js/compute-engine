@@ -1651,8 +1651,29 @@ the static type of the argument (a parameter passed on, `(1 − t)·a + t·b`); 
 function per binding, as for a list parameter below. `C_mod(C_mul(A, X(x, y)))`
 of three functions assigned with no declaration compiles on both targets. A
 later call with an argument of another shape declines, naming the function and
-the parameter. When the interpreter binds the arguments whole
-(`paramsAreScalar()` is false: the body reads a parameter as a list), a flat
+the parameter. A call maps over a list argument, binds it whole or declines
+as the interpreter decides for that parameter (`listMapsAt()`, read from the
+signature of the binding, or of the literal for a name declared with the bare
+type `function`, whose annotated parameters then have the type of their
+annotation): with a parameter declared `broadcastable<T>`
+(`broadcastableParamSlots()`), the interpreter maps a list at that parameter
+and at a scalar one, and the parameter takes a `T` (`broadcastable<real>` of
+a flat list is mapped, `broadcastable<tuple<real, real>>` of a list of points
+declines); it maps a list at every parameter when all are
+scalar (`paramsAreScalar()`); beside a parameter declared as a point
+(`pointListParamSlots()`), a list of points at that parameter (not at an
+indexed one, `p ↦ p[1] + p[2]`) and any list at a parameter of a scalar type
+or of no stated type (user decision 2026-10-24); every other list binds whole.
+The profile maps a flat list at a scalar parameter, the other arguments bound
+whole in each cell (`mapOver()`): `k := (p: tuple<number, number>, x) ↦ 42`
+of `k((1, 2), [3, 4])` is `[42, 42]`. A list that the interpreter maps where
+the parameter is a list or took a point or a list of points at the first call
+declines, as does a list of points or a nested list that the interpreter maps
+(to the points, or to the leaves): `g(B)` of a list of points `B` with
+`g := (p: tuple<real, real>) ↦ p[1] + p[2]`, declared `function` or not, and
+with `g := x ↦ 2x`. A tuple at a parameter annotated as a scalar declines (the
+interpreter maps the function over its components: `g((3, −4))` with
+`g := (p: real) ↦ |p|` is `(3, 4)`), also beside a mapped list. When the interpreter binds the arguments whole, a flat
 list of numbers of a stated length as the first argument is a list of that
 length, and a later call with another length declines:
 `R(p, φ) := [Σ p·[cos φ, −sin φ], Σ p·[sin φ, cos φ]]` of `R([−0.57, 2.8], φ)`.

@@ -169,6 +169,13 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `Floor` under the kept index is not given its handler at the second `At`.
   At `i = 1` the code gives `100002`; the profile `ir` gives `200002`, the
   value of the expressions the handlers returned.
+- `javascript` (crafted), the existing compiler, `L: list<real>`: a function
+  declared in a `Block` with a parameter typed as a point and an untyped
+  one, called with a list at the untyped one:
+  `Block(Declare(k, 'function', Function(At(p, 1) + x, Typed(p, 'tuple<real,
+  real>'), x)), k((1, 2), L))` at `L = [3, 4]` gives the string `"3,41"`.
+  The interpreter gives `[4, 5]`; the profile `ir` declines (a local of
+  type function).
 - `plausible?` — `javascript`, and every other target that compiles the
   closed form, `x: real`: `Apply(Derivative(EllipticK), x)`
   at `x = 0` gives `NaN`, the `0/0` of the closed form

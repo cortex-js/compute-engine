@@ -37,7 +37,13 @@ import {
   type Fn,
   type Lowering,
 } from './lower-context.js';
-import { paramsAreScalar } from '../../boxed-expression/boxed-function.js';
+import {
+  broadcastableParamSlots,
+  paramsAreScalar,
+  pointListParamSlots,
+} from '../../boxed-expression/boxed-function.js';
+import { isIndexReadTuple } from '../../boxed-expression/index-read-tuple.js';
+import { isPointParameterType } from '../../collection-utils.js';
 import { parameterName, type listLowering } from './lower-lists.js';
 
 /**
@@ -252,8 +258,22 @@ function signatureTypes(e: Fn, literal: Fn) {
   // tuples (`tuple`, the axis of the mark). A
   // parameter of no stated type, or of a type that is not a scalar, is a
   // point when the argument of the first call is one (`point`, `define()`).
+  // With no signature (a name declared `function`), a parameter annotated
+  // in the literal (`Typed(p, 'real')`) has the type of its annotation, as
+  // for the interpreter.
+  const own = literal.type.type;
+  const annotated = (i: number) =>
+    typeof own === 'object' &&
+    own.kind === 'signature' &&
+    literal.ops[i + 1]?.operator === 'Typed'
+      ? own.args?.[i]?.type
+      : undefined;
   const params = names.map((p, i) => {
-    const t = signature?.args?.[i]?.type ?? 'unknown';
+    const d = signature?.args?.[i]?.type ?? annotated(i) ?? 'unknown';
+    // A parameter `broadcastable<T>` takes a `T`: a list there is mapped
+    // (`listMapsAt()`).
+    const t =
+      typeof d === 'object' && d.kind === 'broadcastable' ? d.elements : d;
     const list = tupleOrInputType(t);
     const s = inputType(t);
     const scalar = s?.shape.length === 0;
@@ -281,9 +301,9 @@ function signatureTypes(e: Fn, literal: Fn) {
   const points = list === undefined && r ? pointLength(r) : undefined;
   // A list of elements of no stated type: the shape of the body.
   const shaped = list === undefined && r ? openList(r) : undefined;
-  // The interpreter maps a call over its list arguments when every
-  // parameter is a scalar (`paramsAreScalar()`).
-  const maps = paramsAreScalar(signature ?? literal.type.type);
+  // Where the interpreter maps a call over a list argument: the signature
+  // of the binding, or of the literal for a name declared `function`.
+  const mapsAt = listMapsAt(signature ?? literal.type.type);
   // A colour result is on the colour lane; a colour parameter declines.
   const result: IRType | undefined =
     open || list !== undefined || points !== undefined || shaped
@@ -291,7 +311,41 @@ function signatureTypes(e: Fn, literal: Fn) {
       : r === 'color'
         ? { lane: 'color', shape: [] }
         : scalarOf(literal, r, `the result of ${e.operator}`);
-  return { names, params, result, list, tuple, r, open, points, shaped, maps };
+  return {
+    names,
+    params,
+    result,
+    list,
+    tuple,
+    r,
+    open,
+    points,
+    shaped,
+    mapsAt,
+  };
+}
+
+/** Whether the interpreter maps a call of a user function of the signature
+ *  `sig` over a list argument (not a tuple) at the parameter `i`, a list of
+ *  points when `points`. Every parameter scalar (`paramsAreScalar()`): any
+ *  list, to its leaves. Otherwise, with a parameter declared as a point
+ *  (`pointListParamSlots()`): a list of points at a point parameter that
+ *  is not an indexed one (`isIndexReadTuple()`), and any list at a
+ *  parameter of a scalar type or of no stated type (user decision
+ *  2026-10-24). Every other list binds whole. */
+function listMapsAt(sig: Type): (i: number, points: boolean) => boolean {
+  // A parameter declared `broadcastable<T>` (and a scalar beside it) maps.
+  const declared = broadcastableParamSlots(sig);
+  if (declared !== undefined) return (i) => declared.at(i).mappable;
+  if (paramsAreScalar(sig)) return () => true;
+  const plan = pointListParamSlots(sig);
+  if (plan === undefined) return () => false;
+  return (i, points) => {
+    const slot = plan.at(i);
+    if (!slot.mappable || slot.elements === undefined) return false;
+    if (!isPointParameterType(slot.elements)) return true;
+    return points && !isIndexReadTuple(slot.elements);
+  };
 }
 
 /** A user function: the IR function, its parameter types and its result
@@ -319,8 +373,9 @@ type UserFunction = {
   /** The result is a list or a tuple (declared, or a list of elements of no
    *  stated type, `openList()`): its type is the body's. */
   list: boolean;
-  /** A call maps over its list arguments (`signatureTypes()`). */
-  maps: boolean;
+  /** The interpreter maps a call over a list at a parameter
+   *  (`listMapsAt()`). */
+  mapsAt: (i: number, points: boolean) => boolean;
   ir: IRFunction;
   inputs: Type[];
   called: boolean;
@@ -408,9 +463,9 @@ export function functionLowering(
           taken: names[i],
         } as UserFunction['params'][number];
       // A flat list of a stated length, bound whole when the interpreter
-      // does not map the call (`paramsAreScalar()`).
+      // does not map the call over it (`listMapsAt()`).
       if (
-        !sig.maps &&
+        !sig.mapsAt(i, false) &&
         !cx.tuples.has(v!) &&
         t?.shape.length === 1 &&
         typeof n === 'number' &&
@@ -449,7 +504,7 @@ export function functionLowering(
       own: (ir.lifted = ir.body.params.length),
       result,
       list: list !== undefined || points !== undefined || shaped !== undefined,
-      maps: sig.maps,
+      mapsAt: sig.mapsAt,
       ir,
       inputs: [],
       called: false,
@@ -605,6 +660,19 @@ export function functionLowering(
     const args = e.ops.flatMap((op, i) => {
       const p = fn.params[i];
       values.push(early?.[i] ?? cx.value(op)!);
+      // A list (not a point) that the parameter would take whole, where
+      // the interpreter maps the function over it (`listMapsAt()`).
+      const axis = cx.tuples.get(values[i]);
+      if (
+        p.shape.length > 0 &&
+        axis !== 0 &&
+        type(values[i]).shape.length > 0 &&
+        fn.mapsAt(i, axis === 1)
+      )
+        decline(
+          op,
+          `a list argument of ${e.operator} that the parameter ${i + 1}, a list or a point, would take whole (the interpreter maps the function over the list)`
+        );
       if (mapped) return [];
       const v = cx.widen(values[i], p.lane);
       const t = type(v);
@@ -649,8 +717,14 @@ export function functionLowering(
         shape: p.shape.map((m) => (m === 'run-time' ? n : m)),
       } as IRType;
       if (p.shape.length === 0 && t.shape.length > 0) {
+        // A list that the interpreter binds whole at a scalar parameter.
+        if (!fn.mapsAt(i, false))
+          decline(
+            op,
+            `a list argument of ${e.operator} that the scalar parameter ${i + 1} would take (the interpreter binds the list whole)`
+          );
         // A tuple binds whole.
-        if (!fn.maps || cx.tuples.has(v))
+        if (cx.tuples.has(v))
           decline(
             op,
             `a list argument of ${e.operator} (the interpreter maps the function over the list)`
@@ -728,7 +802,8 @@ export function functionLowering(
 
   /** The call `e` of `fn` of the arguments `args`, some of them lists for
    *  its scalar parameters: as the interpreter maps it, a build of the
-   *  calls of the elements at each index, zipped, and of the scalars. The
+   *  calls of the elements at each index, zipped, and of the scalars and
+   *  of the arguments of a list or point parameter, bound whole. The
    *  lists are flat and of one length (lists of different lengths give
    *  `incompatible-dimensions`), and the result of `fn` is a scalar. */
   const mapOver = (
@@ -740,9 +815,10 @@ export function functionLowering(
     if (pending.get(e.operator) === fn)
       decline(e, `a list argument of a recursive call of ${e.operator}`);
     const lengths = new Set<string | number>();
-    const sources = args.map((v) => {
+    const sources = args.map((v, i) => {
       const t = type(v);
-      if (t.shape.length === 0) return undefined;
+      if (t.shape.length === 0 || fn.params[i].shape.length > 0)
+        return undefined;
       if (t.shape.length > 1 || cx.tuples.has(v))
         decline(
           e,
