@@ -368,53 +368,6 @@ export function bodyContainsVariable(
 }
 
 /**
- * For nested quantifiers like ∀x∈S. ∀y∈T. P(x,y), collect the inner domains.
- * Returns an array of {variable, values} for nested ForAll/Exists with finite domains.
- */
-export function collectNestedDomains(
-  body: Expression,
-  ce: ComputeEngine
-): { variable: string; values: Expression[] }[] {
-  const canonicalBody = body.canonical;
-  const op = canonicalBody.operator;
-
-  // Only collect from same quantifier type (ForAll or Exists)
-  if (op !== 'ForAll' && op !== 'Exists') return [];
-  if (!isFunction(canonicalBody)) return [];
-
-  const condition = canonicalBody.op1;
-  const innerBody = canonicalBody.op2;
-
-  if (!condition || !innerBody) return [];
-
-  const domainResult = extractFiniteDomainWithReason(condition, ce, 'reals');
-  if (domainResult.status !== 'success') return [];
-
-  // Recursively collect from inner body
-  const innerDomains = collectNestedDomains(innerBody, ce);
-
-  return [
-    { variable: domainResult.variable, values: domainResult.values },
-    ...innerDomains,
-  ];
-}
-
-/**
- * Get the innermost body of nested quantifiers.
- */
-export function getInnermostBody(body: Expression): Expression {
-  const canonicalBody = body.canonical;
-  const op = canonicalBody.operator;
-
-  if ((op === 'ForAll' || op === 'Exists') && isFunction(canonicalBody)) {
-    const innerBody = canonicalBody.op2;
-    if (innerBody) return getInnermostBody(innerBody);
-  }
-
-  return canonicalBody;
-}
-
-/**
  * Combine the answers of a finite quantifier (`ForAll`, `Exists`) over its
  * domain, as `All` and `Any` do over a collection (`quantifierWalk`,
  * `library/collections.ts`). An absent answer (`Missing`) reads as `False`.
@@ -457,77 +410,37 @@ export function foldQuantifierAnswers(
 }
 
 /**
- * The answers of `body` for each combination of values of `domains` (their
- * Cartesian product), computed one at a time when the iterator is read. An
- * empty domain gives no answer.
+ * The answers of `body` for each value of `variable`, computed one at a time
+ * when the iterator is read.
  */
-export function* cartesianAnswers(
-  domains: { variable: string; values: Expression[] }[],
+function* domainAnswers(
+  variable: string,
+  values: Expression[],
   body: Expression,
   evalOptions?: { numericApproximation: true }
 ): Generator<Expression> {
-  const indices = domains.map(() => 0);
-  const lengths = domains.map((d) => d.values.length);
-  if (lengths.some((l) => l === 0)) return;
-
-  while (true) {
-    // Build substitution map for current combination
-    const subs: Record<string, Expression> = {};
-    for (let i = 0; i < domains.length; i++) {
-      subs[domains[i].variable] = domains[i].values[indices[i]];
-    }
-
-    // Evaluate body with this combination
-    yield body.subs(subs).canonical.evaluate(evalOptions);
-
-    // Move to next combination
-    let dim = domains.length - 1;
-    while (dim >= 0) {
-      indices[dim]++;
-      if (indices[dim] < lengths[dim]) break;
-      indices[dim] = 0;
-      dim--;
-    }
-    if (dim < 0) return; // Exhausted all combinations
-  }
+  for (const value of values)
+    yield body.subs({ [variable]: value }).canonical.evaluate(evalOptions);
 }
 
 /**
- * Evaluate ForAll over a Cartesian product of domains.
- * Returns True if the predicate holds for all combinations, by the rule of
- * `foldQuantifierAnswers`. `evalOptions`
- * is the numeric request of the quantifier, forwarded to each evaluation of
- * the body (see `evaluateForAll`, `logic.ts`).
+ * Evaluate a `ForAll` or an `Exists` whose variable takes the finite list
+ * `values`, by the rule of `foldQuantifierAnswers`. A quantifier nested in
+ * `body` is evaluated once for each value. `evalOptions` is the numeric
+ * request of the quantifier, forwarded to each evaluation of the body (see
+ * `evaluateForAll`, `logic.ts`).
  */
-export function evaluateForAllCartesian(
-  domains: { variable: string; values: Expression[] }[],
+export function evaluateQuantifierOverDomain(
+  kind: 'ForAll' | 'Exists',
+  variable: string,
+  values: Expression[],
   body: Expression,
   ce: ComputeEngine,
   evalOptions?: { numericApproximation: true }
 ): Expression | undefined {
   return foldQuantifierAnswers(
-    'ForAll',
-    cartesianAnswers(domains, body, evalOptions),
-    ce
-  );
-}
-
-/**
- * Evaluate Exists over a Cartesian product of domains.
- * Returns True if the predicate holds for at least one combination, by the
- * rule of `foldQuantifierAnswers`.
- * `evalOptions` is the numeric request of the quantifier, forwarded to each
- * evaluation of the body (see `evaluateForAll`, `logic.ts`).
- */
-export function evaluateExistsCartesian(
-  domains: { variable: string; values: Expression[] }[],
-  body: Expression,
-  ce: ComputeEngine,
-  evalOptions?: { numericApproximation: true }
-): Expression | undefined {
-  return foldQuantifierAnswers(
-    'Exists',
-    cartesianAnswers(domains, body, evalOptions),
+    kind,
+    domainAnswers(variable, values, body, evalOptions),
     ce
   );
 }

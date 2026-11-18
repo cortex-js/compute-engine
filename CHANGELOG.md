@@ -2,6 +2,15 @@
 
 ### Resolved Issues
 
+- **A quantifier nested in a quantifier of the other kind gives the right
+  answer.** `\forall x\in\{1,2\}, \exists y\in\{1,2\}, y=x` was `False`; it
+  is now `True`. The inner quantifier was merged into the outer one and
+  evaluated over the Cartesian product of the two domains, which is right
+  only when both quantifiers are of the same kind. The inner quantifier is
+  now evaluated for each value of the outer variable, so
+  `Exists(Element(x, Set(1, 2)), ForAll(Element(y, Set(1, 2)), x > y))` is
+  `False` (it was `True`).
+
 - **A derivative in a sum or a product keeps its variable when the variable
   has a value.** With `x = 5`, `\sum_{i=1}^{2}\frac{d}{dx}x^2` was `20`; it is
   now `4x`, as the sum of two copies of `\frac{d}{dx}x^2`, which is `2x`. The

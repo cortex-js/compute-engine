@@ -1,3 +1,4 @@
+import type { MathJsonExpression } from '../../src/math-json/types';
 import { engine as ce } from '../utils';
 
 function box(expr: any) {
@@ -315,6 +316,94 @@ describe('Quantifier Evaluation', () => {
           ],
         ])
       ).toMatchInlineSnapshot(`"False"`);
+    });
+
+    // CE-1406: a quantifier of the other kind is evaluated for each value of
+    // the outer variable, not over the Cartesian product of the domains.
+    test.each([
+      [
+        'ForAll of Exists, y > x',
+        [
+          'ForAll',
+          ['Element', 'x', ['Set', 3]],
+          [
+            'Exists',
+            ['Element', 'y', ['Set', 1, 2, 3, 4]],
+            ['Greater', 'y', 'x'],
+          ],
+        ],
+        'True',
+      ],
+      [
+        'ForAll of Exists, y = x',
+        [
+          'ForAll',
+          ['Element', 'x', ['Set', 1, 2]],
+          ['Exists', ['Element', 'y', ['Set', 1, 2]], ['Equal', 'y', 'x']],
+        ],
+        'True',
+      ],
+      [
+        'Exists of ForAll, x > y',
+        [
+          'Exists',
+          ['Element', 'x', ['Set', 1, 2]],
+          ['ForAll', ['Element', 'y', ['Set', 1, 2]], ['Greater', 'x', 'y']],
+        ],
+        'False',
+      ],
+      [
+        'ForAll of ForAll, x >= 1',
+        [
+          'ForAll',
+          ['Element', 'x', ['Set', 1, 2]],
+          ['ForAll', ['Element', 'y', ['Set', 1, 2]], ['GreaterEqual', 'x', 1]],
+        ],
+        'True',
+      ],
+      [
+        'ForAll of ForAll of Exists, x + y = z',
+        [
+          'ForAll',
+          ['Element', 'x', ['Set', 1, 2]],
+          [
+            'ForAll',
+            ['Element', 'y', ['Set', 1, 2]],
+            [
+              'Exists',
+              ['Element', 'z', ['Set', 2, 3, 4]],
+              ['Equal', ['Add', 'x', 'y'], 'z'],
+            ],
+          ],
+        ],
+        'True',
+      ],
+      [
+        'an inner domain that depends on the outer variable',
+        [
+          'ForAll',
+          ['Element', 'x', ['Set', 2, 3]],
+          [
+            'Exists',
+            ['Element', 'y', ['Range', 1, 'x']],
+            ['Equal', ['Add', 'y', 1], 'x'],
+          ],
+        ],
+        'True',
+      ],
+    ] as [string, MathJsonExpression, string][])(
+      '%s',
+      async (_label, json, expected) => {
+        expect(ce.box(json).evaluate().symbol).toBe(expected);
+        expect((await ce.box(json).evaluateAsync()).symbol).toBe(expected);
+      }
+    );
+
+    it('parses and evaluates a ForAll of an Exists', () => {
+      const expr = ce.parse(
+        '\\forall x\\in\\{1,2\\}, \\exists y\\in\\{1,2\\}, y=x'
+      );
+      expect(expr.evaluate().symbol).toBe('True');
     });
   });
 });

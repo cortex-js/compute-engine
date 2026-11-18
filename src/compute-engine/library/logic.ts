@@ -42,10 +42,7 @@ import {
 import {
   extractFiniteDomainWithReason,
   bodyContainsVariable,
-  collectNestedDomains,
-  getInnermostBody,
-  evaluateForAllCartesian,
-  evaluateExistsCartesian,
+  evaluateQuantifierOverDomain,
   isSatisfiable,
   isTautology,
   generateTruthTable,
@@ -908,7 +905,8 @@ function numericRequest(
  * - ∀x. P (where P doesn't contain x) → P
  *
  * Nested quantifiers:
- * - ∀x∈S. ∀y∈T. P(x,y) evaluates over the Cartesian product S × T
+ * - ∀x∈S. Q(x) evaluates the inner quantifier Q once for each value of x,
+ *   so ∀x∈S. ∃y∈T. P(x,y) is not the same as ∃y∈T. ∀x∈S. P(x,y)
  */
 function evaluateForAll(
   args: ReadonlyArray<Expression>,
@@ -945,27 +943,15 @@ function evaluateForAll(
   const domainResult = extractFiniteDomainWithReason(condition, ce, 'reals');
 
   if (domainResult.status === 'success') {
-    // Check for nested quantifiers - collect all domains for Cartesian product
-    const nestedDomains = collectNestedDomains(body, ce);
-    if (nestedDomains.length > 0) {
-      // Evaluate over Cartesian product of all domains
-      return evaluateForAllCartesian(
-        [
-          { variable: domainResult.variable, values: domainResult.values },
-          ...nestedDomains,
-        ],
-        getInnermostBody(body),
-        ce,
-        evalOptions
-      );
-    }
-
-    // Single quantifier: a domain of one dimension. A counterexample decides
+    // A domain of one dimension: a nested quantifier in the body is
+    // evaluated for each value of the variable. A counterexample decides
     // wherever it is; otherwise a failed answer is the result; otherwise an
     // undetermined answer keeps the quantifier unevaluated
     // (`foldQuantifierAnswers`).
-    return evaluateForAllCartesian(
-      [{ variable: domainResult.variable, values: domainResult.values }],
+    return evaluateQuantifierOverDomain(
+      'ForAll',
+      domainResult.variable,
+      domainResult.values,
       body,
       ce,
       evalOptions
@@ -990,7 +976,7 @@ function evaluateForAll(
  * - ∃x. P (where P doesn't contain x) → P
  *
  * Nested quantifiers:
- * - ∃x∈S. ∃y∈T. P(x,y) evaluates over the Cartesian product S × T
+ * - ∃x∈S. Q(x) evaluates the inner quantifier Q once for each value of x
  */
 function evaluateExists(
   args: ReadonlyArray<Expression>,
@@ -1025,28 +1011,16 @@ function evaluateExists(
   const domainResult = extractFiniteDomainWithReason(condition, ce, 'reals');
 
   if (domainResult.status === 'success') {
-    // Check for nested quantifiers - collect all domains for Cartesian product
-    const nestedDomains = collectNestedDomains(body, ce);
-    if (nestedDomains.length > 0) {
-      // Evaluate over Cartesian product of all domains
-      return evaluateExistsCartesian(
-        [
-          { variable: domainResult.variable, values: domainResult.values },
-          ...nestedDomains,
-        ],
-        getInnermostBody(body),
-        ce,
-        evalOptions
-      );
-    }
-
-    // Single quantifier: a domain of one dimension. A witness decides
+    // A domain of one dimension: a nested quantifier in the body is
+    // evaluated for each value of the variable. A witness decides
     // wherever it is; otherwise a failed answer is the result; otherwise an
     // undetermined answer (a body with a free symbol, `x > n`) keeps the
     // quantifier unevaluated (`foldQuantifierAnswers`). Before, every answer
     // that was not `True` counted as `False`.
-    return evaluateExistsCartesian(
-      [{ variable: domainResult.variable, values: domainResult.values }],
+    return evaluateQuantifierOverDomain(
+      'Exists',
+      domainResult.variable,
+      domainResult.values,
       body,
       ce,
       evalOptions
