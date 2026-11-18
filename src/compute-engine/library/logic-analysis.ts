@@ -20,7 +20,8 @@ import { isSymbol, isFunction, sym } from '../boxed-expression/type-guards.js';
  * Result of extracting a finite domain from an Element expression.
  * - `status: 'success'` - Domain was successfully extracted
  * - `status: 'non-enumerable'` - Domain exists but cannot be enumerated (e.g., infinite set, unknown symbol,
- *   or a condition that is neither `True` nor `False` at a value: reason `'undecided-condition'`)
+ *   a condition that is neither `True` nor `False` at a value: reason `'undecided-condition'`,
+ *   or an `Interval` read as a set of real numbers: reason `'real-interval'`)
  * - `status: 'error'` - Invalid Element expression (missing variable, malformed domain)
  */
 export type ExtractDomainResult =
@@ -67,13 +68,24 @@ function filterValuesWithCondition(
  * Supports:
  * - ["Element", "x", ["Set", 1, 2, 3]] → [1, 2, 3]
  * - ["Element", "x", ["Range", 1, 5]] → [1, 2, 3, 4, 5]
- * - ["Element", "x", ["Interval", 1, 5]] → [1, 2, 3, 4, 5] (integers only)
+ * - ["Element", "x", ["Interval", 1, 5]] → [1, 2, 3, 4, 5] (integers only),
+ *   when `intervals` is `'integers'`
  * - ["Element", "x", ["Set", 1, 2, 3], condition] → filtered values (EL-3)
  * Returns detailed result indicating success, non-enumerable domain, or error.
+ *
+ * `intervals` says what the elements of an `Interval` are. With `'integers'`
+ * (the default), they are the integers between the bounds: the index of a
+ * `Sum` or a `Product` and the variable of a set comprehension. With
+ * `'reals'`, an `Interval` is the set of real numbers between its bounds,
+ * which cannot be enumerated: the result is `non-enumerable`, with reason
+ * `'real-interval'`. A quantifier uses `'reals'`, so
+ * `Exists(Element(x, Interval(1, 2)), x == 1.5)` is not decided from the
+ * values 1 and 2 only.
  */
 export function extractFiniteDomainWithReason(
   condition: Expression,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  intervals: 'integers' | 'reals' = 'integers'
 ): ExtractDomainResult {
   // Check for ["Element", var, set] or ["Element", var, set, condition] pattern
   if (condition.operator !== 'Element') {
@@ -204,11 +216,19 @@ export function extractFiniteDomainWithReason(
     };
   }
 
-  // Handle finite integer Interval: ["Interval", start, end]
+  // Handle finite integer Interval: ["Interval", start, end]. Read as a set of
+  // real numbers (`intervals` is `'reals'`, a quantifier), it is not enumerated.
   // EL-6: Support Open/Closed boundary wrappers
   // e.g., ["Interval", ["Open", 0], 5] → iterates 1, 2, 3, 4, 5
   // e.g., ["Interval", 1, ["Open", 6]] → iterates 1, 2, 3, 4, 5
   if (isFunction(domain, 'Interval')) {
+    if (intervals === 'reals')
+      return {
+        status: 'non-enumerable',
+        variable,
+        domain,
+        reason: 'real-interval',
+      };
     let op1: Expression | undefined = domain.op1;
     let op2: Expression | undefined = domain.op2;
     let openStart = false;
@@ -367,7 +387,7 @@ export function collectNestedDomains(
 
   if (!condition || !innerBody) return [];
 
-  const domainResult = extractFiniteDomainWithReason(condition, ce);
+  const domainResult = extractFiniteDomainWithReason(condition, ce, 'reals');
   if (domainResult.status !== 'success') return [];
 
   // Recursively collect from inner body

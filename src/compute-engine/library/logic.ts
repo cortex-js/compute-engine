@@ -941,7 +941,8 @@ function evaluateForAll(
   }
 
   // Try to extract a finite domain from the condition
-  const domainResult = extractFiniteDomainWithReason(condition, ce);
+  // An `Interval` is a set of real numbers: it is not enumerated
+  const domainResult = extractFiniteDomainWithReason(condition, ce, 'reals');
 
   if (domainResult.status === 'success') {
     // Check for nested quantifiers - collect all domains for Cartesian product
@@ -1020,7 +1021,8 @@ function evaluateExists(
   }
 
   // Try to extract a finite domain from the condition
-  const domainResult = extractFiniteDomainWithReason(condition, ce);
+  // An `Interval` is a set of real numbers: it is not enumerated
+  const domainResult = extractFiniteDomainWithReason(condition, ce, 'reals');
 
   if (domainResult.status === 'success') {
     // Check for nested quantifiers - collect all domains for Cartesian product
@@ -1077,7 +1079,8 @@ function evaluateExistsUnique(
   const body = args[1];
 
   // Try to extract a finite domain from the condition
-  const domainResult = extractFiniteDomainWithReason(condition, ce);
+  // An `Interval` is a set of real numbers: it is not enumerated
+  const domainResult = extractFiniteDomainWithReason(condition, ce, 'reals');
 
   if (domainResult.status === 'success') {
     let count = 0;
