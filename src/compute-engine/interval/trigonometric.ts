@@ -1033,8 +1033,8 @@ function sincRaw(x: Interval | IntervalResult): IntervalResult {
 // Fresnel integrals
 // ──────────────────────────────────────────────────────────────────
 
-// Approximate positive locations of local extrema of FresnelS.
-// Extrema occur where sin(πx²/2)=0, i.e. x=√(2n) for positive integers n.
+// Positive local extrema: S' = sin(πx²/2) vanishes at x = √(2n), C' =
+// cos(πx²/2) at x = √(2n − 1). Between two of them each function is monotone.
 const FRESNEL_S_EXTREMA: number[] = [];
 const FRESNEL_C_EXTREMA: number[] = [];
 for (let n = 1; n <= 20; n++) {
@@ -1042,98 +1042,103 @@ for (let n = 1; n <= 20; n++) {
   FRESNEL_C_EXTREMA.push(Math.sqrt(2 * n - 1));
 }
 
+// The deviation from 1/2 at the last tabulated extremum (see `fresnelRaw`).
+const FRESNEL_S_AMP = Math.abs(
+  scalarFresnelS(FRESNEL_S_EXTREMA[FRESNEL_S_EXTREMA.length - 1]) - 0.5
+);
+const FRESNEL_C_AMP = Math.abs(
+  scalarFresnelC(FRESNEL_C_EXTREMA[FRESNEL_C_EXTREMA.length - 1]) - 0.5
+);
+
+/** The relative error by which a computed Fresnel value is widened. The
+ *  scalar kernels (`numerics/special-functions.ts`) are within 1.2e-15 of
+ *  the true value relative (S near x = 1.58, the edge of their rational
+ *  approximation; C within 8e-16), measured against the 40-digit bignum
+ *  kernels at 750,000 points; the interpreter's own double adds one ulp. */
+const FRESNEL_REL_ERR = 4e-15;
+
+/** The absolute floor of the widening, for a value that underflows to a
+ *  subnormal (S(x) ~ πx³/6 near 0), where the relative error is unbounded. */
+const FRESNEL_ABS_ERR = 16 * Number.MIN_VALUE;
+
 /**
- * Fresnel sine integral (interval): S(x) = ∫₀ˣ sin(πt²/2) dt
+ * The enclosure of a Fresnel integral (`S` or `C`) over `xVal`.
  *
- * Conservative approach: evaluate at endpoints and known extrema,
- * take min/max. S is bounded (|S(x)| ≤ ~0.7139).
+ * Every computed value is widened by the error of the scalar kernel, and the
+ * operand is first widened by one ulp at each finite non-zero end: the
+ * interpreter evaluates the shortest decimal that reads back as the double,
+ * which can lie up to half an ulp outside it, and both functions have slope
+ * up to 1 (at x = 17.6 that moves S by 30 ulps). The exact values are kept:
+ * 0 at 0 and ±1/2 at ±∞. Both functions are odd and non-negative for x ≥ 0,
+ * so a value at a positive point is never widened below 0, nor one at a
+ * negative point above 0.
  */
-function fresnelSRaw(x: Interval | IntervalResult): IntervalResult {
-  const unwrapped = unwrapOrPropagate(x);
-  if (!Array.isArray(unwrapped)) return unwrapped;
-  const [xVal] = unwrapped;
-
-  let lo = scalarFresnelS(xVal.lo);
-  let hi = lo;
-  const update = (v: number) => {
-    if (v < lo) lo = v;
-    if (v > hi) hi = v;
-  };
-  update(scalarFresnelS(xVal.hi));
-
-  // S(0) = 0
-  if (xVal.lo <= 0 && xVal.hi >= 0) update(0);
-
-  // Check known extrema (and their negatives, since S is odd)
-  for (const e of FRESNEL_S_EXTREMA) {
-    if (e >= xVal.lo && e <= xVal.hi) update(scalarFresnelS(e));
-    if (-e >= xVal.lo && -e <= xVal.hi) update(scalarFresnelS(-e));
-  }
-
-  // Beyond the last tabulated extremum the oscillation amplitude only
-  // decreases, so bound that portion by the convergence band 0.5 ± A, where A
-  // is the deviation at the last extremum (S(±∞) = ±0.5; S is odd).
-  fresnelConvergenceBound(xVal, FRESNEL_S_EXTREMA, scalarFresnelS, update);
-
-  return ok({ lo, hi });
-}
-
-// Fresnel integrals converge to ±0.5 as x → ±∞, with monotonically decreasing
-// oscillation amplitude. For the part of `xVal` beyond the last tabulated
-// extremum, the value lies in 0.5 ± A (positive side) or −0.5 ± A (negative
-// side), where A is the deviation from 0.5 at the last extremum — a guaranteed
-// upper bound on the remaining amplitude. Without this, the table had no
-// fallback past x ≈ 6.2 and the enclosure was not conservative.
-function fresnelConvergenceBound(
-  xVal: Interval,
-  extrema: number[],
+function fresnelRaw(
+  x: Interval | IntervalResult,
   scalar: (x: number) => number,
-  update: (v: number) => void
-): void {
-  const lastE = extrema[extrema.length - 1];
-  const amp = Math.abs(scalar(lastE) - 0.5);
-  if (xVal.hi > lastE) {
-    update(0.5 + amp);
-    update(0.5 - amp);
-  }
-  if (xVal.lo < -lastE) {
-    update(-0.5 - amp);
-    update(-0.5 + amp);
-  }
-}
-
-/**
- * Fresnel cosine integral (interval): C(x) = ∫₀ˣ cos(πt²/2) dt
- *
- * Conservative approach: evaluate at endpoints and known extrema,
- * take min/max. C is bounded (|C(x)| ≤ ~0.7799).
- */
-function fresnelCRaw(x: Interval | IntervalResult): IntervalResult {
+  extrema: number[],
+  amp: number
+): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
+  if (Number.isNaN(xVal.lo) || Number.isNaN(xVal.hi))
+    return ok({ lo: NaN, hi: NaN });
 
-  let lo = scalarFresnelC(xVal.lo);
-  let hi = lo;
+  const keep = (t: number) => t === 0 || !Number.isFinite(t);
+  const a = keep(xVal.lo) ? xVal.lo : nextDown(xVal.lo);
+  const b = keep(xVal.hi) ? xVal.hi : nextUp(xVal.hi);
+
+  let lo = Infinity;
+  let hi = -Infinity;
   const update = (v: number) => {
     if (v < lo) lo = v;
     if (v > hi) hi = v;
   };
-  update(scalarFresnelC(xVal.hi));
+  // A computed value at a point of sign `sign`, widened by its error.
+  const computed = (v: number, sign: number) => {
+    const e = FRESNEL_REL_ERR * Math.abs(v) + FRESNEL_ABS_ERR;
+    update(sign < 0 ? Math.min(0, v + e) : v + e);
+    update(sign > 0 ? Math.max(0, v - e) : v - e);
+  };
+  // The value at the point t: exact at 0 and ±∞.
+  const at = (t: number) => {
+    if (t === 0 || !Number.isFinite(t)) update(scalar(t));
+    else computed(scalar(t), Math.sign(t));
+  };
 
-  // C(0) = 0
-  if (xVal.lo <= 0 && xVal.hi >= 0) update(0);
-
-  // Check known extrema (and their negatives, since C is odd)
-  for (const e of FRESNEL_C_EXTREMA) {
-    if (e >= xVal.lo && e <= xVal.hi) update(scalarFresnelC(e));
-    if (-e >= xVal.lo && -e <= xVal.hi) update(scalarFresnelC(-e));
+  at(a);
+  at(b);
+  if (a <= 0 && b >= 0) update(0);
+  for (const e of extrema) {
+    if (e >= a && e <= b) at(e);
+    if (-e >= a && -e <= b) at(-e);
   }
 
-  // Same convergence-band fallback as fresnelS (C(±∞) = ±0.5, C is odd).
-  fresnelConvergenceBound(xVal, FRESNEL_C_EXTREMA, scalarFresnelC, update);
+  // Beyond the last tabulated extremum the deviation from ±1/2 (the limits
+  // at ±∞) at successive extrema decreases, so it is at most A, the deviation
+  // at the last one: bound that portion by the band ±1/2 ± A.
+  const lastE = extrema[extrema.length - 1];
+  if (b > lastE && a < Infinity) {
+    computed(0.5 + amp, 1);
+    computed(0.5 - amp, 1);
+  }
+  if (a < -lastE && b > -Infinity) {
+    computed(-0.5 - amp, -1);
+    computed(-0.5 + amp, -1);
+  }
 
   return ok({ lo, hi });
+}
+
+/** Fresnel sine integral (interval): S(x) = ∫₀ˣ sin(πt²/2) dt. */
+function fresnelSRaw(x: Interval | IntervalResult): IntervalResult {
+  return fresnelRaw(x, scalarFresnelS, FRESNEL_S_EXTREMA, FRESNEL_S_AMP);
+}
+
+/** Fresnel cosine integral (interval): C(x) = ∫₀ˣ cos(πt²/2) dt. */
+function fresnelCRaw(x: Interval | IntervalResult): IntervalResult {
+  return fresnelRaw(x, scalarFresnelC, FRESNEL_C_EXTREMA, FRESNEL_C_AMP);
 }
 
 // Every operation above is exported through `liftJump` so that a finite
@@ -1201,9 +1206,10 @@ export const asech = liftJump(outward(asechRaw));
 export const sinc = liftJump(
   outwardUnlessExact(sincRaw, exactInRange(-Infinity, 1))
 );
-export const fresnelS = liftJump(
-  outwardUnlessExact(fresnelSRaw, exactAtOrigin)
+// The Fresnel integrals are exact at 0 and at the limits ±1/2 of ±∞.
+const fresnelExact = eitherExact(
+  exactAtOrigin,
+  eitherExact(exactAtPoint(Infinity, 0.5), exactAtPoint(-Infinity, -0.5))
 );
-export const fresnelC = liftJump(
-  outwardUnlessExact(fresnelCRaw, exactAtOrigin)
-);
+export const fresnelS = liftJump(outwardUnlessExact(fresnelSRaw, fresnelExact));
+export const fresnelC = liftJump(outwardUnlessExact(fresnelCRaw, fresnelExact));

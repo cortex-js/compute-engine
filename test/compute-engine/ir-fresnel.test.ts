@@ -2,7 +2,8 @@
  * `FresnelC` and `FresnelS` in the profile `ir`: on JavaScript the kernels
  * `fresnelC` and `fresnelS` (`_SYS.ir.fresnelc`, `_SYS.ir.fresnels`), on
  * GLSL the helpers `_gpu_ir_fresnelc` and `_gpu_ir_fresnels` (every
- * coefficient table a `float[12]`, CE-1168); the interval mode declines.
+ * coefficient table a `float[12]`, CE-1168); in the interval mode the
+ * kernels `_IA.fresnelC` and `_IA.fresnelS`.
  *
  * JavaScript gives the interpreter's value (`N()`, at the default precision
  * of 21 digits) within the error of the double kernel, which the
@@ -155,23 +156,26 @@ const GLSL_POINTS = [0, 1e-6, -0.3, 1, 1.5999, 1.6, -2.5, 7.3, 35.9, 36.5,
   }
 );
 
-// The kernels `_IA.fresnelC` and `_IA.fresnelS` move each end one ulp
-// outward, and the double kernel can be wrong by more: `_IA.fresnelS` of
-// [1.5, 1.7] has the upper end 0.6975049600820927, below S(1.5) =
-// 0.6975049600820931. The mode declines rather than give an enclosure that
-// misses.
+// The kernels `_IA.fresnelC` and `_IA.fresnelS` widen each computed value by
+// the measured error of the double kernel; one outward ulp was not enough:
+// the upper end of `_IA.fresnelS` of [1.5, 1.7] was 0.6975049600820927,
+// below S(1.5) = 0.6975049600820931. The containment tests are in
+// `ir-interval-special-functions.test.ts`.
 describe('FresnelC and FresnelS in the interval mode', () => {
-  test.each(OPERATORS)('%s declines', (op) => {
-    expect(() =>
-      compile(ce.box([op, 'x'] as never), {
-        to: 'interval-js',
-        profile: 'ir',
-        fallback: false,
-      } as never)
-    ).toThrow(
-      new RegExp(
-        `${op} \\(the operation ${op.toLowerCase()}\\).* on interval-js$`
-      )
-    );
+  test.each(OPERATORS)('%s compiles and holds the value at 1.5', (op) => {
+    const r = compile(ce.box([op, 'x'] as never), {
+      to: 'interval-js',
+      profile: 'ir',
+      fallback: false,
+    } as never) as {
+      success: boolean;
+      code: string;
+      run: (x: unknown) => { value: { lo: number; hi: number } };
+    };
+    expect(r.success).toBe(true);
+    expect(r.code).toContain(`_IA.${op[0].toLowerCase()}${op.slice(1)}(`);
+    const v = ce.box([op, 1.5] as never).N().re;
+    const k = r.run({ x: { lo: 1.5, hi: 1.7 } }).value;
+    expect(k.lo <= v && v <= k.hi).toBe(true);
   });
 });

@@ -117,7 +117,12 @@
   computed from are exact, otherwise `'maybe'`. `Sinc(x)` and `Chop(x)`
   compile, also `Chop(x, 0.01)` (a constant tolerance; `Chop(x)` takes the
   engine's tolerance at compile time, and `Chop` compiles on JavaScript and
-  GLSL too). An input with no declaration whose inferred type is a number
+  GLSL too). `FresnelS(x)` and `FresnelC(x)` compile: their enclosure is
+  widened by the measured error of the double approximation, which one
+  outward ulp did not cover (`FresnelS` of `[1.5, 1.7]` had the upper end
+  0.6975049600820927, below S(1.5) = 0.6975049600820931), and holds the
+  interpreter's value at every point of the box. An input with no
+  declaration whose inferred type is a number
   type is read as a real interval, as every value a host passes is one: `x`
   in `Gamma(x)` (`complex | infinity`), `Erf(x)` and `Sinc(x)`
   (`complex | signed_infinity`) compiles undeclared; a declared `complex`

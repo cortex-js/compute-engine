@@ -16,6 +16,10 @@ import { compile } from '../../src/compile';
 import { nextDown, nextUp } from '../../src/compute-engine/numerics/numeric';
 import { IntervalArithmetic as IA } from '../../src/compute-engine/interval/index';
 import type { Expression } from '../../src/compute-engine/global-types';
+import {
+  fresnelC as scalarFresnelC,
+  fresnelS as scalarFresnelS,
+} from '../../src/compute-engine/numerics/special-functions';
 
 type Box = [number, number];
 type Result = {
@@ -394,6 +398,166 @@ describe('Sinc over a box with an infinite end', () => {
     for (const p of [1e-300, 1e-10, 0.01, 0.2, 0.5, 1]) {
       const v = expr.subs({ x: ce.number(p) }).N().re;
       expect([p, contains(r, v)]).toEqual([p, true]);
+    }
+  });
+});
+
+describe('FresnelS and FresnelC on interval-js', () => {
+  // Containment with no tolerance: at dense points of each box (its ends,
+  // 400 evenly spaced points, the extrema inside it and the neighbors of
+  // each), the interpreter's value is inside the result. The kernels widen
+  // by the measured error of the scalar approximation (1.2e-15 relative);
+  // one outward ulp was not enough on [1.5, 1.7].
+  const I = Infinity;
+  const BOXES: Box[] = [
+    [1.5, 1.7],
+    [0, 3],
+    [-3, 3],
+    [-1, 0],
+    [4, 5],
+    [10, 11],
+    [100, 101],
+    [-I, 2],
+    [5, I],
+    [1.5, 1.5],
+    [17.577, 17.577],
+    [1e-5, 2e-5],
+  ];
+  const EXTREMA = Array.from({ length: 30 }, (_, n) => Math.sqrt(n + 1));
+  const densePoints = ([lo, hi]: Box): number[] => {
+    const a = Number.isFinite(lo) ? lo : Math.min(hi - 50, -50);
+    const b = Number.isFinite(hi) ? hi : Math.max(lo + 50, 50);
+    const n = 400;
+    const pts = Array.from({ length: n + 1 }, (_, k) => a + ((b - a) * k) / n);
+    for (const e of EXTREMA) pts.push(e, -e);
+    if (!Number.isFinite(lo)) pts.push(-1e3, -1e6, -1e9);
+    if (!Number.isFinite(hi)) pts.push(1e3, 1e6, 1e9);
+    const out = pts.flatMap((p) => [nextDown(p), p, nextUp(p)]);
+    return [...new Set([lo, hi, ...out])].filter(
+      (p) => Number.isFinite(p) && p >= lo && p <= hi
+    );
+  };
+  const strictMisses = (
+    ce: ComputeEngine,
+    json: unknown,
+    box: Box,
+    pts: number[]
+  ): string[] => {
+    const { expr, r } = run(ce, json);
+    expect(r.success).toBe(true);
+    const result = r.run({ x: { lo: box[0], hi: box[1] } });
+    const k = result.value;
+    // `partial`: Ln clips its domain at 0.
+    if ((result.kind !== 'interval' && result.kind !== 'partial') || !k)
+      return [`${JSON.stringify(result)}`];
+    const out: string[] = [];
+    for (const p of pts) {
+      const v = reference(ce, expr, p);
+      if (v === undefined) continue;
+      if (!(k.lo <= v && v <= k.hi))
+        out.push(`${p}: ${v} not in [${k.lo}, ${k.hi}]`);
+    }
+    return out;
+  };
+
+  for (const declared of [true, false]) {
+    const ce = engine(declared);
+    const label = declared ? 'declared real' : 'undeclared';
+    for (const f of ['FresnelS', 'FresnelC'])
+      test(`${f}, ${label}: containment`, () => {
+        for (const box of BOXES)
+          expect([
+            box,
+            strictMisses(ce, [f, 'x'], box, densePoints(box)),
+          ]).toEqual([box, []]);
+      });
+    test(`FresnelS(x^2) and FresnelC(Ln(x)) over [0, 1], ${label}`, () => {
+      const pts = [1e-300, 1e-10, ...densePoints([0, 1])];
+      for (const json of [
+        ['FresnelS', ['Power', 'x', 2]],
+        ['FresnelC', ['Ln', 'x']],
+      ])
+        expect([json, strictMisses(ce, json, [0, 1], pts)]).toEqual([json, []]);
+    });
+  }
+
+  test('the exact values: 0 at 0, ±1/2 at ±∞', () => {
+    for (const k of [IA.fresnelS, IA.fresnelC]) {
+      expect(k({ lo: 0, hi: 0 })).toEqual({
+        kind: 'interval',
+        value: { lo: 0, hi: 0 },
+      });
+      expect(k({ lo: I, hi: I })).toEqual({
+        kind: 'interval',
+        value: { lo: 0.5, hi: 0.5 },
+      });
+      expect(k({ lo: -I, hi: -I })).toEqual({
+        kind: 'interval',
+        value: { lo: -0.5, hi: -0.5 },
+      });
+      // A box with an end at 0 keeps that end: both are odd, and >= 0 for
+      // x >= 0.
+      expect((k({ lo: 0, hi: 2 }) as Result).value!.lo).toBe(0);
+      expect((k({ lo: -2, hi: 0 }) as Result).value!.hi).toBe(0);
+    }
+  });
+
+  // The operand is widened one ulp outward on each side of a point box (the
+  // interpreter reads the decimal of the double, within half an ulp of it).
+  const KERNELS = [
+    ['FresnelS', IA.fresnelS, scalarFresnelS],
+    ['FresnelC', IA.fresnelC, scalarFresnelC],
+  ] as const;
+  const POINTS = [1.5, 4.3, 6.2048, 17.577];
+  test('a point box holds the value at the double, its neighbors and the interpreter', () => {
+    const ce = engine(true);
+    for (const [name, k, scalar] of KERNELS)
+      for (const x of [...POINTS, ...POINTS.map((p) => -p)]) {
+        const r = (k({ lo: x, hi: x }) as Result).value!;
+        const v = ce.box([name, x] as never).N().re;
+        const values = [scalar(x), scalar(nextDown(x)), scalar(nextUp(x)), v];
+        expect([name, x, values.every((y) => r.lo <= y && y <= r.hi)]).toEqual([
+          name,
+          x,
+          true,
+        ]);
+      }
+  });
+  test('a point box is widened on both sides', () => {
+    // At 6.2048 the slope sin(πx²/2) is about 1: the point box [x, x] and
+    // [x, nextUp(x)] read different neighbors.
+    for (const [, k] of KERNELS)
+      for (const x of [6.2048, -6.2048]) {
+        const point = k({ lo: x, hi: x });
+        const right = k({ lo: x, hi: nextUp(x) });
+        const left = k({ lo: nextDown(x), hi: x });
+        expect(point).not.toEqual(right);
+        expect(point).not.toEqual(left);
+      }
+  });
+
+  test('a NaN end gives a NaN enclosure', () => {
+    for (const k of [IA.fresnelS, IA.fresnelC])
+      for (const box of [
+        { lo: NaN, hi: NaN },
+        { lo: NaN, hi: 2 },
+      ]) {
+        const v = (k(box) as Result).value!;
+        expect([Number.isNaN(v.lo), Number.isNaN(v.hi)]).toEqual([true, true]);
+      }
+  });
+
+  test('a declared complex input declines', () => {
+    for (const f of ['FresnelS', 'FresnelC']) {
+      const ce = new ComputeEngine();
+      ce.declare('x', 'complex');
+      const r = compile(
+        ce.box([f, 'x'] as never) as never,
+        {
+          to: 'interval-js',
+        } as never
+      ) as { success: boolean };
+      expect([f, r.success]).toEqual([f, false]);
     }
   });
 });

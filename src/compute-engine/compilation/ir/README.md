@@ -667,17 +667,20 @@ is `_IA.powReal`; a power by the exact constant 2 is `_IA.square`, the operation
 trigonometric and hyperbolic functions and their inverses (also the reciprocal
 ones), `Arctan2`, `Hypot`, `Degrees` (the product by an enclosure of π, then the
 quotient by 180), `Floor`, `Ceil`, `Round`, `Truncate`, `Fract`, `Sign`, `Mod`,
-`Max`, `Min`, `Erf`, `Erfc`, `Gamma`, `GammaLn`, `Sinc`, `Factorial`,
-`Factorial2`, `Chop` (`_IA.chop(x, tol)`, which reads the tolerance as a number:
+`Max`, `Min`, `Erf`, `Erfc`, `Gamma`, `GammaLn`, `Sinc`, `FresnelC` and
+`FresnelS` (`_IA.fresnelC`, `_IA.fresnelS`: each computed value is widened by
+4·10⁻¹⁵ relative, more than three times the measured error of the double
+kernel, and the operand by one ulp, so that the result holds the interpreter's
+value at the decimal it reads; exact at 0 and ±∞), `Factorial`, `Factorial2`,
+`Chop` (`_IA.chop(x, tol)`, which reads the tolerance as a number:
 of a constant tolerance only, `Chop(x)` at the engine's tolerance at compile
 time; another tolerance declines), `Binomial` and `Choose` (also of real
 operands, `binomial.real`, a row of the mode), `GCD`, `LCM`, the comparisons,
 `And`, `Or`, `Not` (Kleene logic on verdicts), `If`, `Which`, a `Block` with
 locals, user functions, `Sum` and `Product` with `Limits`, `Random()` and
 `WithRandomSeed` of a number seed, a root function literal, and the lists below,
-and integrals (below). `Haversine`, `Zeta`, `FresnelC`, `FresnelS` (the kernel
-`_IA.fresnelS` misses S(1.5) by 4 ulps, more than its outward ulp) and the
-complex and colour operations have no spelling and decline (a cause of the mode
+and integrals (below). `Haversine`, `Zeta` and the complex and colour
+operations have no spelling and decline (a cause of the mode
 ends with "on interval-js"). A `Loop` is lowered as on JavaScript ("Loops and
 the runtime"): its carried values are intervals, a local assigned in an
 undecided `If` of a pass holds the hull of both arms (the earlier interval
@@ -773,8 +776,8 @@ stretch (`∫ dt/t²` from −1 to 1 closes to −2 and is `singular`), and with
 infinite bound, and the enclosure otherwise. A closed form that the lowering
 declines (an operator with no row), that is not real, or that holds a loop or a
 call (a function lowered in a discarded region would stay defined) is not
-lowered, and one that the mode does not print (`SinIntegral`, `FresnelS`: no
-interval kernel) is removed before `admits()`
+lowered, and one that the mode does not print (`SinIntegral`: no interval
+kernel) is removed before `admits()`
 (`dropClosedForms()`): the enclosure, of the same `n`, stands alone. The reads
 of `vars` entries in a closed form are not counted as effects (in the mode they
 read the inputs object). An integral that is not pure (`e.isPure`: a draw in a

@@ -136,6 +136,8 @@ export const JS_INTERVAL: Syntax = Object.freeze({
       Object.entries(BINARY).map(([op, k]) => [op, ia(k, 2)])
     ),
     'neg': '_IA.negate($0)',
+    'fresnels': '_IA.fresnelS($0)',
+    'fresnelc': '_IA.fresnelC($0)',
     'negdiv': '_IA.negDiv($0, $1)',
     'pow': '_IA.powReal($0, $1)',
     // The exponent is a constant point: its double.
