@@ -160,6 +160,7 @@ import { isShadowOf } from './library-shadowing.js';
 import { isScratchBinding } from './scratch-scopes.js';
 import { isTransitivelyPure } from './boxed-expression/transitive-purity.js';
 import { isExactRealLiteral } from './boxed-expression/constraint-subject.js';
+import { JUMP_FUNCTIONS } from './jump-functions.js';
 import {
   exactArgumentSourceOf,
   setExactArgumentSource,
@@ -3270,6 +3271,109 @@ function isCheapWrittenArgument(source: Expression): boolean {
   const def = source.operatorDefinition;
   if (def === undefined || def.isUserFunctionDefinition) return false;
   return source.ops.every(isCheapWrittenArgument);
+}
+
+/**
+ * Under `.N()`, the values to bind to the parameters of a user function
+ * whose body applies a jump function (`JUMP_FUNCTIONS`) and cannot iterate
+ * (`isStraightLineJumpBody`): at each position where the written argument
+ * (`ApplyOptions.exactSources`) is not its approximation, costs little
+ * (`isCheapWrittenArgument`) and has an exact real value, that value;
+ * elsewhere the approximated argument `args`.
+ *
+ * The numeric request applies to the value of the function, not to one of
+ * its statements. Only the last statement of a body takes the request
+ * (`resultStatementRequest`), and a jump in it re-reads the exact argument
+ * near the jump (`exact-argument-source.ts`). A jump in another statement
+ * runs exactly, and with the parameter bound to the float it read that
+ * float: with `f := x ↦ Block(If(x > 1, Return(Floor(x))), 0)`,
+ * `f((25! − 1)/24!).N()` was 25, the floor of the float, where the value
+ * of the function is 24. A local that holds the parameter
+ * (`Block(y := x, Floor(y))`) records no written argument, and gave 25 as
+ * well. With the exact value bound, every statement reads it, and the
+ * application approximates the result.
+ *
+ * The approximation is kept when the body applies no jump function, when
+ * an argument costs much to evaluate exactly (a `Sum`), and when the body
+ * can iterate: far from a jump the float gives the same value at the
+ * working precision, and an exact rational that goes through a loop or a
+ * recursion can double in size at each step (`z := 4z(1 − z)` eighteen
+ * times took 52 s, where the float took 14 ms). A jump in a statement
+ * before the last one of such a body still reads the float.
+ */
+function exactBoundArguments(
+  ce: ComputeEngine,
+  body: Expression,
+  args: Expression[],
+  options: ApplyOptions | undefined
+): Expression[] {
+  const sources = options?.exactSources;
+  if (
+    options?.numericApproximation !== true ||
+    sources === undefined ||
+    sources.length !== args.length
+  )
+    return args;
+  const candidate = (i: number): Expression | undefined => {
+    const source = sources[i];
+    if (source === undefined || isSameWritten(source, args[i]))
+      return undefined;
+    // A source is evaluated again here, after the caller evaluated every
+    // argument: a variable it reads may have been assigned by a later
+    // argument since (`f(x/3, Block(x := 5, 1))`). Only constants are read.
+    const readsVariable = source.symbols.some((s) => {
+      const def = ce.lookupDefinition(s);
+      return def === undefined || !('value' in def) || !def.value.isConstant;
+    });
+    if (readsVariable) return undefined;
+    return isCheapWrittenArgument(source) ? source : undefined;
+  };
+  if (!args.some((_, i) => candidate(i) !== undefined)) return args;
+  if (!isStraightLineJumpBody(ce, body)) return args;
+  return args.map((arg, i) => {
+    const source = candidate(i);
+    if (source === undefined) return arg;
+    const value = source.evaluate();
+    return isExactRealLiteral(value) ? value : arg;
+  });
+}
+
+/**
+ * True when the function body `body` applies a jump function
+ * (`JUMP_FUNCTIONS`) and runs each of its nodes at most once: every
+ * application in it is a `Block`, a `Return`, or a library operator that is
+ * not scoped, and no symbol in it names a user function or holds an
+ * expression, which could hold one (a list of functions). So it has no loop
+ * (`Loop` is scoped, `While` and `For` have no definition), no function
+ * literal, no recursion and no call of another user function, which could
+ * iterate on an exact argument. A library operator that takes a function
+ * (`Map(Floor, L)`) applies it a bounded number of times.
+ */
+function isStraightLineJumpBody(ce: ComputeEngine, body: Expression): boolean {
+  let jump = false;
+  const pending: Expression[] = [body];
+  while (pending.length > 0) {
+    const node = pending.pop()!;
+    if (isSymbol(node)) {
+      const def = ce.lookupDefinition(node.symbol);
+      if (def === undefined) continue;
+      if ('operator' in def && def.operator.isUserFunctionDefinition)
+        return false;
+      // A value that is an expression can be or hold a function
+      // (`L := [y ↦ …]`, applied as `Apply(At(L, 1), x)`).
+      if ('value' in def && isFunction(def.value.value)) return false;
+      continue;
+    }
+    if (!isFunction(node) || node._numericStore !== undefined) continue;
+    if (JUMP_FUNCTIONS.has(node.operator)) jump = true;
+    if (node.operator !== 'Block' && node.operator !== 'Return') {
+      const def = node.operatorDefinition;
+      if (def === undefined || def.isUserFunctionDefinition || node.isScoped)
+        return false;
+    }
+    pending.push(...node.ops);
+  }
+  return jump;
 }
 
 /**
@@ -8607,6 +8711,12 @@ function makeLambda(
       if (err !== undefined) return err;
     }
 
+    // Under `.N()`, a parameter of a body that applies a jump function is
+    // bound to the exact value of its written argument when that value costs
+    // little (`exactBoundArguments`).
+    if (iterationStatements === undefined && !options?.holdArguments)
+      evaluatedArgs = exactBoundArguments(ce, body, evaluatedArgs, options);
+
     // An absent value at a numeric or a point parameter makes the call
     // `Missing` (see `absentResultParamIndexes`). An error argument outranks
     // it (above).
@@ -9190,7 +9300,8 @@ function makeLambda(
  * way, and `f(x).N()` must agree with `N(f(x))` on both evaluation routes
  * (`evaluateStatements`, `evaluateStatementsAsync`). An early `Return` in
  * one of them gives an exactly computed value, which the application then
- * numericizes.
+ * numericizes. A jump in one of them reads the exact value of an argument
+ * only when the parameter is bound to it (`exactBoundArguments`).
  *
  * A self-recursive body runs exactly, and only its value is numericized.
  * The exact run gives the application memo an exact entry beside the

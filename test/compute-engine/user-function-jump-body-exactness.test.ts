@@ -116,3 +116,165 @@ describe('a user function with a jump body under .N()', () => {
     expect([...values]).toEqual(['24']);
   });
 });
+
+// CE-965. The numeric request applies to the value of the function, not to
+// its last statement. Only the last statement takes the request, so a jump
+// in another statement (an early `Return`, a local that holds the
+// parameter) ran exactly on the float of the argument: the floor of the
+// float of `(25! − 1)/24!` is 25. Under `.N()`, the parameters of a body
+// that applies a jump function are bound to the exact value of a written
+// argument that costs little (`exactBoundArguments` in `function-utils.ts`).
+describe('a jump in a statement before the last one under .N()', () => {
+  test('an early Return', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'f',
+      ce.box([
+        'Function',
+        ['Block', ['If', ['Greater', 'x', 1], ['Return', ['Floor', 'x']]], 0],
+        'x',
+      ])
+    );
+    expect(ce.box(['f', Q]).N().toString()).toBe('24');
+    expect(ce.box(['f', Q]).evaluate().toString()).toBe('24');
+    expect(
+      ce
+        .box(['N', ['f', Q]])
+        .evaluate()
+        .toString()
+    ).toBe('24');
+    expect(ce.box(['Apply', 'f', Q]).N().toString()).toBe('24');
+    // A float argument is bound as it is.
+    expect(
+      ce
+        .box(['f', { num: '25.0' }])
+        .N()
+        .toString()
+    ).toBe('25');
+    expect(ce.box(['f', 0.5]).N().toString()).toBe('0');
+  });
+
+  test('a local that holds the parameter', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'g',
+      ce.box([
+        'Function',
+        ['Block', ['Declare', 'y', "'real'", 'x'], ['Floor', 'y']],
+        'x',
+      ])
+    );
+    expect(ce.box(['g', Q]).N().toString()).toBe('24');
+  });
+
+  test('a one-step definition', () => {
+    const ce = new ComputeEngine();
+    ce.declare('k', {
+      type: '(real) -> real',
+      value: ce.box([
+        'Function',
+        ['Block', ['If', ['Greater', 'x', 1], ['Return', ['Floor', 'x']]], 0],
+        'x',
+      ]),
+    });
+    expect(ce.box(['k', Q]).N().toString()).toBe('24');
+  });
+
+  // An exact rational that goes through a loop or a recursion can double
+  // in size at each step: such a body keeps the float of the argument.
+  // With the exact value bound, each of these took about a minute.
+  test('a loop or a recursion keeps the approximated argument', () => {
+    const ce = new ComputeEngine();
+    const step = ['Multiply', 4, 'z', ['Subtract', 1, 'z']];
+    ce.assign(
+      'h',
+      ce.box([
+        'Function',
+        [
+          'Block',
+          ['Declare', 'z', "'real'", 'y'],
+          ['Loop', ['Assign', 'z', step], ['Element', 'k', ['Range', 1, 18]]],
+          ['Floor', ['Multiply', 10, 'z']],
+        ],
+        'y',
+      ])
+    );
+    ce.assign(
+      'g',
+      ce.box([
+        'Function',
+        [
+          'Block',
+          [
+            'If',
+            ['Equal', 'n', 0],
+            ['Return', ['Floor', ['Multiply', 10, 'z']]],
+          ],
+          ['g', step, ['Subtract', 'n', 1]],
+        ],
+        'z',
+        'n',
+      ])
+    );
+    // A function held in a list, applied from the body.
+    ce.assign('L', ce.box(['List', 'h']));
+    ce.assign(
+      'u',
+      ce.box([
+        'Function',
+        [
+          'Block',
+          ['If', ['Less', 'y', 0], ['Return', 0]],
+          ['Apply', ['At', 'L', 1], 'y'],
+        ],
+        'y',
+      ])
+    );
+    const start = Date.now();
+    const loop = ce.box(['h', ['Rational', 1, 3]]).N();
+    const recursion = ce.box(['g', ['Rational', 1, 3], 18]).N();
+    const throughList = ce.box(['u', ['Rational', 1, 3]]).N();
+    const elapsed = Date.now() - start;
+    expect(loop.isInteger).toBe(true);
+    expect(recursion.isInteger).toBe(true);
+    expect(throughList.isInteger).toBe(true);
+    if (process.env.CE_PERF === '1') expect(elapsed).toBeLessThan(5_000);
+  });
+
+  test('the asynchronous route', async () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'f',
+      ce.box([
+        'Function',
+        ['Block', ['If', ['Greater', 'x', 1], ['Return', ['Floor', 'x']]], 0],
+        'x',
+      ])
+    );
+    const n = { numericApproximation: true } as const;
+    expect((await ce.box(['f', Q]).evaluateAsync(n)).toString()).toBe('24');
+  });
+
+  test('a body with no jump keeps the approximated argument', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      's',
+      ce.box([
+        'Function',
+        ['Block', ['Declare', 'y', "'real'", 'x'], ['Sin', 'y']],
+        'x',
+      ])
+    );
+    expect(
+      ce
+        .box(['s', ['Rational', 1, 3]])
+        .N()
+        .toString()
+    ).toBe(
+      ce
+        .box(['Sin', ['Rational', 1, 3]])
+        .N()
+        .toString()
+    );
+  });
+});

@@ -78,6 +78,19 @@
 
 ### Resolved Issues
 
+- **Under `.N()`, a user function that returns early with a rounding
+  function gives the correct integer.** With
+  `f := x ↦ Block(If(x > 1, Return(Floor(x))), 0)`,
+  `f((25! − 1)/24!).N()` was `25`, the floor of the float of the argument;
+  it is now `24`, as `f((25! − 1)/24!).evaluate()` is. The same applies to a
+  local that holds the parameter (`Block(y := x, Floor(y))`), and to the
+  other functions whose value jumps (`Round`, `Mod`, `Sign`, a comparison,
+  …) in a statement before the last one. The numeric request applies to the value
+  of the function: such a body now reads the exact value of an argument
+  that is cheap to compute. A body with a loop, a recursion or a call of
+  another user function still reads the float of the argument, because an
+  exact rational can double in size at each step.
+
 - **A limit written with its variable and its point is correct when the
   formula is in a symbol.** With `G := sin(x)`, `Limit(G + 0, x, 0)` was `x`
   and `Limit(G, x, 0)` stayed unevaluated; both are now `0`. In Epsil,
