@@ -146,7 +146,8 @@ f(a + 1)
 The `==` operator compares **values**. It can use a tolerance, and it
 approximates an exact value when that is necessary. The `===` operator
 compares the expressions as they are **written** (after canonicalization).
-It never uses a tolerance and never reads the value of a name.
+It never uses a tolerance and never reads the value of a declared or assigned
+name.
 
 ```epsil
 (sqrt(2) == 1.4142135623730951, sqrt(2) === 1.4142135623730951)
@@ -157,6 +158,15 @@ It never uses a tolerance and never reads the value of a name.
 let x = 5
 (x == 5, x === 5)
 // ➔ (true, false)
+```
+
+A parameter of a function, and the variable of a `for` loop or of a
+comprehension, is replaced by its argument before the comparison, so `===`
+can be used in a predicate:
+
+```epsil
+filter([1, 2, 3], e => e === 2)
+// ➔ [2]
 ```
 
 `===` always gives `True` or `False`. `==` can stay unevaluated when the

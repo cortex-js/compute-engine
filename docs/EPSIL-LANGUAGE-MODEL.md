@@ -140,7 +140,10 @@ a sequence rule.
 
 ## Equality surfaces
 
-- `Same` / `===` is structural and never follows a symbol value.
+- `Same` / `===` is structural and never follows the value of a declared or
+  assigned symbol. A function parameter or a binder variable (`for`, a
+  comprehension, `Sum`) denotes its argument, so `filter(xs, e => e === 2)`
+  keeps the elements `2`.
 - `Equal` / `==` is cheap arithmetic equality and stays inert when undecided.
 - `IdenticallyEqual` is the free-variable prover and is three-valued.
 

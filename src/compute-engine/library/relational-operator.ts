@@ -68,6 +68,8 @@ import {
   exactRealValueOf,
 } from '../boxed-expression/constraint-subject.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
+import { inlineCallParameters } from '../function-utils.js';
+import { isOperatorDef } from '../boxed-expression/definition-guards.js';
 import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds.js';
 import {
   isKindValue,
@@ -1355,10 +1357,18 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     // Since we want to work on non-canonical expressions,
     // do nothing to canonicalize the arguments (the lazy flag will prevent
-    // canonicalization of the arguments)
+    // canonicalization of the arguments). A name bound by a running call or
+    // binder denotes its argument, as in `Same`. A raw operand has no scopes,
+    // so the walk cannot see that a nested scoped operator (`Sum`, `Block`,
+    // ...) binds a name again: an operand that holds one is compared as
+    // written (`IsSame(Sum(k, Limits(k, 1, 2)), …)` in a `Sum` over `k`).
     evaluate: (ops, { engine: ce }) => {
       if (ops.length !== 2) return undefined;
-      const [lhs, rhs] = ops;
+      const [lhs, rhs] = ops.map((op) =>
+        holdsScopedOperator(op)
+          ? op
+          : inlineCallParameters(ce, op, { binderVariables: true })
+      );
       return lhs.isSame(rhs) ? ce.True : ce.False;
     },
   },
@@ -1570,9 +1580,13 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // `lazy`, so the operands are CANONICALIZED but never evaluated: `Same` is
     // strictly SYNTACTIC equality of the canonical forms. Canonicalization
     // still folds exact arithmetic (`Same(1+1, 2)` is `True`) and binds
-    // structure, but it does NOT dereference a symbol's value — so `Same` never
-    // depends on the current bindings, unlike `Equal`. `IsSame` remains the
-    // fully raw counterpart (no canonicalization at all).
+    // structure, but it does NOT dereference the value of a declared or
+    // assigned symbol (`let x = 5; x === 5` is `False`), unlike `Equal`. A
+    // name that a running call or binder binds (a function parameter, the
+    // index of a `Sum`, a comprehension or a `Loop`) denotes its argument, as
+    // in the body of a function literal applied to it: `(e => e === 2)(2)` is
+    // `True` (CE-1381). `IsSame` remains the fully raw counterpart (no
+    // canonicalization at all).
     //
     // A `lazy` operator with no `canonical` handler is inert on the box/parse
     // routes (its held operands arrive UNBOUND), hence the handler below; the
@@ -1606,7 +1620,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // structural totality of `match`.
     evaluate: (rawOps, { engine: ce }) => {
       if (rawOps.length < 2) return ce.True;
-      const ops = rawOps.map((op) => op.canonical);
+      const ops = rawOps.map((op) =>
+        inlineCallParameters(ce, op.canonical, { binderVariables: true })
+      );
       for (let i = 1; i < ops.length; i++)
         if (!ops[i - 1].isSame(ops[i])) return ce.False;
       return ce.True;
@@ -2802,4 +2818,17 @@ function inequalityEq(
   }
 
   return undefined;
+}
+
+/** True when `expr`, or an operand of it at any depth, is an application of
+ * a scoped operator (`Sum`, `Block`, `Loop`, ...), which binds names. */
+function holdsScopedOperator(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  // A raw node is not bound to its definition: look it up by name.
+  const found = expr.engine.lookupDefinition(expr.operator);
+  const def =
+    expr.operatorDefinition ??
+    (isOperatorDef(found) ? found.operator : undefined);
+  if (def?.scoped === true) return true;
+  return expr.ops.some(holdsScopedOperator);
 }

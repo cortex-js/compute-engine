@@ -19,6 +19,7 @@ import {
   callableBindingInContext,
   unresolvedFreeHome,
   evaluateInOwnBindings,
+  isBinderVariable,
   isParameterActivation,
   rebindToBindings,
   rewriteWithBinders,
@@ -7139,11 +7140,15 @@ function heldArgumentValue(
  * With `keepWildcards`, a symbol whose name starts with `_` is left alone:
  * in the left side of a rule it is a pattern wildcard, also when an
  * anonymous function took it as its parameter.
+ *
+ * With `binderVariables`, the variable of a running binder (the index of a
+ * `Sum`, a comprehension or a `Loop`) is replaced by its current value too,
+ * when it has one: `Same` reads it this way (CE-1381).
  */
 export function inlineCallParameters(
   ce: ComputeEngine,
   expr: Expression,
-  options?: { keepWildcards?: boolean }
+  options?: { keepWildcards?: boolean; binderVariables?: boolean }
 ): Expression {
   return rewriteWithBinders(expr, (sym, shadowed) => {
     const name = sym.symbol;
@@ -7160,7 +7165,14 @@ export function inlineCallParameters(
       if ('value' in found) live = found.value;
       break;
     }
-    if (live === undefined || !isParameterActivation(live)) return sym;
+    if (
+      live === undefined ||
+      !(
+        isParameterActivation(live) ||
+        (options?.binderVariables === true && isBinderVariable(live))
+      )
+    )
+      return sym;
     // A free name (`isFreeName()`, `binding-unit.ts`) carries no binding,
     // but it is not a raw operand: it was boxed outside the function
     // literal, so it never denotes a parameter.

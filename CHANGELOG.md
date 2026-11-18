@@ -11,6 +11,15 @@
   comprehensions do not read the value in this way: with `G := sin(x)`,
   `Σ_{x=1}^{3} G` is still `3sin(x)`.
 
+- **`===` (`Same`) and `IsSame` read a parameter and a loop variable.** In a
+  function literal, a parameter is replaced by its argument before the
+  comparison, so `any([1, 2, 3], e => e === 2)` was `False` and is now `True`,
+  `filter([1, 2, 3], e => e === 2)` was `[]` and is now `[2]`, and
+  `find([1, 2, 3], e => e === 2)` was `NaN` and is now `2`. The variable of a
+  `for` loop, of a comprehension and of `Sum` or `Product` is read in the same
+  way. A name declared with `let` or assigned is still compared as written:
+  `let x = 5; x === 5` is still `False`.
+
 - **The `incompatible-type` error of a color operator or of `UnitConvert`
   has a payload.** `Color("nosuchcolor")` was `Error("incompatible-type")`; it
   is now `Error(ErrorCode("incompatible-type", "color", "\"nosuchcolor\""))`,

@@ -789,7 +789,9 @@ export function markBinderVariable(scope: Scope, name: string): void {
 }
 
 /** Is `def` a binder's variable (see `markBinderVariable`)? */
-function isBinderVariable(def: BoxedBaseDefinition | undefined): boolean {
+export function isBinderVariable(
+  def: BoxedBaseDefinition | undefined
+): boolean {
   return (def as BinderVariable | undefined)?._isBinderVariable === true;
 }
 
