@@ -211,10 +211,12 @@ export function decline(
 }
 
 /** The binding of a name. `lane` is the declared lane of a local. A
- *  `constant` is a local that no `Assign` writes. */
+ *  `constant` is a local that no `Assign` writes. `exact` is the number
+ *  literal of a local that no `Assign` of its block writes. */
 export type Binding = {
   v: V;
   lane?: Lane;
+  exact?: Expression;
   role: 'input' | 'local' | 'constant' | 'index';
 };
 /** The names of one scope. A loop frame stops writes to outer locals. */

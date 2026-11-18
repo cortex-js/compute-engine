@@ -219,19 +219,22 @@ comparison (`Floor(x/49)` at 49 is 1; the product by the double of `1/49` gave
 0). `p` and the sign multiply the scalar factors first, so a list is passed over
 once for the product and once for the division. The constant can be a free name
 that holds it (`r49 = 1/49`), lowered and captured as any name that holds a
-number. On JavaScript `div.q` is the division, which IEEE rounds correctly; on
-GLSL, whose division need not be (SwiftShader and ANGLE on Metal compute a
-division by a literal as the product by the float of its reciprocal), it is the
-helper `_gpu_ir_quot`, which gives a quotient that is an integer or a half of
-one exactly for a dividend below 2^23 in magnitude, where the test `m·q = 2a` is
-exact. A tuple dividend takes the rule of `Divide` (`TUPLE_RULES`). A power of
-two as the denominator (an exact test over the safe integers) keeps the product
-by the double `p/q`, which is exact, and so do a complex factor and the `bigint`
-mode (a rational declines there). The rule is the spelling of one product, with
-no analysis of where the value is used: a sum of fractions that is an integer
-only in exact arithmetic (`Floor(j/3 + n + 1/3)` at j = -46, n = -16) and a
-comparison at a zero of a transcendental function (`0 < Sin(2π·s/P)` at s = 2, P
-= -2) can still give another value than the interpreter.
+number, or a local declared with a number literal that no `Assign` of its block
+writes (`Block(Declare(q, real, 1/49), Floor(q·k))`); several such constants of
+one product are one `p/q` when both stay safe integers. On JavaScript `div.q` is
+the division, which IEEE rounds correctly; on GLSL, whose division need not be
+(SwiftShader and ANGLE on Metal compute a division by a literal as the product
+by the float of its reciprocal), it is the helper `_gpu_ir_quot`, which gives a
+quotient that is an integer or a half of one exactly for a dividend below 2^23
+in magnitude, where the test `m·q = 2a` is exact. A tuple dividend takes the
+rule of `Divide` (`TUPLE_RULES`). A power of two as the denominator (an exact
+test over the safe integers) keeps the product by the double `p/q`, which is
+exact, and so do a complex factor and the `bigint` mode (a rational declines
+there). The rule is the spelling of one product, with no analysis of where the
+value is used: a sum of fractions that is an integer only in exact arithmetic
+(`Floor(j/3 + n + 1/3)` at j = -46, n = -16) and a comparison at a zero of a
+transcendental function (`0 < Sin(2π·s/P)` at s = 2, P = -2) can still give
+another value than the interpreter.
 
 The real functions (`Erf`, `Gamma`, `Root`, the inverse trigonometric and
 hyperbolic functions, ...) are rows whose operation the JavaScript code calls by

@@ -1625,10 +1625,13 @@ export function lower(
   /** A product. With a rational constant `p/q` whose denominator is not a
    *  power of two, it is `(p · factors) / q` (`div.q`): `Floor(x/49)` at 49
    *  is 1, where the product by the double of `1/49` gives 0 (`README.md`,
-   *  "The contracts"). The constant can be a free name that holds it. */
+   *  "The contracts"). The constant can be a free name that holds it, or a
+   *  local that no `Assign` writes (CE-1191); several are one constant. */
   const product = (e: Fn): V => {
     const ratio = (x: Expression) => {
-      const n = numberOf(x);
+      const n =
+        numberOf(x) ??
+        (isSymbol(x) ? lookup(x.symbol)?.binding.exact : undefined);
       const pq = n !== undefined ? n.toRational() : null;
       return pq !== null &&
         pq.every(Number.isSafeInteger) &&
@@ -1636,18 +1639,25 @@ export function lower(
         ? pq
         : undefined;
     };
-    const k = bigint ? -1 : e.ops.findIndex((x) => ratio(x) !== undefined);
-    const values = e.ops.map((x, i) => (i === k ? undefined : value(x)!));
+    const rs = bigint ? [] : e.ops.map(ratio);
+    let ks = rs.flatMap((r, i) => (r ? [i] : []));
+    const of = (is: number[]) =>
+      is.reduce(([m, n], i) => [m * rs[i]![0], n * rs[i]![1]], [1, 1]);
+    if (!of(ks).every(Number.isSafeInteger)) ks = ks.slice(0, 1);
+    const values = e.ops.map((x, i) =>
+      ks.includes(i) ? undefined : value(x)!
+    );
     const rest = values.filter((v): v is V => v !== undefined);
-    if (k < 0 || rest.some((v) => type(v).lane === 'complex'))
+    if (ks.length === 0 || rest.some((v) => type(v).lane === 'complex'))
       return apply(
         e,
         'Multiply',
         values.map((v, i) => v ?? value(e.ops[i])!)
       );
-    const c = e.ops[k];
-    if (isSymbol(c) && !held(c.symbol)!.library) b.captures.add(c.symbol);
-    const [p, q] = ratio(c)!;
+    for (const c of ks.map((i) => e.ops[i]))
+      if (isSymbol(c) && !lookup(c.symbol) && !held(c.symbol)!.library)
+        b.captures.add(c.symbol);
+    const [p, q] = of(ks);
     const mul = (xs: V[]) =>
       xs.length === 1 ? xs[0] : apply(e, 'Multiply', xs);
     const scalars = rest.filter((v) => type(v).shape.length === 0);
@@ -1661,7 +1671,7 @@ export function lower(
     const c0 = interval ? scalars.find((v) => inexacts.has(v)) : undefined;
     if (c0 !== undefined && rest.some((v) => constant(v) === undefined)) {
       const fixed = (i: number) =>
-        i === k || constant(values[i]!) !== undefined;
+        ks.includes(i) || constant(values[i]!) !== undefined;
       const closed = e.ops.filter((_, i) => fixed(i));
       const others = values.filter((_, i) => !fixed(i)) as V[];
       const folded = closedValue(ce.function('Multiply', closed) as Fn);
@@ -2643,10 +2653,14 @@ export function lower(
                 ? type(v).lane
                 : 'real';
           result = local(s, v, lane);
+          const unwritten = !e.ops.some((x) =>
+            facts(x).writes.has(name.symbol)
+          );
           frame.names.set(name.symbol, {
             v: result,
             lane,
             role: isSymbol(constant, 'True') ? 'constant' : 'local',
+            exact: unwritten && isNumber(value) ? value : undefined,
           });
         } else result = value(s, want && i === e.nops - 1);
       };
