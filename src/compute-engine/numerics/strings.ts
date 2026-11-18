@@ -209,28 +209,39 @@ export function fromDigits(
     const [v, r, e] = fromDigits(s.slice(1), baseInput);
     return [-v, r, e === undefined ? undefined : -e];
   }
-  let base = 10;
   if (typeof baseInput === 'string') baseInput = baseInput.toLowerCase();
-  if (s.startsWith('0x')) {
-    base = 16;
-    s = s.slice(2);
-  } else if (s.startsWith('0b')) {
-    base = 2;
-    s = s.slice(2);
-  } else if (baseInput === 'roman') {
-    return fromRoman(s);
-  } else if (baseInput === 'base64' || baseInput === 'base-64') {
+  if (baseInput === 'roman') return fromRoman(s);
+  if (baseInput === 'base64' || baseInput === 'base-64') {
     try {
       return [parseInt(btoa(s)), ''];
     } catch {
       return [NaN, ''];
     }
-  } else if (typeof baseInput === 'number') {
-    base = baseInput;
-  } else if (typeof baseInput === 'string') {
-    base = parseInt(baseInput);
   }
+  let base: number | undefined =
+    typeof baseInput === 'number'
+      ? baseInput
+      : typeof baseInput === 'string'
+        ? parseInt(baseInput)
+        : undefined;
 
+  // A `0x` or `0b` prefix is read only when no base is given or when the base
+  // is the prefix's own: in another base, `0b1` is a numeral of that base
+  // (177 in base 16), and in base 10 the `x` of `0x10` is not a digit.
+  // A prefix with no digit after it (`0x`, `0x_`) is NaN.
+  let prefixRead = false;
+  const prefix = /^0([xb])/i.exec(s);
+  if (prefix) {
+    const prefixBase = prefix[1].toLowerCase() === 'x' ? 16 : 2;
+    if (base === undefined || base === prefixBase) {
+      base = prefixBase;
+      s = s.slice(2);
+      prefixRead = true;
+    }
+  }
+  base ??= 10;
+
+  let digitCount = 0;
   let value = 0;
   // The double loses digits past 2^53; `exact` is the integer itself.
   const bigBase = Number.isInteger(base) && base >= 2 ? BigInt(base) : null;
@@ -299,9 +310,11 @@ export function fromDigits(
       if (k === undefined || k >= base) return [value, s.substring(i)];
       value = value * base + k;
       if (bigBase !== null) exact = exact * bigBase + BigInt(k);
+      digitCount += 1;
     }
   }
 
+  if (prefixRead && digitCount === 0) return [NaN, ''];
   return [value, '', bigBase !== null ? exact : undefined];
 }
 

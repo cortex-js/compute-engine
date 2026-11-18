@@ -40,6 +40,22 @@ describe('BASE FORM', () => {
       ]
     `);
   });
+  test('a 0x or 0b prefix is read only in the base of the prefix (CE-1420)', () => {
+    // `0b1` in base 16 was read as a binary numeral, 1.
+    expect(json('\\text{0b1}_{16}')).toBe(177);
+    expect(json('\\text{0bad}_{16}')).toBe(2989);
+    expect(json('\\text{0x1F}_{16}')).toBe(31);
+    expect(json('\\text{0X1F}_{16}')).toBe(31);
+    expect(json('\\text{0b101}_2')).toBe(5);
+    // A prefix with no digit after it is NaN, as in `DigitsFrom`: this was 0.
+    expect(json('\\text{0x}_{16}')).toBe('NaN');
+    // `x` is not a digit of base 10: this was 16.
+    expect(engine.box(['Subscript', "'0x10'", 10]).json).toEqual([
+      'Error',
+      ['ErrorCode', "'unexpected-digit'", "'x'"],
+      '\'"0x10"\'',
+    ]);
+  });
   test('base 36', () => {
     expect(json('\\text{a1xy9zb23}_{36}')).toMatchInlineSnapshot(
       `28363369669563`

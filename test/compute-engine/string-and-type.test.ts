@@ -563,6 +563,16 @@ describe('DigitsFrom reads an integer past 2^53 exactly', () => {
     expect(digits("'0bz'")).toBe('NaN');
   });
 
+  test('a 0x or 0b prefix is read only in the base of the prefix (CE-1420)', () => {
+    // The prefix was read after any signs and spaces: these were -1.
+    expect(digits("'- 0b1'", 16)).toBe('-177');
+    expect(digits("'-+0b1'", 16)).toBe('-177');
+    expect(digits("'0B101'", 2)).toBe('5');
+    expect(digits("'0b1'", 12)).toBe('133');
+    // A prefix with only separators after it has no digit.
+    expect(digits("'0x_'", 16)).toBe('NaN');
+  });
+
   test('an operand that is not yet a string stays unevaluated (CE-1401)', () => {
     // It was the error "expected `string`, got `character | string`".
     expect(digits('x')).toBe('DigitsFrom(x)');

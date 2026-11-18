@@ -628,8 +628,17 @@ describe('NumberFrom — the `base` argument', () => {
   });
 
   test('a `0x`/`0b` radix prefix is refused: the base operand is the authority', () => {
-    // `fromDigits` reads the prefix as an OVERRIDE, so `("0x10", 10)` would
-    // answer 16. The base-less form already rejects `"0x1f"`, so does this.
+    // The base-less form rejects `"0x1f"`, so does this, also in the base of
+    // the prefix.
+    expect(evalBox(['NumberFrom', str('0x10'), 16]).toString()).toContain(
+      'invalid-number'
+    );
+    expect(evalBox(['NumberFrom', str('-0b11'), 2]).toString()).toContain(
+      'invalid-number'
+    );
+    // In base 12 and above, `0b1` is a numeral of the base (CE-1420).
+    expect(evalBox(['NumberFrom', str('0b1'), 12]).re).toBe(133);
+    expect(evalBox(['NumberFrom', str('0x10'), 36]).re).toBe(42804);
     expect(evalBox(['NumberFrom', str('0x10'), 10]).toString()).toContain(
       'invalid-number'
     );

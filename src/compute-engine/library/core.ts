@@ -3309,17 +3309,13 @@ const NUMBER_FROM_DECIMAL =
 // alphanumeric digits. Whether each digit belongs to the requested base is
 // decided by `fromDigits`, which reports the first one that does not.
 //
-// A leading `0x`/`0b` is rejected (the negative lookahead). `fromDigits`
-// treats those two spellings as a radix prefix that overrides the base it was
-// handed — `fromDigits("0x10", 10)` is 16, not 0 — and here the `base`
-// operand is the only authority on the radix, so a numeral that looks like a
-// prefix cannot be read at all. This also matches the base-less form, which
-// rejects `"0x1f"` outright. The cost is that a numeral such as `"0b1"`,
-// legitimate in base 12 and above, is refused rather than misread; there is
-// no spelling that reads it correctly today, so refusing is the honest
-// answer. Both cases are excluded, since `"0X10"` reads as a prefix to a
-// human even though `fromDigits` only special-cases the lowercase spelling.
-const NUMBER_FROM_BASE_INTEGER = /^[+-]?(?!0[xXbB])[0-9a-zA-Z]+$/;
+// The `base` operand is the only authority on the radix: a radix prefix is
+// not accepted, as in the base-less form, which rejects `"0x1f"`. A leading
+// `0x` or `0b` (in either case) whose letter is not a digit of the base is
+// an `invalid-number` (`NUMBER_FROM_RADIX_PREFIX`); in base 12 and above,
+// `"0b1"` is a numeral of the base (133 in base 12).
+const NUMBER_FROM_BASE_INTEGER = /^[+-]?[0-9a-zA-Z]+$/;
+const NUMBER_FROM_RADIX_PREFIX = /^[+-]?0([xb])/i;
 
 /**
  * The longest padded `IntegerString(n, base, length)` the handler builds;
@@ -12237,42 +12233,29 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return ce.error(['unexpected-base', shown], op2.toString());
         }
 
-        // An optional sign, then a `0x` or `0b` prefix. With no base, the
-        // digits are read as a bigint, so a numeral past 2^53 stays exact; as
-        // with `parseInt`, the longest prefix of valid digits is read, and a
-        // numeral with none is `NaN`. With a base, the numeral is read by
-        // `fromDigits` below.
-        const prefixed = /^([+-]?)0([xb])(.*)$/is.exec(op1str);
-        const kind = prefixed?.[2].toLowerCase();
-        if (prefixed && base === undefined) {
-          const [, sign, , rest] = prefixed;
-          const digits = (kind === 'x' ? /^[0-9a-f]+/i : /^[01]+/).exec(rest);
-          if (!digits) return ce.number(NaN);
-          const magnitude = BigInt(`0${kind}${digits[0]}`);
-          return ce.number(sign === '-' ? -magnitude : magnitude);
-        }
-
         if (base === undefined) {
+          // An optional sign, then a `0x` or `0b` prefix: the digits are read
+          // as a bigint, so a numeral past 2^53 stays exact; as with
+          // `parseInt`, the longest prefix of valid digits is read, and a
+          // numeral with none is `NaN`.
+          const prefixed = /^([+-]?)0([xb])(.*)$/is.exec(op1str);
+          if (prefixed) {
+            const [, sign, , rest] = prefixed;
+            const kind = prefixed[2].toLowerCase();
+            const digits = (kind === 'x' ? /^[0-9a-f]+/i : /^[01]+/).exec(rest);
+            if (!digits) return ce.number(NaN);
+            const magnitude = BigInt(`0${kind}${digits[0]}`);
+            return ce.number(sign === '-' ? -magnitude : magnitude);
+          }
           // A plain decimal integer keeps its digits past 2^53.
           if (/^[+-]?\d+$/.test(op1str)) return ce.number(BigInt(op1str));
           return ce.number(Number.parseInt(op1str, 10));
         }
 
-        // A prefix is read only when it is the prefix of the base: with
-        // another base, `0b1` is a numeral of that base (177 in base 16).
-        // `fromDigits` reads a lowercase `0x` or `0b` as a radix prefix even
-        // when it is handed a base (CE-1420), so the prefix is removed here,
-        // or, for a numeral of another base, its leading `0`, which does not
-        // change the value.
-        let numeral = op1str;
-        if (prefixed) {
-          const [, sign, written, rest] = prefixed;
-          numeral =
-            base === (kind === 'x' ? 16 : 2)
-              ? `${sign}${rest}`
-              : `${sign}${written}${rest}`;
-        }
-        const [value, rest, exact] = fromDigits(numeral, base);
+        // `fromDigits` reads a `0x` or `0b` prefix only when it is the
+        // prefix of the base: in another base, `0b1` is a numeral of that
+        // base (177 in base 16).
+        const [value, rest, exact] = fromDigits(op1str, base);
 
         if (rest) return ce.error(['unexpected-digit', rest[0]], rest);
 
@@ -12345,6 +12328,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             return ce.error(['unexpected-base', shown], baseArg.toString());
           }
           if (!NUMBER_FROM_BASE_INTEGER.test(text)) return invalid();
+          const prefix = NUMBER_FROM_RADIX_PREFIX.exec(text);
+          if (prefix && Number.parseInt(prefix[1], 36) >= base)
+            return invalid();
           const [, rest] = fromDigits(text, base);
           // `fromDigits` reports the unconsumed tail; the same code
           // `DigitsFrom` uses names the offending digit.

@@ -1,3 +1,78 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A numeral that starts with `0b` or `0x` is read in the base it is given.**
+  `"0b1"_{16}` was 1 and `"0bad"_{16}` was an `unexpected-digit` error,
+  because the `0b` was read as a binary prefix; they are now 177 and 2989. `"0x10"_{10}` was 16; it is now an
+  `unexpected-digit` error. The prefix is read only in its own base (`0x` in
+  base 16, `0b` in base 2), in either case: `"0X1F"_{16}` is 31.
+  `DigitsFrom("- 0b1", 16)` is -177 (it was -1), `NumberFrom("0b1", 12)` is
+  133 (it was an `invalid-number` error), and `"0x"_{16}` is `NaN` (it was 0).
+
+- **A color written as an `oklch(…)` or `oklab(…)` string keeps its
+  channels.** `Color("oklch(50% 0.3 240)")` was `Oklch(0.508, 0.131, 246)`,
+  because the string was read as an 8-bit sRGB color, clipped to the sRGB
+  gamut; it is now `Oklch(0.5, 0.3, 240)`, the same color as the head. Every
+  operator that takes a color string reads these two notations the same way,
+  in the interpreter, in compiled JavaScript and in a GPU `Color` literal. The
+  CSS units are read: a chroma or an OKLab `a`/`b` of `100%` is 0.4, and a hue
+  can be written in `deg`, `rad`, `grad` or `turn`. A string of these
+  notations with an argument that is not a number is now an
+  `incompatible-type` error, not a color.
+
+- **A level in decibels converts to nepers by the factor ln(10)/20.**
+  `UnitConvert(Quantity(10, dB), Np)` was `10 Np`; it is now
+  `1.151292546497023 Np` (1 dB = ln(10)/20 Np, ISO 80000-3). Arithmetic and
+  comparisons use the same factor: `3 dB + 1 Np` was `4 Np` and is now
+  `1.345… Np`, and `1 dB < 1 Np` is `True`. A level does not convert to a
+  ratio or a number any more: converting `10 dB` to `percent` or `rad` is an
+  `incompatible-type` error (it was `1000 percent` and `10 rad`),
+  `IsCompatibleUnit(dB, percent)` is `False`, and `(3 dB/m)·(2 m)` is
+  `6 dB`, not the number `6`.
+
+- **The LaTeX of a `Delimiter` with the Unicode angle brackets `⟨` and `⟩`
+  reads back.** `["Delimiter", ["Sequence", 1, 2, 3], "'⟨,⟩'"]` was written
+  `⟨1,2,3⟩`, which the parser does not read. It is now written
+  `\langle1,2,3\rangle`, as the spelling `"'<,>'"` was. A `Delimiter` with
+  square brackets is still written with parentheses, except for a `List`
+  operand: `\lbrack 1,2,3\rbrack` reads back as a list, not as the tuple that
+  the group is.
+
+- **A constant whose value is 0, divided by itself, has no value.** With
+  `ce.declare('z', { value: 0, isConstant: true })`,
+  `ce.box(['Divide', 'z', 'z'])` was `1`. The quotient is now kept, and its
+  `evaluate()` and `simplify()` give `NaN`, as for `0/0`. The same applies to
+  `z.div(z)` and to `['Multiply', 'z', ['Power', 'z', -1]]`. A constant with
+  a nonzero value (`Pi/Pi`), a constant with no value and a free variable
+  (`x/x`) still give `1`.
+
+- **The `epsil` command line tool prints numbers with a fraction or a radical
+  in a form that Epsil reads back as the same value.** `epsil -e
+  'sqrt(3)/2 * i'` printed `sqrt(3)/2i`, which Epsil reads as `sqrt(3)/(2i)`;
+  `3/sqrt(2)` printed `3/2sqrt(2)`, which reads as `3/(2sqrt(2))`; and
+  `2*sqrt(-2)` printed `2sqrt(2)i`, which Epsil does not read. They now print
+  `sqrt(3)/2 * i`, `3/2 * sqrt(2)` and `2sqrt(2) * i`. The `toString()` of an
+  expression is unchanged.
+
+- **`Map`, `Filter` and the other lazy collection operators walk a list
+  chosen by `If`.** With `f = k ↦ k + 1`,
+  `ListFrom(Map(f, If(True, [4, 5], [1, 2, 3])))` gave `[]` and
+  `Sum(Map(f, If(True, [4, 5], [1, 2, 3])))` gave `0`, with no error. They
+  now give `[5, 6]` and `11`. The `If` is evaluated once in the evaluation of
+  the view.
+
+### Performance
+
+- **A `Map` or `Filter` callback that reads one element of a list expression
+  evaluates that list expression once per walk, not once per element.** In
+  `Map(j ↦ Which(At(c, j), At(v, j), True, NaN), Range(1, n))`, where `c` and
+  `v` are list expressions that do not depend on `j`, the time grew with the
+  square of `n`: 4.6 s for `n` = 3,200. It is now 0.09 s. The same applies to
+  a mask such as `Filter(Range(1, n), i ↦ 0 < At(Abs(C), i))`. A
+  sub-expression that reads the parameter, a local of the callback or a
+  value that changes between two elements is still evaluated at each element.
+
 ## 0.193.0 _2026-11-17_
 
 ### Breaking Changes
@@ -51,6 +126,16 @@
   `CE_JS_PROFILE_SHADOW=1` no longer turn anything on.
 
 ### Behavior Changes
+
+- **A quantifier over an `Interval` no longer tries only the integers of the
+  interval.** `exists(x in interval(1, 2), x == 1.5)` was `False`, because
+  `ForAll`, `Exists` and `ExistsUnique` tried only the values 1 and 2. An
+  `Interval` is a set of real numbers, so a quantifier over it now stays
+  unevaluated, unless its proposition does not read the variable. For the
+  integers from `a` to `b`, write the range `a..b`
+  (`["Range", a, b]`): `exists(n in 1..2, n == 1)` is still `True`. The index
+  of a `Sum` or a `Product` over an `Interval` still takes the integers
+  between the bounds.
 
 - **A destructuring of a value that did not evaluate to a tuple has its own
   error.** `let (U, S, V) = svd([[1, 2], [3, 4]])` failed with "expected
