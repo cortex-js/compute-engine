@@ -94,6 +94,102 @@ function clamp01(x: number): number {
   return Math.max(0, Math.min(1, x));
 }
 
+/** The channels of a color string written in OKLCh or OKLab. */
+export type OkColorChannels = {
+  space: 'oklch' | 'oklab';
+  c0: number;
+  c1: number;
+  c2: number;
+  /** Absent when the color is opaque (an alpha within 1e-9 of 1). */
+  alpha?: number;
+};
+
+/** An `oklch(…)` or `oklab(…)` spelling, with its argument list. */
+const OK_COLOR_FORM = /^(oklch|oklab)\s*\(([^()]*)\)$/;
+
+/** One argument: a number, with an optional unit or `%`, or `none`. */
+const OK_COLOR_ARGUMENT =
+  /^(?:none|([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(%|deg|rad|grad|turn)?)$/;
+
+/**
+ * Read an `oklch(…)` or `oklab(…)` color string to its channels, with no
+ * conversion through sRGB.
+ *
+ * Answers `undefined` when the string is not one of these two notations,
+ * and `null` when it is one of them but is not a color (an argument that
+ * is not a number, a wrong number of arguments, a unit that the channel
+ * does not take, a value that is not finite).
+ *
+ * `parseColor()` of `@arnog/colors` reads these strings to an 8-bit sRGB
+ * value: the channels were clipped to the sRGB gamut and rounded, so
+ * `oklch(50% 0.3 240)` read as chroma 0.131 and hue 246. Color values have
+ * no gamut (see `CLAMPED_CHANNELS`), so the string is read here as the head
+ * `Oklch(0.5, 0.3, 240)` is.
+ *
+ * The arguments are read as CSS Color 4 reads them, with the conventions of
+ * `parseColor()` where the two differ:
+ * - The arguments are separated by spaces or commas, and the fourth (the
+ *   alpha) can follow a `/`. There are 3 or 4 arguments.
+ * - `none` is 0. A unit or a `%` follows its number with no space, as in
+ *   CSS: `oklch(50 % 0.3 240)` is not a color.
+ * - The lightness is a number or a percentage (100% is 1). A number above 1
+ *   is a percentage, as `parseColor()` reads it (`oklch(50 0.3 240)` is
+ *   `oklch(0.5 0.3 240)`). It is clamped into `[0, 1]`.
+ * - The chroma, and the OKLab `a` and `b`, are numbers or percentages
+ *   (100% is 0.4). A negative chroma is 0.
+ * - The hue is a number of degrees or an angle (`deg`, `rad`, `grad`,
+ *   `turn`), reduced into `[0, 360)`.
+ * - The alpha is a number or a percentage, clamped into `[0, 1]`. A number
+ *   above 1 is on the 0-255 scale, as `parseColor()` reads it.
+ */
+export function parseOkColorString(
+  s: string
+): OkColorChannels | null | undefined {
+  const match = OK_COLOR_FORM.exec(s.trim().toLowerCase());
+  if (match === null) return undefined;
+  const space = match[1] as 'oklch' | 'oklab';
+  const args = match[2].trim().split(/\s*[\s,/]\s*/);
+  if (args.length !== 3 && args.length !== 4) return null;
+
+  const values: number[] = [];
+  for (const [i, arg] of args.entries()) {
+    const m = OK_COLOR_ARGUMENT.exec(arg);
+    if (m === null) return null;
+    if (m[1] === undefined) {
+      values.push(0);
+      continue;
+    }
+    const x = Number(m[1]);
+    if (!Number.isFinite(x)) return null;
+    const unit = m[2];
+    const isHue = space === 'oklch' && i === 2;
+    if (unit !== undefined && unit !== '%' && !isHue) return null;
+    if (isHue) {
+      if (unit === '%') return null;
+      const deg =
+        unit === 'rad'
+          ? (x * 180) / Math.PI
+          : unit === 'grad'
+            ? x * 0.9
+            : unit === 'turn'
+              ? x * 360
+              : x;
+      values.push(((deg % 360) + 360) % 360);
+    } else if (i === 0) {
+      values.push(clamp01(unit === '%' || x > 1 ? x / 100 : x));
+    } else if (i === 3) {
+      values.push(clamp01(unit === '%' ? x / 100 : x > 1 ? x / 255 : x));
+    } else {
+      const v = unit === '%' ? (x * 0.4) / 100 : x;
+      values.push(space === 'oklch' ? Math.max(0, v) : v);
+    }
+  }
+  const [c0, c1, c2, alpha] = values;
+  if (alpha === undefined || Math.abs(alpha - 1) < 1e-9)
+    return { space, c0, c1, c2 };
+  return { space, c0, c1, c2, alpha };
+}
+
 /**
  * HSL to sRGB, with channels on the 0-255 scale and not rounded.
  *

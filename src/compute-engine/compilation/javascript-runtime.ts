@@ -48,6 +48,7 @@ import {
   inGamut,
   readColorGamut,
   displayP3String,
+  parseOkColorString,
 } from '../numerics/color-conversion.js';
 import type { ColorGamut } from '../numerics/color-conversion.js';
 import {
@@ -442,6 +443,21 @@ function isCompiledColor(v: unknown): v is CompiledColor {
   );
 }
 
+/**
+ * The color value of an `oklch(…)` or `oklab(…)` string, in its own space
+ * and with its own channels (`parseOkColorString`), or `undefined` for any
+ * other string. The packing of `parseColor()` is clipped to the sRGB gamut,
+ * so these strings do not go through it: the interpreter reads them the
+ * same way (`readColorExpr`, `library/colors.ts`). A string of one of these
+ * notations that is not a color throws, as `parseColorStringOrThrow` does.
+ */
+function okStringColor(input: string): CompiledColor | undefined {
+  const ok = parseOkColorString(input);
+  if (ok === undefined) return undefined;
+  if (ok === null) throw new Error(`Unknown color: ${input}`);
+  return mkColor(ok.space, ok.c0, ok.c1, ok.c2, ok.alpha);
+}
+
 /** The shape a color helper accepts, named in the `TypeError` it throws for
  * anything else. */
 const COLOR_SHAPE =
@@ -494,7 +510,9 @@ function nonFiniteColor(
  */
 function asCompiledColor(input: unknown): CompiledColor {
   if (typeof input === 'string')
-    return packedToColor(parseColorStringOrThrow(input));
+    return (
+      okStringColor(input) ?? packedToColor(parseColorStringOrThrow(input))
+    );
   if (isCompiledColor(input)) return input;
   if (
     input === undefined ||
@@ -527,6 +545,7 @@ function toRgb255(input: unknown): {
   b: number;
   alpha?: number;
 } {
+  if (typeof input === 'string') input = okStringColor(input) ?? input;
   if (typeof input === 'string') {
     const c = parseColorStringOrThrow(input);
     const rgb: { r: number; g: number; b: number; alpha?: number } = {
@@ -734,9 +753,10 @@ function packedToColor(c: number): CompiledColor {
  * its alpha.
  *
  * This is the rule of the interpreter (`gamutMapColor`, `library/colors.ts`):
- * a color held in OKLCh or OKLab is mapped from its own OKLCh channels, so its
- * chroma does not go through sRGB first, and any other color (a color in
- * sRGB, HSV or HSL, or a color string) is mapped from its extended sRGB
+ * a color held in OKLCh or OKLab, or written as an `oklch(…)` or `oklab(…)`
+ * string, is mapped from its own OKLCh channels, so its chroma does not go
+ * through sRGB first, and any other color (a color in sRGB, HSV or HSL, or
+ * another color string) is mapped from its extended sRGB
  * channels. A color whose channels `readColorChannels` refuses has `NaN`
  * channels, and they stay `NaN`: every comparison of the mapping with `NaN`
  * is false, so it returns the clip of the `NaN` channels, which is `NaN`.
@@ -745,6 +765,7 @@ function gamutMapInput(
   input: unknown,
   gamut: ColorGamut
 ): { channels: [number, number, number]; alpha: number | undefined } {
+  if (typeof input === 'string') input = okStringColor(input) ?? input;
   if (
     isCompiledColor(input) &&
     (input.space === 'oklch' || input.space === 'oklab')

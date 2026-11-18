@@ -57,7 +57,7 @@ import {
   gpuAppliedBody,
   gpuApplyDerivatives,
 } from './gpu-applied-derivative.js';
-import { parseColorString } from '../library/colors.js';
+import { colorStringToOklch } from '../library/colors.js';
 import { GPU_MAX_INLINE_ELEMENTS } from './gpu-functions.js';
 import { gpuStorageAtBaseShape } from './gpu-at.js';
 import { BaseCompiler } from './base-compiler.js';
@@ -1763,8 +1763,8 @@ export function glslFragmentDefinition(
           ? GPU_COLOR_SPACES.has(text)
           : true;
       }
-      const packed = parseColorString(text);
-      return packed !== null && (packed & 0xff) === 0xff;
+      const color = colorStringToOklch(text);
+      return color !== null && color.alpha === undefined;
     },
 
     // The loop counter is a signed 32-bit `int`.

@@ -17,9 +17,8 @@ import {
   isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { rgbToOklch } from '@arnog/colors';
 import { gpuAmplifiedTrigMod } from './gpu-exact-trig.js';
-import { parseColorString } from '../library/colors.js';
+import { colorStringToOklch } from '../library/colors.js';
 import {
   tryGetConstant,
   foldTerms,
@@ -3126,21 +3125,22 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         'Could not compile `Color`: argument must be a string literal on GPU target'
       );
-    // The predicate is the interpreter's own (`parseColorString`,
-    // `library/colors.ts`), so a string is a color on every route or on none
-    // of them. Reading the parser's zero sentinel as "not a color" here made
+    // The predicate and the color are the interpreter's own
+    // (`colorStringToOklch`, `library/colors.ts`), so a string is a color on
+    // every route or on none of them, and an `oklch(…)` string keeps its
+    // chroma. Reading the parser's zero sentinel as "not a color" here made
     // `Color("#gg0000")` compile to opaque black — a wrong value behind a
     // reported success — while refusing the genuinely transparent spellings
     // `#00000000` and `rgba(0, 0, 0, 0)`.
-    const packed = parseColorString(str);
-    if (packed === null)
+    const oklch = colorStringToOklch(str);
+    if (oklch === null)
       throw new Error(
         `Could not compile \`Color\`: invalid color string "${str}"`
       );
-    // The packing is 0xrrggbbaa. Only the RGB is lowered below, so a literal
-    // carrying a non-opaque alpha would silently become opaque. Decline
-    // instead, matching `assertNoGPUAlpha`.
-    if ((packed & 0xff) !== 0xff)
+    // Only the OKLCh channels are lowered below, so a literal carrying a
+    // non-opaque alpha would silently become opaque. Decline instead,
+    // matching `assertNoGPUAlpha`.
+    if (oklch.alpha !== undefined)
       throw new Error(
         `Could not compile \`Color\`: the color string "${str}" carries an alpha channel, which is ` +
           `not representable on the GPU target — color values are \`vec3\` ` +
@@ -3148,10 +3148,6 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           `color and pass the alpha separately (e.g. as a uniform) at the ` +
           `framebuffer boundary.`
       );
-    const r = (packed >>> 24) & 0xff;
-    const g = (packed >>> 16) & 0xff;
-    const b = (packed >>> 8) & 0xff;
-    const oklch = rgbToOklch({ r, g, b });
     return `${gpuVec3()}(${formatFloat(oklch.L)}, ${formatFloat(oklch.C)}, ${formatFloat(oklch.H)})`;
   },
 

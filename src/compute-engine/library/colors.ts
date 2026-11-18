@@ -34,6 +34,7 @@ import {
   inGamut,
   readColorGamut,
   displayP3String,
+  parseOkColorString,
 } from '../numerics/color-conversion.js';
 import type {
   ColorChannelSpace,
@@ -164,9 +165,15 @@ const COLOR_FUNCTION_FORM = /^(rgba?|hsl|oklch|oklab)\s*\(\s*[^()]+\s*\)$/;
  * just as the keyword `transparent` is. Only a string that is not a color
  * notation at all is refused. A COMPUTED color with a zero alpha is a color
  * value, not a string, and never reaches this predicate.
+ *
+ * An `oklch(…)` or `oklab(…)` string is a color when `parseOkColorString()`
+ * reads it. Its packing is an 8-bit sRGB value, clipped to the sRGB gamut,
+ * so a reader of the color's value takes the channels from
+ * `parseOkColorString()` (see `readColorExpr`), not from the packing.
  */
 export function parseColorString(s: string | undefined | null): number | null {
   if (!s) return null;
+  if (parseOkColorString(s) === null) return null;
   const spelling = s.trim().toLowerCase();
   if (spelling.startsWith('#') && !HEX_COLOR_FORM.test(spelling)) return null;
   let color: number;
@@ -179,6 +186,36 @@ export function parseColorString(s: string | undefined | null): number | null {
   if (color !== 0) return color;
   if (spelling === 'transparent' || spelling.startsWith('#')) return 0;
   return COLOR_FUNCTION_FORM.test(spelling) ? 0 : null;
+}
+
+/**
+ * The color of a CSS-style color string, in OKLCh, or `null` when the
+ * string does not name a color (`parseColorString`). Its alpha is absent
+ * when the color is opaque.
+ *
+ * An `oklch(…)` or `oklab(…)` string keeps its own channels
+ * (`parseOkColorString`): the packing of `parseColorString` is clipped to
+ * the sRGB gamut and rounded to 8 bits, so `oklch(50% 0.3 240)` read as
+ * chroma 0.131 and hue 246. Any other string is read from that packing.
+ *
+ * `Color` answers this color, and the GPU targets compile a `Color` of a
+ * string literal to it, so the routes agree.
+ */
+export function colorStringToOklch(s: string): OklchColor | null {
+  // The two OKLab notations do not go through `parseColor()` at all, as in
+  // the compiled runtime (`okStringColor`), so both routes accept the same
+  // strings.
+  const ok = parseOkColorString(s);
+  if (ok === null) return null;
+  if (ok === undefined) {
+    const color = parseColorString(s);
+    return color === null ? null : colorNumberToOklchColor(color);
+  }
+  const c =
+    ok.space === 'oklch'
+      ? { L: ok.c0, C: ok.c1, H: ok.c2 }
+      : oklabToOklch({ L: ok.c0, a: ok.c1, b: ok.c2 });
+  return ok.alpha !== undefined ? { ...c, alpha: ok.alpha } : c;
 }
 
 /** Convert a 0xRRGGBBAA packed integer to an `OklchColor`. */
@@ -250,6 +287,10 @@ const COLOR_OPERATORS = new Set(['Rgb', 'Hsv', 'Hsl', 'Oklab', 'Oklch']);
  * is an extended sRGB channel. A `NaN` channel, or an infinite channel that
  * is not clamped (an sRGB channel, a hue, an OKLab/OKLCh channel), makes the
  * expression not a color.
+ *
+ * An `oklch(…)` or `oklab(…)` string is read as the `Oklch` or `Oklab` head
+ * with the channels of `parseOkColorString()`, so it is the same color as
+ * that head on every operator, with no clip to the sRGB gamut.
  */
 function readColorExpr(arg: any): {
   space: string;
@@ -258,6 +299,12 @@ function readColorExpr(arg: any): {
   c2: number;
   alpha?: number;
 } | null {
+  if (isString(arg)) {
+    const ok = parseOkColorString(arg.string);
+    if (!ok) return null;
+    const space = ok.space === 'oklch' ? 'Oklch' : 'Oklab';
+    return { space, c0: ok.c0, c1: ok.c1, c2: ok.c2, alpha: ok.alpha };
+  }
   if (!isFunction(arg)) return null;
   if (!COLOR_OPERATORS.has(arg.operator)) return null;
   if (!arg.ops || arg.ops.length < 3) return null;
@@ -381,6 +428,20 @@ function lerpOklchColor(a: OklchColor, b: OklchColor, t: number): OklchColor {
   return { L, C, H, alpha: normalizeAlpha(alphaA + (alphaB - alphaA) * t) };
 }
 
+/**
+ * The `Oklch` or `Oklab` head of an `oklch(…)` or `oklab(…)` string, or
+ * `arg` itself for any other expression. Used where an operator takes a
+ * shortcut on its own head, so that the string takes it too.
+ */
+function okStringAsHead(ce: any, arg: any): any {
+  if (!isString(arg)) return arg;
+  const ok = parseOkColorString(arg.string);
+  if (!ok) return arg;
+  const args = [ce.number(ok.c0), ce.number(ok.c1), ce.number(ok.c2)];
+  if (ok.alpha !== undefined) args.push(ce.number(ok.alpha));
+  return ce.function(ok.space === 'oklch' ? 'Oklch' : 'Oklab', args);
+}
+
 /** Build an Oklch boxed expression from an OklchColor. */
 function oklchToExpr(ce: any, c: OklchColor): any {
   const args = [ce.number(c.L), ce.number(c.C), ce.number(c.H)];
@@ -403,6 +464,9 @@ function oklchToExpr(ce: any, c: OklchColor): any {
  * component is refused, as the head is.
  */
 function extractRgb(ce: any, arg: any): RgbColor | undefined {
+  // A typed color head, or an `oklch(…)`/`oklab(…)` string (`readColorExpr`).
+  const fromTyped = colorExprToRgb(arg);
+  if (fromTyped) return fromTyped;
   if (isString(arg)) {
     const color = parseColorString(arg.string);
     if (color === null) return undefined;
@@ -415,8 +479,6 @@ function extractRgb(ce: any, arg: any): RgbColor | undefined {
     if (alpha !== undefined) rgb.alpha = alpha;
     return rgb;
   }
-  const fromTyped = colorExprToRgb(arg);
-  if (fromTyped) return fromTyped;
   if (
     arg.operator === 'Tuple' &&
     arg.ops &&
@@ -537,10 +599,8 @@ function gamutMapColor(
   rgb: RgbColor,
   gamut: ColorGamut
 ): [number, number, number] {
-  if (
-    isFunction(arg) &&
-    (arg.operator === 'Oklch' || arg.operator === 'Oklab')
-  ) {
+  const space = readColorExpr(arg)?.space;
+  if (space === 'Oklch' || space === 'Oklab') {
     const c = colorExprToOklch(arg);
     if (c) return gamutMapOklch(c.L, c.C, c.H, gamut);
   }
@@ -556,10 +616,9 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       const input = isString(ops[0]) ? ops[0].string : undefined;
       if (!input) return ce.error('incompatible-type');
 
-      const color = parseColorString(input);
+      const color = colorStringToOklch(input);
       if (color === null) return ce.error('incompatible-type');
-
-      return colorNumberToOklch(ce, color);
+      return oklchToExpr(ce, color);
     },
   },
 
@@ -1055,7 +1114,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     broadcastExemptions: ['tuples'],
     signature: '(color | string | tuple) -> color',
     evaluate: (ops, { engine: ce }) => {
-      const arg = ops[0];
+      const arg = okStringAsHead(ce, ops[0]);
       if (isFunction(arg) && arg.operator === 'Oklab')
         return normalizeColorHead(ce, arg);
       // Wide-gamut path: Oklch → Oklab without an sRGB pinch.
@@ -1084,7 +1143,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     broadcastExemptions: ['tuples'],
     signature: '(color | string | tuple) -> color',
     evaluate: (ops, { engine: ce }) => {
-      const arg = ops[0];
+      const arg = okStringAsHead(ce, ops[0]);
       if (isFunction(arg) && arg.operator === 'Oklch')
         return normalizeColorHead(ce, arg);
       // Wide-gamut path: Oklab → Oklch without an sRGB pinch.
