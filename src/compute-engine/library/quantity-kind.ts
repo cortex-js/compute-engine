@@ -41,7 +41,6 @@ import {
   isFunction,
   isInexactOperand,
   isNumber,
-  isString,
 } from '../boxed-expression/type-guards.js';
 import { holdsKindValue } from '../boxed-expression/residue-class.js';
 import { isExactConstantExpression } from '../boxed-expression/compare.js';
@@ -51,7 +50,6 @@ import {
   exactUnitConversion,
   getExpressionDimension,
   getExpressionScale,
-  parseUnitDSL,
   sameLogarithmicExponent,
 } from './unit-data.js';
 import {
@@ -59,6 +57,7 @@ import {
   cancelledUnitValue,
   canonicalUnit,
   decodedUnit,
+  unitOperand,
 } from './units.js';
 import { isMeasurement } from './measurement-arithmetic.js';
 import { refusedEnclosureOperands } from './arithmetic.js';
@@ -656,30 +655,12 @@ export const QUANTITY_LIBRARY: SymbolDefinitions = {
       // scope.
       //
       // A string second argument (e.g. "km/h", "km") is parsed into a
-      // structured unit expression with the same DSL parser the LaTeX/text
-      // path uses. A simple unit becomes a symbol; a compound unit becomes a
-      // Multiply/Divide/Power expression — so the string form canonicalizes
-      // identically to the symbolic-unit form `Quantity(30, km/h)`.
-      const unitArg = args[1];
-      if (isString(unitArg)) {
-        const parsed = parseUnitDSL(unitArg.string);
-        if (parsed === null)
-          return ce._fn('Quantity', [
-            mag,
-            ce.error(['unexpected-argument', unitArg.string]),
-          ]);
-        // The compound unit is boxed raw: `canonicalUnit()` makes it
-        // canonical.
-        const boxed = ce._resolveOnly(() =>
-          typeof parsed === 'string'
-            ? ce.symbol(parsed)
-            : ce.box(parsed as any, { form: 'raw' })
-        );
-        return (
-          cancelledUnitValue(ce, mag, boxed) ??
-          ce._fn('Quantity', [mag, canonicalUnit(ce, boxed)])
-        );
-      }
+      // structured unit expression, so the string form canonicalizes
+      // identically to the symbolic-unit form `Quantity(30, km/h)` (see
+      // `unitOperand()`).
+      const unitArg = unitOperand(ce, args[1]);
+      if (isFunction(unitArg, 'Error'))
+        return ce._fn('Quantity', [mag, unitArg]);
 
       // A compound unit whose factors cancel (`m/m`) gives a plain number,
       // as the quantity arithmetic does.

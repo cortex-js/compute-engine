@@ -462,6 +462,71 @@ describe('COMPOUND UNIT CONVERT', () => {
   });
 });
 
+// A unit whose name is also a function name (`min`, `lb`) is written as a
+// string. Each unit operand reads a string as `Quantity` does.
+describe('STRING UNIT OPERANDS', () => {
+  test('UnitConvert to a string unit', () => {
+    expect(
+      engine
+        .box(['UnitConvert', ['Quantity', 2, 'h'], { str: 'min' }])
+        .evaluate().json
+    ).toEqual(['Quantity', 120, 'min']);
+    expect(
+      engine
+        .box(['UnitConvert', ['Quantity', 1, { str: 'lb' }], { str: 'kg' }])
+        .evaluate().json
+    ).toEqual(['Quantity', 0.45359237, 'kg']);
+  });
+
+  test('UnitConvert to a compound string unit gives the unit of the symbolic form', () => {
+    const strForm = engine.box([
+      'UnitConvert',
+      ['Quantity', 36, 'km'],
+      { str: 'km/h' },
+    ]);
+    const symForm = engine.box([
+      'UnitConvert',
+      ['Quantity', 36, 'km'],
+      ['Divide', 'km', 'h'],
+    ]);
+    expect(strForm.json).toEqual(symForm.json);
+    const r = engine
+      .box(['UnitConvert', ['Quantity', 36, { str: 'km/h' }], { str: 'm/s' }])
+      .evaluate();
+    expect(r.op1.re).toBeCloseTo(10);
+    expect(r.op2.json).toEqual(['Divide', 'm', 's']);
+  });
+
+  test('UnitConvert to a malformed string unit is invalid', () => {
+    const bad = engine.box([
+      'UnitConvert',
+      ['Quantity', 1, 'm'],
+      { str: 'kg/(' },
+    ]);
+    expect(bad.isValid).toBe(false);
+    expect(bad.op2.operator).toBe('Error');
+  });
+
+  test('IsCompatibleUnit with string units', () => {
+    expect(
+      engine.box(['IsCompatibleUnit', { str: 'min' }, { str: 'h' }]).evaluate()
+        .symbol
+    ).toBe('True');
+    expect(
+      engine.box(['IsCompatibleUnit', { str: 'lb' }, 'm']).evaluate().symbol
+    ).toBe('False');
+  });
+
+  test('UnitDimension of a string unit', () => {
+    expect(
+      engine.box(['UnitDimension', { str: 'km/h' }]).evaluate().json
+    ).toEqual(['List', 1, 0, -1, 0, 0, 0, 0, 0]);
+    expect(engine.box(['UnitDimension', { str: 'N' }]).evaluate().json).toEqual(
+      ['List', 1, 1, -2, 0, 0, 0, 0, 0]
+    );
+  });
+});
+
 describe('LATEX PARSING', () => {
   test('Number with \\mathrm unit', () => {
     const expr = engine.parse('12\\,\\mathrm{cm}');

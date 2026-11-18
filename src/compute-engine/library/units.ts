@@ -14,8 +14,10 @@ import {
   isSymbol,
   isFunction,
   isNumber,
+  isString,
 } from '../boxed-expression/type-guards.js';
 import {
+  parseUnitDSL,
   convertUnit,
   unitConversionCoefficients,
   convertCompoundUnit,
@@ -391,6 +393,35 @@ export function canonicalUnit(ce: ComputeEngine, unit: Expression): Expression {
 }
 
 /**
+ * The unit written by the unit operand `unit` of `Quantity`, `UnitConvert`,
+ * `IsCompatibleUnit` or `UnitDimension`, not yet canonical.
+ *
+ * A string (`"km/h"`, `"min"`) is parsed with the unit DSL, as the unit of
+ * LaTeX: a simple unit becomes a symbol, a compound unit a
+ * `Multiply`/`Divide`/`Power` expression boxed raw, so that the string form
+ * gives the same unit as the symbolic form. A string is the way to write a
+ * unit whose name is also the name of a function (`"min"`, `"lb"`). A
+ * string that the DSL cannot parse (`"kg/("`) gives an
+ * `unexpected-argument` error, and a name that is not a valid symbol an
+ * `invalid-symbol` error; an unknown unit name (`"foo"`) is a symbol, as a
+ * bare unknown name is, and the operators leave it unevaluated or give
+ * `incompatible-type`. An operand that is not a string is the unit as it
+ * is.
+ */
+export function unitOperand(ce: ComputeEngine, unit: Expression): Expression {
+  if (!isString(unit)) return unit;
+  const parsed = parseUnitDSL(unit.string);
+  if (parsed === null) return ce.error(['unexpected-argument', unit.string]);
+  // A unit name is not a variable: it is boxed resolve-only, and is not
+  // declared in the current scope.
+  return ce._resolveOnly(() =>
+    typeof parsed === 'string'
+      ? ce.symbol(parsed)
+      : ce.box(parsed as any, { form: 'raw' })
+  );
+}
+
+/**
  * The magnitude `mag` when `unit` is a compound unit whose factors all
  * cancel (`m/m`, `m·s/(s·m)`): the quantity `mag unit` is then the plain
  * number `mag`, as in the quantity arithmetic, where `(6 m)/(2 m)` is `3`.
@@ -717,10 +748,11 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       // The target unit is boxed resolve-only, as the unit of a `Quantity`:
       // a unit name is not declared in the current scope.
       // The target unit takes its canonical form, which is the unit of the
-      // result (see `canonicalUnit()`).
+      // result (see `canonicalUnit()`). A string target (`"min"`) is read
+      // as a unit (see `unitOperand()`).
       return ce._fn('UnitConvert', [
         args[0].canonical,
-        canonicalUnit(ce, args[1]),
+        canonicalUnit(ce, unitOperand(ce, args[1])),
       ]);
     },
     evaluate: (ops, { numericApproximation, engine: ce }) => {
@@ -808,8 +840,12 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
     canonical: (args, { engine: ce }) => {
       if (args.length !== 2) return ce.error('incompatible-type');
       // Don't canonicalize unit arguments — they may be symbols like 'N'
-      // that conflict with function definitions
-      return ce._fn('IsCompatibleUnit', args);
+      // that conflict with function definitions. A string (`"lb"`) is read
+      // as a unit (see `unitOperand()`).
+      return ce._fn(
+        'IsCompatibleUnit',
+        args.map((x) => unitOperand(ce, x))
+      );
     },
     evaluate: (ops, { engine: ce }) => {
       // Support both simple symbols and compound unit expressions
@@ -837,7 +873,7 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
     canonical: (args, { engine: ce }) => {
       if (args.length !== 1) return ce.error('incompatible-type');
       // Don't canonicalize unit argument — same reason as IsCompatibleUnit
-      return ce._fn('UnitDimension', args);
+      return ce._fn('UnitDimension', [unitOperand(ce, args[0])]);
     },
     evaluate: (ops, { engine: ce }) => {
       // Support both simple symbols and compound unit expressions

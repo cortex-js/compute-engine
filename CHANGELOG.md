@@ -2,6 +2,16 @@
 
 ### Resolved Issues
 
+- **A unit written as a string is the target of a conversion.** In Epsil,
+  `unitConvert(quantity(2, h), "min")` was unevaluated; it is now `120 min`.
+  `UnitConvert`, `IsCompatibleUnit` and `UnitDimension` read a string unit
+  operand (`"min"`, `"km/h"`) as `Quantity` does: `IsCompatibleUnit("min",
+  "h")` is `True` and `UnitDimension("km/h")` is `[1, 0, -1, 0, 0, 0, 0, 0]`.
+  A string is the way to write a unit whose name is also the name of a
+  function, such as `min` or `lb`: a bare `min` is the function `Min`. A
+  string that is not a unit expression, such as `"kg/("`, is an
+  `unexpected-argument` error.
+
 - **`TrigExpand`, `TrigReduce` and `TrigToExp` rewrite the value of a
   variable, and the result of another rewrite.** With `y := \sin(2x)`,
   `TrigExpand(y)` was `y`; it is now `2\sin(x)\cos(x)`, as
