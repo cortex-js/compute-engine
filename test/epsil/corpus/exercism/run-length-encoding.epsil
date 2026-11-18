@@ -2,7 +2,7 @@
 encode(s) = do {
   let out = ""
   let run = 0
-  let prev = ""
+  let prev: string | character = ""
   for c in characters(s) {
     if c == prev { run = run + 1 }
     else {

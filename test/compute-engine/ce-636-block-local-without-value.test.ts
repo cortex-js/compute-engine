@@ -1,10 +1,6 @@
 /**
- * CE-636. A `Block` local that a `Declare` gave no value could be read with
- * no value on some paths. The language no longer admits that state: a
- * declaration without a value is the static error `declaration-without-value`,
- * so there is no read of a local with no value to classify. The remaining
- * rules of block locals are pinned in `block-locals-declaration-rules.test.ts`
- * and `compile-block-locals-rules.test.ts`.
+ * A declared loop local may remain uninitialized on some paths. Runtime reads
+ * report that state, and compilation conservatively declines the declaration.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -34,10 +30,10 @@ const LOOP = [
 ];
 
 describe('CE-636: A DECLARATION WITHOUT A VALUE', () => {
-  test('the declaration is a static error', () => {
+  test('the declaration is valid but a read before initialization fails', () => {
     const e = box(LOOP);
-    expect(e.type.toString()).toBe('error');
-    expect(e.toString()).toContain('declaration-without-value');
+    expect(e.type.toString()).toBe('number');
+    expect(e.evaluate().toString()).toContain('read-before-initialization');
   });
 
   test('a block with that declaration does not compile', () => {

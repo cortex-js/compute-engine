@@ -1281,6 +1281,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     let entryEnv = this._env;
     let fromCollector = 0;
     if (isFunctionLiteralParameter(v)) {
+      if (v._fixedInitializationType) return v.type;
       const record = this.engine._parameterRecord(v);
       if (record !== undefined) {
         entryEnv = record.env;
@@ -1714,19 +1715,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // even if it is unknown (e.g. `ContinuationPlaceholder`)
       if (def.value.isConstant) return false;
 
-      // A valueless binding with assignment evidence (a block local that an
-      // `Assign` or a `let` initializer gave a value type when it was
-      // canonicalized) has the join of its assigned value types as its
-      // static type. A use does not narrow that type: the meet with a
-      // parameter type can exclude a value that an assignment gives, and it
-      // made the type depend on the order of the statements
-      // (`_assignmentEvidence`, `boxed-value-definition.ts`).
-      if (
-        inferenceMode === 'narrow' &&
-        def.value._assignmentEvidence &&
-        def.value.value === undefined
-      )
-        return false;
+      if (def.value._fixedInitializationType || isDeclaredLocal(def.value)) return false;
 
       // A block local declared `any` keeps its declared type: a use does
       // not narrow it (`isDeclaredLocal()`). Its assigned value can be any
@@ -2776,6 +2765,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return explainExpression(this, operation, options);
   }
 
+  private _uninitializedRead(): Expression | undefined {
+    const def = this.valueDefinition;
+    if (!def?._requiresInitialization) return undefined;
+    const binding = this._contextBinding();
+    if (!binding || !('value' in binding) || binding.value !== def ||
+        binding.value.storedValue !== undefined) return undefined;
+    return this.engine.error(['read-before-initialization', this._id]);
+  }
+
   evaluate(options?: Partial<EvaluateOptions>): Expression {
     // An operation runs in an operation environment of its own (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
@@ -2795,6 +2793,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
     const def = this.valueDefinition;
     if (!def) return this;
+    const uninitialized = this._uninitializedRead();
+    if (uninitialized) return uninitialized;
     // Debug invariant (§3 of the binder-mechanism design): a resolution site,
     // not the `valueDefinition` getter, which must stay a plain field read.
     if (this.engine._debugBindings) this._assertLiveRead(def);
@@ -2964,6 +2964,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (canonical) return canonical.evaluateAsync(options);
     const def = this.valueDefinition;
     if (!def) return this;
+    const uninitialized = this._uninitializedRead();
+    if (uninitialized) return uninitialized;
     if (this.engine._debugBindings) this._assertLiveRead(def);
     const numeric = options?.numericApproximation === true;
     if (
@@ -3362,6 +3364,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   private _N(): Expression {
+    const uninitialized = this._uninitializedRead();
+    if (uninitialized) return uninitialized;
     const def = this.valueDefinition;
     if (def && this.engine._debugBindings) this._assertLiveRead(def);
     // Note: `holdUntil: 'never'` means "substitute as early as possible" —

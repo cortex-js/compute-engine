@@ -273,10 +273,9 @@ describe('EPSIL `where` ANNOTATIONS (D13: prefix-mode termination)', () => {
       'g',
       { str: '(T) -> boolean where T: (real) -> real' },
     ]);
-    // The annotation is a function type: without a `function g` statement
-    // in the same block, the declaration needs a value.
+    // An unused uninitialized declaration is valid; reads still check the slot.
     expect(run('let g: (T) -> boolean where T: (real) -> real').value).toBe(
-      'Error(ErrorCode("declaration-without-value", "g", "function"))'
+      '"Nothing"'
     );
   });
 

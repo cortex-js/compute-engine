@@ -61,9 +61,9 @@ describe('CE-1179: a declared scalar result after a loop', () => {
     );
   });
 
-  test('a captured name with an inferred type keeps the list arm', () => {
+  test('a dynamic captured value cannot widen the numeric local contract', () => {
     // An explicitly dynamic captured value can change from scalar to list.
-    // The body-local `n` keeps its scalar type and the result keeps the list arm.
+    // The body-local `n` refuses a list store; no list result is admitted.
     const ce = new ComputeEngine();
     const checked = executeEpsil(
       ce,
@@ -78,7 +78,8 @@ X = [1, 2]
     );
     expect(checked.diagnostics).toEqual([]);
     ce.declare('L', 'list<integer>');
-    expect(ce.box(['f', 'L', 3]).type.toString()).toBe('integer | list<any>');
+    expect(ce.box(['f', 'L', 3]).type.toString()).toBe('integer');
+    expect(ce.box(['f', ['List', 1], 3]).evaluate().operator).toBe('Error');
   });
 
   test('a call of a user function in the body keeps the list arm', () => {

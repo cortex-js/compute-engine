@@ -211,8 +211,8 @@ function operandTypeInSum(
   return { type, value: expr.evaluate().toString() };
 }
 
-describe('Evidence read again after the block is canonicalized (Tycho item 332)', () => {
-  test('the leaves of a loop pattern whose collection loses its tuple type are widened to unknown', () => {
+describe('Fixed binding contracts in loops (Tycho item 332)', () => {
+  test('loop leaves retain the initialized collection element contracts', () => {
     expect(
       operandTypeInSum(
         `let ps = [(1, 2)]
@@ -227,7 +227,7 @@ while n < 2 {
 s`,
         'q'
       )
-    ).toEqual({ type: 'unknown', value: '8' });
+    ).toEqual({ type: 'number', value: '8' });
   });
 
   // The element type is a union of two tuple types. Each arm is read and
@@ -272,7 +272,7 @@ s`,
     ).toEqual({ type: 'number', value: '4.5' });
   });
 
-  test('a destructuring assignment whose value loses its tuple type widens its leaves to unknown', () => {
+  test('a destructuring assignment preserves the initialized leaf contracts', () => {
     expect(
       operandTypeInSum(
         `let ps = [(1, 2)]
@@ -289,7 +289,7 @@ while n < 2 {
 s`,
         'b'
       )
-    ).toEqual({ type: 'unknown', value: '6' });
+    ).toEqual({ type: 'number', value: '6' });
   });
 
   // A destructuring `let` records the type of each leaf, as a destructuring
@@ -309,7 +309,7 @@ while n < 2 {
 s`,
         'b'
       )
-    ).toEqual({ type: 'real', value: '4.5' });
+    ).toEqual({ type: 'number', value: '4.5' });
   });
 
   // The leaves of a destructuring `let` are block locals: a leaf named `i`

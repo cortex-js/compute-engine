@@ -227,6 +227,13 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
   _typeWithFacts(declared: BoxedType, memoize: boolean): BoxedType;
   /** A hoisted block local (see `types-definitions.ts`). @internal */
   _blockLocal: boolean;
+
+  /** A sequence initializer or annotation fixed this binding's static contract. */
+  _fixedInitializationType?: boolean;
+
+  /** The source declaration reserves a slot without an initial value.
+   * @internal */
+  _requiresInitialization?: boolean;
   _programVariable: boolean;
   /** History of writes to this definition's type. Structural mirror of
    * `TypeProvenanceEntry[]` — the full type lives in `types-definitions.ts`,

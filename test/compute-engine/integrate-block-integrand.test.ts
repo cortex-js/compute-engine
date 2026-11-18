@@ -301,9 +301,8 @@ describe('Integrate of any other block stays unevaluated under evaluate()', () =
       ['Assign', 'c', 2],
       CX
     ).evaluate();
-    expect(refused.operator).toBe('Error');
-    expect(refused.op1.json).toEqual(['ErrorCode', "'assignment-type-mismatch'", "'c'", "'function'", "'2'"]);
-    expect(refused.op2.operator).toBe('ErrorTrace');
+    // A later use does not make the unknown initialization contract callable.
+    expect(refused.operator).toBe('Integrate');
     const unread = ce.box([
       'D',
       block(['Declare', 'c', { str: 'unknown' }, failing], 'x'),
@@ -363,15 +362,15 @@ describe('Integrate of any other block stays unevaluated under evaluate()', () =
     );
   });
 
-  test('a declaration without a value is an error, under evaluate() and N()', () => {
+  test('a deferred initialization uses numerical quadrature', () => {
     const e = integral(
       new ComputeEngine(),
       ['Declare', 'c', { str: 'real' }],
       ['Assign', 'c', 2],
       CX
     );
-    expect(e.evaluate().operator).toBe('Error');
-    expect(e.N().operator).toBe('Error');
+    expect(e.evaluate().operator).toBe('Integrate');
+    expect(numeric(e.N())).toBeCloseTo(1);
   });
 });
 

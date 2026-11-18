@@ -479,7 +479,7 @@ describe('RULES 3 AND 4: a stored literal and a name declared unknown', () => {
       ],
       'P',
     ]);
-    expect(typeOf(literal.op1.ops[1], 'q')).toBe('list<real>');
+    expect(typeOf(literal.op1.ops[1], 'q')).toBe('list<number>');
     expect(literal.op1.ops[0].ops[2].type.toString()).toBe('list<real>');
   });
 

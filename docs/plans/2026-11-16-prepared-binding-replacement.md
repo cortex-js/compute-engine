@@ -68,9 +68,10 @@ the existing general function/recursive inference route remain in place.
 The runtime initialization check applies to newly admitted source declarations
 without values. It tests physical slot presence, not visibility through symbolic
 value shields. This does not amend existing Program hoisting, failed-declaration
-publication or namespace replacement. Strict compilation also declines collection
-writes whose known complex lanes are erased by mutable widening; this reuses
-existing lane-admission logic, without extending shape analysis.
+publication or namespace replacement. On the November 18 IR compiler, the
+existing input-shape checks decline the complex-point witness. A fixed unknown
+can hold a matrix, so canonicalization preserves the order of potential matrix
+factors.
 
 The bounded implementation's actual removal accounting, semantic migrations and
 validation are recorded in the

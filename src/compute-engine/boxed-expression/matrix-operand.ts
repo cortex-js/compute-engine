@@ -5,6 +5,12 @@ import { isSubtype } from '../../common/type/subtype.js';
 import { resolveTypeAlias } from '../../common/type/utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
 
+/** An unknown source contract cannot acquire a scalar type from its use. */
+function isFixedUnknownSymbol(x: Expression): boolean {
+  return isSymbol(x) && x.type.type === 'unknown' &&
+    x.valueDefinition?._fixedInitializationType === true;
+}
+
 /**
  * Can this operand be a matrix, although its type does not say so? This is
  * `true` when the type of the operand is not known to exclude a collection:
@@ -17,7 +23,9 @@ import { isFunction, isSymbol } from './type-guards.js';
  * A symbol of type `unknown` (a symbol with no declaration and no value) is
  * `false`: a symbol used in a product is a number. `ce.box(['Multiply', 'A',
  * 'x'])` infers the type `number` for `x`, but `ce.parse('A x')` leaves it
- * `unknown`, and the two must give the same product. A symbol declared with
+ * `unknown`, and the two must give the same product. A fixed unknown source
+ * contract is different: it cannot be inferred scalar and may hold a matrix.
+ * A symbol declared with
  * the type `any` is not inferred to be a number, so it is `true`.
  *
  * In a product with a matrix, such an operand must not move past a matrix
@@ -38,7 +46,7 @@ import { isFunction, isSymbol } from './type-guards.js';
 export function mayBeTensorProductOperand(x: Expression): boolean {
   const facts = x.type.facts;
   if (facts.collection === false || facts.tupleShaped) return false;
-  return !(isSymbol(x) && x.type.type === 'unknown');
+  return !(isSymbol(x) && x.type.type === 'unknown') || isFixedUnknownSymbol(x);
 }
 
 /**
@@ -81,7 +89,7 @@ export function mayBeMatrixPowerBase(x: Expression): boolean {
  * a product does not move one of them past another either
  * (`Product.hasMatrixFactor()` in `arithmetic-mul-div.ts`, the product rule
  * of `simplify-rules.ts`): `p·q·p` is not `p^2·q`. An operand typed
- * `unknown` keeps its written order only beside such an operand, so that a
+ * inferable `unknown` keeps its written order only beside such an operand, so that a
  * product of calls of functions that were not declared (`f(x)·g(x)`) is
  * still sorted.
  */
@@ -99,7 +107,7 @@ export function typeMayHoldMatrix(x: Expression, depth = 0): boolean {
   )
     return x.ops.some((op) => typeMayHoldMatrix(op, depth + 1));
   const t = x.type.type;
-  if (t === 'unknown') return false;
+  if (t === 'unknown') return isFixedUnknownSymbol(x);
   if (!mayBeTensorProductOperand(x)) return false;
   return mayHoldNumericArray(t, 2, 0);
 }
@@ -120,13 +128,13 @@ export function isSquareMatrixTyped(x: Expression): boolean {
 
 /**
  * Is the value of `x` provably a number: a number literal, a symbol with no
- * declared type (a symbol used in a product is a number), or an operand
+ * declared type (an inferable symbol used in a product is a number), or an operand
  * whose type is a number type? A call typed `unknown` (`h(x)` of a function
  * that was not declared) and an operand typed `any` are not: they may be
  * matrices.
  */
 export function isProvablyScalar(x: Expression): boolean {
-  if (isSymbol(x) && x.type.type === 'unknown') return true;
+  if (isSymbol(x) && x.type.type === 'unknown') return !isFixedUnknownSymbol(x);
   return x.type.matches(new BoxedType('number'));
 }
 

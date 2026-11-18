@@ -880,11 +880,11 @@ const r = Map(negated(_) * 10, [1, 2, 3])`
     expect(e.box('r').evaluate().toString()).toBe('[-10,-20,-30]');
     // An undecided receiver still DEFERS — symbolic, not an error.
     const e2 = new ComputeEngine();
+    e2.declare('u', 'unknown');
     run(
       e2,
       `protocol Negatable { function negated(self: Self) -> Self }
 type number is Negatable { function negated(self) -> number { -self } }
-let u
 const s = negated(u) * 10`
     );
     expect(e2.box('s').evaluate().toString()).toBe('10negated(u)');

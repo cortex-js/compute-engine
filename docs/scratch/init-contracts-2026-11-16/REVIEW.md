@@ -58,3 +58,26 @@ Original unannotated observations are reported separately from explicit host-inp
 and annotation migrations. Snapshots were not rewritten.
 
 No review result substitutes for the combined validation or measurement results.
+
+## November 18 review on the current IR compiler
+
+Sol reviewed the updated candidate at fd7bad6e1. The public compiler declined the
+uninitialized-source and complex-point witnesses safely. The three loop values
+3, 4 and 14 came from interpreter fallback. Separate controls evaluated each
+lazy collection with a bare written parameter and an explicit list parameter.
+
+The first full run exposed a wrong interpreted SVD reconstruction. With mutable
+lengths erased, the three destructured factors had fixed unknown contracts.
+The product canonicalizer assumed they could commute. The change in
+matrix-operand.ts preserves their order and keeps ordinary free symbolic
+products sortable. An independent Sol delta review found no source defect.
+The original 87-test linear algebra suite passed, including all three matrix
+shapes, and the three additional controls passed. The public compile test executes
+the returned function and checks the four numerical cells on either execution path.
+
+Three additional suites required expectation or source migrations. Loop and
+destructuring type pins retain the same values 8, 6 and 4.5. Othello now
+requires integer locals for its compiled integer result. Its original unannotated
+program declines, and the annotated version retains both board parity controls.
+The symbolic tuple diagnostic uses a host-declared symbolic input. All 31 tests
+in those three suites passed.

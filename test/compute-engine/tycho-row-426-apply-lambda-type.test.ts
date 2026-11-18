@@ -656,11 +656,18 @@ describe('row 426 second review: a lazy collection over a reassigned parameter',
     ['Reverse', ['Reverse', 'a'], '[8,7]'],
   ] as [string, Json, string][]) {
     test(label, () => {
-      const literal = F(['Block', ['Assign', 'a', ['List', 7, 8]], last], 'a');
+      const body = ['Block', ['Assign', 'a', ['List', 7, 8]], last];
+      const unannotated = F(body, 'a');
+      const literal = F(body, typed('a', 'list<number>'));
       const ce = rowEngine();
       ce.declare('q', 'function');
       ce.assign('q', ce.box(literal));
       ce.assign('M', ce.box(['List', 1.5, -2, 0.25]));
+      // A written unannotated parameter is unknown and maps over the input.
+      // The annotation preserves whole-list binding for the lazy-view control.
+      expect(ce.box(['Apply', unannotated, 'M']).evaluate().toString()).toBe(
+        `[${expected},${expected},${expected}]`
+      );
       expect(ce.box(['Apply', literal, 'M']).evaluate().toString()).toBe(
         expected
       );

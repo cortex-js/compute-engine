@@ -62,7 +62,7 @@ describe('a declared parameter type is checked when a later value decides it', (
       'let h: (integer) -> integer\nfunction h(k) { 2*k }\nlet m\nlet r = g(h(m))\nm = 1.5\nr'
     );
     expect(diagnostics.map((d) => d.message[3])).toContain(
-      'declaration-without-value'
+      'read-before-initialization'
     );
   });
 

@@ -96,10 +96,7 @@ describe('EPSIL STATIC DECLARED-TYPE CHECK — unproven stays silent', () => {
 
   test('a declaration without an annotation is skipped', () => {
     expect(staticErrors('let z = 42\nz')).toHaveLength(0);
-    // A declaration without a value is an error of its own, not a type
-    // mismatch.
-    expect(staticErrors('let z: integer\n1')).toEqual([
-      '`z` is declared without a value: write `let z = …`',
-    ]);
+    // Reserving a typed slot without reading it is valid.
+    expect(staticErrors('let z: integer\n1')).toEqual([]);
   });
 });

@@ -1,0 +1,3815 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 46f04a305..248a961f4 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,12 @@
+ 
+ ### Breaking Changes
+ 
++- Program and Block variables keep the contract supplied by an annotation or
++  inferred during initialization. Mutable numeric values establish `number`,
++  mutable lists erase lengths, and empty list elements stay unknown. A later
++  store must satisfy the contract. A declaration without a value reserves a slot.
++  Reading it before initialization reports `read-before-initialization`.
++
+ - **`compile()` uses one compiler for JavaScript, GLSL and interval arithmetic,
+   and the compilation APIs of the previous compilers are removed.**
+   `compile(expr, { to })` with `to` set to `'javascript'` (the default),
+diff --git a/docs/ERROR-MODEL.md b/docs/ERROR-MODEL.md
+index 8ceea5919..9485ce1a3 100644
+--- a/docs/ERROR-MODEL.md
++++ b/docs/ERROR-MODEL.md
+@@ -317,25 +317,34 @@ dictionary construction, the omission by `ListFrom`, the `Map` bypass, the
+ covariance family); and the parse of an empty slot to `Nothing`. Those
+ passages are kept as history.
+ 
+-### Block locals: a declaration has a value; an assignment is a statement — user decision of 2026-11-02
+-
+-A local of a block always has a value when it is read. There is no error
+-value for a read of a local with no value, and no symbolic read of such a
+-local: each case below is a static error, put in place by the
+-canonicalization, so the expression is invalid, `epsil check` reports it
+-before the program runs, and a compilation declines it.
++### Block locals: initialization and statement assignments
++
++Program and Block declarations may reserve uninitialized slots (accepted
++2026-11-16). An explicit annotation fixes the contract; otherwise preparation
++uses an initializer or a unique later straight-line initialization before any use.
++It does not search branches, loops or calls. Reading an uninitialized slot gives
++`read-before-initialization` at runtime; there is no symbolic read of that slot.
++Compilation conservatively declines source declarations without an initializer,
++except signatures paired with their function definitions. Standalone `Declare`
++outside these sequences retains `declaration-without-value`.
++
++The other declaration-placement, name and assignment errors below remain static
++errors in the canonical form. A fixed contract uses the same store admission
++whether annotated or inferred: a refused store retains the previous admitted
++value and reports its error; a failed RHS does not overwrite a numeric slot.
+ 
+ | Code                                | Example                                              | Replacement                                         |
+ | ----------------------------------- | ---------------------------------------------------- | --------------------------------------------------- |
+-| `declaration-without-value`         | `Declare(x, "integer")` then `Assign(x, 5)`          | `Declare(x, "integer", 5)`                          |
++| `read-before-initialization`        | `Block(Declare(x, "integer"), x)`                   | initialize `x` before reading it                     |
+ | `declaration-below-statement`       | `Block(If(c, Declare(t, "unknown", 1)), t)`          | `Block(Declare(t, "unknown", 0), If(c, Assign(t, 1)), t)` |
+ | `assignment-to-undeclared-variable` | `Block(Assign(a, 1), a)`, `If(c, Assign(a, 1))`      | `Block(Declare(a, "unknown", 1), a)`                |
+ | `read-before-declaration`           | `Block(Declare(b, "unknown", k), Declare(k, "integer", 2))` | declare `k` before the first use             |
+ | `assignment-in-operand`             | `f(Assign(a, 2))`, `Assign(t, Assign(u, v))`         | `Block(Declare(a, "unknown", 2), f(a))`             |
+ | `assignment-type-mismatch`          | `Block(Declare(a, "unknown", 1), Assign(a, "x"), a)` | use another name                                    |
+ 
+-- A declaration is `Declare(x, type, v)`, or a `Declare` whose attributes
+-  dictionary has a `value` entry. The three-operand `Declare(x, "unknown",
++- A declaration is `Declare(x, type, v)`, a `Declare` whose attributes
++  dictionary has a `value` entry, or a declaration reserving a slot without a
++  value. The three-operand `Declare(x, "unknown",
+   v)` of the `where` clause and of the `;` parse is a declaration. Only a
+   `Declare` that is a statement of a block or a function body declares a
+   local. An `Assign` writes the variable that is in scope and never makes
+diff --git a/docs/TYPE-SYSTEM.md b/docs/TYPE-SYSTEM.md
+index b20193fe8..520c14288 100644
+--- a/docs/TYPE-SYSTEM.md
++++ b/docs/TYPE-SYSTEM.md
+@@ -1685,6 +1685,37 @@ scope, and a call head as a `function` (`p + q(2) + 1` declares `p: number`
+ and `q: function`). `ce.assume()` declares the names that it constrains, as
+ it is a host statement and not a boxing.
+ 
++## Initialization-defined Program and Block contracts
++
++Program and Block variables establish their contract during preparation. Explicit
++annotations fix it. Otherwise numeric initializers give `number`, callable
++initializers give `function`, mutable lists erase lengths and widen elements,
++and tuples retain arity with widened components. Constants can retain precision.
++An empty unannotated list retains unknown elements. Initialization is not executed
++to discover a type.
++
++An uninitialized declaration can use a unique later initialization in its same
++straight-line sequence, before any use, to establish the contract. Initialization
++inside branches, loops or called functions is not searched. An intervening runtime
++application, or one in the proposed later initializer, conservatively stops this
++inference: `let x; x=1+2` remains unknown, while `let x; x=1` establishes number.
++Use a declaration initializer or an annotation when more precision is needed.
++Without such evidence,
++`unknown` is final for that binding. The runtime slot remains uninitialized until
++its initialization executes, and reads still check that state.
++
++Assignments only validate against finalized contracts, including inferred ones;
++evaluation and `N()` cannot refine or widen them. Callable values keep their own
++argument checks and do not promote their variable into an operator. Per-use
++checker facts are separate from these contracts. These rules replace assignment
++convergence for sequence locals; they do not redesign the host's standalone
++inference APIs, recursive inference or namespace publication.
++
++An unannotated function parameter assigned in its body keeps an unknown contract;
++neither a use nor the assigned value fixes it. Explicit parameter annotations
++continue to supply contracts. This uses the existing written-binding record and
++does not add an assignment inference pass.
++
+ ## A static type does not depend on a value
+ 
+ The static type of a node is a function of the definitions, of their
+@@ -1701,7 +1732,8 @@ invalidates no cached type: the type version (`typeVersion`,
+   value moves the type version. A definition whose value an activation holds
+   (a parameter, a local of a block) has no value there either, also a
+   constant: `const h = (k) => k + 1` in a block holds a value of one run of
+-  the block, so `Map(h, [1, 2])` is typed `list<unknown^2>` inside the run
++  the block. Its prepared constant signature can still type `Map(h, [1, 2])`
++  as `vector<2>` inside the run
+   and after it.
+ - The type of a call whose free head resolves to such a definition, one
+   whose value an activation holds, is not derived from that value: the call
+diff --git a/src/compute-engine/boxed-expression/boxed-function.ts b/src/compute-engine/boxed-expression/boxed-function.ts
+index be3cf724e..548fe7163 100644
+--- a/src/compute-engine/boxed-expression/boxed-function.ts
++++ b/src/compute-engine/boxed-expression/boxed-function.ts
+@@ -66,6 +66,7 @@ import {
+   componentwiseTupleCallType,
+   inferredPointSignature,
+   partialApplicationType,
++  curriedSignature,
+   wildcardRecursiveSignature,
+ } from './call-result-type.js';
+ import {
+@@ -692,33 +693,6 @@ function mixOperandHash(h: number, operandHash: number): number {
+   return Math.imul(((h << 5) | (h >>> 27)) ^ operandHash, 0x9e3779b1) | 0;
+ }
+ 
+-/**
+- * The signature of a partial application: `sig` applied to the arguments
+- * `ops`, when they are fewer than its fixed parameters and the literal
+- * would be curried by `makeLambda` (function-utils.ts) — a plain signature
+- * with no optional parameter, no variadic tail and no type parameter.
+- * `undefined` when the call is saturated or is not curried, and when an
+- * argument is a `Spread` (`g(...args)`), whose element count is unknown
+- * until it is evaluated.
+- */
+-function curriedSignature(
+-  sig: Type,
+-  ops: ReadonlyArray<{ readonly operator: string }>
+-): Type | undefined {
+-  if (typeof sig === 'string' || sig.kind !== 'signature') return undefined;
+-  if (ops.some((x) => x.operator === 'Spread')) return undefined;
+-  const argCount = ops.length;
+-  if (
+-    sig.variadicArg !== undefined ||
+-    (sig.optArgs !== undefined && sig.optArgs.length > 0) ||
+-    (sig.typeParams !== undefined && sig.typeParams.length > 0)
+-  )
+-    return undefined;
+-  const args = sig.args ?? [];
+-  if (argCount >= args.length) return undefined;
+-  return { ...sig, args: args.slice(argCount) };
+-}
+-
+ /** Read {@link _effectsComputeCount} — for tests. @internal */
+ export function effectsComputeCount(): number {
+   return _effectsComputeCount;
+@@ -18466,6 +18440,11 @@ function applyFunctionLiteralWith(
+   evaluatedOps?: Expression[],
+   awaitBody = false
+ ): Expression | Promise<Expression> {
++  if (value === undefined && def._requiresInitialization && def.storedValue === undefined) {
++    const binding = callableBindingInContext(expr.engine, expr.operator, { value: def });
++    if (binding && isValueDef(binding) && binding.value === def)
++      return expr.engine.error(['read-before-initialization', expr.operator]);
++  }
+   if (value && !value.type.matches('function')) {
+     // A symbol that holds an error is applied as the error, as it is when it
+     // is the callback of `Map`. (CE-108.1)
+diff --git a/src/compute-engine/boxed-expression/boxed-symbol.ts b/src/compute-engine/boxed-expression/boxed-symbol.ts
+index 71616b2f7..f26358f7a 100644
+--- a/src/compute-engine/boxed-expression/boxed-symbol.ts
++++ b/src/compute-engine/boxed-expression/boxed-symbol.ts
+@@ -1281,6 +1281,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+     let entryEnv = this._env;
+     let fromCollector = 0;
+     if (isFunctionLiteralParameter(v)) {
++      if (v._fixedInitializationType) return v.type;
+       const record = this.engine._parameterRecord(v);
+       if (record !== undefined) {
+         entryEnv = record.env;
+@@ -1714,19 +1715,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+       // even if it is unknown (e.g. `ContinuationPlaceholder`)
+       if (def.value.isConstant) return false;
+ 
+-      // A valueless binding with assignment evidence (a block local that an
+-      // `Assign` or a `let` initializer gave a value type when it was
+-      // canonicalized) has the join of its assigned value types as its
+-      // static type. A use does not narrow that type: the meet with a
+-      // parameter type can exclude a value that an assignment gives, and it
+-      // made the type depend on the order of the statements
+-      // (`_assignmentEvidence`, `boxed-value-definition.ts`).
+-      if (
+-        inferenceMode === 'narrow' &&
+-        def.value._assignmentEvidence &&
+-        def.value.value === undefined
+-      )
+-        return false;
++      if (def.value._fixedInitializationType || isDeclaredLocal(def.value)) return false;
+ 
+       // A block local declared `any` keeps its declared type: a use does
+       // not narrow it (`isDeclaredLocal()`). Its assigned value can be any
+@@ -2776,6 +2765,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+     return explainExpression(this, operation, options);
+   }
+ 
++  private _uninitializedRead(): Expression | undefined {
++    const def = this.valueDefinition;
++    if (!def?._requiresInitialization) return undefined;
++    const binding = this._contextBinding();
++    if (!binding || !('value' in binding) || binding.value !== def ||
++        binding.value.storedValue !== undefined) return undefined;
++    return this.engine.error(['read-before-initialization', this._id]);
++  }
++
+   evaluate(options?: Partial<EvaluateOptions>): Expression {
+     // An operation runs in an operation environment of its own (rule 8 of
+     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+@@ -2795,6 +2793,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+ 
+     const def = this.valueDefinition;
+     if (!def) return this;
++    const uninitialized = this._uninitializedRead();
++    if (uninitialized) return uninitialized;
+     // Debug invariant (§3 of the binder-mechanism design): a resolution site,
+     // not the `valueDefinition` getter, which must stay a plain field read.
+     if (this.engine._debugBindings) this._assertLiveRead(def);
+@@ -2964,6 +2964,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+     if (canonical) return canonical.evaluateAsync(options);
+     const def = this.valueDefinition;
+     if (!def) return this;
++    const uninitialized = this._uninitializedRead();
++    if (uninitialized) return uninitialized;
+     if (this.engine._debugBindings) this._assertLiveRead(def);
+     const numeric = options?.numericApproximation === true;
+     if (
+@@ -3362,6 +3364,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+   }
+ 
+   private _N(): Expression {
++    const uninitialized = this._uninitializedRead();
++    if (uninitialized) return uninitialized;
+     const def = this.valueDefinition;
+     if (def && this.engine._debugBindings) this._assertLiveRead(def);
+     // Note: `holdUntil: 'never'` means "substitute as early as possible" —
+diff --git a/src/compute-engine/boxed-expression/boxed-value-definition.ts b/src/compute-engine/boxed-expression/boxed-value-definition.ts
+index 2338057a3..4a26c5374 100644
+--- a/src/compute-engine/boxed-expression/boxed-value-definition.ts
++++ b/src/compute-engine/boxed-expression/boxed-value-definition.ts
+@@ -1,4 +1,3 @@
+-import { widenValueTypes } from '../../common/type/widen-value.js';
+ import { inStaticTypingView } from '../static-typing-view.js';
+ import { activationRecordOf, isActivatedDefinition } from './ambient-chain.js';
+ import { valueIsHidden } from './hidden-values.js';
+@@ -327,18 +326,11 @@ export class _BoxedValueDefinition
+    * an inferred signature is the recorded one (`declaredType`). */
+   _signatureSkeleton: Type | undefined = undefined;
+ 
+-  /** True when an assignment to this binding recorded the type of its value
+-   * at canonicalization time (`joinAssignmentEvidence`, `library/core.ts`).
+-   * The static type of a valueless binding with this flag is the join of the
+-   * types of its assigned values only. A use of the binding (an argument at
+-   * a typed parameter) does not narrow it (`BoxedSymbol._inferWithoutFacts`,
+-   * `boxed-symbol.ts`), and the first assignment replaces a type that came
+-   * from uses only. The order of the uses and the assignments in a block
+-   * then does not change the static type. A narrowing by a use cannot be
+-   * part of that type: a meet with the uses is not sound, because it can
+-   * exclude a value that an assignment gives (`v = [1.5]` and a use at a
+-   * `list<integer>` parameter gave `vector<integer^1>`). */
+-  _assignmentEvidence: boolean = false;
++  /** A sequence initializer or annotation fixed this binding's static contract. */
++  _fixedInitializationType = false;
++
++  /** The source declaration reserves a slot without an initial value. */
++  _requiresInitialization = false;
+ 
+   /** Memo of the signature derived from `_signatureSkeleton`, keyed on the
+    * identities of the skeleton and of the stored value's type object.
+@@ -964,9 +956,9 @@ export class _BoxedValueDefinition
+       // matches the restored type.
+       _placeholderSkeleton: this._placeholderSkeleton,
+       _signatureSkeleton: this._signatureSkeleton,
+-      // The evidence flag decides how the next write joins the type, so it
+-      // is restored with the type.
+-      _assignmentEvidence: this._assignmentEvidence,
++      // Finalization is restored with the contract it protects.
++      _fixedInitializationType: this._fixedInitializationType,
++      _requiresInitialization: this._requiresInitialization,
+       // Effects annotation provenance rides in the tuple: the typed-`let`
+       // upgrade writes it alongside `type`/`inferredType`
+       // (`docs/EFFECTS-MODEL.md`, rollback
+@@ -1001,11 +993,13 @@ export class _BoxedValueDefinition
+       _isSelfReferential: boolean;
+       _placeholderSkeleton: Type | undefined;
+       _signatureSkeleton: Type | undefined;
+-      _assignmentEvidence: boolean;
++      _fixedInitializationType: boolean;
++      _requiresInitialization: boolean;
+       effectsDeclared: boolean;
+     };
+     this._type = s._type;
+-    this._assignmentEvidence = s._assignmentEvidence;
++    this._fixedInitializationType = s._fixedInitializationType;
++    this._requiresInitialization = s._requiresInitialization;
+     this._placeholderSkeleton = s._placeholderSkeleton;
+     this._signatureSkeleton = s._signatureSkeleton;
+     this._value = s._value;
+@@ -1065,7 +1059,8 @@ export class _BoxedValueDefinition
+       _programVariable: this._programVariable,
+       _placeholderSkeleton: this._placeholderSkeleton,
+       _signatureSkeleton: this._signatureSkeleton,
+-      _assignmentEvidence: this._assignmentEvidence,
++      _fixedInitializationType: this._fixedInitializationType,
++      _requiresInitialization: this._requiresInitialization,
+       // COPIED, not aliased: provenance is appended to in place, so a
+       // snapshot sharing the array would grow with the writes it exists to
+       // undo and restore the post-write history.
+@@ -1109,7 +1104,8 @@ export class _BoxedValueDefinition
+     this._programVariable = s._programVariable as boolean;
+     this._placeholderSkeleton = s._placeholderSkeleton as Type | undefined;
+     this._signatureSkeleton = s._signatureSkeleton as Type | undefined;
+-    this._assignmentEvidence = s._assignmentEvidence as boolean;
++    this._fixedInitializationType = s._fixedInitializationType as boolean;
++    this._requiresInitialization = s._requiresInitialization as boolean;
+     this._typeProvenance = s._typeProvenance as
+       TypeProvenanceEntry[] | undefined;
+     this.effectsDeclared = s.effectsDeclared as boolean;
+@@ -1140,6 +1136,7 @@ export class _BoxedValueDefinition
+    */
+   get declaredType(): BoxedType {
+     const t = this._type;
++    if (this._fixedInitializationType) return t ?? BoxedType.unknown;
+     // A static type does not depend on a value: a variable with no type is
+     // `unknown`, whatever it holds.
+     if (t === undefined || t === null)
+@@ -1249,6 +1246,7 @@ export class _BoxedValueDefinition
+    * @internal
+    */
+   _wildcardRecursiveSignature(): Type | undefined {
++    if (this._fixedInitializationType) return undefined;
+     const t = this._type;
+     if (t === undefined || t === null || !isWildcardFunctionType(t.type))
+       return undefined;
+@@ -1757,10 +1755,7 @@ export class _BoxedValueDefinition
+   }
+ 
+   private _writeType(t: Type | TypeString | BoxedType): void {
+-    if (
+-      this._isConstant &&
+-      !(this._programVariable && this.inferredType && this._value === undefined)
+-    )
++    if (this._isConstant && !(this._blockLocal && !this._fixedInitializationType && this._value === undefined))
+       throw new Error(
+         `The type of the constant "${this.name}" cannot be changed`
+       );
+@@ -2377,25 +2372,18 @@ function holdsFunctionLiteral(x0: Expression | null | undefined): boolean {
+  * set and a tuple the same way (a list loses its dimensions). Any other type
+  * is kept.
+  *
+- * With `tiers`, a numeric type widens to its tier instead
+- * (`widenAssignedType()`: `5` to `integer`, `0.5` to `real`), an element
+- * type loses only its literal cargo (`widenValueTypes()`: `complex` stays
+- * `complex`), and a character type is kept. That is the
+- * type of a `let` with no declared type (see `Declare`): `let c = [(1, 2)]`
+- * is a `list<tuple<integer, integer>>` of any length.
+  */
+ export function widenLocalType(
+   ce: ComputeEngine,
+-  t: Type,
+-  tiers: boolean | 'nested' = false
++  t: Type
+ ): Type {
+-  if (t === 'never') return t;
++  if (t === 'never') return 'unknown';
+   if (typeof t === 'object') {
+     if (t.kind === 'list') {
+       // A list with n dimensions (a matrix `matrix<integer^(2x2)>` has two)
+       // widens to n nested lists: `list<list<number>>`. The lengths are not
+       // kept, so a local can hold a longer list later.
+-      let widened: Type = widenLocalType(ce, t.elements, tiers && 'nested');
++      let widened: Type = widenLocalType(ce, t.elements);
+       const rank = Math.max(1, t.dimensions?.length ?? 1);
+       for (let i = 0; i < rank; i++)
+         widened = { kind: 'list', elements: widened };
+@@ -2404,29 +2392,48 @@ export function widenLocalType(
+     if (t.kind === 'set')
+       return {
+         kind: 'set',
+-        elements: widenLocalType(ce, t.elements, tiers && 'nested'),
++        elements: widenLocalType(ce, t.elements),
+       };
+     if (t.kind === 'tuple')
+       return {
+         kind: 'tuple',
+         elements: t.elements.map((e) => ({
+           ...e,
+-          type: widenLocalType(ce, e.type, tiers && 'nested'),
++          type: widenLocalType(ce, e.type),
+         })),
+       };
+-    if (t.kind === 'union') return t;
++    if (t.kind === 'union') return { ...t, types: t.types.map((x) => widenLocalType(ce, x)) };
++    if (t.kind === 'signature') return 'function';
+   }
+   const bt = ce.type(t);
+-  if (bt.matches('number')) {
+-    if (tiers === 'nested') return widenValueTypes(t);
+-    return tiers ? widenAssignedType(ce, t) : 'number';
+-  }
+-  // A character is a string of one character in a value, but the type
+-  // `character` is not a subtype of `string`: both widen to `string`, so
+-  // that `let prev = ""` then `prev = ch` is valid. A type of a local keeps
+-  // `character`: a `list<string>` does not hold the characters of a word.
+-  if (tiers && bt.matches('character')) return t;
++  if (bt.matches('number')) return 'number';
+   if (bt.matches('string') || bt.matches('character')) return 'string';
+   if (bt.matches('boolean')) return 'boolean';
+   return t;
+ }
++
++/** Establish a sequence local's contract from its initializer, without evaluating it. */
++export function initializeLocalContract(
++  ce: ComputeEngine,
++  name: string,
++  type: Type,
++  constant = false
++): void {
++  const binding = ce.context.lexicalScope.bindings.get(name);
++  if (!binding || !('value' in binding) || binding.value._blockLocal !== true)
++    return;
++  const target = binding.value;
++  if (target._fixedInitializationType) return;
++  const next = constant ? type : widenLocalType(ce, type);
++  const wasCallable = containsSignatureArm(target.type.type);
++  target._setType(() => ce.type(next));
++  target._fixedInitializationType = true;
++  // A precise constant arrow records inferred parameter requirements, not
++  // authored annotations; calls keep the existing inferred-call admission.
++  target.inferredType = constant && ce.type(next).matches('function');
++  ce._noteStateEvent({
++    kind: 'type-write',
++    callableBefore: wasCallable,
++    callableAfter: containsSignatureArm(next),
++  });
++}
+diff --git a/src/compute-engine/boxed-expression/call-result-type.ts b/src/compute-engine/boxed-expression/call-result-type.ts
+index 3a6b213ed..b254384b1 100644
+--- a/src/compute-engine/boxed-expression/call-result-type.ts
++++ b/src/compute-engine/boxed-expression/call-result-type.ts
+@@ -2598,3 +2598,30 @@ export function componentwiseTupleCallType(
+     elements: Array.from({ length: arity }, () => ({ type: 'number' })),
+   };
+ }
++
++/**
++ * The signature of a partial application: `sig` applied to the arguments
++ * `ops`, when they are fewer than its fixed parameters and the literal
++ * would be curried by `makeLambda` (function-utils.ts) — a plain signature
++ * with no optional parameter, no variadic tail and no type parameter.
++ * `undefined` when the call is saturated or is not curried, and when an
++ * argument is a `Spread` (`g(...args)`), whose element count is unknown
++ * until it is evaluated.
++ */
++export function curriedSignature(
++  sig: Type,
++  ops: ReadonlyArray<{ readonly operator: string }>
++): Type | undefined {
++  if (typeof sig === 'string' || sig.kind !== 'signature') return undefined;
++  if (ops.some((x) => x.operator === 'Spread')) return undefined;
++  const argCount = ops.length;
++  if (
++    sig.variadicArg !== undefined ||
++    (sig.optArgs !== undefined && sig.optArgs.length > 0) ||
++    (sig.typeParams !== undefined && sig.typeParams.length > 0)
++  )
++    return undefined;
++  const args = sig.args ?? [];
++  if (argCount >= args.length) return undefined;
++  return { ...sig, args: args.slice(argCount) };
++}
+diff --git a/src/compute-engine/boxed-expression/declared-local.ts b/src/compute-engine/boxed-expression/declared-local.ts
+index 04ce3009b..6fa1566c0 100644
+--- a/src/compute-engine/boxed-expression/declared-local.ts
++++ b/src/compute-engine/boxed-expression/declared-local.ts
+@@ -3,22 +3,7 @@ import {
+   registerDefinitionSideTable,
+ } from './definition-restore-point.js';
+ 
+-/**
+- * The block locals whose hoisted binding carries a DECLARED type
+- * (`Declare(v, "list<real>")`, `let v: list<real>`). The declared type is
+- * the contract:
+- * - a second read of an assignment's value type must not widen it:
+- *   `joinAssignmentEvidence` (`library/core.ts`) registers no evidence site
+- *   for them;
+- * - a use must not narrow a local declared `any`: `BoxedSymbol._infer()`
+- *   does not write a narrower type on it, and the generic solver reads it
+- *   as an operand typed `any`, not as a symbol whose type is still to be
+- *   inferred (`actualOfOperand()`, `generic-instantiation.ts`).
+- *
+- * The hoisted binding is marked `inferred` (the `Declare` evaluate handler
+- * upgrades it in place), so this set is what tells it from a local whose
+- * type the program does not state.
+- */
++/** Sequence locals whose types cannot be narrowed by a use. */
+ const DECLARED_LOCALS = new WeakSet<object>();
+ 
+ /** Record that the block-local binding `def` has a declared type. */
+@@ -75,57 +60,3 @@ export function markAssignedLocal(target: object): void {
+ export function isAssignedLocal(target: object): boolean {
+   return ASSIGNED_LOCALS.has(target);
+ }
+-
+-/** The bindings for which `isFirstValue()` was called. */
+-const FIRST_VALUE_SEEN = new WeakSet<object>();
+-/** The bindings whose first value had the type `unknown` when
+- * `isFirstValue()` was called for it. */
+-const UNKNOWN_FIRST_VALUES = new WeakSet<object>();
+-registerDefinitionSideTable(FIRST_VALUE_SEEN);
+-registerDefinitionSideTable(UNKNOWN_FIRST_VALUES);
+-/** The bindings that `markOpenLocal()` recorded. */
+-const OPEN_LOCALS = new WeakSet<object>();
+-
+-/**
+- * Whether this is the first call for the block local `target`. The first
+- * value that the canonicalization of a block records for a local is its
+- * declaration (`Declare(q, "unknown", t)` or a first `Assign(q, t)`).
+- * `valueIsUnknown` tells whether the type of that value is `unknown` now
+- * (`hasUnknownFirstValue()`).
+- */
+-export function isFirstValue(target: object, valueIsUnknown: boolean): boolean {
+-  if (FIRST_VALUE_SEEN.has(target)) return false;
+-  beforeDefinitionWrite(target);
+-  FIRST_VALUE_SEEN.add(target);
+-  if (valueIsUnknown) UNKNOWN_FIRST_VALUES.add(target);
+-  return true;
+-}
+-
+-/**
+- * Whether the first value of the block local `target` had the type
+- * `unknown` when it was canonicalized. A later assignment to such a local
+- * is not checked against the type of the local (`assignment-type-mismatch`):
+- * the local can hold a value of any type.
+- */
+-export function hasUnknownFirstValue(target: object): boolean {
+-  return UNKNOWN_FIRST_VALUES.has(target);
+-}
+-
+-/**
+- * Record that the first value of the block local `target` has the type
+- * `unknown` when the types of the block are settled. The local is then
+- * OPEN: its type is `unknown`, and a later assignment does not narrow it
+- * (`isOpenLocal()`). Without this, the join ignores the first value (a
+- * value of type `unknown` is no evidence) and the type of the local is the
+- * type of the later values only: after `q := t` and `q := [2, 3]` in a
+- * branch, `q` was typed `vector<integer^2>`, although it holds the scalar
+- * `t` when the branch does not run.
+- */
+-export function markOpenLocal(target: object): void {
+-  OPEN_LOCALS.add(target);
+-}
+-
+-/** Whether `markOpenLocal()` recorded the block local `target`. */
+-export function isOpenLocal(target: object): boolean {
+-  return OPEN_LOCALS.has(target);
+-}
+diff --git a/src/compute-engine/boxed-expression/matrix-operand.ts b/src/compute-engine/boxed-expression/matrix-operand.ts
+index 6479026f0..4fdb37dac 100644
+--- a/src/compute-engine/boxed-expression/matrix-operand.ts
++++ b/src/compute-engine/boxed-expression/matrix-operand.ts
+@@ -5,6 +5,12 @@ import { isSubtype } from '../../common/type/subtype.js';
+ import { resolveTypeAlias } from '../../common/type/utils.js';
+ import { isFunction, isSymbol } from './type-guards.js';
+ 
++/** An unknown source contract cannot acquire a scalar type from its use. */
++function isFixedUnknownSymbol(x: Expression): boolean {
++  return isSymbol(x) && x.type.type === 'unknown' &&
++    x.valueDefinition?._fixedInitializationType === true;
++}
++
+ /**
+  * Can this operand be a matrix, although its type does not say so? This is
+  * `true` when the type of the operand is not known to exclude a collection:
+@@ -17,7 +23,9 @@ import { isFunction, isSymbol } from './type-guards.js';
+  * A symbol of type `unknown` (a symbol with no declaration and no value) is
+  * `false`: a symbol used in a product is a number. `ce.box(['Multiply', 'A',
+  * 'x'])` infers the type `number` for `x`, but `ce.parse('A x')` leaves it
+- * `unknown`, and the two must give the same product. A symbol declared with
++ * `unknown`, and the two must give the same product. A fixed unknown source
++ * contract is different: it cannot be inferred scalar and may hold a matrix.
++ * A symbol declared with
+  * the type `any` is not inferred to be a number, so it is `true`.
+  *
+  * In a product with a matrix, such an operand must not move past a matrix
+@@ -38,7 +46,7 @@ import { isFunction, isSymbol } from './type-guards.js';
+ export function mayBeTensorProductOperand(x: Expression): boolean {
+   const facts = x.type.facts;
+   if (facts.collection === false || facts.tupleShaped) return false;
+-  return !(isSymbol(x) && x.type.type === 'unknown');
++  return !(isSymbol(x) && x.type.type === 'unknown') || isFixedUnknownSymbol(x);
+ }
+ 
+ /**
+@@ -81,7 +89,7 @@ export function mayBeMatrixPowerBase(x: Expression): boolean {
+  * a product does not move one of them past another either
+  * (`Product.hasMatrixFactor()` in `arithmetic-mul-div.ts`, the product rule
+  * of `simplify-rules.ts`): `p·q·p` is not `p^2·q`. An operand typed
+- * `unknown` keeps its written order only beside such an operand, so that a
++ * inferable `unknown` keeps its written order only beside such an operand, so that a
+  * product of calls of functions that were not declared (`f(x)·g(x)`) is
+  * still sorted.
+  */
+@@ -99,7 +107,7 @@ export function typeMayHoldMatrix(x: Expression, depth = 0): boolean {
+   )
+     return x.ops.some((op) => typeMayHoldMatrix(op, depth + 1));
+   const t = x.type.type;
+-  if (t === 'unknown') return false;
++  if (t === 'unknown') return isFixedUnknownSymbol(x);
+   if (!mayBeTensorProductOperand(x)) return false;
+   return mayHoldNumericArray(t, 2, 0);
+ }
+@@ -120,13 +128,13 @@ export function isSquareMatrixTyped(x: Expression): boolean {
+ 
+ /**
+  * Is the value of `x` provably a number: a number literal, a symbol with no
+- * declared type (a symbol used in a product is a number), or an operand
++ * declared type (an inferable symbol used in a product is a number), or an operand
+  * whose type is a number type? A call typed `unknown` (`h(x)` of a function
+  * that was not declared) and an operand typed `any` are not: they may be
+  * matrices.
+  */
+ export function isProvablyScalar(x: Expression): boolean {
+-  if (isSymbol(x) && x.type.type === 'unknown') return true;
++  if (isSymbol(x) && x.type.type === 'unknown') return !isFixedUnknownSymbol(x);
+   return x.type.matches(new BoxedType('number'));
+ }
+ 
+diff --git a/src/compute-engine/boxed-expression/proved-absent-domain.ts b/src/compute-engine/boxed-expression/proved-absent-domain.ts
+index d32ee4aba..ba989e951 100644
+--- a/src/compute-engine/boxed-expression/proved-absent-domain.ts
++++ b/src/compute-engine/boxed-expression/proved-absent-domain.ts
+@@ -38,3 +38,24 @@ export function provedAbsentDomainOf(x: Expression): Type | undefined {
+   if (x.type.type !== 'missing') return undefined;
+   return provedAbsentDomainHook(describe(x));
+ }
++
++/**
++ * The type that the assignment of `value` records on its target binding,
++ * or `undefined` when the type of `value` is `unknown`.
++ *
++ * An access PROVED to find nothing is typed `missing`, its absence marker
++ * alone (`provedAbsentDomainOf()`). An operator that propagates absence
++ * reads the domain of such an access to choose its marker: `At(M, 7) + 1`
++ * for a matrix `M` of two rows is the sum of a row and a number, and its
++ * value is `Missing`. A use of a local does not see the access, so the
++ * local records the domain beside the marker, `missing | vector<…>`, and
++ * `r + 1` after `r = At(M, 7)` is `Missing` too, not the `NaN` of an absent
++ * number.
++ */
++export function initializationType(value: Expression): Type | undefined {
++  if (value.type.isUnknown) return undefined;
++  const t = value.type.type;
++  if (t !== 'missing') return t;
++  const domain = provedAbsentDomainOf(value);
++  return domain === undefined ? t : { kind: 'union', types: [t, domain] };
++}
+diff --git a/src/compute-engine/engine-declarations.ts b/src/compute-engine/engine-declarations.ts
+index e1ebf34ba..531308127 100644
+--- a/src/compute-engine/engine-declarations.ts
++++ b/src/compute-engine/engine-declarations.ts
+@@ -3433,6 +3433,13 @@ function assignNamedValue(
+   }
+ 
+   const def = ce.lookupDefinition(id);
++  if (isValueDef(def) && def.value._fixedInitializationType &&
++      !hasFunctionSignature(def.value.type.type)) {
++    const value = ce.expr(arg2 as ExpressionInput).canonical;
++    if (assertAssignable(ce, id, value) === 'overlap') noteOverlapAdmitted(value);
++    ce._setSymbolValue(id, value);
++    return ce;
++  }
+ 
+   if (ctorLiteral !== undefined && ctorType !== undefined && !ctorType.alias) {
+     // Same eligibility as the type declaration's own namespace claim (D5): an
+@@ -3474,7 +3481,7 @@ function assignNamedValue(
+       // new literal refines. The type the definition reports is the
+       // skeleton refined from the PREVIOUS value, so refining from it would
+       // find no placeholder left, and a re-assignment could not re-refine.
+-      const skeleton = def.value._signatureSkeleton;
++      const skeleton = def.value._fixedInitializationType ? undefined : def.value._signatureSkeleton;
+       const declaredType0 =
+         skeleton !== undefined ? ce.type(skeleton) : def.value.type;
+       // The result the body has with the DECLARED parameter types, when the
+@@ -3491,11 +3498,8 @@ function assignNamedValue(
+         typedResult === undefined
+           ? t
+           : ce.type(withSignatureResult(t.type, typedResult));
+-      let declaredType = refineDeclaredType(
+-        ce,
+-        declaredType0,
+-        withTypedResult(literal.type)
+-      );
++      let declaredType = def.value._fixedInitializationType ? declaredType0
++        : refineDeclaredType(ce, declaredType0, withTypedResult(literal.type));
+ 
+       // A generic declaration DOES take a function-literal body (the
+       // generic-literals milestone, §2.4): the literal installs under the
+@@ -3548,7 +3552,8 @@ function assignNamedValue(
+       const reconciledType = withTypedResult(reconciled.type);
+       // Second refinement pass (see the comment above): adopt the
+       // post-ascription result for any slot still `unknown`.
+-      declaredType = refineDeclaredType(ce, declaredType, reconciledType);
++      if (!def.value._fixedInitializationType)
++        declaredType = refineDeclaredType(ce, declaredType, reconciledType);
+       // The effects axis is judged by its own provenance: a bare specifier is
+       // the INFERRED track (the body's effects are simply re-stamped on every
+       // assignment), a stated one is a contract.
+@@ -4482,6 +4487,7 @@ function deriveAndWriteAssignedType(
+   valueDef: BoxedValueDefinition,
+   value: Expression
+ ): void {
++  if (valueDef._fixedInitializationType) return;
+   // We have a value definition, update the inferred type...
+   //
+   // A symbol DECLARED `unknown` takes this path too, even though its type
+@@ -4844,7 +4850,9 @@ export function assertAssignable(
+   if (id === 'Nothing') return; // `assignFn` no-ops on it
+   const def = ce.lookupDefinition(id);
+   if (def === undefined || !isValueDef(def)) return;
+-  const v = assignValueAsValue(ce, value);
++  if (def.value.isConstant) throw new ConstantAssignmentError(id);
++  const v = def.value._fixedInitializationType && !hasFunctionSignature(def.value.type.type)
++    ? value : assignValueAsValue(ce, value);
+   if (v === undefined) return;
+   if (
+     !def.value.isConstant &&
+diff --git a/src/compute-engine/function-utils.ts b/src/compute-engine/function-utils.ts
+index 829d9ba85..0c1ab0bdb 100644
+--- a/src/compute-engine/function-utils.ts
++++ b/src/compute-engine/function-utils.ts
+@@ -83,7 +83,7 @@ import {
+   shareLazyViewRecord,
+   wasCanonicalizedIn,
+ } from './boxed-expression/lazy-view-context.js';
+-import { markLocalBinding } from './boxed-expression/declared-local.js';
++import { isAssignedLocal, markLocalBinding } from './boxed-expression/declared-local.js';
+ import {
+   functionLiteralBoundNames,
+   functionLiteralDeclaredSignature,
+@@ -1534,6 +1534,21 @@ export function canonicalFunctionLiteralArguments(
+   // (`_pushShadowedParameters()`).
+   console.assert(record !== undefined, 'A function literal has a record');
+   const closing = record!;
++  for (const param of params) {
++    if (functionLiteralParameterType(param) !== undefined) continue;
++    for (const name of functionLiteralParameterNames(param)) {
++      const binding = blockScope.bindings.get(name);
++      if (!binding || !('value' in binding) || !isAssignedLocal(binding.value)) continue;
++      const value = binding.value;
++      // A use describes the incoming argument, not every later value of a
++      // written parameter. Without assignment inference its contract is unknown.
++      value._setType(() => ce.type('unknown'));
++      value._fixedInitializationType = true;
++      value.inferredType = false;
++      closing.requirements.delete(value);
++      ce._noteStateEvent({ kind: 'inference', valueType: true, widening: true });
++    }
++  }
+   block = ce._withClosingLiteral(parameterDefs, closing, () =>
+     rebindParameters(block, params)
+   );
+@@ -1554,12 +1569,7 @@ export function canonicalFunctionLiteralArguments(
+     // again, which keeps its scope) is not written: the write would replace
+     // its `BoxedType` and move its `_writeVersion`, which the memos of the
+     // elements of a lazy collection read (`collection-element-memo.ts`).
+-    // A parameter with assignment evidence (`Assign(x, [1, 2])` in the
+-    // body, `joinAssignmentEvidence()` in `library/core.ts`) has the join of
+-    // its assigned value types as its type, and a use does not narrow it
+-    // (`BoxedSymbol._inferWithoutFacts()`): the record of the uses made
+-    // before the assignment is not written over it.
+-    if (value._assignmentEvidence && value.value === undefined) continue;
++    if (value._fixedInitializationType) continue;
+     const current = value.type;
+     if (
+       current.type === type.type ||
+diff --git a/src/compute-engine/library/assignment-evidence.ts b/src/compute-engine/library/assignment-evidence.ts
+deleted file mode 100644
+index 8c144ac78..000000000
+--- a/src/compute-engine/library/assignment-evidence.ts
++++ /dev/null
+@@ -1,362 +0,0 @@
+-/**
+- * The fixpoint of ASSIGNMENT EVIDENCE over one canonicalization of a block.
+- *
+- * `Assign` and an untyped `let` (`Declare` with an initial value) record the
+- * static type of their value on the target binding when they are
+- * canonicalized (`joinAssignmentEvidence`, `library/core.ts`). The value's
+- * type is read at that moment. When the value reads another local whose type
+- * is widened by an assignment canonicalized LATER — in a loop, the back edge
+- * carries that later assignment to the earlier read — the recorded type is
+- * too narrow:
+- *
+- * ```
+- * let circles = [(2, 0.5, 0, 1)]         // list<tuple<integer, real, …>>
+- * while … {
+- *   let e = circles[j]                   // recorded: tuple<integer, real, …>
+- *   …
+- *   circles = [...circles, (k, x, y, 1)] // k: number, widens circles
+- * }
+- * ```
+- *
+- * `e` stayed typed with real elements although the second turn of the loop
+- * reads a tuple with `number` elements. The compiled complex lane represents
+- * a `number` value as a `{re, im}` object and a `real` value as a JavaScript
+- * number, so `e[1] - k` added a number to an object and every comparison
+- * with `e[1]` was false (Tycho item 332, the gasket programs b and c, whose
+- * compiled run never ended because its de-duplication test never matched).
+- *
+- * So each evidence site registers a function that joins its value's CURRENT
+- * type again, and the outermost block canonicalization re-runs every site
+- * until no recorded type changes. Joins only widen, so the passes converge
+- * unless a type grows without bound (`xs = (xs, 1)` in a loop). After
+- * `evidencePassBudget(sites)` passes the joins continue with every compound
+- * type nested deeper than `EVIDENCE_TYPE_DEPTH` replaced by a wide type
+- * (`coarsenEvidenceType` says which kinds), which bounds the height of the
+- * types and so ends the growth. If that also does not converge, every
+- * binding the sites wrote is reset to `unknown`, which is wide and therefore
+- * sound for every consumer.
+- *
+- * The reset is GLOBAL, not limited to the sites that still changed on the
+- * last pass: a site that settled may have read its value type from a binding
+- * that an unsettled site writes, so its recorded type can be too narrow as
+- * well. Finding the sites that depend on an unsettled one would need the
+- * read dependencies between the sites, which are not recorded.
+- */
+-
+-import type { ListType, Type } from '../../common/type/types.js';
+-import { reduceType } from '../../common/type/reduce.js';
+-import { listElementType } from '../../common/type/subtype.js';
+-
+-/** A registered evidence site. `rejoin` joins the value's current type on
+- * the binding and returns `true` when the recorded type changed; with
+- * `coarse`, the joined type goes through `coarsenEvidenceType` first.
+- * `reset` sets the binding back to `unknown`. */
+-type EvidenceSite = {
+-  rejoin: (coarse: boolean) => boolean;
+-  reset: () => void;
+-};
+-
+-const EVIDENCE_TYPE_DEPTH = 4;
+-
+-/**
+- * `t` with every compound type nested more than `EVIDENCE_TYPE_DEPTH` levels
+- * deep replaced by a wide type. The kinds that count as a level are: `tuple`,
+- * `list`, `set`, `collection`, `indexed_collection` and `broadcastable`
+- * (their element types), `dictionary` and `record` (their value types), each
+- * replaced by `any` below the limit, and a function `signature` (its result
+- * type only), replaced by `function` below the limit. The argument types of
+- * a signature are not coarsened: replacing an argument type by a wider one
+- * makes the signature NARROWER (a function that accepts more is a subtype),
+- * so that would not be a widening. A polymorphic signature (with type
+- * parameters) is only replaced at the limit, since its result type can name
+- * its type parameters. The members of a union or an intersection are at the
+- * depth of the union. Other types are kept as they are.
+- */
+-export function coarsenEvidenceType(
+-  t: Type,
+-  depth: number = EVIDENCE_TYPE_DEPTH
+-): Type {
+-  if (typeof t === 'string') return t;
+-  if (t.kind === 'union' || t.kind === 'intersection')
+-    return { ...t, types: t.types.map((x) => coarsenEvidenceType(x, depth)) };
+-  switch (t.kind) {
+-    case 'tuple':
+-      if (depth <= 0) return 'any';
+-      return {
+-        ...t,
+-        elements: t.elements.map((e) => ({
+-          ...e,
+-          type: coarsenEvidenceType(e.type, depth - 1),
+-        })),
+-      };
+-    case 'list':
+-    case 'set':
+-    case 'collection':
+-    case 'indexed_collection':
+-    case 'broadcastable':
+-      if (depth <= 0) return 'any';
+-      return { ...t, elements: coarsenEvidenceType(t.elements, depth - 1) };
+-    case 'dictionary':
+-      if (depth <= 0) return 'any';
+-      return { ...t, values: coarsenEvidenceType(t.values, depth - 1) };
+-    case 'record':
+-      if (depth <= 0) return 'any';
+-      return {
+-        ...t,
+-        elements: Object.fromEntries(
+-          Object.entries(t.elements).map(([k, v]) => [
+-            k,
+-            coarsenEvidenceType(v, depth - 1),
+-          ])
+-        ),
+-      };
+-    case 'signature':
+-      if (depth <= 0) return 'function';
+-      if (t.typeParams !== undefined) return t;
+-      return { ...t, result: coarsenEvidenceType(t.result, depth - 1) };
+-    default:
+-      return t;
+-  }
+-}
+-
+-// The record of the block locals with a declared type lives with the
+-// expressions, because a use of such a local reads it too
+-// (`boxed-expression/declared-local.ts`).
+-export {
+-  markDeclaredLocal,
+-  isDeclaredLocal,
+-  isFirstValue,
+-  hasUnknownFirstValue,
+-  isOpenLocal,
+-  markOpenLocal,
+-} from '../boxed-expression/declared-local.js';
+-
+-type EvidenceSession = {
+-  depth: number;
+-  sites: EvidenceSite[];
+-  lost: WeakSet<object>;
+-};
+-
+-/**
+- * The number of passes over `sites` before the joins are coarsened (and
+- * again before the reset). A widening moves along a chain of sites one site
+- * per pass when each site reads the binding the previous one writes, in the
+- * opposite order of registration (a back edge), so a chain of `n` sites can
+- * need `n + 1` passes to settle without any unbounded growth. The budget is
+- * therefore `sites.length + 1`, at least 16, and at most 256 so that a very
+- * large program does not spend quadratic time before the coarsening.
+- */
+-function evidencePassBudget(sites: ReadonlyArray<EvidenceSite>): number {
+-  return Math.min(256, Math.max(16, sites.length + 1));
+-}
+-
+-const SESSIONS = new WeakMap<object, EvidenceSession>();
+-
+-/**
+- * Register an evidence site on the canonicalization in progress. Outside a
+- * block canonicalization (a lone `Assign` boxed at the top level) there is
+- * no later statement that could widen a read, and nothing is registered.
+- */
+-export function registerEvidenceSite(engine: object, site: EvidenceSite): void {
+-  const session = SESSIONS.get(engine);
+-  if (session !== undefined && session.depth > 0) session.sites.push(site);
+-}
+-
+-/** Whether a block canonicalization is in progress, so that an assignment
+- * canonicalized now records evidence that the block joins again at its end
+- * (`registerEvidenceSite`). */
+-export function isInEvidenceSession(engine: object): boolean {
+-  const session = SESSIONS.get(engine);
+-  return session !== undefined && session.depth > 0;
+-}
+-
+-/**
+- * Record, in the session in progress, that the value type of an evidence
+- * site targeting the binding `target` could no longer be read after an
+- * earlier read succeeded. The site then wrote `unknown` on the binding.
+- * A binding recorded `unknown` is read as "no evidence yet" by the join, so
+- * without this mark another site's join would replace that `unknown` with
+- * its own narrower type. `isEvidenceLost` lets the join skip the binding for
+- * the rest of the session. Outside a session nothing is recorded.
+- */
+-export function markEvidenceLost(engine: object, target: object): void {
+-  const session = SESSIONS.get(engine);
+-  if (session !== undefined && session.depth === 0) session.lost.add(target);
+-}
+-
+-/** Whether `markEvidenceLost` recorded `target` in the session in progress. */
+-export function isEvidenceLost(engine: object, target: object): boolean {
+-  return SESSIONS.get(engine)?.lost.has(target) ?? false;
+-}
+-
+-/**
+- * Run `fn` (the canonicalization of a block's statements) inside an evidence
+- * session. When the outermost session ends, re-run every registered site to
+- * a fixpoint.
+- */
+-export function withEvidenceSession<T>(engine: object, fn: () => T): T {
+-  let session = SESSIONS.get(engine);
+-  if (session === undefined) {
+-    session = { depth: 0, sites: [], lost: new WeakSet() };
+-    SESSIONS.set(engine, session);
+-  }
+-  session.depth += 1;
+-  let result: T;
+-  try {
+-    result = fn();
+-  } catch (e) {
+-    session.depth -= 1;
+-    if (session.depth === 0) {
+-      session.sites = [];
+-      session.lost = new WeakSet();
+-    }
+-    throw e;
+-  }
+-  session.depth -= 1;
+-  if (session.depth === 0) {
+-    const sites = session.sites;
+-    session.sites = [];
+-    if (sites.length > 0) {
+-      const run = (coarse: boolean): boolean => {
+-        let changed = true;
+-        let passes = 0;
+-        const budget = evidencePassBudget(sites);
+-        while (changed && passes < budget) {
+-          changed = false;
+-          for (const site of sites) if (site.rejoin(coarse)) changed = true;
+-          passes += 1;
+-        }
+-        return changed;
+-      };
+-      try {
+-        if (run(false) && run(true)) for (const site of sites) site.reset();
+-      } finally {
+-        session.lost = new WeakSet();
+-      }
+-    }
+-  }
+-  return result;
+-}
+-
+-/**
+- * The join of two evidence types, taken STRUCTURALLY: the lists among the
+- * members of the two types become one list whose element type is the join of
+- * their element types, and the tuples of one length (with the same names, or
+- * none) become one tuple whose slots are the joins of their slots. Every
+- * other member is kept, and the members are reduced as a union.
+- *
+- * The plain union of two list types whose elements are tuples of different
+- * component types reduced to the bare `list`, which says nothing about the
+- * elements. In a work-queue loop (`let gap = queue[i]`, `let p = gap[1]`,
+- * `queue = [...queue, (p, q, c, depth + 1)]`) the second pass of the
+- * fixpoint then read `gap` as `unknown`, every local derived from it lost
+- * its evidence, and the compiler refused the element reads of a program
+- * whose interpreter run is correct (Tycho item 332, program a).
+- *
+- * The result is a supertype of both inputs, so the join only widens. It is
+- * less precise than the union in one respect: it does not keep which slot
+- * types occur together.
+- */
+-export function joinEvidenceTypes(a: Type, b: Type): Type {
+-  const members: Type[] = [];
+-  const flatten = (t: Type): void => {
+-    if (typeof t === 'object' && t.kind === 'union') t.types.forEach(flatten);
+-    else members.push(t);
+-  };
+-  flatten(a);
+-  flatten(b);
+-
+-  let list: Type | undefined;
+-  const tuples = new Map<string, Type>();
+-  const rest: Type[] = [];
+-  for (const m of members) {
+-    if (typeof m === 'object' && m.kind === 'list') {
+-      if (list === undefined) list = m;
+-      else if (typeof list === 'object' && list.kind === 'list')
+-        list = joinListEvidence(list, m);
+-      continue;
+-    }
+-    if (typeof m === 'object' && m.kind === 'tuple') {
+-      // The length is part of the key: the names alone give the empty tuple
+-      // and a one-element unnamed tuple the same key.
+-      const key = JSON.stringify([
+-        m.elements.length,
+-        ...m.elements.map((e) => e.name ?? ''),
+-      ]);
+-      const seen = tuples.get(key);
+-      if (
+-        seen === undefined ||
+-        typeof seen !== 'object' ||
+-        seen.kind !== 'tuple'
+-      )
+-        tuples.set(key, m);
+-      else
+-        tuples.set(key, {
+-          kind: 'tuple',
+-          elements: seen.elements.map((e, i) => ({
+-            ...e,
+-            type: joinEvidenceTypes(e.type, m.elements[i].type),
+-          })),
+-        });
+-      continue;
+-    }
+-    rest.push(m);
+-  }
+-  const all: Type[] = [
+-    ...rest,
+-    ...(list !== undefined ? [list] : []),
+-    ...tuples.values(),
+-  ];
+-  if (all.length === 1) return all[0];
+-  return reduceType({ kind: 'union', types: all });
+-}
+-
+-/**
+- * The join of two list types, for `joinEvidenceTypes`.
+- *
+- * The `elements` of a list type with dimensions are its CELLS, not the
+- * values that one index returns (`listElementType()`, `subtype.ts`): the
+- * elements of `matrix<integer^(1x2)>` are `integer`, but its rows are
+- * `vector<integer^2>`. So the cells of the two types are joined only when
+- * the two types have the same rank. Each axis then keeps its length when
+- * the two lengths are equal, and is open (`-1`) otherwise:
+- * `vector<integer^2>` and `vector<real^3>` join to `vector<real>`. Two
+- * tensors of unknown rank join to a tensor of unknown rank of the joined
+- * cells: `tensor<integer>` and `tensor<real>` join to `tensor<real>`. In the
+- * other cases (different ranks, a plain list, one tensor of unknown rank) the
+- * result is a plain list of the join of the values that one index returns:
+- * `vector<integer^2>` and `matrix<integer^(1x2)>` join to
+- * `list<integer | vector<integer^2>>`. A plain list of the joined cells,
+- * `list<integer>`, is not a supertype of the matrix: a block local assigned
+- * `[1, 2]` and then `[[1, 2]]` was typed `list<integer>`, and a callback
+- * that `Map` applied to it was refused the row `[1, 2]`.
+- */
+-function joinListEvidence(a: ListType, b: ListType): ListType {
+-  const da = a.dimensions;
+-  const db = b.dimensions;
+-  if (Array.isArray(da) && Array.isArray(db) && da.length === db.length)
+-    return {
+-      kind: 'list',
+-      elements: joinEvidenceTypes(a.elements, b.elements),
+-      dimensions: da.map((d, i) => (d === db[i] ? d : -1)),
+-    };
+-  if (da === undefined && db === undefined)
+-    return {
+-      kind: 'list',
+-      elements: joinEvidenceTypes(a.elements, b.elements),
+-    };
+-  // Two tensors of unknown rank: the result is a tensor of unknown rank of
+-  // the joined cells. The general case below must not be used here: one
+-  // index of `tensor<U>` returns `U | tensor<U>`, so the join of these values
+-  // would join the two tensors again, with no end.
+-  if (da === null && db === null)
+-    return {
+-      kind: 'list',
+-      elements: joinEvidenceTypes(a.elements, b.elements),
+-      dimensions: null,
+-    };
+-  return {
+-    kind: 'list',
+-    elements: joinEvidenceTypes(listElementType(a), listElementType(b)),
+-  };
+-}
+diff --git a/src/compute-engine/library/control-structures.ts b/src/compute-engine/library/control-structures.ts
+index 08c9427a6..f964c9027 100644
+--- a/src/compute-engine/library/control-structures.ts
++++ b/src/compute-engine/library/control-structures.ts
+@@ -1,3 +1,4 @@
++import { initializationType } from '../boxed-expression/proved-absent-domain.js';
+ import { assertDeclarationName } from '../engine-declarations.js';
+ import { withEarlierConstantDeclarations } from '../boxed-expression/parameter-defaults.js';
+ import { scopeActivation } from '../boxed-expression/ambient-chain.js';
+@@ -177,10 +178,7 @@ import {
+   isStatementArm,
+ } from '../boxed-expression/conditional-value.js';
+ import { isValueDef } from '../boxed-expression/utils.js';
+-import {
+-  widenAssignedType,
+-  widenLocalType,
+-} from '../boxed-expression/boxed-value-definition.js';
++import { initializeLocalContract, widenAssignedType, widenLocalType } from '../boxed-expression/boxed-value-definition.js';
+ import {
+   elementMemoFillTo,
+   ELEMENT_MEMO_CAP,
+@@ -203,13 +201,7 @@ import {
+   bindIndexAuthoritatively,
+   substituteBinderValues,
+ } from './utils.js';
+-import {
+-  coarsenEvidenceType,
+-  isInEvidenceSession,
+-  markDeclaredLocal,
+-  registerEvidenceSite,
+-  withEvidenceSession,
+-} from './assignment-evidence.js';
++import { markDeclaredLocal } from '../boxed-expression/declared-local.js';
+ 
+ /**
+  * The supertype a restriction condition is checked against to be typed as a
+@@ -1322,17 +1314,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
+               return ce.error(['assignment-to-undeclared-variable', name]);
+           }
+         }
+-        // An assignment in a case body to a local of the enclosing block is
+-        // an assignment of that local, and the static type of the local
+-        // must admit its value. The case bodies stay raw, so canonicalize
+-        // each closure once now, in the scope of the block, only for the
+-        // assignment evidence that its `Assign` records
+-        // (`joinAssignmentEvidence`, `library/core.ts`). The closure is
+-        // discarded: the evaluation builds its own (`buildCaseClosure`).
+-        // Without this, `let xs = [1, 2, 3]; while let [h, ...] = xs
+-        // { xs = Rest(xs) }; xs` was typed `vector<integer^3>` and
+-        // evaluated to `[]`.
+-        if (isInEvidenceSession(ce)) {
++        // Case bodies remain raw for pattern matching. Check their writes
++        // against fixed local contracts in the capture scope.
++        {
+           for (const cc of getMatchPlan(ce, ops2).segments.flatMap(
+             (seg) => seg.cases
+           )) {
+@@ -4277,7 +4261,10 @@ export function staticDeclarations(
+             : isString(typeOp)
+               ? typeOp.string
+               : sym(typeOp);
+-        if (source !== undefined && source !== 'unknown') {
++        const attributesType = isDictionary(op.ops[1]) || isFunction(op.ops[1], 'Dictionary');
++        const authoredType = attributesType || valueOp === undefined ||
++          isDictionary(valueOp) || isFunction(valueOp, 'Dictionary');
++        if (source !== undefined && (source !== 'unknown' || authoredType)) {
+           try {
+             const parsed = parseType(source, ce._typeResolver);
+             // A type that names `missing` cannot be declared: the `Declare`
+@@ -4292,28 +4279,9 @@ export function staticDeclarations(
+             // error on the routes that run it.
+           }
+         } else if (valueOp !== undefined) {
+-          // No declared type, but an initial value that is a CLOSED literal
+-          // (a number, a string, or a `List`/`Tuple` of such, nested): its
+-          // type is static evidence of the same standing as a declared type,
+-          // so it rides on the hoisted binding too. Without it the binding
+-          // stays `unknown` until the `Declare` runs, and the FIRST use of
+-          // the local in the block — `Length(queue)` in a loop condition,
+-          // `ListJoin(xs, [4])` behind the spread `[...xs, 4]` — infers the
+-          // callee's loose parameter type (`collection`, `collection<any>`)
+-          // onto it; the later `Assign` can only WIDEN that, so `let xs = []`
+-          // grown by a spread read as a `collection<any>` on the compile
+-          // route, which never runs the `Declare`, and the JavaScript
+-          // target's array-shape gate refused `Length(xs)` (Tycho item 332,
+-          // programs b and c). With the value's type hoisted (`list<nothing>`
+-          // for `[]`), the use narrows to the list and the assignment widens
+-          // its element type (`list<integer>`), so the compiled shape is the
+-          // one the program builds. Only a closed literal is read: an
+-          // expression that mentions a symbol would have to be bound here,
+-          // in the enclosing scope, before the block's own locals exist.
+-          const literalType =
+-            program && isFunction(valueOp, 'Function')
+-              ? 'function'
+-              : closedLiteralType(ce, valueOp);
++          // Closed literals can be typed before lexical names are bound.
++          // Other initializers are typed once their declaration is reached.
++          const literalType = program && isFunction(valueOp, 'Function') ? 'function' : closedLiteralType(ce, valueOp);
+           if (literalType !== undefined)
+             declaredTypes.set(nameExpr.symbol, literalType);
+         }
+@@ -4699,13 +4667,8 @@ function canonicalSequence(
+     if (program && existing !== undefined)
+       previousBindings!.set(name, existing);
+     const knownType = declaredTypes.get(name);
+-    const persistentType =
+-      program &&
+-      knownType !== undefined &&
+-      !explicitlyDeclared.has(name) &&
+-      !declaredConstants.has(name)
+-        ? widenLocalType(ce, knownType)
+-        : knownType;
++    const persistentType = knownType !== undefined && !explicitlyDeclared.has(name) && !declaredConstants.has(name)
++      ? widenLocalType(ce, knownType) : knownType;
+     const hoisted = ce._declareSymbolValue(
+       name,
+       {
+@@ -4728,7 +4691,15 @@ function canonicalSequence(
+           hoisted as typeof hoisted & { _declaredByStatement?: boolean }
+         )._declaredByStatement = true;
+       markCallableHome(hoisted, scope);
+-      if (explicitlyDeclared.has(name)) markDeclaredLocal(hoisted.value);
++      const declaration = firstDeclarations.get(name);
++      const declared = declaration === undefined ? undefined : typedStatement(declaration);
++      hoisted.value._requiresInitialization = isFunction(declared, 'Declare') &&
++        !declareHasValue(declared.ops) && !functions.has(name);
++      markDeclaredLocal(hoisted.value);
++      if (explicitlyDeclared.has(name)) {
++        hoisted.value._fixedInitializationType = true;
++        hoisted.value.inferredType = false;
++      }
+     }
+   };
+   if (scope) {
+@@ -4765,22 +4736,47 @@ function canonicalSequence(
+       (name) => !UNBINDABLE_NAMES.has(name)
+     )
+   );
+-  if (program && scope !== undefined)
+-    for (const name of hoistedNames) {
+-      const binding = scope.bindings.get(name);
+-      if (binding !== undefined) ce._setShadowedParameterDef(name, binding);
++  if (program && scope !== undefined) for (const name of hoistedNames) {
++    const binding = scope.bindings.get(name);
++    if (binding !== undefined) ce._setShadowedParameterDef(name, binding);
++  }
++  const laterInitializers = new Map<Expression, string>();
++  const mentions = (expr: Expression, name: string): boolean =>
++    sym(expr) === name || (isFunction(expr) &&
++      (expr.operator === name || expr.ops.some((x) => mentions(x, name))));
++  // A runtime call may read or initialize the reserved slot through a
++  // capture. Deferred initialization never follows callees or callback values.
++  const mayCall = (expr: Expression): boolean => {
++    if (!isFunction(expr)) return false;
++    if (!resolvesToSystemBinding(ce, expr.operator)) return true;
++    if (expr.operator === 'Function') return false;
++    if (!['Declare', 'Assign', 'List', 'Tuple', 'Dictionary', 'KeyValuePair'].includes(expr.operator))
++      return true;
++    return expr.ops.some(mayCall);
++  };
++  for (let i = 0; i < source.length; i++) {
++    const declaration = typedStatement(source[i]);
++    if (refused.has(source[i]) || !isFunction(declaration, 'Declare') ||
++        declareHasValue(declaration.ops) || !isSymbol(declaration.op1)) continue;
++    const name = declaration.op1.symbol;
++    if (explicitlyDeclared.has(name) || functions.has(name)) continue;
++    for (const candidate of source.slice(i + 1)) {
++      const statement = typedStatement(candidate);
++      if (isFunction(statement, 'Assign') && sym(statement.op1) === name &&
++          !mentions(statement.op2, name) && !mayCall(statement.op2)) {
++        laterInitializers.set(candidate, name);
++        break;
++      }
++      if (mentions(statement, name) || mayCall(statement)) break;
+     }
++  }
++  const initializedLater = new Set(laterInitializers.values());
+   let statements: Expression[];
+   enterBody();
+   try {
+     // We canonicalize the statements in the local scope. A refused
+     // re-declaration stands as its error value.
+-    // The evidence session re-reads the value type of every assignment
+-    // canonicalized in this block (nested blocks included) once all of them
+-    // are canonicalized, so that a read in a loop body sees the widening a
+-    // later assignment of the same loop records (`withEvidenceSession`).
+-    statements = withEvidenceSession(ce, () =>
+-      ce._inScope(scope, () =>
++    statements = ce._inScope(scope, () =>
+         ops.map((op) => {
+           const refusal = refused.get(op);
+           if (refusal !== undefined && isFunction(refusal)) {
+@@ -4795,17 +4791,20 @@ function canonicalSequence(
+           // literal binds it), it is a variable, as in `x + N`.
+           // The repair runs here, once the scope of the block and its locals
+           // exist, so that a local `N` stays the local.
+-          const statement = early?.get(op) ?? canonicalizeStatement(op);
+-          if (
+-            program &&
+-            (isFunction(statement, 'Declare') ||
+-              isFunction(statement, 'Assign'))
+-          ) {
+-            const names = isFunction(statement.op1, 'Tuple')
+-              ? tuplePatternNames(statement.op1)
+-              : isSymbol(statement.op1)
+-                ? [statement.op1.symbol]
+-                : [];
++          const declaration = typedStatement(op);
++          if (isFunction(declaration, 'Declare') && !declareHasValue(declaration.ops) &&
++              isSymbol(declaration.op1) && !initializedLater.has(declaration.op1.symbol))
++            initializeLocalContract(ce, declaration.op1.symbol, 'unknown', declaredConstants.has(declaration.op1.symbol));
++          const initializes = laterInitializers.get(op);
++          let prepared = op;
++          if (initializes !== undefined && isFunction(op, 'Assign')) {
++            const value = op.op2.canonical;
++            initializeLocalContract(ce, initializes, value.isValid ? (initializationType(value) ?? 'unknown') : 'unknown');
++            prepared = ce._fn('Assign', [op.op1, value], { canonical: false, metadata: { sourceOffsets: op.sourceOffsets } });
++          }
++          const statement = early?.get(op) ?? canonicalizeStatement(prepared);
++          if (program && (isFunction(statement, 'Declare') || isFunction(statement, 'Assign'))) {
++            const names = isFunction(statement.op1, 'Tuple') ? tuplePatternNames(statement.op1) : isSymbol(statement.op1) ? [statement.op1.symbol] : [];
+             const writes = new Map<string, BoxedDefinition>();
+             for (const name of names) {
+               const binding = ce.lookupDefinition(name);
+@@ -4831,7 +4830,6 @@ function canonicalSequence(
+           completed?.set(op, result);
+           return result;
+         })
+-      )
+     );
+   } finally {
+     exitBody();
+@@ -4841,25 +4839,10 @@ function canonicalSequence(
+   if (scope !== undefined)
+     statements = withUseBeforeDeclarationErrors(ce, ops, statements, program);
+ 
+-  if (program) {
+-    for (const name of hoistedNames) {
+-      const binding = scope?.bindings.get(name);
+-      if (
+-        binding !== undefined &&
+-        isValueDef(binding) &&
+-        binding.value._programVariable
+-      ) {
+-        if (
+-          !explicitlyDeclared.has(name) &&
+-          !binding.value.isConstant &&
+-          !binding.value.type.matches('function')
+-        ) {
+-          const widened = widenLocalType(ce, binding.value.type.type);
+-          binding.value._setType(() => ce.type(widened));
+-        }
+-        binding.value.inferredType = false;
+-      }
+-    }
++  for (const name of hoistedNames) {
++    const binding = scope?.bindings.get(name);
++    if (binding !== undefined && isValueDef(binding) && !binding.value._fixedInitializationType)
++      ce._inScope(scope, () => initializeLocalContract(ce, name, 'unknown', declaredConstants.has(name)));
+   }
+   const result = ce._fn(head, statements, program ? undefined : { scope });
+   if (program) noteProgramSourceOrder(result, order);
+@@ -5924,67 +5907,6 @@ function canonicalLoopLike(
+         bindIndexAuthoritatively(ce, binding, type)
+       )
+     );
+-    // The collection's type is read NOW, but it may read a local that a later
+-    // statement of an enclosing loop widens: `for t in [p, q, r]` where `p`
+-    // later holds a tuple of `number` elements. The index then claimed the
+-    // narrower element type, and the compiled complex lane read a `{re, im}`
+-    // element as a JavaScript number. So the enclosing block reads the
+-    // element type again after all its statements are canonicalized, and
+-    // widens the index to it (`withEvidenceSession`,
+-    // `library/assignment-evidence.ts`). A pattern error found on that
+-    // second read is ignored: the loop is already built. But when a later
+-    // read gives no type for an index (or a leaf) that the first read typed
+-    // — the element type became `unknown` or `any`, or is no longer a tuple
+-    // of the pattern's arity — the first, narrower type may no longer hold
+-    // for what the loop visits, so that index is widened to `unknown` (the
+-    // same write as `reset`) and the site reports a change. After that the
+-    // site writes nothing more for the rest of the session: `unknown` is
+-    // already the widest type.
+-    const indexBindings: Expression[] = [];
+-    ce._withoutFacts(() =>
+-      bindFromElement(currentElementType(), (binding) =>
+-        indexBindings.push(binding)
+-      )
+-    );
+-    if (patternError === undefined && indexBindings.length > 0) {
+-      const lost = new Set<string>();
+-      registerEvidenceSite(ce, {
+-        rejoin: (coarse) => {
+-          let changed = false;
+-          const saved = patternError;
+-          const typed = new Set<string>();
+-          ce._withoutFacts(() =>
+-            bindFromElement(currentElementType(), (binding, type) => {
+-              const name = sym(binding);
+-              if (name === undefined || lost.has(name)) return;
+-              typed.add(name);
+-              const before = binding.type.type;
+-              if (isSubtype(type, before)) return;
+-              binding._infer(
+-                () => (coarse ? coarsenEvidenceType(type) : type),
+-                'widen'
+-              );
+-              if (binding.type.type !== before) changed = true;
+-            })
+-          );
+-          patternError = saved;
+-          for (const binding of indexBindings) {
+-            const name = sym(binding);
+-            if (name === undefined || typed.has(name) || lost.has(name))
+-              continue;
+-            lost.add(name);
+-            if (binding.type.isUnknown) continue;
+-            binding._infer(() => 'unknown', 'replace');
+-            changed = true;
+-          }
+-          return changed;
+-        },
+-        reset: () => {
+-          for (const binding of indexBindings)
+-            binding._infer(() => 'unknown', 'replace');
+-        },
+-      });
+-    }
+     // An optional GUARD, `Element(x, xs, cond)` — the three-operand indexing
+     // set `Sum` and `Product` also take. It is canonicalized here, after the
+     // index is declared, so its occurrences of the index bind to this loop's
+@@ -6280,15 +6202,8 @@ function* runLoop(
+  *
+  * The canonical `AddTo` keeps its operands and does not run the canonical
+  * handlers of `Add`, `At`, `ReplaceAt` or `Assign`. The equivalent assignment
+- * is canonicalized once, for two reasons:
++ * is canonicalized once to retain the checks of the long form:
+  *
+- * - The target receives the type information of its use: the inference that
+- *   the operator signatures write on the symbols, and the assignment evidence
+- *   that the canonical `Assign` records on the target
+- *   (`joinAssignmentEvidence()`, `library/core.ts`). Without it, an untyped
+- *   parameter `L` of `function step(L, n) { for k in 1..n { L[k] += 1 }; L }`
+- *   stayed `unknown`, and a call with a list argument was applied to each
+- *   element of the list.
+  * - The caller gets the static errors of the long form. When the result is
+  *   not valid, the canonical `AddTo` is that result, so `t += e` has the
+  *   errors of `t = t + e`: an assignment of an undeclared `t`
+diff --git a/src/compute-engine/library/core.ts b/src/compute-engine/library/core.ts
+index 72eca52c5..666a9ac69 100755
+--- a/src/compute-engine/library/core.ts
++++ b/src/compute-engine/library/core.ts
+@@ -1,6 +1,6 @@
++import { initializationType } from '../boxed-expression/proved-absent-domain.js';
+ import { noteOverlapAdmitted } from '../boxed-expression/store-admission.js';
+ import { installAnonymousCalleeDerivation } from '../boxed-expression/callee-type-derivation.js';
+-import { provedAbsentDomainOf } from '../boxed-expression/proved-absent-domain.js';
+ import { mayHoldRestriction } from '../boxed-expression/conditional-value.js';
+ import {
+   runOperandSteps,
+@@ -55,6 +55,8 @@ import { instantiatedResultTypeOverActuals } from '../boxed-expression/generic-i
+ import { actualOfDescriptor } from '../boxed-expression/derive-application-type.js';
+ import {
+   appliedLiteralResultType,
++  curriedSignature,
++  inferredArgumentMaps,
+   componentwiseTupleCallType,
+ } from '../boxed-expression/call-result-type.js';
+ import {
+@@ -108,7 +110,7 @@ import {
+   scopeActivationTemplate,
+ } from '../boxed-expression/ambient-chain.js';
+ import {
+-  isAssignedLocal,
++  isDeclaredLocal,
+   markAssignedLocal,
+   markLocalBinding,
+ } from '../boxed-expression/declared-local.js';
+@@ -130,18 +132,6 @@ import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
+ import { rangeCount } from '../numerics/range-count.js';
+ import { exactArithmeticRange } from './range-closed-form.js';
+ import { randomCount } from './random-utils.js';
+-import {
+-  coarsenEvidenceType,
+-  joinEvidenceTypes,
+-  isDeclaredLocal,
+-  isEvidenceLost,
+-  hasUnknownFirstValue,
+-  isFirstValue,
+-  isOpenLocal,
+-  markEvidenceLost,
+-  markOpenLocal,
+-  registerEvidenceSite,
+-} from './assignment-evidence.js';
+ import { isRingConstant } from './ring-constructions.js';
+ import { RING_CONSTANTS } from '../latex-syntax/utils.js';
+ import {
+@@ -419,7 +409,7 @@ import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
+ import { splitByPattern, replaceByPattern } from './regexp.js';
+ import {
+   inferTypeFromValue,
+-  widenAssignedType,
++  initializeLocalContract,
+   widenLocalType,
+ } from '../boxed-expression/boxed-value-definition.js';
+ import { reduceType } from '../../common/type/reduce.js';
+@@ -4156,120 +4146,6 @@ function readsVariable(ce: ComputeEngine, expr: Expression): boolean {
+   return expr.ops.some((op) => readsVariable(ce, op));
+ }
+ 
+-/**
+- * Record ASSIGNMENT EVIDENCE at canonicalization time: the binding `name`,
+- * when it is an inferred, valueless, non-constant one — the hoisted
+- * block-local `canonicalBlock` creates, or an auto-declared symbol — takes
+- * the JOIN of its recorded type and the widened type of the value assigned
+- * to it. `Assign` only writes its binding at evaluation time, so without this
+- * a block-local bound by assignment (`Block(Assign(d, [4,5,4]), Length(d))`)
+- * stays `unknown`-typed on every route that never evaluates — compilation in
+- * particular, whose operand type gates then fail closed on a local whose type
+- * is manifest in the program (Tycho item 235).
+- *
+- * The recorded type is the join over every `Assign` canonicalized against
+- * this binding (each pass widens through the same `widenAssignedType` table
+- * the evaluation-time assignment uses), so a read placed between two
+- * assignments of different kinds sees a type that admits both — reads resolve
+- * the binding lazily, so every read in the block observes the final joined
+- * type, including re-reads in a loop body after a reassignment. The binding
+- * stays `inferred` and valueless: evaluation still creates the runtime
+- * binding afresh and type-checks the assigned value there. Shared by the
+- * plain-symbol and the destructuring targets of the `Assign` canonical
+- * handler, the latter calling it once per pattern leaf, and by the `Declare`
+- * canonical handler for an untyped `let` with an initial value.
+- *
+- * `assignedType` returns the CURRENT static type of the assigned value, or
+- * `undefined` when the value is invalid or `unknown`-typed (nothing is
+- * recorded then). It is a function because the enclosing block reads it again
+- * after the whole block is canonicalized.
+- *
+- * With `currentScopeOnly`, the target is the binding of `name` in the
+- * CURRENT lexical scope, and nothing is recorded when that scope does not
+- * bind the name. A `let` uses it: at run time `Declare` creates (or
+- * upgrades) the binding in the current scope only, so a lookup through the
+- * scope chain could reach an OUTER binding of the same name (an
+- * auto-declared free symbol, a local of an enclosing block) that the `let`
+- * never writes, and record a type on it. An `Assign` writes the binding the
+- * name resolves to, and looks it up through the scope chain.
+- */
+-function joinAssignmentEvidence(
+-  ce: ComputeEngine,
+-  name: string,
+-  assignedType: () => Type | undefined,
+-  options?: { currentScopeOnly?: boolean }
+-): void {
+-  const def = options?.currentScopeOnly
+-    ? ce.context.lexicalScope.bindings.get(name)
+-    : ce.lookupDefinition(name);
+-  if (
+-    !def ||
+-    !isValueDef(def) ||
+-    !def.value.inferredType ||
+-    (def.value.isConstant &&
+-      !(options?.currentScopeOnly && def.value._programVariable)) ||
+-    def.value.value !== undefined
+-  )
+-    return;
+-  const target = def.value;
+-  // A block local whose first value has the type `unknown` keeps the type
+-  // `unknown`: no later value narrows it (`markOpenLocal()`).
+-  if (isOpenLocal(target)) return;
+-  const first = assignedType();
+-  const declaration =
+-    target._blockLocal === true && isFirstValue(target, first === undefined);
+-  if (first !== undefined) joinEvidenceOnBinding(ce, target, first);
+-  // The value's type is read NOW, but a read in the value of a local that a
+-  // later statement widens (through a loop's back edge) makes it too narrow.
+-  // The enclosing block canonicalization joins the value's type again after
+-  // every statement is canonicalized, until no recorded type changes (see
+-  // `withEvidenceSession`, `library/assignment-evidence.ts`). A block local
+-  // with a declared type is excluded: its declared type is the contract,
+-  // and a use of it (a call with a `list<real>` parameter) narrows it back
+-  // after the first join, which a second join must not undo.
+-  if (isDeclaredLocal(target)) return;
+-  // Whether a read of the value's type has succeeded. A value whose type
+-  // could not be read on the first read gave no information, and the site
+-  // records nothing until a read succeeds. A value whose type could be read
+-  // before but not now (its type became `unknown`, or a destructured leaf
+-  // is no longer found in the value's tuple type) has LOST information: the
+-  // type recorded from the earlier read may be too narrow for what the
+-  // value now holds, so the site writes `unknown` on the binding, which is
+-  // wide and therefore sound, and marks the binding so that no other site
+-  // narrows it again in this session (`markEvidenceLost`).
+-  let hasRead = first !== undefined;
+-  registerEvidenceSite(ce, {
+-    rejoin: (coarse) => {
+-      if (isEvidenceLost(ce, target)) return false;
+-      const t = assignedType();
+-      // The declaration of a block local whose value still has the type
+-      // `unknown` when every statement of the block is canonicalized makes
+-      // the local open (`markOpenLocal()`), when a later value gave it a
+-      // type: the local keeps the type `unknown`. The value is read here,
+-      // not when the declaration is canonicalized: a call of a function
+-      // whose result type is known only after the whole block is
+-      // canonicalized (a recursive function) has the type `unknown` then.
+-      if (t === undefined && declaration && target._assignmentEvidence) {
+-        markOpenLocal(target);
+-        markEvidenceLost(ce, target);
+-        if (target.type.isUnknown) return false;
+-        writeEvidenceType(ce, target, 'unknown');
+-        return true;
+-      }
+-      if (t === undefined) {
+-        if (!hasRead) return false;
+-        markEvidenceLost(ce, target);
+-        if (target.type.isUnknown) return false;
+-        writeEvidenceType(ce, target, 'unknown');
+-        return true;
+-      }
+-      hasRead = true;
+-      return joinEvidenceOnBinding(ce, target, t, coarse);
+-    },
+-    reset: () => writeEvidenceType(ce, target, 'unknown'),
+-  });
+-}
+-
+ /**
+  * Type the variable `name`, which a statement gives a function literal, as a
+  * function before the literal is canonicalized, declaring it when no scope
+@@ -4291,6 +4167,7 @@ function typeFunctionTarget(ce: ComputeEngine, name: string): void {
+     !def ||
+     !isValueDef(def) ||
+     !def.value.inferredType ||
++    def.value._fixedInitializationType ||
+     def.value.type.matches('function')
+   )
+     return;
+@@ -4396,21 +4273,14 @@ function rawDeclaredValue(
+  * the local: `["Error", ["ErrorCode", "assignment-type-mismatch", name,
+  * localType, valueType]]`. Otherwise `undefined`.
+  *
+- * The type of the local is its declared type (`Declare(x, "integer", 0)`),
+- * or else the type of the values assigned to it before this one, widened by
+- * `widenLocalType()`: after `s = 0`, the value `s + 0.5` is accepted and the
+- * value `"x"` is refused. A local with no value type yet (its first
+- * assignment) is not checked, and neither is a local whose first value has
+- * the type `unknown` (`hasUnknownFirstValue()`): it can hold any value.
++ * A sequence local has the contract supplied by its annotation or
++ * initializer. Unknown locals accept writes without acquiring their types.
+  *
+  * The test is permissive where the type of the value is not settled: a
+  * value whose type is `unknown`, `any`, or holds one of them (a free
+  * symbol), and a value that is absent or has no value (`never`, `nothing`,
+  * `missing`, `error`), is accepted. A union is accepted when one of its
+- * members is accepted. For a local with no declared type, a value type that
+- * is narrower than the type of the local in the other direction (the empty
+- * list `list<never>` of `let xs = []`, then `xs = [1]`) is accepted too, and
+- * the type of the local is the join of its values.
++ * members is accepted.
+  */
+ function localAssignmentMismatch(
+   ce: ComputeEngine,
+@@ -4426,11 +4296,10 @@ function localAssignmentMismatch(
+   if (local.type.isUnknown || valueType.isUnknown) return undefined;
+   // A declared type is the contract: a first value of type `unknown` does
+   // not turn off the check of a local with a declared type.
+-  if (!isDeclaredLocal(local) && hasUnknownFirstValue(local)) return undefined;
+   const open = (t: BoxedType): boolean =>
+     /\b(any|unknown|never|nothing|missing|error)\b/.test(t.toString());
+   if (open(valueType) || open(local.type)) return undefined;
+-  const declared = isDeclaredLocal(local);
++  const declared = isDeclaredLocal(local) || local._fixedInitializationType === true;
+   const target = declared
+     ? local.type.type
+     : widenLocalType(ce, local.type.type);
+@@ -4506,94 +4375,6 @@ function patternAssignmentMismatch(
+   return undefined;
+ }
+ 
+-/**
+- * The type that the assignment of `value` records on its target binding,
+- * or `undefined` when the type of `value` is `unknown`.
+- *
+- * An access PROVED to find nothing is typed `missing`, its absence marker
+- * alone (`provedAbsentDomainOf()`). An operator that propagates absence
+- * reads the domain of such an access to choose its marker: `At(M, 7) + 1`
+- * for a matrix `M` of two rows is the sum of a row and a number, and its
+- * value is `Missing`. A use of a local does not see the access, so the
+- * local records the domain beside the marker, `missing | vector<…>`, and
+- * `r + 1` after `r = At(M, 7)` is `Missing` too, not the `NaN` of an absent
+- * number.
+- */
+-function assignedEvidenceType(value: Expression): Type | undefined {
+-  if (value.type.isUnknown) return undefined;
+-  const t = value.type.type;
+-  if (t !== 'missing') return t;
+-  const domain = provedAbsentDomainOf(value);
+-  return domain === undefined ? t : { kind: 'union', types: [t, domain] };
+-}
+-
+-/** Join `assignedType` (widened) with the recorded type of the binding
+- * `target`. Return `true` when the recorded type changed. With `coarse`, the
+- * join is bounded in height by `coarsenEvidenceType`. */
+-function joinEvidenceOnBinding(
+-  ce: ComputeEngine,
+-  target: BoxedValueDefinition,
+-  assignedType: Type,
+-  coarse = false
+-): boolean {
+-  // A binding whose evidence was lost in this session stays `unknown`.
+-  if (isEvidenceLost(ce, target)) return false;
+-  // A value typed `never` claims no value, so it is no evidence. `never` is
+-  // the bottom type and matches every type, so the widening table below read
+-  // it as an integer, and the binding gained an `integer` member that no
+-  // assignment gives it: with `circles` a list of points, a first read of
+-  // `circles = g(gap[1], 2, circles)` inside a `for` loop, taken before the
+-  // types of the loop settled, typed the call `never`, `circles` became
+-  // `integer | list<…>`, and the JavaScript target declined `Length(circles)`.
+-  if (assignedType === 'never') return false;
+-  const widened = widenAssignedType(ce, assignedType);
+-  const recorded = target.type;
+-  // The type of a binding with no assignment evidence yet came from uses
+-  // only (an argument at a typed parameter narrowed it). A use is a
+-  // requirement on the value, not a value, so the first assignment replaces
+-  // that type instead of joining with it. Otherwise the static type depends
+-  // on the order of the statements: `mutate(v); v = [1.5, 2]` gave
+-  // `list<real>` and `v = [1.5, 2]; mutate(v)` gave `vector<real^2>`.
+-  // A block local with a declared type (`isDeclaredLocal()`) is excluded:
+-  // its type came from the declaration, which is the contract, not from a
+-  // use, so an assignment joins with it. With `xs: any`, `xs = "abc"` keeps
+-  // `xs` typed `any`.
+-  const fromUsesOnly = !target._assignmentEvidence && !isDeclaredLocal(target);
+-  const joined =
+-    recorded.isUnknown || fromUsesOnly
+-      ? widened
+-      : joinEvidenceTypes(recorded.type, widened);
+-  if (joined === undefined) return false;
+-  const next = coarse ? coarsenEvidenceType(joined) : joined;
+-  if (!fromUsesOnly && !recorded.isUnknown && isSubtype(next, recorded.type))
+-    return false;
+-  writeEvidenceType(ce, target, next);
+-  return true;
+-}
+-
+-/** Write the type `next` on the binding `target`. */
+-function writeEvidenceType(
+-  ce: ComputeEngine,
+-  target: BoxedValueDefinition,
+-  next: Type
+-): void {
+-  const wasCallable = containsSignatureArm(target.type.type);
+-  target._setType(() => ce.type(next));
+-  // From now on, the type of the binding is the join of its assignment
+-  // evidence, and a use does not narrow it (`_assignmentEvidence`).
+-  target._assignmentEvidence = true;
+-  // The `_type` expression caches key on the engine's `any` axis, which a
+-  // `_setType()` write does not advance: without the event, an
+-  // expression typed before this join — a lambda body canonicalized earlier
+-  // in the same block — keeps its stale narrower type for the rest of the
+-  // generation.
+-  ce._noteStateEvent({
+-    kind: 'type-write',
+-    callableBefore: wasCallable,
+-    callableAfter: containsSignatureArm(target.type.type),
+-  });
+-}
+-
+ /**
+  * The static type of each leaf of the destructuring pattern `pattern` (a
+  * `Tuple` of names, `_` and nested patterns), read from the matching
+@@ -4672,40 +4453,6 @@ function tuplePatternLeafTypes(
+   return leaves;
+ }
+ 
+-/**
+- * Record assignment evidence on each leaf of the destructuring pattern
+- * `pattern` from the value type `valueType()` (`tuplePatternLeafTypes`),
+- * one evidence site per leaf. Nothing is recorded when the first read of
+- * the value type does not fit the pattern. Each site reads the value type
+- * again when the enclosing block re-runs the sites, so a leaf that is no
+- * longer found in a later read loses its evidence (`joinAssignmentEvidence`).
+- * `options` is passed to `joinAssignmentEvidence` for each leaf. With
+- * `leafType`, the evidence of each leaf is `leafType(name, type)` of the
+- * type that the value type gives that leaf.
+- */
+-function recordPatternEvidence(
+-  ce: ComputeEngine,
+-  pattern: Expression,
+-  valueType: () => Type,
+-  options?: { currentScopeOnly?: boolean },
+-  leafType?: (name: string, type: Type) => Type
+-): void {
+-  const first = tuplePatternLeafTypes(pattern, valueType());
+-  if (first === undefined) return;
+-  for (const name of first.keys())
+-    joinAssignmentEvidence(
+-      ce,
+-      name,
+-      () => {
+-        const t = tuplePatternLeafTypes(pattern, valueType())?.get(name);
+-        return t === undefined || leafType === undefined
+-          ? t
+-          : leafType(name, t);
+-      },
+-      options
+-    );
+-}
+-
+ /**
+  * Bind a destructuring `Tuple` pattern, invoking `bindOne` at every named
+  * position. Shared by the two destructuring routes: the `let (x, y) = v`
+@@ -5701,6 +5448,20 @@ function anonymousApplicationType(
+ ): Type {
+   const { engine } = context;
+   const t = fn.type;
++  const curried = curriedSignature(t, args.map((arg) => {
++    const structure = arg.structureOf?.();
++    return { operator: structure?.kind === 'application' ? structure.head : '' };
++  }));
++  if (curried !== undefined) {
++    if (args.some((arg) => arg.type === 'error')) return 'error';
++    // Partial application can map to residual functions. Keep no single
++    // callable claim when the existing mapping rules do not settle that.
++    const slots = typeof t === 'object' && t.kind === 'signature' ? t.args : undefined;
++    if (applyLiteralMapType(fn, args, context) !== undefined ||
++        args.some((arg, i) => inferredArgumentMaps(slots?.[i]?.type, arg.type) === undefined))
++      return 'unknown';
++    return curried;
++  }
+   // A function literal with scalar parameters maps over a collection
+   // argument (`applyLiteralMaps`): the call is typed as the mapped
+   // collection (`applyLiteralMapType`).
+@@ -8217,9 +7978,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
+         // The local that the assignment writes is an assigned local: a `let`
+         // of it takes the widened type of its value (see `Declare`).
+         for (const name of targets) {
++          // A write can be the parameter's first reference. Resolve its
++          // binding before recording the write, as a read of the name does.
++          const parameter = ce._isFunctionLiteralParameter(name)
++            ? ce.symbol(name).valueDefinition : undefined;
+           const def = ce.lookupDefinition(name);
+-          if (def !== undefined && isValueDef(def))
+-            markAssignedLocal(def.value);
++          const target = parameter ?? (def !== undefined && isValueDef(def) ? def.value : undefined);
++          if (target !== undefined) markAssignedLocal(target);
+         }
+         // A function value is checked against the type of the local BEFORE
+         // the retype below writes the type `function` on the local:
+@@ -8336,33 +8101,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
+           if (mismatch !== undefined) return mismatch;
+         }
+ 
+-        // A DATA-valued RHS records assignment evidence on the target's
+-        // binding at canonicalization time (`joinAssignmentEvidence`, which
+-        // owns the join rule), mirroring the `Function`-valued branch above.
+-        if (
+-          symbolName !== undefined &&
+-          !isFunction(canonRhs, 'Function') &&
+-          canonRhs.isValid
+-        )
+-          joinAssignmentEvidence(ce, symbolName, () =>
+-            assignedEvidenceType(canonRhs)
+-          );
+-        // A destructuring target `(x, y) := v` records the same evidence on
+-        // each pattern leaf, from the matching position of the RHS's static
+-        // tuple type: `(xs, n) := ([1, 2, 3], 2)` types `xs` a list and `n` an
+-        // integer, so `Length(xs)` later in the block compiles. Nested
+-        // patterns descend into nested tuple types; a `_` position binds
+-        // nothing. The evaluation-time write is atomic — a shape mismatch
+-        // anywhere in the pattern writes no leaf at all (`bindTuplePattern`)
+-        // — and so is the evidence: the pairs are collected over the whole
+-        // pattern first, and an RHS type that is not a tuple of the pattern's
+-        // arity at any level (a symbol of unknown type, an arity mismatch the
+-        // evaluation will report) records nothing, leaving every leaf
+-        // `unknown`. A union RHS type is read arm by arm
+-        // (`tuplePatternLeafTypes`).
+-        if (isFunction(symbol, 'Tuple') && canonRhs.isValid)
+-          recordPatternEvidence(ce, symbol, () => canonRhs.type.type);
+-
+         const result = ce._fn('Assign', [symbol, canonRhs]);
+ 
+         return result;
+@@ -8451,34 +8189,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
+               : sym(symbolExpr)) ?? 'Nothing',
+           ]);
+ 
+-        // A declaration has a value: `Declare(x)` and `Declare(x, "integer")`
+-        // are static errors, as is a `let x: integer` with no value. The
+-        // name is declared with its value in one statement,
+-        // `Declare(x, "integer", 5)`, so that a read of it never finds a
+-        // local with no value.
+-        //
+-        // One exception: a `Declare` of a function type without a value is
+-        // the signature of a function that a function definition statement
+-        // of the same name in the same statement list defines
+-        // (`let f: (integer) -> integer; function f(x) { x + 1 }`). The
+-        // definition gives the name its value from the start of the list.
+-        // A function type with no such definition is an error whose third
+-        // operand `"function"` asks for the definition.
++        // Sequence declarations reserve a slot; execution initializes it only
++        // when its initializer or a later assignment runs.
+         const pairedNames = takePairedFunctionNames();
+-        if (!declareHasValue(args)) {
+-          const isFunctionSignature =
+-            isSymbol(symbolExpr) && declaresFunctionType(ce, args[1]);
+-          if (
+-            !isFunctionSignature ||
+-            pairedNames?.has(sym(symbolExpr) ?? '') !== true
+-          )
+-            return ce.error(
+-              isSymbol(symbolExpr)
+-                ? isFunctionSignature
+-                  ? ['declaration-without-value', symbolExpr.symbol, 'function']
+-                  : ['declaration-without-value', symbolExpr.symbol]
+-                : ['declaration-without-value']
+-            );
++        const local = isSymbol(symbolExpr)
++          ? ce.context.lexicalScope.bindings.get(symbolExpr.symbol)
++          : undefined;
++        if (!declareHasValue(args) && !(local && isValueDef(local) && local.value._blockLocal)) {
++          const signature = isSymbol(symbolExpr) && declaresFunctionType(ce, args[1]);
++          if (!signature || !pairedNames?.has(sym(symbolExpr) ?? ''))
++            return ce.error(['declaration-without-value', sym(symbolExpr) ?? 'Nothing']);
+         }
+ 
+         // A local declared with a function literal and no type is typed as
+@@ -8489,106 +8209,23 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
+         )
+           typeFunctionTarget(ce, symbolExpr.symbol);
+ 
+-        // A `let` with an initial value and no declared type is an
+-        // assignment for typing purposes: the initializer's static type is
+-        // recorded on the hoisted binding as assignment evidence
+-        // (`joinAssignmentEvidence`, the rule `Assign` uses), so a later read
+-        // of the local in the block — and the compile route, which never
+-        // runs the `Declare` — sees the type the program gives it. Without
+-        // this only a closed literal initializer typed the local (through
+-        // the `Block` hoist), and `let cands = fourth(a, b)` or
+-        // `let gap = queue[i]` stayed `unknown`, so `filter(cands, …)` and
+-        // `gap[1]` failed the compiler's shape gates although the callee's
+-        // declared result type and the list's element type were known (Tycho
+-        // item 332, program a). A declared type is the contract and takes no
+-        // evidence; a `Function` value goes through the function-definition
+-        // route; an invalid or unknown-typed value records nothing. A
+-        // destructuring `let (a, b) = v` records evidence on each leaf, as
+-        // `(a, b) := v` does (`recordPatternEvidence`). The target of each
+-        // write is the binding in the CURRENT scope only, the one the `let`
+-        // creates at run time (see `joinAssignmentEvidence`).
+-        //
+-        // A local of a `let` that an `Assign` of the block writes, at any
+-        // depth (`isAssignedLocal()`), has the widened type of its value
+-        // (`widenLocalType()` with tiers): no literal type, no length, so a
+-        // later value of the same kind is admitted (`let c = [(1, 2)]` is a
+-        // list of pairs of any length). A local that is never assigned, and
+-        // a `const`, keep the type of the value (`let v = [1, 2]` is a
+-        // `vector<integer^2>`). The type is read again when every statement
+-        // of the block is canonicalized (`withEvidenceSession`), after the
+-        // assignments that follow the declaration.
+-        const recordInitializerEvidence = (
++        const recordInitializerContract = (
+           typeOp: Expression | undefined,
+           value: Expression | undefined,
+           constant = false
+         ): void => {
+-          // A type operand `"unknown"` declares no type (the parse of an
+-          // untyped `let k = v`), so it is read as no type operand.
+-          const declaresType =
+-            typeOp !== undefined &&
++          const declaresType = typeOp !== undefined &&
+             !(isString(typeOp) && typeOp.string === 'unknown') &&
+             !isSymbol(typeOp, 'unknown');
+-          // The value of a declaration with a type is the first value of
+-          // the local. Record it, so that a later assignment of a value of
+-          // type `unknown` is not taken as the first value, which would turn
+-          // off the type check of every later assignment
+-          // (`localAssignmentMismatch()`).
+-          if (declaresType && value !== undefined && isSymbol(symbolExpr)) {
+-            const def = ce.context.lexicalScope.bindings.get(symbolExpr.symbol);
+-            if (def && isValueDef(def)) isFirstValue(def.value, false);
+-          }
+           if (declaresType || value === undefined) return;
+-          if (
+-            isSymbol(symbolExpr) &&
+-            ((isFunction(value, 'Function') && value.isValid) ||
+-              value.type.matches('function'))
+-          ) {
+-            typeFunctionTarget(ce, symbolExpr.symbol);
+-            return;
+-          }
+-          if (!value.isValid) return;
+-          if (isFunction(value, 'Function')) return;
+-          // The bindings of the declared names, read now: the type is read
+-          // again later, outside the scope of the block. Each local is
+-          // widened only when that local is assigned.
+-          const locals = new Map(
+-            (isFunction(symbolExpr, 'Tuple')
+-              ? tuplePatternNames(symbolExpr)
+-              : isSymbol(symbolExpr)
+-                ? [symbolExpr.symbol]
+-                : []
+-            ).map((name) => [name, ce.context.lexicalScope.bindings.get(name)])
+-          );
+-          const widened = (name: string, t: Type): Type => {
+-            const def = locals.get(name);
+-            return !constant &&
+-              def !== undefined &&
+-              isValueDef(def) &&
+-              isAssignedLocal(def.value)
+-              ? widenLocalType(ce, t, true)
+-              : t;
+-          };
+-          if (isFunction(symbolExpr, 'Tuple')) {
+-            recordPatternEvidence(
+-              ce,
+-              symbolExpr,
+-              () => value.type.type,
+-              { currentScopeOnly: true },
+-              widened
+-            );
+-            return;
++          const type = value.isValid ? (initializationType(value) ?? 'unknown') : 'unknown';
++          if (isSymbol(symbolExpr))
++            initializeLocalContract(ce, symbolExpr.symbol, type, constant);
++          else if (isFunction(symbolExpr, 'Tuple')) {
++            const leaves = tuplePatternLeafTypes(symbolExpr, type);
++            for (const name of tuplePatternNames(symbolExpr))
++              initializeLocalContract(ce, name, leaves?.get(name) ?? 'unknown', constant);
+           }
+-          if (!isSymbol(symbolExpr)) return;
+-          const local = symbolExpr.symbol;
+-          joinAssignmentEvidence(
+-            ce,
+-            local,
+-            () => {
+-              const t = assignedEvidenceType(value);
+-              return t === undefined ? undefined : widened(local, t);
+-            },
+-            { currentScopeOnly: true }
+-          );
+         };
+ 
+         // A constant whose value is a constant default (an Epsil
+@@ -8637,7 +8274,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
+           const op =
+             args[1].operator === 'Dictionary' ? initialValue(args[1]) : args[1];
+           if (isDictionary(op) && op.get('type') === undefined)
+-            recordInitializerEvidence(
++            recordInitializerContract(
+               undefined,
+               op.get('value'),
+               hasConstantAttribute(op)
+@@ -8649,7 +8286,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
+ 
+         if (args.length === 3) {
+           const value = initialValue(args[2]);
+-          recordInitializerEvidence(args[1], value);
++          recordInitializerContract(args[1], value);
+           if (isDictionary(value)) markConstantLocal(ce, symbolExpr, value);
+           noteDeclaration(isDictionary(value) ? value : undefined);
+           return ce._fn('Declare', [symbolExpr, args[1], value]);
+@@ -8658,6 +8295,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
+         if (args.length === 4) {
+           const attributes = initialValue(args[3]);
+           const initializer = initialValue(args[2]);
++          recordInitializerContract(args[1], initializer, hasConstantAttribute(attributes));
+           markConstantLocal(ce, symbolExpr, attributes);
+           noteDeclaration(
+             isDictionary(attributes) ? attributes : undefined,
+@@ -14761,15 +14399,8 @@ function* assignSteps(
+   // host `ce.assign` keeps throwing.
+   try {
+     const binding = ce.lookupDefinition(symbolName);
+-    if (
+-      binding !== undefined &&
+-      isValueDef(binding) &&
+-      binding.value._programVariable &&
+-      !(
+-        isFunction(val, 'Function') &&
+-        containsSignatureArm(binding.value.type.type)
+-      )
+-    ) {
++    if (binding !== undefined && isValueDef(binding) && binding.value._programVariable &&
++        (binding.value._fixedInitializationType || !(isFunction(val, 'Function') && containsSignatureArm(binding.value.type.type)))) {
+       const local = binding.value;
+       if (local.isConstant || isDeclaredLocal(local)) {
+         if (assertAssignable(ce, symbolName, val) === 'overlap')
+diff --git a/src/compute-engine/types-definitions.ts b/src/compute-engine/types-definitions.ts
+index 3edc0f84e..20ba6d9a8 100644
+--- a/src/compute-engine/types-definitions.ts
++++ b/src/compute-engine/types-definitions.ts
+@@ -2427,12 +2427,13 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
+    * @internal */
+   _signatureSkeleton: Type | undefined;
+ 
+-  /** True when an assignment to this binding recorded its value type at
+-   * canonicalization time (`joinAssignmentEvidence`, `library/core.ts`).
+-   * A use of a valueless binding with this flag does not narrow its type.
+-   * See `_BoxedValueDefinition._assignmentEvidence`.
++  /** A sequence initializer or annotation fixed this binding's static contract.
+    * @internal */
+-  _assignmentEvidence?: boolean;
++  _fixedInitializationType?: boolean;
++
++  /** The source declaration reserves a slot without an initial value.
++   * @internal */
++  _requiresInitialization?: boolean;
+ 
+   /** Install an element refinement of the placeholder skeleton without
+    * disturbing `_placeholderSkeleton` (the public `type` setter maintains
+diff --git a/src/compute-engine/types-expression.ts b/src/compute-engine/types-expression.ts
+index 5dbeec7ed..960dd222b 100644
+--- a/src/compute-engine/types-expression.ts
++++ b/src/compute-engine/types-expression.ts
+@@ -227,6 +227,13 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
+   _typeWithFacts(declared: BoxedType, memoize: boolean): BoxedType;
+   /** A hoisted block local (see `types-definitions.ts`). @internal */
+   _blockLocal: boolean;
++
++  /** A sequence initializer or annotation fixed this binding's static contract. */
++  _fixedInitializationType?: boolean;
++
++  /** The source declaration reserves a slot without an initial value.
++   * @internal */
++  _requiresInitialization?: boolean;
+   _programVariable: boolean;
+   /** History of writes to this definition's type. Structural mirror of
+    * `TypeProvenanceEntry[]` — the full type lives in `types-definitions.ts`,
+diff --git a/src/epsil/docs/declarations.md b/src/epsil/docs/declarations.md
+index e88df4d82..6150b6ad3 100644
+--- a/src/epsil/docs/declarations.md
++++ b/src/epsil/docs/declarations.md
+@@ -191,15 +191,24 @@ binding.
+ ## Variable bindings {#the-rules-of-block-locals}
+ 
+ The same declaration and assignment rules apply to a program and to block
+-locals. Two rules make sure a declared variable has a value when it is read:
+-
+-1. **A declaration has a value.** `let x = v` or `let x: integer = v`
+-   declares `x` with its value. `let x: integer` with no value is an error
+-   (`declaration-without-value`). One declaration needs no value: at the
+-   top level of a program, a function type, when a `function` statement (or
+-   a definition `f(x) = …`) of the same name is in the program. The
+-   definition gives the name its value from the start of the program, so
+-   the declaration only gives the signature of the function:
++locals. A binding has a fixed type contract and a separate initialization state:
++
++1. **A declaration can be initialized later.** `let x = v` declares and
++   initializes `x`; `let x` reserves an uninitialized binding. When a unique
++   later assignment initializes it in the same straight-line statement sequence
++   before any use, preparation infers its contract from that assignment. Thus
++   `let x; x = 1` establishes `number`, but the slot remains uninitialized until
++   the assignment runs. A read before initialization is still an error.
++   Preparation does not search branches, loops or called functions for an
++   initializer. An intervening runtime application, or one in the proposed
++   later initializer, also stops this inference: `let x; x=1+2` stays unknown;
++   `let x=1+2` or an explicit annotation provides the contract. Without such
++   evidence the contract remains `unknown`, even after a runtime write.
++   An explicit annotation fixes the contract independently of initialization.
++   At the top level, a function type can also be paired with a `function`
++   statement (or a definition `f(x) = …`) of the same name. The definition
++   supplies its value from the start of the program, and the declaration
++   supplies its signature:
+    `let f: (integer) -> integer; function f(x) { x + 1 }; f(2)` is `3`. In
+    a function body or a block, a function statement declares a local
+    ([local functions](/epsil/control-flow#local-functions)), so the two
+@@ -227,9 +236,16 @@ branch, a loop body or a nested block. Assignment preserves the binding's
+ type. An explicit annotation is its contract; otherwise the initializer's
+ type is widened: a number gives `number`, a string or character gives
+ `string`, a boolean gives `boolean`, and the elements of a list, set or
+-tuple widen the same way. So `let s = 0` then `s = s + 0.5` is valid, while
++tuple widen the same way. Mutable lists lose fixed lengths; tuples keep their
++arity. An empty list without an annotation has no known element type, and later
++writes do not infer one. Annotate it, for example `let xs: list<real> = []`,
++when operations or compilation need that information. So `let s = 0` then
++`s = s + 0.5` is valid, while
+ `let s = 0` then `s = "x"` is `assignment-type-mismatch`. A variable whose
+-initializer has no known type keeps `unknown`.
++initializer has no known type keeps `unknown`. Later assignments validate
++against the contract; they never widen it. Evaluation and numerical approximation
++change values without changing these static types. Constants may retain more
++precise static information.
+ 
+ An unannotated variable initialized with a function, or with a name known to
+ hold a function, has type `function`. Each function value retains its own
+diff --git a/src/epsil/docs/errors.md b/src/epsil/docs/errors.md
+index 4e433a88d..e43b33245 100644
+--- a/src/epsil/docs/errors.md
++++ b/src/epsil/docs/errors.md
+@@ -258,6 +258,10 @@ A second declaration in one scope is a mistake in practice — a `let` where an
+ 
+ A `let` in a NESTED block is not a re-declaration: `for k in xs { if c { let k = 1 … } }` and a closure body that declares a name its enclosing scope also has are ordinary shadowing, and stay legal. The initializer of such a shadowing `let` reads the OUTER name. Across programs — a rerun notebook cell or a later REPL line — a top-level `let` or `const` may replace an earlier declaration and establish a new type. Assignment instead preserves the current binding and its contract. Only a repeat within one program is reported.
+ 
++## `read-before-initialization`
++
++A variable declared without a value was read before its initializer assignment ran. Give it a value before reading it. For example, write `let x; x = 1; x`. An assignment in a branch or loop initializes the variable only when that assignment executes.
++
+ ## `read-before-declaration`
+ 
+ A statement of a program or block uses a variable before the statement that declares it. A variable is declared by a `let` or a `const`. This includes a variable initialized with a function: `let a = h(1); let h = (x) => x + 1; a` uses `h` too early. A top-level `function` statement is different: it is prepared before the other statements and can be called above its definition. In `do { let a = k; let k = 2; a }` the first statement reads `k`, which the block declares only in the next statement. In `do { k = 5; let k = 2 }` the first statement assigns it.
+diff --git a/src/epsil/docs/examples.md b/src/epsil/docs/examples.md
+index f1a0e3788..4202a86ca 100644
+--- a/src/epsil/docs/examples.md
++++ b/src/epsil/docs/examples.md
+@@ -996,7 +996,7 @@ function parseArray(cs: list<character>, i: integer) -> tuple<json, integer> {
+   else {
+     let more = true
+     while more {
+-      let v = 0
++      let v: json = 0
+       (v, j) := parseValue(cs, j)
+       out = join(out, [v])
+       j = skipWs(cs, j)
+@@ -1020,7 +1020,7 @@ function parseObject(cs: list<character>, i: integer) -> tuple<json, integer> {
+       let k = ""
+       (k, j) := parseString(cs, skipWs(cs, j))
+       j = skipWs(cs, skipWs(cs, j) + 1) // skip ":"
+-      let v = 0
++      let v: json = 0
+       (v, j) := parseValue(cs, j)
+       keys = join(keys, [k])
+       vals = join(vals, [v])
+diff --git a/src/epsil/docs/for-agents.md b/src/epsil/docs/for-agents.md
+index 0ba06dbea..b60f6621a 100644
+--- a/src/epsil/docs/for-agents.md
++++ b/src/epsil/docs/for-agents.md
+@@ -242,7 +242,7 @@ Dictionaries (string keys; dot access is shorthand for identifier-shaped
+ keys):
+ 
+ ```epsil
+-let d = {one -> 1, two -> 2}
++let d: dictionary<number> = {one -> 1, two -> 2}
+ (d.two, d["two"], isMissing(d.missing), Coalesce(d.missing, 0))
+ // ➔ (2, 2, true, 0)
+ ```
+diff --git a/src/epsil/docs/types.md b/src/epsil/docs/types.md
+index 7a39886ac..7b5101a9a 100644
+--- a/src/epsil/docs/types.md
++++ b/src/epsil/docs/types.md
+@@ -160,13 +160,13 @@ binding to a real — inference follows the values, and asks no questions.
+ 
+ ### 4. When there is nothing to infer from
+ 
+-An empty collection says nothing about what will go into it, so inference
+-starts at the bottom of the lattice:
++An empty initializer establishes `list<unknown>` for a mutable binding.
++Later assignments do not refine its element contract:
+ 
+ ```epsil-live
+ let xs = []
+ type(xs)
+-// ➔ TypeFrom("list<never>")
++// ➔ TypeFrom("list<unknown>")
+ ```
+ 
+ Say what you mean instead:
+@@ -177,16 +177,17 @@ type(xs)
+ // ➔ TypeFrom("list<integer>")
+ ```
+ 
+-The same applies to a name declared without an initializer (`let x: real`) and
+-to a function parameter that the body never constrains.
++An annotation also fixes a contract before a runtime value is available
++(`let x: real`). An unannotated declaration without an identifiable straight-line
++initialization remains `unknown`. A read before initialization is an error.
+ 
+ ### 5. When the inferred type is not what you meant
+ 
+-Inference is a guess from evidence, and a guess can be narrower or wider than
+-your intent — a variable that happens to start at `0` but will hold a fraction,
+-a parameter you intend as `complex` though the body only ever adds. An
+-annotation is a commitment: it is never silently revised, so it pins the type
+-where the guess would have drifted.
++Mutable bindings keep the contract inferred from their initialization. Numeric
++initializers establish `number`; lists erase fixed lengths and widen their
++elements. An annotation supplies a different contract, such as `real` or
++`list<integer>`. Later assignments validate against that contract without
++changing it.
+ 
+ ## Where an annotation goes
+ 
+diff --git a/src/epsil/error-explanations.ts b/src/epsil/error-explanations.ts
+index 1d06db1d3..f8ba59221 100644
+--- a/src/epsil/error-explanations.ts
++++ b/src/epsil/error-explanations.ts
+@@ -195,6 +195,7 @@ A second declaration in one scope is a mistake in practice — a \`let\` where a
+ 
+ A \`let\` in a NESTED block is not a re-declaration: \`for k in xs { if c { let k = 1 … } }\` and a closure body that declares a name its enclosing scope also has are ordinary shadowing, and stay legal. The initializer of such a shadowing \`let\` reads the OUTER name. Across programs — a rerun notebook cell or a later REPL line — a top-level \`let\` or \`const\` may replace an earlier declaration and establish a new type. Assignment instead preserves the current binding and its contract. Only a repeat within one program is reported.`,
+ 
++  'read-before-initialization': `A variable declared without a value was read before its initializer assignment ran. Give it a value before reading it. For example, write \`let x; x = 1; x\`. An assignment in a branch or loop initializes the variable only when that assignment executes.`,
+   'read-before-declaration': `A statement of a program or block uses a variable before the statement that declares it. A variable is declared by a \`let\` or a \`const\`. This includes a variable initialized with a function: \`let a = h(1); let h = (x) => x + 1; a\` uses \`h\` too early. A top-level \`function\` statement is different: it is prepared before the other statements and can be called above its definition. In \`do { let a = k; let k = 2; a }\` the first statement reads \`k\`, which the block declares only in the next statement. In \`do { k = 5; let k = 2 }\` the first statement assigns it.
+ 
+ The error is found before the program runs. Move the declaration before the first use, or give the local another name. The initializer of a \`let\` is not such a use: \`let t = t * 2\` in a nested block reads the OUTER \`t\`. A use in a function literal is not such a use either, because it runs when the function is called: a function can read a variable that a later statement of the program or block declares.`,
+diff --git a/src/epsil/execute-epsil.ts b/src/epsil/execute-epsil.ts
+index 75e7a6d5c..3d6a7a754 100644
+--- a/src/epsil/execute-epsil.ts
++++ b/src/epsil/execute-epsil.ts
+@@ -2023,6 +2023,7 @@ function constantAssignmentName(e: unknown): string | undefined {
+  */
+ const BLOCK_LOCAL_ERROR_CODES = [
+   'read-before-declaration',
++  'read-before-initialization',
+   'variable-redeclaration',
+   'declaration-without-value',
+   'declaration-below-statement',
+diff --git a/src/epsil/static-diagnostics.ts b/src/epsil/static-diagnostics.ts
+index 5e4f7aa78..c86e73a9a 100644
+--- a/src/epsil/static-diagnostics.ts
++++ b/src/epsil/static-diagnostics.ts
+@@ -531,7 +531,7 @@ export function staticDiagnostics(
+   ce._staticTypeCheckDepth += 1;
+   // The pre-pass is one long WRITE: it applies the type effect of every
+   // top-level statement onto real definitions (`_infer`,
+-  // `_setElementRefinement`, the assignment-evidence map). None of that may
++  // `_setElementRefinement`, initializer contract preparation). None of that may
+   // record what an assumption in force happens to prove, so the whole pass
+   // runs with the assumptions hidden — the same bracket every other write
+   // routine uses (`docs/plans/2026-08-29-assumptions-as-facts-type.md`
+@@ -3304,6 +3304,10 @@ export function describeError(error: MathJsonExpression): string {
+           : `a protocol function member is not a field (${payload.join(', ')})`;
+       break;
+     }
++    case 'read-before-initialization':
++      detail = payload.length === 0 ? 'a local is read before initialization'
++        : `\`${payload[0]}\` is read before it has been given a value`;
++      break;
+     case 'read-before-declaration':
+       // Payload: [name]. A statement of a block uses a local of the block
+       // before the statement that declares it: a `let` or a `const`.
+diff --git a/test/compute-engine/annotated-parameter-undecided.test.ts b/test/compute-engine/annotated-parameter-undecided.test.ts
+index d97e71f86..a96842b31 100644
+--- a/test/compute-engine/annotated-parameter-undecided.test.ts
++++ b/test/compute-engine/annotated-parameter-undecided.test.ts
+@@ -23,6 +23,8 @@ function run(source: string): unknown {
+ /** The value of the Epsil program `source` on a new engine that declares each
+  * name of `names` with the type `unknown` and no value, as MathJSON. A later
+  * statement of the program assigns it. */
++// Symbolic inputs use host declarations; a source let without a value now
++// reserves an uninitialized slot and cannot provide a symbolic input.
+ function runWith(names: string[], source: string): unknown {
+   const ce = new ComputeEngine();
+   for (const name of names) ce.declare(name, 'unknown');
+@@ -108,15 +110,16 @@ describe('a parameter annotated in the function is checked when a later value de
+   test('an element of a list stays, by the name of the function', () => {
+     const list = ['List', ['h', 'm'], 2];
+     expect(
+-      run('function h(k: integer) { 2*k }\nlet m\nh([m, 1])')
++      runWith(['m'], 'function h(k: integer) { 2*k }\nh([m, 1])')
+     ).toEqual(list);
+-    expect(run('let h = (k: integer) => 2*k\nlet m\nh([m, 1])')).toEqual(list);
++    expect(runWith(['m'], 'let h = (k: integer) => 2*k\nh([m, 1])')).toEqual(list);
+   });
+ 
+   test('a function that calls an annotated function keeps the inner call', () => {
+     expect(
+-      run(
+-        'function h(k: integer) { 2*k }\nfunction f(x: real) { h(x) + 1 }\nlet q\nf(q)'
++      runWith(
++        ['q'],
++        'function h(k: integer) { 2*k }\nfunction f(x: real) { h(x) + 1 }\nf(q)'
+       )
+     ).toEqual(['Add', ['h', 'q'], 1]);
+   });
+@@ -124,7 +127,7 @@ describe('a parameter annotated in the function is checked when a later value de
+   test('a recursive function is not unrolled for a symbolic argument', () => {
+     const fact =
+       'function fact(n: integer) { if n <= 1 { 1 } else { n * fact(n - 1) } }\n';
+-    expect(run(fact + 'let m\nfact(m)')).toEqual(['fact', 'm']);
++    expect(runWith(['m'], fact + 'fact(m)')).toEqual(['fact', 'm']);
+     expect(run(fact + 'fact(5)')).toBe(120);
+   });
+ 
+@@ -184,7 +187,7 @@ describe('what an annotated parameter does not hold', () => {
+   });
+ 
+   test('a predicate at a boolean parameter is applied', () => {
+-    expect(run('function p(b: boolean) { b }\nlet x\np(x > 0)')).toEqual([
++    expect(runWith(['x'], 'function p(b: boolean) { b }\np(x > 0)')).toEqual([
+       'Less',
+       0,
+       'x',
+@@ -192,7 +195,7 @@ describe('what an annotated parameter does not hold', () => {
+   });
+ 
+   test('a symbol at a parameter typed symbol is its own value', () => {
+-    expect(run('function f(s: symbol) { s }\nlet q\nf(q)')).toBe('q');
++    expect(runWith(['q'], 'function f(s: symbol) { s }\nf(q)')).toBe('q');
+     const declared = new ComputeEngine();
+     declared.declare('f', '(symbol) -> symbol');
+     declared.assign('f', declared.box(['Function', 's', 's']));
+@@ -200,7 +203,7 @@ describe('what an annotated parameter does not hold', () => {
+   });
+ 
+   test('an expression at a parameter typed expression is applied', () => {
+-    expect(run('function f(e: expression) { e }\nlet q\nf(q + 1)')).toEqual([
++    expect(runWith(['q'], 'function f(e: expression) { e }\nf(q + 1)')).toEqual([
+       'Add',
+       'q',
+       1,
+@@ -208,12 +211,12 @@ describe('what an annotated parameter does not hold', () => {
+   });
+ 
+   test('a bare parameter beside an annotated one holds nothing', () => {
+-    expect(run('function f(a: integer, b) { a + b }\nlet q\nf(1, q)')).toEqual([
++    expect(runWith(['q'], 'function f(a: integer, b) { a + b }\nf(1, q)')).toEqual([
+       'Add',
+       'q',
+       1,
+     ]);
+-    expect(run('let f = (a: integer, b) => a + b\nlet q\nf(1, q)')).toEqual([
++    expect(runWith(['q'], 'let f = (a: integer, b) => a + b\nf(1, q)')).toEqual([
+       'Add',
+       'q',
+       1,
+@@ -221,8 +224,8 @@ describe('what an annotated parameter does not hold', () => {
+   });
+ 
+   test('a literal with no annotation holds nothing', () => {
+-    expect(run('let m\n((k) => 2*k)(m)')).toEqual(['Multiply', 2, 'm']);
+-    expect(run('function h(k) { 2*k }\nlet m\nh(m)')).toEqual([
++    expect(runWith(['m'], '((k) => 2*k)(m)')).toEqual(['Multiply', 2, 'm']);
++    expect(runWith(['m'], 'function h(k) { 2*k }\nh(m)')).toEqual([
+       'Multiply',
+       2,
+       'm',
+@@ -278,10 +281,10 @@ describe('an annotated parameter and a symbol that its type lists', () => {
+ describe('the order of the checks of an annotated parameter', () => {
+   test('an absent value beside an undecided argument gives Missing', () => {
+     expect(
+-      run('function f(k: integer, x: real) { k + x }\nlet m\nf(m, Missing)')
++      runWith(['m'], 'function f(k: integer, x: real) { k + x }\nf(m, Missing)')
+     ).toBe('Missing');
+     expect(
+-      run('let f = (k: integer, x: real) => k + x\nlet m\nf(m, Missing)')
++      runWith(['m'], 'let f = (k: integer, x: real) => k + x\nf(m, Missing)')
+     ).toBe('Missing');
+   });
+ 
+@@ -297,22 +300,24 @@ describe('the order of the checks of an annotated parameter', () => {
+ describe('an annotated parameter and the map of a broadcastable or a point-list parameter', () => {
+   test('an element of a broadcastable map applies the body', () => {
+     expect(
+-      run('function h(k: broadcastable<integer>) { 2*k }\nlet m\nh([m, 1])')
++      runWith(['m'], 'function h(k: broadcastable<integer>) { 2*k }\nh([m, 1])')
+     ).toEqual(['List', ['Multiply', 2, 'm'], 2]);
+   });
+ 
+   test('a symbol beside a broadcastable map applies the body', () => {
+     expect(
+-      run(
+-        'function h(k: integer, x: broadcastable<real>) { k*x }\nlet m\nh(m, [1, 2])'
++      runWith(
++        ['m'],
++        'function h(k: integer, x: broadcastable<real>) { k*x }\nh(m, [1, 2])'
+       )
+     ).toEqual(['List', 'm', ['Multiply', 2, 'm']]);
+   });
+ 
+   test('a symbol beside a point-list map applies the body', () => {
+     expect(
+-      run(
+-        'function f(k: integer, p: tuple<real, real>) { k*PointX(p) }\nlet m\nf(m, [(1, 2), (3, 4)])'
++      runWith(
++        ['m'],
++        'function f(k: integer, p: tuple<real, real>) { k*PointX(p) }\nf(m, [(1, 2), (3, 4)])'
+       )
+     ).toEqual(['List', 'm', ['Multiply', 3, 'm']]);
+   });
+@@ -320,7 +325,7 @@ describe('an annotated parameter and the map of a broadcastable or a point-list
+ 
+ describe('the application that waits belongs to the literal that answered', () => {
+   test('a function with no annotation does not wait for an inner application', () => {
+-    const held = run('let w = (x) => ((k: integer) => 2*k)(x)\nlet m\nw(m)');
++    const held = runWith(['m'], 'let w = (x) => ((k: integer) => 2*k)(x)\nw(m)');
+     expect((held as unknown[])[0]).toBe('Apply');
+     expect(
+       runWith(
+diff --git a/test/compute-engine/binding-units-commit.test.ts b/test/compute-engine/binding-units-commit.test.ts
+index 0b03e2585..66f0b14ba 100644
+--- a/test/compute-engine/binding-units-commit.test.ts
++++ b/test/compute-engine/binding-units-commit.test.ts
+@@ -479,7 +479,7 @@ describe('RULES 3 AND 4: a stored literal and a name declared unknown', () => {
+       ],
+       'P',
+     ]);
+-    expect(typeOf(literal.op1.ops[1], 'q')).toBe('list<real>');
++    expect(typeOf(literal.op1.ops[1], 'q')).toBe('list<number>');
+     expect(literal.op1.ops[0].ops[2].type.toString()).toBe('list<real>');
+   });
+ 
+diff --git a/test/compute-engine/block-local-list-rank-join.test.ts b/test/compute-engine/block-local-list-rank-join.test.ts
+index 1a03e070d..8e9072b9d 100644
+--- a/test/compute-engine/block-local-list-rank-join.test.ts
++++ b/test/compute-engine/block-local-list-rank-join.test.ts
+@@ -1,22 +1,7 @@
+ import { ComputeEngine } from '../../src/compute-engine';
+ import { compile } from '../../src/compute-engine/compilation/compile-expression';
+-import { joinEvidenceTypes } from '../../src/compute-engine/library/assignment-evidence';
+-import { parseType } from '../../src/common/type/parse';
+-import { typeToString } from '../../src/common/type/serialize';
+ import type { MathJsonExpression } from '../../src/math-json';
+ 
+-// The static type of a block local assigned more than once is the join of
+-// the types of its assigned values (`joinEvidenceTypes`). The `elements` of
+-// a list type with dimensions are its cells, so a join of two list types of
+-// different ranks must join what one index returns (a cell of a vector, a
+-// row of a matrix), not the cells. The join of `[1, 2]` and `[[1, 2]]` gave
+-// `list<integer>`, and `Map` then refused an untyped callback whose
+-// parameter was inferred `integer` from that type, while the compiled code
+-// mapped the row.
+-
+-const join = (a: string, b: string): string =>
+-  typeToString(joinEvidenceTypes(parseType(a), parseType(b)));
+-
+ // A local declared with a type that admits a vector and a matrix, assigned
+ // a vector, then a matrix. With no declared type, the type of the local is
+ // the type of its first value, widened (`list<number>`), and the second
+@@ -41,45 +26,6 @@ const doubleReal: MathJsonExpression = [
+   ['Typed', 't', "'real'"],
+ ];
+ 
+-describe('the join of list types of different shapes', () => {
+-  test('a vector and a matrix join on their rows', () => {
+-    expect(join('vector<integer^2>', 'matrix<integer^(1x2)>')).toBe(
+-      'list<integer | vector<integer^2>>'
+-    );
+-  });
+-
+-  test('a plain list and a matrix join on their rows', () => {
+-    expect(join('list<integer>', 'matrix<integer>')).toBe(
+-      'list<integer | vector<integer>>'
+-    );
+-  });
+-
+-  test('two vectors of different lengths keep the rank', () => {
+-    expect(join('vector<integer^2>', 'vector<real^3>')).toBe('vector<real>');
+-  });
+-
+-  test('two matrices keep the axis on which they agree', () => {
+-    expect(join('matrix<integer^(2x2)>', 'matrix<integer^(1x2)>')).toBe(
+-      'matrix<integer^(?x2)>'
+-    );
+-  });
+-
+-  test('two plain lists join their elements', () => {
+-    expect(join('list<integer>', 'list<string>')).toBe(
+-      'list<integer | string>'
+-    );
+-  });
+-
+-  // One index of `tensor<U>` returns `U | tensor<U>`: a join of these values
+-  // joined the two tensors again, with no end (a stack overflow).
+-  test('two tensors of unknown rank join their cells', () => {
+-    expect(join('tensor<integer>', 'tensor<real>')).toBe('tensor<real>');
+-    expect(join('tensor<integer>', 'tensor<integer>')).toBe(
+-      'tensor<integer>'
+-    );
+-  });
+-});
+-
+ describe('a block local assigned a vector, then a matrix', () => {
+   const values: MathJsonExpression[] = [
+     ['List', 1, 2],
+diff --git a/test/compute-engine/block-locals-declaration-rules.test.ts b/test/compute-engine/block-locals-declaration-rules.test.ts
+index 058409bba..f1c9df9f8 100644
+--- a/test/compute-engine/block-locals-declaration-rules.test.ts
++++ b/test/compute-engine/block-locals-declaration-rules.test.ts
+@@ -3,11 +3,9 @@ import type { MathJsonExpression } from '../../src/math-json/types';
+ import { executeEpsil } from '../../src/epsil/execute-epsil';
+ import { explainErrorCode } from '../../src/epsil/error-explanations';
+ 
+-// The rules of block locals (`docs/ERROR-MODEL.md`): a declaration has a
+-// value, a local is declared at the own level of a block and an assignment
+-// writes a declared variable, an assignment is a statement and not an
+-// operand, and a reassignment keeps the type of the local. Each broken rule
+-// is a static error in place in the canonical form.
++// Block declarations establish fixed contracts; initialization may occur later.
++// Declaration placement and statement-only assignment remain static rules,
++// while reading an uninitialized slot is a runtime error.
+ 
+ function run(expr: MathJsonExpression): {
+   canonical: string;
+@@ -23,7 +21,7 @@ function run(expr: MathJsonExpression): {
+   };
+ }
+ 
+-describe('A DECLARATION HAS A VALUE', () => {
++describe('A DECLARATION HAS A FIXED INITIALIZATION CONTRACT', () => {
+   test('a declaration with a value, then an assignment', () => {
+     const r = run([
+       'Block',
+@@ -32,20 +30,18 @@ describe('A DECLARATION HAS A VALUE', () => {
+       'b',
+     ]);
+     expect(r.value).toBe('2');
+-    expect(r.type).toBe('integer');
++    expect(r.type).toBe('number');
+   });
+ 
+-  test('`Declare(x, type)` then `Assign(x, v)` is not a pair', () => {
++  test('a typed declaration can initialize in a later statement', () => {
+     const r = run([
+       'Block',
+       ['Declare', 'a', "'integer'"],
+       ['Assign', 'a', 5],
+       'a',
+     ]);
+-    expect(r.type).toBe('error');
+-    expect(r.value).toBe(
+-      'Error(ErrorCode("declaration-without-value", "a"))'
+-    );
++    expect(r.type).toBe('integer');
++    expect(r.value).toBe('5');
+   });
+ 
+   test('a `Declare` with no value at the top level', () => {
+@@ -72,39 +68,22 @@ describe('A DECLARATION HAS A VALUE', () => {
+     ).toBe('3');
+   });
+ 
+-  test('a function type with no function definition in the same block', () => {
+-    // No definition of `f` in the block.
+-    expect(
+-      run([
+-        'Block',
+-        ['Declare', 'f', "'(integer) -> integer'"],
+-        ['Assign', 'f', ['Function', ['Add', 'x', 1], 'x']],
+-        ['f', 2],
+-      ]).canonical
+-    ).toContain('ErrorCode("declaration-without-value", "f", "function")');
+-    // A definition in an enclosing block does not pair with the declaration.
+-    expect(
+-      run([
+-        'Block',
+-        ['DefineFunction', 'f', ['Function', 'x', 'x']],
+-        ['Block', ['Declare', 'f', "'(integer) -> integer'"], ['f', 2]],
+-      ]).canonical
+-    ).toContain('ErrorCode("declaration-without-value", "f", "function")');
+-    // The Epsil message names the fix.
+-    const { diagnostics } = executeEpsil(
+-      new ComputeEngine(),
+-      'let f: (integer) -> integer\nf(2)'
+-    );
+-    expect(diagnostics.map((d) => d.message[1])).toEqual([
+-      '`f` is declared without a value: define `f` with a function statement in the same block, or give the declaration a value',
+-    ]);
+-    // A declaration of a type that is not a function type stays an error.
+-    expect(
+-      executeEpsil(
+-        new ComputeEngine(),
+-        'let g: integer\ng = 2'
+-      ).diagnostics.map((d) => d.message[3])
+-    ).toEqual(['declaration-without-value']);
++  test('a typed function variable initializes later and an uninitialized shadow fails on read', () => {
++    expect(run([
++      'Block',
++      ['Declare', 'f', "'(integer) -> integer'"],
++      ['Assign', 'f', ['Function', ['Add', 'x', 1], 'x']],
++      ['f', 2],
++    ]).value).toBe('3');
++    expect(run([
++      'Block',
++      ['DefineFunction', 'f', ['Function', 'x', 'x']],
++      ['Block', ['Declare', 'f', "'(integer) -> integer'"], ['f', 2]],
++    ]).value).toContain('read-before-initialization');
++    const uninitialized = executeEpsil(new ComputeEngine(),
++      'let f: (integer) -> integer; f(2)');
++    expect(uninitialized.value.toString()).toContain('read-before-initialization');
++    expect(executeEpsil(new ComputeEngine(), 'let g: integer; g=2; g').value.json).toBe(2);
+   });
+ 
+   test('the three-operand `Declare` of the `where` clause and of `;`', () => {
+@@ -115,7 +94,7 @@ describe('A DECLARATION HAS A VALUE', () => {
+       'xs',
+     ]);
+     expect(r.value).toBe('[1,2]');
+-    expect(r.type).toBe('list<integer>');
++    expect(r.type).toBe('list<unknown>');
+   });
+ 
+   test('the LaTeX `let` declares the local with its value', () => {
+@@ -124,7 +103,7 @@ describe('A DECLARATION HAS A VALUE', () => {
+       ce.parse('\\operatorname{let} k \\coloneq 2; k+1', { form: 'raw' }).json
+     ).toEqual(['Block', ['Declare', 'k', "'unknown'", 2], ['Add', 'k', 1]]);
+     expect(ce.parse('\\operatorname{let} k; k').evaluate().toString()).toBe(
+-      'Error(ErrorCode("declaration-without-value", "k"))'
++      'Error(ErrorCode("read-before-initialization", "k"))'
+     );
+   });
+ });
+diff --git a/test/compute-engine/bound-once.test.ts b/test/compute-engine/bound-once.test.ts
+index 987894d77..1f41add12 100644
+--- a/test/compute-engine/bound-once.test.ts
++++ b/test/compute-engine/bound-once.test.ts
+@@ -489,10 +489,10 @@ describe('a local of a block is declared', () => {
+       ['Declare', 'b', "'unknown'", ['List', 1, 2]],
+       'b',
+     ]);
+-    expect(literal.type.toString()).toBe('vector<integer^2>');
++    expect(literal.type.toString()).toBe('list<number>');
+   });
+ 
+-  test('only the assigned leaf of a destructuring declaration is widened', () => {
++  test('each mutable destructuring leaf has its initialization contract', () => {
+     const typeOf = (tail: string) =>
+       new ComputeEngine()
+         .box(
+@@ -501,8 +501,8 @@ describe('a local of a block is declared', () => {
+           )[0]
+         )
+         .type.toString();
+-    expect(typeOf('b')).toBe('vector<integer^2>');
+-    expect(typeOf('a')).toBe('vector<integer>');
++    expect(typeOf('b')).toBe('list<number>');
++    expect(typeOf('a')).toBe('list<number>');
+   });
+ 
+   test('a destructuring declaration declares each name', () => {
+@@ -678,7 +678,7 @@ describe('a local of a block is declared', () => {
+           ['g', 2],
+         ]).json
+       )
+-    ).toBe('declaration-without-value');
++    ).toBe('variable-redeclaration');
+     expect(
+       JSON.stringify(
+         ce.box([
+diff --git a/test/compute-engine/ce-1179-loop-body-scalar-result.test.ts b/test/compute-engine/ce-1179-loop-body-scalar-result.test.ts
+index f001aeb3e..15af0b155 100644
+--- a/test/compute-engine/ce-1179-loop-body-scalar-result.test.ts
++++ b/test/compute-engine/ce-1179-loop-body-scalar-result.test.ts
+@@ -61,9 +61,9 @@ describe('CE-1179: a declared scalar result after a loop', () => {
+     );
+   });
+ 
+-  test('a captured name with an inferred type keeps the list arm', () => {
++  test('a dynamic captured value cannot widen the numeric local contract', () => {
+     // An explicitly dynamic captured value can change from scalar to list.
+-    // The body-local `n` keeps its scalar type and the result keeps the list arm.
++    // The body-local `n` refuses a list store; no list result is admitted.
+     const ce = new ComputeEngine();
+     const checked = executeEpsil(
+       ce,
+@@ -78,7 +78,8 @@ X = [1, 2]
+     );
+     expect(checked.diagnostics).toEqual([]);
+     ce.declare('L', 'list<integer>');
+-    expect(ce.box(['f', 'L', 3]).type.toString()).toBe('integer | list<any>');
++    expect(ce.box(['f', 'L', 3]).type.toString()).toBe('integer');
++    expect(ce.box(['f', ['List', 1], 3]).evaluate().operator).toBe('Error');
+   });
+ 
+   test('a call of a user function in the body keeps the list arm', () => {
+diff --git a/test/compute-engine/ce-1309-untyped-integer-local.test.ts b/test/compute-engine/ce-1309-untyped-integer-local.test.ts
+index c8fc79fbb..2624780ea 100644
+--- a/test/compute-engine/ce-1309-untyped-integer-local.test.ts
++++ b/test/compute-engine/ce-1309-untyped-integer-local.test.ts
+@@ -72,7 +72,12 @@ function interpreted(ce: ComputeEngine, expr: unknown, board: number[]) {
+ }
+ 
+ describe('CE-1309: a condition on a call of a function that calls another', () => {
+-  const ce = engine(OTHELLO);
++  const ce = engine(OTHELLO.replace(/let (col|row|found|n|v) =/g, 'let $1: integer ='));
++  test('unannotated numeric locals do not establish integer results', () => {
++    const original = engine(OTHELLO);
++    expect(() => compile(original.box(['legal', 'L', 1]), { fallback: false }))
++      .toThrow(/not integer/);
++  });
+   test.each(['javascript', 'interval-js'])('compiles on %s', (to) => {
+     const exprs = [
+       ['If', ['Greater', ['flips', 'L', 20, 1], 0], 1, 0],
+@@ -120,7 +125,7 @@ describe('CE-1309: the lane of a local with no declared type', () => {
+   };
+ 
+   test('a count in a loop is an integer', () => {
+-    expect(run('let n = 0\nfor j in 1..k { n = n + B[j] }\nn')).toBe(6);
++    expect(run('let n: integer = 0\nfor j in 1..k { n = n + B[j] }\nn')).toBe(6);
+   });
+ 
+   test('a local that a loop makes a real stays a real', () => {
+diff --git a/test/compute-engine/ce-43-block-local-statement-order.test.ts b/test/compute-engine/ce-43-block-local-statement-order.test.ts
+index 39ad27d9e..8331eeee7 100644
+--- a/test/compute-engine/ce-43-block-local-statement-order.test.ts
++++ b/test/compute-engine/ce-43-block-local-statement-order.test.ts
+@@ -33,7 +33,7 @@ describe('CE-43: block local types do not depend on statement order', () => {
+       ['mutate', 'v'],
+       'v',
+     ]);
+-    expect(assignFirst).toEqual({ type: 'vector<real^2>', sound: true });
++    expect(assignFirst).toEqual({ type: 'list<number>', sound: true });
+   });
+ 
+   test('a scalar local used at a real parameter', () => {
+@@ -44,7 +44,7 @@ describe('CE-43: block local types do not depend on statement order', () => {
+         ['rk', 'u'],
+         'u',
+       ])
+-    ).toEqual({ type: 'integer', sound: true });
++    ).toEqual({ type: 'number', sound: true });
+   });
+ 
+   test('a use does not narrow the type of an assigned local below its value', () => {
+@@ -55,7 +55,7 @@ describe('CE-43: block local types do not depend on statement order', () => {
+     ] as MathJsonExpression[]) {
+       const ce = engine();
+       const e = ce.box(mj);
+-      expect(e.type.toString()).toBe('vector<real^1>');
++      expect(e.type.toString()).toBe('list<number>');
+     }
+   });
+ });
+@@ -80,7 +80,7 @@ describe('CE-43: an assignment in a match case is an assignment of the block loc
+     // Before: typed `vector<integer^3>`, evaluated to `[]`.
+     expect(
+       run('let xs = [1, 2, 3]\nwhile let [h, ...] = xs { xs = Rest(xs) }\nxs')
+-    ).toEqual({ type: 'list<integer>', value: '[]', sound: true });
++    ).toEqual({ type: 'list<number>', value: '[]', sound: true });
+   });
+ 
+   test('a match case that assigns a value of another kind', () => {
+diff --git a/test/compute-engine/ce-636-block-local-without-value.test.ts b/test/compute-engine/ce-636-block-local-without-value.test.ts
+index e6dde6bb6..2ee6d5c30 100644
+--- a/test/compute-engine/ce-636-block-local-without-value.test.ts
++++ b/test/compute-engine/ce-636-block-local-without-value.test.ts
+@@ -1,10 +1,6 @@
+ /**
+- * CE-636. A `Block` local that a `Declare` gave no value could be read with
+- * no value on some paths. The language no longer admits that state: a
+- * declaration without a value is the static error `declaration-without-value`,
+- * so there is no read of a local with no value to classify. The remaining
+- * rules of block locals are pinned in `block-locals-declaration-rules.test.ts`
+- * and `compile-block-locals-rules.test.ts`.
++ * A declared loop local may remain uninitialized on some paths. Runtime reads
++ * report that state, and compilation conservatively declines the declaration.
+  */
+ 
+ import { ComputeEngine } from '../../src/compute-engine';
+@@ -34,10 +30,10 @@ const LOOP = [
+ ];
+ 
+ describe('CE-636: A DECLARATION WITHOUT A VALUE', () => {
+-  test('the declaration is a static error', () => {
++  test('the declaration is valid but a read before initialization fails', () => {
+     const e = box(LOOP);
+-    expect(e.type.toString()).toBe('error');
+-    expect(e.toString()).toContain('declaration-without-value');
++    expect(e.type.toString()).toBe('number');
++    expect(e.evaluate().toString()).toContain('read-before-initialization');
+   });
+ 
+   test('a block with that declaration does not compile', () => {
+diff --git a/test/compute-engine/ce-689-type-cache-across-calls.test.ts b/test/compute-engine/ce-689-type-cache-across-calls.test.ts
+index 0d9ef4590..c65220b16 100644
+--- a/test/compute-engine/ce-689-type-cache-across-calls.test.ts
++++ b/test/compute-engine/ce-689-type-cache-across-calls.test.ts
+@@ -388,9 +388,9 @@ describe('CE-689: the type cache across calls of a function literal', () => {
+       ],
+     ]);
+     const divide = find(block, (e) => e.operator === 'Divide');
+-    expect(divide.type.toString()).toBe('infinity | nan | real');
++    expect(divide.type.toString()).toBe('number');
+     expect(block.evaluate().toString()).toBe(
+-      '["infinity | nan | real","infinity | nan | real"]'
++      '["number","number"]'
+     );
+   });
+ 
+diff --git a/test/compute-engine/collection-type-followups.test.ts b/test/compute-engine/collection-type-followups.test.ts
+index b9b5f9b6d..e94e4379d 100644
+--- a/test/compute-engine/collection-type-followups.test.ts
++++ b/test/compute-engine/collection-type-followups.test.ts
+@@ -132,7 +132,7 @@ describe('1. FLATMAP OVER A SOURCE WITH ABSENT CELLS', () => {
+       epsil(
+         'let l = [1, Missing]\nflatMap(l, x => [x, x])'
+       )
+-    ).toEqual(['[1,1,"Missing","Missing"]', 'list<integer | missing>']);
++    ).toEqual(['[1,1,"Missing","Missing"]', 'list<missing | number>']);
+   });
+ 
+   test('a callback result that is a union of a list and an absent value', () => {
+diff --git a/test/compute-engine/d17-run-keeps-type-caches.test.ts b/test/compute-engine/d17-run-keeps-type-caches.test.ts
+index 7bd2738db..f03bc32ba 100644
+--- a/test/compute-engine/d17-run-keeps-type-caches.test.ts
++++ b/test/compute-engine/d17-run-keeps-type-caches.test.ts
+@@ -215,12 +215,12 @@ describe('D17: a run keeps the cached types', () => {
+     );
+     const probed = find(block, (x) => x.operator === 'TypeOfD17').op1;
+     const map = block.ops[block.ops.length - 1];
+-    expect(probed.type.toString()).toBe('list<unknown^2>');
+-    expect(map.type.toString()).toBe('list<unknown^2>');
++    expect(probed.type.toString()).toBe('vector<2>');
++    expect(map.type.toString()).toBe('vector<2>');
+     expect(block.evaluate().toString()).toBe('[2,3]');
+-    expect(types).toEqual(['list<unknown^2>']);
+-    expect(probed.type.toString()).toBe('list<unknown^2>');
+-    expect(map.type.toString()).toBe('list<unknown^2>');
++    expect(types).toEqual(['vector<2>']);
++    expect(probed.type.toString()).toBe('vector<2>');
++    expect(map.type.toString()).toBe('vector<2>');
+   });
+ 
+   // A guard of behaviour that the change must keep: it holds before the
+diff --git a/test/compute-engine/d18-end-of-literal-event.test.ts b/test/compute-engine/d18-end-of-literal-event.test.ts
+index 42cf41c59..f161e7a64 100644
+--- a/test/compute-engine/d18-end-of-literal-event.test.ts
++++ b/test/compute-engine/d18-end-of-literal-event.test.ts
+@@ -9,8 +9,7 @@
+  * the literal is complete. Without the event, `G` below kept the signature
+  * `-> unknown` that it was given while `F` was being derived.
+  *
+- * The same write does not replace the type that an assignment in the body
+- * gives a parameter (the second group).
++ * Written unannotated parameters keep an unknown contract (the second group).
+  */
+ import { ComputeEngine } from '../../src/compute-engine';
+ 
+@@ -62,10 +61,9 @@ describe('D18: THE STATE EVENT AT THE END OF THE BOXING OF A LITERAL', () => {
+   );
+ });
+ 
+-// The record of the uses of a parameter is not written over the type that
+-// the assignments in the body give it (`_assignmentEvidence`): an
+-// assignment replaces a type that only uses gave.
+-describe('D18: THE END-OF-LITERAL WRITE KEEPS ASSIGNMENT EVIDENCE', () => {
++// A written unannotated parameter remains unknown: neither an assignment
++// nor a use supplies its finalized contract.
++describe('D18: WRITTEN UNANNOTATED PARAMETERS REMAIN UNKNOWN', () => {
+   test('a use before the assignment', () => {
+     const ce = new ComputeEngine();
+     const f = ce.box([
+@@ -74,7 +72,7 @@ describe('D18: THE END-OF-LITERAL WRITE KEEPS ASSIGNMENT EVIDENCE', () => {
+       'x',
+     ] as never);
+     expect(f.type.toString()).toBe(
+-      '(x: vector<integer^2>) -> vector<integer^2>'
++      '(x: unknown) -> unknown'
+     );
+     expect(
+       ce
+@@ -91,7 +89,7 @@ describe('D18: THE END-OF-LITERAL WRITE KEEPS ASSIGNMENT EVIDENCE', () => {
+       ['Block', ['Assign', 'x', ['List', 1, 2]], ['Add', 'x', 1], 'x'],
+       'x',
+     ] as never);
+-    expect(f.type.toString()).toBe('(x: unknown) -> number');
++    expect(f.type.toString()).toBe('(x: unknown) -> unknown');
+     expect(
+       ce
+         .box(['Apply', f, 3] as never)
+diff --git a/test/compute-engine/declared-parameter-undecided.test.ts b/test/compute-engine/declared-parameter-undecided.test.ts
+index b39eceb9b..79d350ff8 100644
+--- a/test/compute-engine/declared-parameter-undecided.test.ts
++++ b/test/compute-engine/declared-parameter-undecided.test.ts
+@@ -62,7 +62,7 @@ describe('a declared parameter type is checked when a later value decides it', (
+       'let h: (integer) -> integer\nfunction h(k) { 2*k }\nlet m\nlet r = g(h(m))\nm = 1.5\nr'
+     );
+     expect(diagnostics.map((d) => d.message[3])).toContain(
+-      'declaration-without-value'
++      'read-before-initialization'
+     );
+   });
+ 
+diff --git a/test/compute-engine/integrate-block-integrand.test.ts b/test/compute-engine/integrate-block-integrand.test.ts
+index 36ff7f7ba..33314ad05 100644
+--- a/test/compute-engine/integrate-block-integrand.test.ts
++++ b/test/compute-engine/integrate-block-integrand.test.ts
+@@ -301,9 +301,8 @@ describe('Integrate of any other block stays unevaluated under evaluate()', () =
+       ['Assign', 'c', 2],
+       CX
+     ).evaluate();
+-    expect(refused.operator).toBe('Error');
+-    expect(refused.op1.json).toEqual(['ErrorCode', "'assignment-type-mismatch'", "'c'", "'function'", "'2'"]);
+-    expect(refused.op2.operator).toBe('ErrorTrace');
++    // A later use does not make the unknown initialization contract callable.
++    expect(refused.operator).toBe('Integrate');
+     const unread = ce.box([
+       'D',
+       block(['Declare', 'c', { str: 'unknown' }, failing], 'x'),
+@@ -363,15 +362,15 @@ describe('Integrate of any other block stays unevaluated under evaluate()', () =
+     );
+   });
+ 
+-  test('a declaration without a value is an error, under evaluate() and N()', () => {
++  test('a deferred initialization uses numerical quadrature', () => {
+     const e = integral(
+       new ComputeEngine(),
+       ['Declare', 'c', { str: 'real' }],
+       ['Assign', 'c', 2],
+       CX
+     );
+-    expect(e.evaluate().operator).toBe('Error');
+-    expect(e.N().operator).toBe('Error');
++    expect(e.evaluate().operator).toBe('Integrate');
++    expect(numeric(e.N())).toBeCloseTo(1);
+   });
+ });
+ 
+diff --git a/test/compute-engine/lazy-view-scope.test.ts b/test/compute-engine/lazy-view-scope.test.ts
+index e38c2f2e2..45ce4b762 100644
+--- a/test/compute-engine/lazy-view-scope.test.ts
++++ b/test/compute-engine/lazy-view-scope.test.ts
+@@ -1116,15 +1116,23 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
+       ]);
+     });
+ 
+-  test('a call of a local that a local of an inner block shadows with a number', () => {
+-    // The inner `f` holds `5`, not a function. The view read after the
+-    // blocks gives the same elements as the view read in the inner block.
++  test('a fixed numeric shadow refuses a call before a lazy view is created', () => {
++    // The inner f has a fixed number contract. Both read placements report
++    // the noncallable head instead of treating it as provisional inference.
+     const blocks = (read: string) =>
+       `let h = []; let r: any = 0; if true { let f = x => x + 1; if true { let f = 5; h = Map(x => f(x), Range(1, Infinity))${read} } }`;
+-    for (const debug of [false, true])
+-      expect(
+-        run(`${blocks('')}; ListFrom(Take(h, 2))`, debug)
+-      ).toEqual(run(`${blocks('; r = ListFrom(Take(h, 2))')}; r`, debug));
++    for (const debug of [false, true]) {
++      for (const source of [
++        `${blocks('')}; ListFrom(Take(h, 2))`,
++        `${blocks('; r = ListFrom(Take(h, 2))')}; r`,
++      ]) {
++        const ce = new ComputeEngine();
++        ce._debugBindings = debug;
++        const result = executeEpsil(ce, source);
++        expect(result.diagnostics.length).toBeGreaterThan(0);
++        expect(result.diagnostics.every(d => d.message[3] === 'expected-function')).toBe(true);
++      }
++    }
+   });
+ 
+   test('a value that nests tuples of a view', () => {
+diff --git a/test/compute-engine/product-of-reassigned-variable.test.ts b/test/compute-engine/product-of-reassigned-variable.test.ts
+index 56821aa83..7dfd86978 100644
+--- a/test/compute-engine/product-of-reassigned-variable.test.ts
++++ b/test/compute-engine/product-of-reassigned-variable.test.ts
+@@ -183,7 +183,7 @@ describe('The type of the Product of matrices that are not square', () => {
+       ['Declare', 'x', "'unknown'", ['List', m]],
+       ['Product', 'x'],
+     ]);
+-    expect(expr.type.toString()).toBe('matrix<integer^(2x3)>');
++    expect(expr.type.toString()).toBe('list<any> | number');
+     const value = expr.evaluate();
+     expect(value.toString()).toBe('[[1,2,3],[4,5,6]]');
+     expect(value.type.matches(expr.type)).toBe(true);
+@@ -196,7 +196,7 @@ describe('The type of the Product of matrices that are not square', () => {
+       ['Declare', 'x', "'unknown'", ['List', m, m]],
+       ['Product', 'x'],
+     ]);
+-    expect(expr.type.toString()).toBe('number');
++    expect(expr.type.toString()).toBe('list<any> | number');
+   });
+ 
+   // Elements of several shapes can multiply to a matrix: a 2x3 and a 3x2
+diff --git a/test/compute-engine/protocol-dispatch.test.ts b/test/compute-engine/protocol-dispatch.test.ts
+index fe3a0ee85..d2a501815 100644
+--- a/test/compute-engine/protocol-dispatch.test.ts
++++ b/test/compute-engine/protocol-dispatch.test.ts
+@@ -880,11 +880,11 @@ const r = Map(negated(_) * 10, [1, 2, 3])`
+     expect(e.box('r').evaluate().toString()).toBe('[-10,-20,-30]');
+     // An undecided receiver still DEFERS — symbolic, not an error.
+     const e2 = new ComputeEngine();
++    e2.declare('u', 'unknown');
+     run(
+       e2,
+       `protocol Negatable { function negated(self: Self) -> Self }
+ type number is Negatable { function negated(self) -> number { -self } }
+-let u
+ const s = negated(u) * 10`
+     );
+     expect(e2.box('s').evaluate().toString()).toBe('10negated(u)');
+diff --git a/test/compute-engine/tycho-item-332-block-let-literal-type.test.ts b/test/compute-engine/tycho-item-332-block-let-literal-type.test.ts
+index 7c883e4d8..39ceb142b 100644
+--- a/test/compute-engine/tycho-item-332-block-let-literal-type.test.ts
++++ b/test/compute-engine/tycho-item-332-block-let-literal-type.test.ts
+@@ -10,7 +10,7 @@ import { operands } from '../../src/math-json/utils';
+  *
+  * Two mechanisms are pinned here:
+  * 1. `canonicalBlock` hoists the type of a closed literal initial value,
+- *    widened through the assignment table (`let i = 1` is `integer`, not the
++ *    widened through the assignment table (`let i = 1` is `number`, not the
+  *    singleton `1`, so a loop condition is not folded).
+  * 2. A reference to a hoisted local from a NESTED block (an `if` branch, a
+  *    loop body) binds to the hoisted binding instead of declaring a second
+@@ -86,7 +86,7 @@ total`,
+     );
+   });
+ 
+-  test('a let counter hoists the tier integer, not the singleton literal type', () => {
++  test('a let counter has number contract, not the singleton literal type', () => {
+     // With `i` typed as the literal `1`, `i <= 3` would fold to `true` and the
+     // compiled loop would never end (or the sum would be wrong).
+     expectParity(
+@@ -99,22 +99,22 @@ while i <= 3 {
+ n`,
+       6
+     );
+-    expect(lastOperandType(`let i = 1\ni`)).toBe('integer');
++    expect(lastOperandType(`let i = 1\ni`)).toBe('number');
+     expect(lastOperandType(`let s = "ab"\ns`)).toBe('string');
+   });
+ 
+   test('the hoisted type is list-shaped after the first use and the assignment', () => {
+     expect(lastOperandType(`let xs = []\nxs = [...xs, 4]\nLength(xs)`)).toBe(
+-      'list<integer>'
++      'list<unknown>'
+     );
+     expect(
+       lastOperandType(`let xs = []\nif true { xs = [...xs, 4] }\nLength(xs)`)
+-    ).toBe('list<integer>');
++    ).toBe('list<unknown>');
+     expect(
+       lastOperandType(
+         `let xs = []\nwhile false { xs = [...xs, 4] }\nLength(xs)`
+       )
+-    ).toBe('list<integer>');
++    ).toBe('list<unknown>');
+   });
+ 
+   test('a nested-block reference binds to the hoisted binding, not a copy', () => {
+@@ -133,7 +133,7 @@ n`,
+     walk(expr.ops![1]);
+     expect(inner).toBeDefined();
+     expect(inner!.valueDefinition).toBe(outer.valueDefinition);
+-    expect(outer.valueDefinition?.type.toString()).toBe('list<integer>');
++    expect(outer.valueDefinition?.type.toString()).toBe('list<unknown>');
+   });
+ 
+   test('a declared type on the let still wins over the literal (Tycho item 235)', () => {
+@@ -144,14 +144,14 @@ n`,
+     ).toBe('list<number>');
+   });
+ 
+-  test('a scalar literal widens by the assignment table: real after a float assignment', () => {
++  test('a scalar contract remains number after a float assignment', () => {
+     const ce = new ComputeEngine();
+     const expr = box(ce, `let x = 1\nx = x + 0.5\nx`);
+     expect(expr.evaluate().json).toEqual(1.5);
+-    expect(expr.ops![2].type.toString()).toBe('real');
++    expect(expr.ops![2].type.toString()).toBe('number');
+   });
+ 
+-  test('a let whose value mentions a symbol is left unknown until it runs', () => {
++  test('a let initializer can read a captured symbol without executing it', () => {
+     // The value is not a closed literal, so nothing is hoisted from it: the
+     // binding must not be typed by binding `y` in the enclosing scope before
+     // the block's own locals exist.
+diff --git a/test/compute-engine/tycho-item-332-compiled-program-parity.test.ts b/test/compute-engine/tycho-item-332-compiled-program-parity.test.ts
+index 4d50700d9..eee7c12a0 100644
+--- a/test/compute-engine/tycho-item-332-compiled-program-parity.test.ts
++++ b/test/compute-engine/tycho-item-332-compiled-program-parity.test.ts
+@@ -211,8 +211,8 @@ function operandTypeInSum(
+   return { type, value: expr.evaluate().toString() };
+ }
+ 
+-describe('Evidence read again after the block is canonicalized (Tycho item 332)', () => {
+-  test('the leaves of a loop pattern whose collection loses its tuple type are widened to unknown', () => {
++describe('Fixed binding contracts in loops (Tycho item 332)', () => {
++  test('loop leaves retain the initialized collection element contracts', () => {
+     expect(
+       operandTypeInSum(
+         `let ps = [(1, 2)]
+@@ -227,7 +227,7 @@ while n < 2 {
+ s`,
+         'q'
+       )
+-    ).toEqual({ type: 'unknown', value: '8' });
++    ).toEqual({ type: 'number', value: '8' });
+   });
+ 
+   // The element type is a union of two tuple types. Each arm is read and
+@@ -272,7 +272,7 @@ s`,
+     ).toEqual({ type: 'number', value: '4.5' });
+   });
+ 
+-  test('a destructuring assignment whose value loses its tuple type widens its leaves to unknown', () => {
++  test('a destructuring assignment preserves the initialized leaf contracts', () => {
+     expect(
+       operandTypeInSum(
+         `let ps = [(1, 2)]
+@@ -289,7 +289,7 @@ while n < 2 {
+ s`,
+         'b'
+       )
+-    ).toEqual({ type: 'unknown', value: '6' });
++    ).toEqual({ type: 'number', value: '6' });
+   });
+ 
+   // A destructuring `let` records the type of each leaf, as a destructuring
+@@ -309,7 +309,7 @@ while n < 2 {
+ s`,
+         'b'
+       )
+-    ).toEqual({ type: 'real', value: '4.5' });
++    ).toEqual({ type: 'number', value: '4.5' });
+   });
+ 
+   // The leaves of a destructuring `let` are block locals: a leaf named `i`
+diff --git a/test/compute-engine/tycho-row-426-apply-lambda-type.test.ts b/test/compute-engine/tycho-row-426-apply-lambda-type.test.ts
+index e64745589..12a561d23 100644
+--- a/test/compute-engine/tycho-row-426-apply-lambda-type.test.ts
++++ b/test/compute-engine/tycho-row-426-apply-lambda-type.test.ts
+@@ -656,11 +656,18 @@ describe('row 426 second review: a lazy collection over a reassigned parameter',
+     ['Reverse', ['Reverse', 'a'], '[8,7]'],
+   ] as [string, Json, string][]) {
+     test(label, () => {
+-      const literal = F(['Block', ['Assign', 'a', ['List', 7, 8]], last], 'a');
++      const body = ['Block', ['Assign', 'a', ['List', 7, 8]], last];
++      const unannotated = F(body, 'a');
++      const literal = F(body, typed('a', 'list<number>'));
+       const ce = rowEngine();
+       ce.declare('q', 'function');
+       ce.assign('q', ce.box(literal));
+       ce.assign('M', ce.box(['List', 1.5, -2, 0.25]));
++      // A written unannotated parameter is unknown and maps over the input.
++      // The annotation preserves whole-list binding for the lazy-view control.
++      expect(ce.box(['Apply', unannotated, 'M']).evaluate().toString()).toBe(
++        `[${expected},${expected},${expected}]`
++      );
+       expect(ce.box(['Apply', literal, 'M']).evaluate().toString()).toBe(
+         expected
+       );
+diff --git a/test/epsil/ce-1303-while-undecided-condition.test.ts b/test/epsil/ce-1303-while-undecided-condition.test.ts
+index 580fc9303..af3a7876c 100644
+--- a/test/epsil/ce-1303-while-undecided-condition.test.ts
++++ b/test/epsil/ce-1303-while-undecided-condition.test.ts
+@@ -147,12 +147,10 @@ describe('CE-1303: while with an undecided condition', () => {
+ 
+   test('a condition undecided on the first turn ends the loop before the body runs', () => {
+     // A condition must be decided at each turn: the body does not run to
+-    // give its name a value. In Epsil, `let x` with no value is a static
+-    // error. Program continues to the loop, which reports its undecided
+-    // condition before running the body; the host loop has the same guard.
++    // give its name a value. Source let reserves an uninitialized slot;
++    // the read in the condition fails before the body can initialize it.
+     expect(run('let x\nwhile x != 5 { x = 5 }\nx').diagnostics).toEqual([
+-      'static-type-error | `x` is declared without a value: write `let x = …` | let x | declaration-without-value',
+-      'runtime-error | incompatible type: boolean at `x != 5` | in If argument 1 | incompatible-type',
++      'runtime-error | `x` is read before it has been given a value | in NotEqual argument 1, in If argument 1 | read-before-initialization',
+     ]);
+     const ce = engine();
+     ce.declare('x', 'integer');
+diff --git a/test/epsil/ce-1389-destructure-unevaluated-tuple.test.ts b/test/epsil/ce-1389-destructure-unevaluated-tuple.test.ts
+index 427bdc729..650f7bda4 100644
+--- a/test/epsil/ce-1389-destructure-unevaluated-tuple.test.ts
++++ b/test/epsil/ce-1389-destructure-unevaluated-tuple.test.ts
+@@ -23,7 +23,9 @@ describe('CE-1389: destructuring a value that did not evaluate to a tuple', () =
+   });
+ 
+   test('a symbol with no value gets no `N` hint', () => {
+-    const { diagnostics } = run('let p: tuple<real, real>\nlet (a, b) = p\na');
++    const ce = new ComputeEngine();
++    ce.declare('p', 'tuple<real, real>');
++    const { diagnostics } = executeEpsil(ce, 'let (a, b) = p\na');
+     const error = diagnostics.find((d) => d.message[0] === 'runtime-error')!;
+     expect(error.message[3]).toBe('unevaluated-tuple');
+     expect(error.message[1]).toBe(
+diff --git a/test/epsil/corpus/exercism/isbn-verifier.epsil b/test/epsil/corpus/exercism/isbn-verifier.epsil
+index 377987442..b76c4a089 100644
+--- a/test/epsil/corpus/exercism/isbn-verifier.epsil
++++ b/test/epsil/corpus/exercism/isbn-verifier.epsil
+@@ -1,7 +1,7 @@
+ // ISBN-10 check: weighted sum of digits, X allowed as the last check digit.
+ digitOf(c, i) = 10 if c == "X" && i == 10 else (numberFrom(String(c)) if "0" <= c <= "9" else -1)
+ isValidIsbn(s) = do {
+-  let cs = filter(characters(s), c => c != "-")
++  let cs: list<character> = filter(characters(s), c => c != "-")
+   if length(cs) != 10 { false }
+   else {
+     let ds = map(p => digitOf(p[1], p[2]), zip(cs, 1..10))
+diff --git a/test/epsil/corpus/exercism/run-length-encoding.epsil b/test/epsil/corpus/exercism/run-length-encoding.epsil
+index 3c32ed4dc..88eaf572d 100644
+--- a/test/epsil/corpus/exercism/run-length-encoding.epsil
++++ b/test/epsil/corpus/exercism/run-length-encoding.epsil
+@@ -2,7 +2,7 @@
+ encode(s) = do {
+   let out = ""
+   let run = 0
+-  let prev = ""
++  let prev: string | character = ""
+   for c in characters(s) {
+     if c == prev { run = run + 1 }
+     else {
+diff --git a/test/epsil/function-body-error-location.test.ts b/test/epsil/function-body-error-location.test.ts
+index 40a2b900a..ab136a139 100644
+--- a/test/epsil/function-body-error-location.test.ts
++++ b/test/epsil/function-body-error-location.test.ts
+@@ -61,7 +61,7 @@ describe('an error in the body of a called function', () => {
+       'let v = y + h(1, g("a"))',
+       'g("a")',
+     ],
+-    ['function g(x) { Ln(x) + 1 }', 'let v = 0\nv = y + g("a")', 'g("a")'],
++    ['function g(x) { Ln(x) + 1 }', 'let v = 0\nv = y + g("a")', 'v = y + g("a")'],
+   ])('%s, %s underlines %s', (fn, stmt, expected) => {
+     expect(underlines(`${fn}\nlet y = 5\n${stmt}\n0`)).toEqual([expected]);
+   });
+diff --git a/test/epsil/iterate-list-with-failed-cell.test.ts b/test/epsil/iterate-list-with-failed-cell.test.ts
+index b1bad5739..28c54bb6e 100644
+--- a/test/epsil/iterate-list-with-failed-cell.test.ts
++++ b/test/epsil/iterate-list-with-failed-cell.test.ts
+@@ -99,14 +99,17 @@ describe('EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER', () => {
+     ]);
+   });
+ 
+-  test('a header whose failed cell ends the loop is reported once', () => {
+-    // The body uses the index, so the failed cell makes an `Error` that ends
+-    // the loop. That `Error` is the value of the top-level statement, and
+-    // is the same failure: it is not reported a second time.
++  test('a failed cell and its refused numeric store are distinct diagnostics', () => {
++    // The failed cell is reported once; fixed numeric admission separately
++    // reports the refused store and retains the preceding value.
+     for (const loopBody of ['{ n = n + x }', '{ n = h(x) + 1 }']) {
+       const body = `function h(y) { y * 2 }\nlet n = 0\nfor x in ${LITERAL} ${loopBody}\nn`;
+       const r = report(body);
+-      expect(r.at).toEqual([LET_XS, atText(body, LITERAL)]);
++      expect(r.at).toEqual([
++        LET_XS,
++        atText(body, LITERAL),
++        atText(body, `for x in ${LITERAL} ${loopBody}`),
++      ]);
+       expect(r.messages[1]).toEqual(r.messages[0]);
+     }
+   });
+@@ -119,7 +122,11 @@ describe('EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER', () => {
+     const at = result.diagnostics.map(
+       (d) => `${String(d.message[0])} ${source.slice(d.range[0], d.range[1])}`
+     );
+-    expect(at).toEqual(['static-type-error "a"', 'runtime-error "a"']);
++    expect(at).toEqual([
++      'static-type-error "a"',
++      'runtime-error "a"',
++      'runtime-error for x in [1, g("a"), 3] { s = s + x }',
++    ]);
+   });
+ 
+   test('a header that is a variable is not reported a second time', () => {
+@@ -202,9 +209,9 @@ describe('EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER', () => {
+     expect(r.at).toEqual([LET_XS, `${xInBody}:x`]);
+   });
+ 
+-  test('an operation on the failed cell gives the error', () => {
++  test('a failed operation cannot replace a finalized numeric slot', () => {
+     const r = run('let t = 0\nfor x in xs { t = t + x }\nt');
+-    expect(r.value).toBe(ERR);
++    expect(r.value).toBe('1');
+   });
+ 
+   test('map applies the function to each cell', () => {
+diff --git a/test/epsil/member-call.test.ts b/test/epsil/member-call.test.ts
+index c65d20142..2cf9271b7 100644
+--- a/test/epsil/member-call.test.ts
++++ b/test/epsil/member-call.test.ts
+@@ -263,7 +263,7 @@ describe('what the dot does NOT do', () => {
+   test('a library function is not reached: `xs.Sort()`', () => {
+     const r = run('let xs = [3, 1, 2]; xs.Sort()');
+     expect(r.value).toContain(
+-      'ErrorCode("dot-call-not-a-protocol-function", "Sort", "vector<integer^3>")'
++      'ErrorCode("dot-call-not-a-protocol-function", "Sort", "list<number>")'
+     );
+     // The refusal is a canonicalization error, so the static check reports
+     // it with the two spellings that work.
+diff --git a/test/epsil/program.test.ts b/test/epsil/program.test.ts
+index f5437fea7..3f6622382 100644
+--- a/test/epsil/program.test.ts
++++ b/test/epsil/program.test.ts
+@@ -73,12 +73,16 @@ describe('Program uses one sequence on every execution route', () => {
+     expect(ce.box(['Divide', 'c', 'c']).json).toBe(1);
+   });
+ 
+-  test('an inferred persistent carrier retains failed values under Block admission', () => {
++  test('fixed contracts preserve the last valid value when a later store fails', () => {
+     const prefix = 'function g(x){1/x}; let xs=[1,g("a"),3]; ';
+     const list = executeEpsil(new ComputeEngine(), prefix + 'let ys=[]; for x in xs {ys=[...ys,x+1]}; ys');
+     expect(list.value.toString()).toBe('[2,Error(ErrorCode("incompatible-type", "number", "string"), "a"),4]');
+     const total = executeEpsil(new ComputeEngine(), prefix + 'let t=0; for x in xs {t=t+x}; t');
+-    expect(total.value.operator).toBe('Error');
++    expect(total.value.json).toBe(1);
++    expect(total.diagnostics.map((d) => [d.message[0], d.message[3]])).toEqual([
++      ['runtime-error', 'incompatible-type'],
++      ['runtime-error', 'incompatible-type'],
++    ]);
+     expect(executeEpsil(new ComputeEngine(), 'let t:integer=0; t="a"; t').value.json).toBe(0);
+   });
+ 
+@@ -311,7 +315,7 @@ describe('stable caller-scope Program variables', () => {
+   test('a refused declaration cannot change an actual Block binding type', () => {
+     const ce = new ComputeEngine();
+     const block = ce.box(['Block', ['Declare', 'x', { dict: { value: 1 } }], ['Declare', 'x', { dict: { value: { str: 'a' } } }], 'x']);
+-    expect(block.ops[block.ops.length - 1].type.toString()).toBe('integer');
++    expect(block.ops[block.ops.length - 1].type.toString()).toBe('number');
+   });
+ 
+   test('a prepared typed const function initializes on each synchronous run', () => {
+diff --git a/test/epsil/static-declared-type.test.ts b/test/epsil/static-declared-type.test.ts
+index 8bea5092a..1b64b5461 100644
+--- a/test/epsil/static-declared-type.test.ts
++++ b/test/epsil/static-declared-type.test.ts
+@@ -96,10 +96,7 @@ describe('EPSIL STATIC DECLARED-TYPE CHECK — unproven stays silent', () => {
+ 
+   test('a declaration without an annotation is skipped', () => {
+     expect(staticErrors('let z = 42\nz')).toHaveLength(0);
+-    // A declaration without a value is an error of its own, not a type
+-    // mismatch.
+-    expect(staticErrors('let z: integer\n1')).toEqual([
+-      '`z` is declared without a value: write `let z = …`',
+-    ]);
++    // Reserving a typed slot without reading it is valid.
++    expect(staticErrors('let z: integer\n1')).toEqual([]);
+   });
+ });
+diff --git a/test/epsil/type-variables-epsil.test.ts b/test/epsil/type-variables-epsil.test.ts
+index d353d0dc6..2ad5e3b58 100644
+--- a/test/epsil/type-variables-epsil.test.ts
++++ b/test/epsil/type-variables-epsil.test.ts
+@@ -273,10 +273,9 @@ describe('EPSIL `where` ANNOTATIONS (D13: prefix-mode termination)', () => {
+       'g',
+       { str: '(T) -> boolean where T: (real) -> real' },
+     ]);
+-    // The annotation is a function type: without a `function g` statement
+-    // in the same block, the declaration needs a value.
++    // An unused uninitialized declaration is valid; reads still check the slot.
+     expect(run('let g: (T) -> boolean where T: (real) -> real').value).toBe(
+-      'Error(ErrorCode("declaration-without-value", "g", "function"))'
++      '"Nothing"'
+     );
+   });
+ 
+diff --git a/test/compute-engine/compile-source-initialization-admission.test.ts b/test/compute-engine/compile-source-initialization-admission.test.ts
+new file mode 100644
+index 000000000..aa2863cc9
+--- /dev/null
++++ b/test/compute-engine/compile-source-initialization-admission.test.ts
+@@ -0,0 +1,81 @@
++import { ComputeEngine } from '../../src/compute-engine';
++import { compile } from '../../src/compile';
++import { parseEpsil, resolveLibraryNames } from '../../src/epsil';
++import type { MathJsonExpression } from '../../src/math-json/types';
++
++const silence = jest.spyOn(console, 'warn').mockImplementation(() => {});
++afterAll(() => silence.mockRestore());
++
++function box(source: string) {
++  const ce = new ComputeEngine();
++  const [program, diagnostics] = parseEpsil(source);
++  expect(diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
++  return ce.box(resolveLibraryNames(program, source, ce));
++}
++
++const UNINITIALIZED: MathJsonExpression = [
++  'Block',
++  ['Declare', 's', "'unknown'", 0],
++  ['Loop', ['Block', ['Declare', 'n', "'integer'"],
++    ['If', ['Greater', 'i', 3], ['Assign', 'n', 1]],
++    ['If', ['NotEqual', 'n', 1], ['Assign', 's', ['Add', 's', 'i']]]],
++    ['Element', 'i', ['Range', 1, 5]]],
++  's',
++];
++
++describe('source declarations require initialization before compilation', () => {
++  test.each(['javascript', 'glsl', 'interval-js'])('a nested loop declines on %s', (to) => {
++    const ce = new ComputeEngine();
++    expect(compile(ce.box(UNINITIALIZED), { to }).success).toBe(false);
++    let success = false;
++    try { success = compile(ce.box(UNINITIALIZED), { to, fallback: false }).success; }
++    catch { /* A strict target may throw its decline. */ }
++    expect(success).toBe(false);
++  });
++
++  test('IR also declines the source declaration', () => {
++    const ce = new ComputeEngine();
++    expect(compile(ce.box(UNINITIALIZED), { to: 'javascript', profile: 'ir' }).success).toBe(false);
++  });
++
++  test('a later straight-line write does not supply an initialization proof', () => {
++    const ce = new ComputeEngine();
++    const expr = ce.box(['Block', ['Declare', 'n', "'integer'"], ['Assign', 'n', 7], 'n']);
++    expect(expr.evaluate().re).toBe(7);
++    expect(compile(expr, { to: 'javascript' }).success).toBe(false);
++  });
++
++  test('the initialized loop control still compiles with the right value', () => {
++    const source = JSON.parse(JSON.stringify(UNINITIALIZED)) as MathJsonExpression[];
++    const loop = source[2] as MathJsonExpression[];
++    const body = loop[1] as MathJsonExpression[];
++    (body[1] as MathJsonExpression[]).push(0);
++    const ce = new ComputeEngine();
++    const result = compile(ce.box(source), { to: 'javascript', fallback: false });
++    expect(result.success).toBe(true);
++    expect(result.run?.({})).toBe(6);
++  });
++
++  test('a source signature paired with its same-scope function is initialized', () => {
++    const expr = box('let f: (number) -> number\nfunction f(x) { x+1 }\nf(2)');
++    const result = compile(expr, { to: 'javascript' });
++    expect(result.run?.({})).toBe(3);
++  });
++
++  test('destructuring lowering initializes its generated temporary slots', () => {
++    const ce = new ComputeEngine();
++    const expr = ce.box(['Block', ['Declare', 'a', "'unknown'", 2],
++      ['Declare', 'b', "'unknown'", 3],
++      ['Assign', ['Tuple', 'a', 'b'], ['Tuple', 'b', 'a']],
++      ['Add', ['Multiply', 'a', 10], 'b']]);
++    expect(expr.evaluate().re).toBe(32);
++    const result = compile(expr, { to: 'javascript' });
++    expect(result.run?.({})).toBe(32);
++  });
++
++  test('recursive list execution preserves initialized source locals', () => {
++    const expr = box('function f(n, acc: list) { let out = acc; if n > 0 { out = [...out, n]; out = f(n - 1, out) }; out }\nf(3, [])');
++    const result = compile(expr, { to: 'javascript' });
++    expect(result.run?.({})).toEqual([3, 2, 1]);
++  });
++});
+diff --git a/test/compute-engine/fixed-unknown-matrix-order.test.ts b/test/compute-engine/fixed-unknown-matrix-order.test.ts
+new file mode 100644
+index 000000000..9c67e6d1e
+--- /dev/null
++++ b/test/compute-engine/fixed-unknown-matrix-order.test.ts
+@@ -0,0 +1,31 @@
++import { ComputeEngine } from '../../src/compute-engine';
++import { compile } from '../../src/compute-engine/compilation/compile-expression';
++import { parseEpsil } from '../../src/epsil/parse-epsil';
++import { resolveLibraryNames } from '../../src/epsil/resolve-library-names';
++
++const prepared = (ce: ComputeEngine, source: string) =>
++  ce.box(resolveLibraryNames(parseEpsil(source)[0]!, source, ce));
++
++test('fixed unknown matrix factors keep their noncommutative order', () => {
++  const ce = new ComputeEngine();
++  const source = 'let A:unknown=[[1,2],[0,1]]; let B:unknown=[[1,0],[3,1]]; B*A';
++  const e = prepared(ce, source);
++  expect(e.evaluate().json).toEqual(['List', ['List',1,2], ['List',3,7]]);
++  expect(ce.symbol('A').type.toString()).toBe('unknown');
++  expect(ce.symbol('B').type.toString()).toBe('unknown');
++});
++
++test('the public compiler preserves the SVD reconstruction or declines', () => {
++  const ce = new ComputeEngine();
++  const e = prepared(ce, 'let A=[[1,2],[3,4]]; let (U,S,V)=N(svd(A)); U*S*transpose(V)');
++  const compiled = compile(e, {to:'javascript'});
++  const result = compiled.run!({}) as number[][];
++  [[1, 2], [3, 4]].forEach((row, i) =>
++    row.forEach((x, j) => expect(result[i][j]).toBeCloseTo(x, 12))
++  );
++});
++
++test('legacy scalar symbols still have the ordinary canonical product order', () => {
++  const ce = new ComputeEngine();
++  expect(ce.box(['Multiply','z','a']).json).toEqual(['Multiply','a','z']);
++});
+diff --git a/test/epsil/initialization-contracts.test.ts b/test/epsil/initialization-contracts.test.ts
+new file mode 100644
+index 000000000..c64fd2420
+--- /dev/null
++++ b/test/epsil/initialization-contracts.test.ts
+@@ -0,0 +1,203 @@
++import { compile } from '../../src/compute-engine/compilation/compile-expression';
++import { ComputeEngine } from '../../src/compute-engine';
++import { parseEpsil } from '../../src/epsil/parse-epsil';
++import { resolveLibraryNames } from '../../src/epsil/resolve-library-names';
++import { executeEpsil, executeEpsilAsync } from '../../src/epsil/execute-epsil';
++
++// These controls pin observable behavior independently of inferred precision.
++describe('initialization contract semantic controls', () => {
++  test.each([
++    ['let a=3; let b=a+1; b', 4],
++    ['let x; x=1; x', 1],
++    ['let xs=[]; xs=[1,2]; xs', ['List', 1, 2]],
++    ['let xs:list<real>=[]; xs=[1,2.5]; xs', ['List', 1, 2.5]],
++    ['let x:integer=1; x="a"; x', 1],
++    ['const x=1; x=2; x', 1],
++    ['let x=1; let x=2; x', 1],
++    ['let a=h(1); function h(x){x+1}; a', 2],
++    ['let f=(x)=>x+1; let old=f; f=(x)=>x+2; [old(1),f(1)]', ['List', 2, 3]],
++    ['let xs=[1,2,3]; while let [h,...]=xs {xs=rest(xs)}; xs', ['Rest', ['Rest', ['Rest', ['List', 1, 2, 3]]]]],
++    ['let t=0; for x in [1,2,3] {t=t+x}; t', 6],
++    ['let x=1; do {let x=2; x}; x', 1],
++    ['let a="x"+1; 5', 5],
++  ])('%s', async (source, expected) => {
++    expect(executeEpsil(new ComputeEngine(), source).value.json).toEqual(expected);
++    expect((await executeEpsilAsync(new ComputeEngine(), source)).value.json).toEqual(expected);
++  });
++});
++
++describe('fixed initialization type contracts', () => {
++  test.each([
++    ['let x=1; x=2.5; x', 'x', 'number'],
++    ['let xs=[]; xs=[1,2]; xs', 'xs', 'list<unknown>'],
++    ['let xs:list<real>=[]; xs=[1,2]; xs', 'xs', 'list<real>'],
++    ['let p=(1,[2,3]); p=(2.5,[4]); p', 'p', 'tuple<number, list<number>>'],
++    ['let x; x=1; x', 'x', 'number'],
++    ['let x; if true {x=1}; x', 'x', 'unknown'],
++    ['let f; if true {f=(x)=>x+1}; f(2)', 'f', 'unknown'],
++    ['let x; for k in [1] {x=1}; x', 'x', 'unknown'],
++    ['let x=t; x=1; x', 'x', 'unknown'],
++    ['let x:unknown=1; x=2; x', 'x', 'unknown'],
++    ['let x:unknown; x=1; x', 'x', 'unknown'],
++    ['let xs:list<unknown>=[]; xs=[1,2]; xs', 'xs', 'list<unknown>'],
++    ['let f=(x)=>x+1; f=(x)=>"a"; f=(x)=>x+2; f', 'f', 'function'],
++  ])('%s retains its prepared type across execution', (source, name, expected) => {
++    const ce = new ComputeEngine();
++    const ast = ce.box(resolveLibraryNames(parseEpsil(source)[0]!, source, ce));
++    const before = ce.symbol(name).type.toString();
++    ast.evaluate();
++    const evaluated = ce.symbol(name).type.toString();
++    ast.N();
++    expect({ before, evaluated, numeric: ce.symbol(name).type.toString() }).toEqual({before: expected, evaluated: expected, numeric: expected});
++  });
++
++  test.each([
++    ['let x; x', ['Error', ['ErrorCode', "'read-before-initialization'", "'x'"]]],
++    ['let x=1; let f=()=>do {x=x+1; x}; [f(),x]', ['List',2,2]],
++    ['let p=(1,2); p=(3.5,4); p', ['Tuple',3.5,4]],
++    ['let f=(x)=>x+1; f=7; f(1)', 2],
++  ])('%s preserves value behavior', (source, expected) => {
++    expect(executeEpsil(new ComputeEngine(), source).value.json).toEqual(expected);
++  });
++});
++
++describe('initialization boundaries', () => {
++  test.each([
++    ['let x:real; x=1; x', 1],
++    ['let x; if false {x=1}; x', ['Error', ['ErrorCode', "'read-before-initialization'", "'x'"]]],
++    ['let x; let f=()=>x; let before=f(); x=1; before', ['Error', ['ErrorCode', "'read-before-initialization'", "'x'"]]],
++    ['let x; x=1; let f=()=>x; f()', 1],
++    ['let f=(x,k=2)=>x+k; f(3)', 5],
++    ['let f=(x,k=2)=>x+k; f(k:4,x:3)', 7],
++    ['let f; if false {f=(x)=>x+1}; f(2)', ['Error', ['ErrorCode', "'read-before-initialization'", "'f'"]]],
++    ['let f; if true {f=(x)=>x+1}; f(2)', 3],
++    ['let r; r=[[1,2],[3,4]][7]; r=[5,6]; r', ['List',5,6]],
++    ['let f=(x,y)=>x+y; let g=f(2); g(3)', 5],
++    ['let f=(x:integer)=>x+1; f(1.5)', ['Error', ['ErrorCode', "'incompatible-type'", "'integer'", "'1.5'"], 1.5, ['ErrorTrace', ['ErrorFrame', "'f'", 1]]]],
++  ])('%s', async (source, expected) => {
++    expect(executeEpsil(new ComputeEngine(), source).value.json).toEqual(expected);
++    expect((await executeEpsilAsync(new ComputeEngine(), source)).value.json).toEqual(expected);
++  });
++
++  test('a typed empty slot keeps its annotation', () => {
++    const ce = new ComputeEngine();
++    const source = 'let x:real; x=1; x';
++    const e = ce.box(resolveLibraryNames(parseEpsil(source)[0]!, source, ce));
++    expect(ce.symbol('x').type.toString()).toBe('real');
++    expect(e.evaluate().json).toBe(1);
++    expect(ce.symbol('x').type.toString()).toBe('real');
++  });
++
++  test('fixed types also apply to Block activations', () => {
++    const ce = new ComputeEngine();
++    const e = ce.box(['Block', ['Declare', 'x', "'unknown'", 1], ['Assign', 'x', 2.5], 'x']);
++    expect(e.type.toString()).toBe('number');
++    expect(e.evaluate().json).toBe(2.5);
++    expect(e.N().json).toBe(2.5);
++    expect(e.type.toString()).toBe('number');
++  });
++});
++
++
++describe('compilation reads initialization contracts', () => {
++  test.each([
++    ['let x:real; if false {x=1}; x', undefined],
++    ['let x:real; for k in [] {x=1}; x', undefined],
++    ['let x; x=1; x+2', 3],
++    ['let xs=[]; xs=[1,2]; length(xs)', 2],
++    ['let x:real=1; x=2.5; x+1', 3.5],
++  ])('%s returns the interpreter value or declines', (source, expected) => {
++    const ce = new ComputeEngine();
++    const e = ce.box(resolveLibraryNames(parseEpsil(source)[0]!, source, ce));
++    let result: ReturnType<typeof compile> | undefined;
++    try { result = compile(e, {to: 'javascript', fallback: false}); } catch { /* A refusal may throw with fallback disabled. */ }
++    if (expected === undefined) {
++      expect(result?.success ?? false).toBe(false);
++      expect(compile(e, {to: 'javascript'}).success).toBe(false);
++    }
++    else if (result?.success) expect(result.run!({})).toEqual(expected);
++  });
++});
++
++
++test('a constant callable reports its refused write once', () => {
++  const result = executeEpsil(new ComputeEngine(), 'const k=(n)=>n+1; k=(s)=>s; k(1)');
++  expect(result.value.json).toBe(2);
++  expect(result.diagnostics.map((d) => d.message[0])).toEqual(['static-type-error']);
++});
++
++
++describe('deferred initialization does not follow runtime calls', () => {
++  test.each([
++    ['function init() scope {x="a";x}; let x; let y=init(); x=1; y', 'y', "'a'"],
++    ['function init() scope {x="a";x}; let x; x=init(); x', 'x', "'a'"],
++    ['function init() scope {x="a";x}; let x; x=[init()]; x', 'x', ['List', "'a'"]],
++  ])('%s', async (source, resultName, expected) => {
++    const ce = new ComputeEngine();
++    const e = ce.box(resolveLibraryNames(parseEpsil(source)[0]!, source, ce));
++    expect(ce.symbol('x').type.toString()).toBe('unknown');
++    expect(e.evaluate().json).toEqual(expected);
++    expect(ce.symbol('x').type.toString()).toBe('unknown');
++    expect(ce.symbol(resultName).evaluate().json).toEqual(expected);
++    expect((await executeEpsilAsync(new ComputeEngine(), source)).value.json).toEqual(expected);
++  });
++
++  test.each([
++    ['let x; x=1; x', 'number', 1],
++    ['let x; let y=2; x=1; x', 'number', 1],
++    ['let x; x=1+2; x', 'unknown', 3],
++  ])('%s uses only direct initialization evidence', (source, type, value) => {
++    const ce = new ComputeEngine();
++    const e = ce.box(resolveLibraryNames(parseEpsil(source)[0]!, source, ce));
++    expect(ce.symbol('x').type.toString()).toBe(type);
++    expect(e.evaluate().json).toEqual(value);
++  });
++});
++
++
++test('a deferred slot keeps its initialized state under a value shield', () => {
++  const ce = new ComputeEngine();
++  const value = ce.box(['Block', ['Declare', 'x'], ['Assign', 'x', 1],
++    ['HoldValues', ['Add', 'x', 1], 'x']]);
++  expect(value.evaluate().toString()).toBe('x + 1');
++  const callable = ce.box(['Block', ['Declare', 'f'], ['Assign', 'f', ['Function', 1]],
++    ['HoldValues', ['f'], 'f']]);
++  expect(callable.evaluate().toString()).toBe('f()');
++});
++
++
++test('a mapped partial application does not acquire a scalar callable contract', () => {
++  const ce = new ComputeEngine();
++  const value = ce.box(['Block',
++    ['Declare', 'fs', "'unknown'", ['Apply', ['Function', ['Add','x','y'],'x','y'], ['List',1,2]]],
++    'fs']);
++  const functions = [...value.evaluate().each()];
++  expect(functions).toHaveLength(2);
++  expect(functions.map((fn) => ce.function('Apply', [fn, ce.number(3)]).evaluate().json)).toEqual([4,5]);
++});
++
++
++describe('written bare parameters keep an unknown contract', () => {
++  test.each([
++    [['Add','x',1], ['Assign','x',['List',1,2]], 'x'],
++    [['Assign','x',['List',1,2]], ['Add','x',1], 'x'],
++  ])('list writes do not inherit a numeric use requirement: %j', (...statements) => {
++    const ce = new ComputeEngine();
++    const fn = ce.box(['Function', ['Block', ...statements], 'x']);
++    const type = fn.type.type;
++    expect(typeof type).toBe('object');
++    if (typeof type === 'object' && type.kind === 'signature') {
++      expect(type.args?.[0].type).toBe('unknown');
++      expect(type.result).toBe('unknown');
++    }
++    expect(ce.function('Apply', [fn, ce.number(3)]).evaluate().json).toEqual(['List',1,2]);
++    expect(compile(fn, {to:'javascript'}).success).toBe(false);
++  });
++
++  test('a numeric write still executes without a numeric parameter claim', () => {
++    const ce = new ComputeEngine();
++    const fn = ce.box(['Function', ['Block', ['Add','x',1], ['Assign','x',2], 'x'], 'x']);
++    expect(ce.function('Apply', [fn, ce.number(3)]).evaluate().json).toBe(2);
++    expect(fn.type.toString()).toContain('unknown');
++  });
++});

@@ -99,14 +99,17 @@ describe('EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER', () => {
     ]);
   });
 
-  test('a header whose failed cell ends the loop is reported once', () => {
-    // The body uses the index, so the failed cell makes an `Error` that ends
-    // the loop. That `Error` is the value of the top-level statement, and
-    // is the same failure: it is not reported a second time.
+  test('a failed cell and its refused numeric store are distinct diagnostics', () => {
+    // The failed cell is reported once; fixed numeric admission separately
+    // reports the refused store and retains the preceding value.
     for (const loopBody of ['{ n = n + x }', '{ n = h(x) + 1 }']) {
       const body = `function h(y) { y * 2 }\nlet n = 0\nfor x in ${LITERAL} ${loopBody}\nn`;
       const r = report(body);
-      expect(r.at).toEqual([LET_XS, atText(body, LITERAL)]);
+      expect(r.at).toEqual([
+        LET_XS,
+        atText(body, LITERAL),
+        atText(body, `for x in ${LITERAL} ${loopBody}`),
+      ]);
       expect(r.messages[1]).toEqual(r.messages[0]);
     }
   });
@@ -119,7 +122,11 @@ describe('EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER', () => {
     const at = result.diagnostics.map(
       (d) => `${String(d.message[0])} ${source.slice(d.range[0], d.range[1])}`
     );
-    expect(at).toEqual(['static-type-error "a"', 'runtime-error "a"']);
+    expect(at).toEqual([
+      'static-type-error "a"',
+      'runtime-error "a"',
+      'runtime-error for x in [1, g("a"), 3] { s = s + x }',
+    ]);
   });
 
   test('a header that is a variable is not reported a second time', () => {
@@ -202,9 +209,9 @@ describe('EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER', () => {
     expect(r.at).toEqual([LET_XS, `${xInBody}:x`]);
   });
 
-  test('an operation on the failed cell gives the error', () => {
+  test('a failed operation cannot replace a finalized numeric slot', () => {
     const r = run('let t = 0\nfor x in xs { t = t + x }\nt');
-    expect(r.value).toBe(ERR);
+    expect(r.value).toBe('1');
   });
 
   test('map applies the function to each cell', () => {

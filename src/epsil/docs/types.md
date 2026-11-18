@@ -160,13 +160,13 @@ binding to a real — inference follows the values, and asks no questions.
 
 ### 4. When there is nothing to infer from
 
-An empty collection says nothing about what will go into it, so inference
-starts at the bottom of the lattice:
+An empty initializer establishes `list<unknown>` for a mutable binding.
+Later assignments do not refine its element contract:
 
 ```epsil-live
 let xs = []
 type(xs)
-// ➔ TypeFrom("list<never>")
+// ➔ TypeFrom("list<unknown>")
 ```
 
 Say what you mean instead:
@@ -177,16 +177,17 @@ type(xs)
 // ➔ TypeFrom("list<integer>")
 ```
 
-The same applies to a name declared without an initializer (`let x: real`) and
-to a function parameter that the body never constrains.
+An annotation also fixes a contract before a runtime value is available
+(`let x: real`). An unannotated declaration without an identifiable straight-line
+initialization remains `unknown`. A read before initialization is an error.
 
 ### 5. When the inferred type is not what you meant
 
-Inference is a guess from evidence, and a guess can be narrower or wider than
-your intent — a variable that happens to start at `0` but will hold a fraction,
-a parameter you intend as `complex` though the body only ever adds. An
-annotation is a commitment: it is never silently revised, so it pins the type
-where the guess would have drifted.
+Mutable bindings keep the contract inferred from their initialization. Numeric
+initializers establish `number`; lists erase fixed lengths and widen their
+elements. An annotation supplies a different contract, such as `real` or
+`list<integer>`. Later assignments validate against that contract without
+changing it.
 
 ## Where an annotation goes
 

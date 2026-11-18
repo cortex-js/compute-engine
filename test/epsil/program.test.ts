@@ -73,12 +73,16 @@ describe('Program uses one sequence on every execution route', () => {
     expect(ce.box(['Divide', 'c', 'c']).json).toBe(1);
   });
 
-  test('an inferred persistent carrier retains failed values under Block admission', () => {
+  test('fixed contracts preserve the last valid value when a later store fails', () => {
     const prefix = 'function g(x){1/x}; let xs=[1,g("a"),3]; ';
     const list = executeEpsil(new ComputeEngine(), prefix + 'let ys=[]; for x in xs {ys=[...ys,x+1]}; ys');
     expect(list.value.toString()).toBe('[2,Error(ErrorCode("incompatible-type", "number", "string"), "a"),4]');
     const total = executeEpsil(new ComputeEngine(), prefix + 'let t=0; for x in xs {t=t+x}; t');
-    expect(total.value.operator).toBe('Error');
+    expect(total.value.json).toBe(1);
+    expect(total.diagnostics.map((d) => [d.message[0], d.message[3]])).toEqual([
+      ['runtime-error', 'incompatible-type'],
+      ['runtime-error', 'incompatible-type'],
+    ]);
     expect(executeEpsil(new ComputeEngine(), 'let t:integer=0; t="a"; t').value.json).toBe(0);
   });
 
@@ -311,7 +315,7 @@ describe('stable caller-scope Program variables', () => {
   test('a refused declaration cannot change an actual Block binding type', () => {
     const ce = new ComputeEngine();
     const block = ce.box(['Block', ['Declare', 'x', { dict: { value: 1 } }], ['Declare', 'x', { dict: { value: { str: 'a' } } }], 'x']);
-    expect(block.ops[block.ops.length - 1].type.toString()).toBe('integer');
+    expect(block.ops[block.ops.length - 1].type.toString()).toBe('number');
   });
 
   test('a prepared typed const function initializes on each synchronous run', () => {

@@ -9,8 +9,7 @@
  * the literal is complete. Without the event, `G` below kept the signature
  * `-> unknown` that it was given while `F` was being derived.
  *
- * The same write does not replace the type that an assignment in the body
- * gives a parameter (the second group).
+ * Written unannotated parameters keep an unknown contract (the second group).
  */
 import { ComputeEngine } from '../../src/compute-engine';
 
@@ -62,10 +61,9 @@ describe('D18: THE STATE EVENT AT THE END OF THE BOXING OF A LITERAL', () => {
   );
 });
 
-// The record of the uses of a parameter is not written over the type that
-// the assignments in the body give it (`_assignmentEvidence`): an
-// assignment replaces a type that only uses gave.
-describe('D18: THE END-OF-LITERAL WRITE KEEPS ASSIGNMENT EVIDENCE', () => {
+// A written unannotated parameter remains unknown: neither an assignment
+// nor a use supplies its finalized contract.
+describe('D18: WRITTEN UNANNOTATED PARAMETERS REMAIN UNKNOWN', () => {
   test('a use before the assignment', () => {
     const ce = new ComputeEngine();
     const f = ce.box([
@@ -74,7 +72,7 @@ describe('D18: THE END-OF-LITERAL WRITE KEEPS ASSIGNMENT EVIDENCE', () => {
       'x',
     ] as never);
     expect(f.type.toString()).toBe(
-      '(x: vector<integer^2>) -> vector<integer^2>'
+      '(x: unknown) -> unknown'
     );
     expect(
       ce
@@ -91,7 +89,7 @@ describe('D18: THE END-OF-LITERAL WRITE KEEPS ASSIGNMENT EVIDENCE', () => {
       ['Block', ['Assign', 'x', ['List', 1, 2]], ['Add', 'x', 1], 'x'],
       'x',
     ] as never);
-    expect(f.type.toString()).toBe('(x: unknown) -> number');
+    expect(f.type.toString()).toBe('(x: unknown) -> unknown');
     expect(
       ce
         .box(['Apply', f, 3] as never)

@@ -1,7 +1,7 @@
 // ISBN-10 check: weighted sum of digits, X allowed as the last check digit.
 digitOf(c, i) = 10 if c == "X" && i == 10 else (numberFrom(String(c)) if "0" <= c <= "9" else -1)
 isValidIsbn(s) = do {
-  let cs = filter(characters(s), c => c != "-")
+  let cs: list<character> = filter(characters(s), c => c != "-")
   if length(cs) != 10 { false }
   else {
     let ds = map(p => digitOf(p[1], p[2]), zip(cs, 1..10))

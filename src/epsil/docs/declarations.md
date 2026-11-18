@@ -191,15 +191,24 @@ binding.
 ## Variable bindings {#the-rules-of-block-locals}
 
 The same declaration and assignment rules apply to a program and to block
-locals. Two rules make sure a declared variable has a value when it is read:
+locals. A binding has a fixed type contract and a separate initialization state:
 
-1. **A declaration has a value.** `let x = v` or `let x: integer = v`
-   declares `x` with its value. `let x: integer` with no value is an error
-   (`declaration-without-value`). One declaration needs no value: at the
-   top level of a program, a function type, when a `function` statement (or
-   a definition `f(x) = …`) of the same name is in the program. The
-   definition gives the name its value from the start of the program, so
-   the declaration only gives the signature of the function:
+1. **A declaration can be initialized later.** `let x = v` declares and
+   initializes `x`; `let x` reserves an uninitialized binding. When a unique
+   later assignment initializes it in the same straight-line statement sequence
+   before any use, preparation infers its contract from that assignment. Thus
+   `let x; x = 1` establishes `number`, but the slot remains uninitialized until
+   the assignment runs. A read before initialization is still an error.
+   Preparation does not search branches, loops or called functions for an
+   initializer. An intervening runtime application, or one in the proposed
+   later initializer, also stops this inference: `let x; x=1+2` stays unknown;
+   `let x=1+2` or an explicit annotation provides the contract. Without such
+   evidence the contract remains `unknown`, even after a runtime write.
+   An explicit annotation fixes the contract independently of initialization.
+   At the top level, a function type can also be paired with a `function`
+   statement (or a definition `f(x) = …`) of the same name. The definition
+   supplies its value from the start of the program, and the declaration
+   supplies its signature:
    `let f: (integer) -> integer; function f(x) { x + 1 }; f(2)` is `3`. In
    a function body or a block, a function statement declares a local
    ([local functions](/epsil/control-flow#local-functions)), so the two
@@ -227,9 +236,16 @@ branch, a loop body or a nested block. Assignment preserves the binding's
 type. An explicit annotation is its contract; otherwise the initializer's
 type is widened: a number gives `number`, a string or character gives
 `string`, a boolean gives `boolean`, and the elements of a list, set or
-tuple widen the same way. So `let s = 0` then `s = s + 0.5` is valid, while
+tuple widen the same way. Mutable lists lose fixed lengths; tuples keep their
+arity. An empty list without an annotation has no known element type, and later
+writes do not infer one. Annotate it, for example `let xs: list<real> = []`,
+when operations or compilation need that information. So `let s = 0` then
+`s = s + 0.5` is valid, while
 `let s = 0` then `s = "x"` is `assignment-type-mismatch`. A variable whose
-initializer has no known type keeps `unknown`.
+initializer has no known type keeps `unknown`. Later assignments validate
+against the contract; they never widen it. Evaluation and numerical approximation
+change values without changing these static types. Constants may retain more
+precise static information.
 
 An unannotated variable initialized with a function, or with a name known to
 hold a function, has type `function`. Each function value retains its own

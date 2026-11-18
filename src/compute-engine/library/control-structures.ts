@@ -1,3 +1,4 @@
+import { initializationType } from '../boxed-expression/proved-absent-domain.js';
 import { assertDeclarationName } from '../engine-declarations.js';
 import { withEarlierConstantDeclarations } from '../boxed-expression/parameter-defaults.js';
 import { scopeActivation } from '../boxed-expression/ambient-chain.js';
@@ -177,10 +178,7 @@ import {
   isStatementArm,
 } from '../boxed-expression/conditional-value.js';
 import { isValueDef } from '../boxed-expression/utils.js';
-import {
-  widenAssignedType,
-  widenLocalType,
-} from '../boxed-expression/boxed-value-definition.js';
+import { initializeLocalContract, widenAssignedType, widenLocalType } from '../boxed-expression/boxed-value-definition.js';
 import {
   elementMemoFillTo,
   ELEMENT_MEMO_CAP,
@@ -203,13 +201,7 @@ import {
   bindIndexAuthoritatively,
   substituteBinderValues,
 } from './utils.js';
-import {
-  coarsenEvidenceType,
-  isInEvidenceSession,
-  markDeclaredLocal,
-  registerEvidenceSite,
-  withEvidenceSession,
-} from './assignment-evidence.js';
+import { markDeclaredLocal } from '../boxed-expression/declared-local.js';
 
 /**
  * The supertype a restriction condition is checked against to be typed as a
@@ -1322,17 +1314,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
               return ce.error(['assignment-to-undeclared-variable', name]);
           }
         }
-        // An assignment in a case body to a local of the enclosing block is
-        // an assignment of that local, and the static type of the local
-        // must admit its value. The case bodies stay raw, so canonicalize
-        // each closure once now, in the scope of the block, only for the
-        // assignment evidence that its `Assign` records
-        // (`joinAssignmentEvidence`, `library/core.ts`). The closure is
-        // discarded: the evaluation builds its own (`buildCaseClosure`).
-        // Without this, `let xs = [1, 2, 3]; while let [h, ...] = xs
-        // { xs = Rest(xs) }; xs` was typed `vector<integer^3>` and
-        // evaluated to `[]`.
-        if (isInEvidenceSession(ce)) {
+        // Case bodies remain raw for pattern matching. Check their writes
+        // against fixed local contracts in the capture scope.
+        {
           for (const cc of getMatchPlan(ce, ops2).segments.flatMap(
             (seg) => seg.cases
           )) {
@@ -4277,7 +4261,10 @@ export function staticDeclarations(
             : isString(typeOp)
               ? typeOp.string
               : sym(typeOp);
-        if (source !== undefined && source !== 'unknown') {
+        const attributesType = isDictionary(op.ops[1]) || isFunction(op.ops[1], 'Dictionary');
+        const authoredType = attributesType || valueOp === undefined ||
+          isDictionary(valueOp) || isFunction(valueOp, 'Dictionary');
+        if (source !== undefined && (source !== 'unknown' || authoredType)) {
           try {
             const parsed = parseType(source, ce._typeResolver);
             // A type that names `missing` cannot be declared: the `Declare`
@@ -4292,28 +4279,9 @@ export function staticDeclarations(
             // error on the routes that run it.
           }
         } else if (valueOp !== undefined) {
-          // No declared type, but an initial value that is a CLOSED literal
-          // (a number, a string, or a `List`/`Tuple` of such, nested): its
-          // type is static evidence of the same standing as a declared type,
-          // so it rides on the hoisted binding too. Without it the binding
-          // stays `unknown` until the `Declare` runs, and the FIRST use of
-          // the local in the block — `Length(queue)` in a loop condition,
-          // `ListJoin(xs, [4])` behind the spread `[...xs, 4]` — infers the
-          // callee's loose parameter type (`collection`, `collection<any>`)
-          // onto it; the later `Assign` can only WIDEN that, so `let xs = []`
-          // grown by a spread read as a `collection<any>` on the compile
-          // route, which never runs the `Declare`, and the JavaScript
-          // target's array-shape gate refused `Length(xs)` (Tycho item 332,
-          // programs b and c). With the value's type hoisted (`list<nothing>`
-          // for `[]`), the use narrows to the list and the assignment widens
-          // its element type (`list<integer>`), so the compiled shape is the
-          // one the program builds. Only a closed literal is read: an
-          // expression that mentions a symbol would have to be bound here,
-          // in the enclosing scope, before the block's own locals exist.
-          const literalType =
-            program && isFunction(valueOp, 'Function')
-              ? 'function'
-              : closedLiteralType(ce, valueOp);
+          // Closed literals can be typed before lexical names are bound.
+          // Other initializers are typed once their declaration is reached.
+          const literalType = program && isFunction(valueOp, 'Function') ? 'function' : closedLiteralType(ce, valueOp);
           if (literalType !== undefined)
             declaredTypes.set(nameExpr.symbol, literalType);
         }
@@ -4699,13 +4667,8 @@ function canonicalSequence(
     if (program && existing !== undefined)
       previousBindings!.set(name, existing);
     const knownType = declaredTypes.get(name);
-    const persistentType =
-      program &&
-      knownType !== undefined &&
-      !explicitlyDeclared.has(name) &&
-      !declaredConstants.has(name)
-        ? widenLocalType(ce, knownType)
-        : knownType;
+    const persistentType = knownType !== undefined && !explicitlyDeclared.has(name) && !declaredConstants.has(name)
+      ? widenLocalType(ce, knownType) : knownType;
     const hoisted = ce._declareSymbolValue(
       name,
       {
@@ -4728,7 +4691,15 @@ function canonicalSequence(
           hoisted as typeof hoisted & { _declaredByStatement?: boolean }
         )._declaredByStatement = true;
       markCallableHome(hoisted, scope);
-      if (explicitlyDeclared.has(name)) markDeclaredLocal(hoisted.value);
+      const declaration = firstDeclarations.get(name);
+      const declared = declaration === undefined ? undefined : typedStatement(declaration);
+      hoisted.value._requiresInitialization = isFunction(declared, 'Declare') &&
+        !declareHasValue(declared.ops) && !functions.has(name);
+      markDeclaredLocal(hoisted.value);
+      if (explicitlyDeclared.has(name)) {
+        hoisted.value._fixedInitializationType = true;
+        hoisted.value.inferredType = false;
+      }
     }
   };
   if (scope) {
@@ -4765,22 +4736,47 @@ function canonicalSequence(
       (name) => !UNBINDABLE_NAMES.has(name)
     )
   );
-  if (program && scope !== undefined)
-    for (const name of hoistedNames) {
-      const binding = scope.bindings.get(name);
-      if (binding !== undefined) ce._setShadowedParameterDef(name, binding);
+  if (program && scope !== undefined) for (const name of hoistedNames) {
+    const binding = scope.bindings.get(name);
+    if (binding !== undefined) ce._setShadowedParameterDef(name, binding);
+  }
+  const laterInitializers = new Map<Expression, string>();
+  const mentions = (expr: Expression, name: string): boolean =>
+    sym(expr) === name || (isFunction(expr) &&
+      (expr.operator === name || expr.ops.some((x) => mentions(x, name))));
+  // A runtime call may read or initialize the reserved slot through a
+  // capture. Deferred initialization never follows callees or callback values.
+  const mayCall = (expr: Expression): boolean => {
+    if (!isFunction(expr)) return false;
+    if (!resolvesToSystemBinding(ce, expr.operator)) return true;
+    if (expr.operator === 'Function') return false;
+    if (!['Declare', 'Assign', 'List', 'Tuple', 'Dictionary', 'KeyValuePair'].includes(expr.operator))
+      return true;
+    return expr.ops.some(mayCall);
+  };
+  for (let i = 0; i < source.length; i++) {
+    const declaration = typedStatement(source[i]);
+    if (refused.has(source[i]) || !isFunction(declaration, 'Declare') ||
+        declareHasValue(declaration.ops) || !isSymbol(declaration.op1)) continue;
+    const name = declaration.op1.symbol;
+    if (explicitlyDeclared.has(name) || functions.has(name)) continue;
+    for (const candidate of source.slice(i + 1)) {
+      const statement = typedStatement(candidate);
+      if (isFunction(statement, 'Assign') && sym(statement.op1) === name &&
+          !mentions(statement.op2, name) && !mayCall(statement.op2)) {
+        laterInitializers.set(candidate, name);
+        break;
+      }
+      if (mentions(statement, name) || mayCall(statement)) break;
     }
+  }
+  const initializedLater = new Set(laterInitializers.values());
   let statements: Expression[];
   enterBody();
   try {
     // We canonicalize the statements in the local scope. A refused
     // re-declaration stands as its error value.
-    // The evidence session re-reads the value type of every assignment
-    // canonicalized in this block (nested blocks included) once all of them
-    // are canonicalized, so that a read in a loop body sees the widening a
-    // later assignment of the same loop records (`withEvidenceSession`).
-    statements = withEvidenceSession(ce, () =>
-      ce._inScope(scope, () =>
+    statements = ce._inScope(scope, () =>
         ops.map((op) => {
           const refusal = refused.get(op);
           if (refusal !== undefined && isFunction(refusal)) {
@@ -4795,17 +4791,20 @@ function canonicalSequence(
           // literal binds it), it is a variable, as in `x + N`.
           // The repair runs here, once the scope of the block and its locals
           // exist, so that a local `N` stays the local.
-          const statement = early?.get(op) ?? canonicalizeStatement(op);
-          if (
-            program &&
-            (isFunction(statement, 'Declare') ||
-              isFunction(statement, 'Assign'))
-          ) {
-            const names = isFunction(statement.op1, 'Tuple')
-              ? tuplePatternNames(statement.op1)
-              : isSymbol(statement.op1)
-                ? [statement.op1.symbol]
-                : [];
+          const declaration = typedStatement(op);
+          if (isFunction(declaration, 'Declare') && !declareHasValue(declaration.ops) &&
+              isSymbol(declaration.op1) && !initializedLater.has(declaration.op1.symbol))
+            initializeLocalContract(ce, declaration.op1.symbol, 'unknown', declaredConstants.has(declaration.op1.symbol));
+          const initializes = laterInitializers.get(op);
+          let prepared = op;
+          if (initializes !== undefined && isFunction(op, 'Assign')) {
+            const value = op.op2.canonical;
+            initializeLocalContract(ce, initializes, value.isValid ? (initializationType(value) ?? 'unknown') : 'unknown');
+            prepared = ce._fn('Assign', [op.op1, value], { canonical: false, metadata: { sourceOffsets: op.sourceOffsets } });
+          }
+          const statement = early?.get(op) ?? canonicalizeStatement(prepared);
+          if (program && (isFunction(statement, 'Declare') || isFunction(statement, 'Assign'))) {
+            const names = isFunction(statement.op1, 'Tuple') ? tuplePatternNames(statement.op1) : isSymbol(statement.op1) ? [statement.op1.symbol] : [];
             const writes = new Map<string, BoxedDefinition>();
             for (const name of names) {
               const binding = ce.lookupDefinition(name);
@@ -4831,7 +4830,6 @@ function canonicalSequence(
           completed?.set(op, result);
           return result;
         })
-      )
     );
   } finally {
     exitBody();
@@ -4841,25 +4839,10 @@ function canonicalSequence(
   if (scope !== undefined)
     statements = withUseBeforeDeclarationErrors(ce, ops, statements, program);
 
-  if (program) {
-    for (const name of hoistedNames) {
-      const binding = scope?.bindings.get(name);
-      if (
-        binding !== undefined &&
-        isValueDef(binding) &&
-        binding.value._programVariable
-      ) {
-        if (
-          !explicitlyDeclared.has(name) &&
-          !binding.value.isConstant &&
-          !binding.value.type.matches('function')
-        ) {
-          const widened = widenLocalType(ce, binding.value.type.type);
-          binding.value._setType(() => ce.type(widened));
-        }
-        binding.value.inferredType = false;
-      }
-    }
+  for (const name of hoistedNames) {
+    const binding = scope?.bindings.get(name);
+    if (binding !== undefined && isValueDef(binding) && !binding.value._fixedInitializationType)
+      ce._inScope(scope, () => initializeLocalContract(ce, name, 'unknown', declaredConstants.has(name)));
   }
   const result = ce._fn(head, statements, program ? undefined : { scope });
   if (program) noteProgramSourceOrder(result, order);
@@ -5924,67 +5907,6 @@ function canonicalLoopLike(
         bindIndexAuthoritatively(ce, binding, type)
       )
     );
-    // The collection's type is read NOW, but it may read a local that a later
-    // statement of an enclosing loop widens: `for t in [p, q, r]` where `p`
-    // later holds a tuple of `number` elements. The index then claimed the
-    // narrower element type, and the compiled complex lane read a `{re, im}`
-    // element as a JavaScript number. So the enclosing block reads the
-    // element type again after all its statements are canonicalized, and
-    // widens the index to it (`withEvidenceSession`,
-    // `library/assignment-evidence.ts`). A pattern error found on that
-    // second read is ignored: the loop is already built. But when a later
-    // read gives no type for an index (or a leaf) that the first read typed
-    // — the element type became `unknown` or `any`, or is no longer a tuple
-    // of the pattern's arity — the first, narrower type may no longer hold
-    // for what the loop visits, so that index is widened to `unknown` (the
-    // same write as `reset`) and the site reports a change. After that the
-    // site writes nothing more for the rest of the session: `unknown` is
-    // already the widest type.
-    const indexBindings: Expression[] = [];
-    ce._withoutFacts(() =>
-      bindFromElement(currentElementType(), (binding) =>
-        indexBindings.push(binding)
-      )
-    );
-    if (patternError === undefined && indexBindings.length > 0) {
-      const lost = new Set<string>();
-      registerEvidenceSite(ce, {
-        rejoin: (coarse) => {
-          let changed = false;
-          const saved = patternError;
-          const typed = new Set<string>();
-          ce._withoutFacts(() =>
-            bindFromElement(currentElementType(), (binding, type) => {
-              const name = sym(binding);
-              if (name === undefined || lost.has(name)) return;
-              typed.add(name);
-              const before = binding.type.type;
-              if (isSubtype(type, before)) return;
-              binding._infer(
-                () => (coarse ? coarsenEvidenceType(type) : type),
-                'widen'
-              );
-              if (binding.type.type !== before) changed = true;
-            })
-          );
-          patternError = saved;
-          for (const binding of indexBindings) {
-            const name = sym(binding);
-            if (name === undefined || typed.has(name) || lost.has(name))
-              continue;
-            lost.add(name);
-            if (binding.type.isUnknown) continue;
-            binding._infer(() => 'unknown', 'replace');
-            changed = true;
-          }
-          return changed;
-        },
-        reset: () => {
-          for (const binding of indexBindings)
-            binding._infer(() => 'unknown', 'replace');
-        },
-      });
-    }
     // An optional GUARD, `Element(x, xs, cond)` — the three-operand indexing
     // set `Sum` and `Product` also take. It is canonicalized here, after the
     // index is declared, so its occurrences of the index bind to this loop's
@@ -6280,15 +6202,8 @@ function* runLoop(
  *
  * The canonical `AddTo` keeps its operands and does not run the canonical
  * handlers of `Add`, `At`, `ReplaceAt` or `Assign`. The equivalent assignment
- * is canonicalized once, for two reasons:
+ * is canonicalized once to retain the checks of the long form:
  *
- * - The target receives the type information of its use: the inference that
- *   the operator signatures write on the symbols, and the assignment evidence
- *   that the canonical `Assign` records on the target
- *   (`joinAssignmentEvidence()`, `library/core.ts`). Without it, an untyped
- *   parameter `L` of `function step(L, n) { for k in 1..n { L[k] += 1 }; L }`
- *   stayed `unknown`, and a call with a list argument was applied to each
- *   element of the list.
  * - The caller gets the static errors of the long form. When the result is
  *   not valid, the canonical `AddTo` is that result, so `t += e` has the
  *   errors of `t = t + e`: an assignment of an undeclared `t`

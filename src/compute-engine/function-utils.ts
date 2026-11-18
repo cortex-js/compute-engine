@@ -83,7 +83,7 @@ import {
   shareLazyViewRecord,
   wasCanonicalizedIn,
 } from './boxed-expression/lazy-view-context.js';
-import { markLocalBinding } from './boxed-expression/declared-local.js';
+import { isAssignedLocal, markLocalBinding } from './boxed-expression/declared-local.js';
 import {
   functionLiteralBoundNames,
   functionLiteralDeclaredSignature,
@@ -1534,6 +1534,21 @@ export function canonicalFunctionLiteralArguments(
   // (`_pushShadowedParameters()`).
   console.assert(record !== undefined, 'A function literal has a record');
   const closing = record!;
+  for (const param of params) {
+    if (functionLiteralParameterType(param) !== undefined) continue;
+    for (const name of functionLiteralParameterNames(param)) {
+      const binding = blockScope.bindings.get(name);
+      if (!binding || !('value' in binding) || !isAssignedLocal(binding.value)) continue;
+      const value = binding.value;
+      // A use describes the incoming argument, not every later value of a
+      // written parameter. Without assignment inference its contract is unknown.
+      value._setType(() => ce.type('unknown'));
+      value._fixedInitializationType = true;
+      value.inferredType = false;
+      closing.requirements.delete(value);
+      ce._noteStateEvent({ kind: 'inference', valueType: true, widening: true });
+    }
+  }
   block = ce._withClosingLiteral(parameterDefs, closing, () =>
     rebindParameters(block, params)
   );
@@ -1554,12 +1569,7 @@ export function canonicalFunctionLiteralArguments(
     // again, which keeps its scope) is not written: the write would replace
     // its `BoxedType` and move its `_writeVersion`, which the memos of the
     // elements of a lazy collection read (`collection-element-memo.ts`).
-    // A parameter with assignment evidence (`Assign(x, [1, 2])` in the
-    // body, `joinAssignmentEvidence()` in `library/core.ts`) has the join of
-    // its assigned value types as its type, and a use does not narrow it
-    // (`BoxedSymbol._inferWithoutFacts()`): the record of the uses made
-    // before the assignment is not written over it.
-    if (value._assignmentEvidence && value.value === undefined) continue;
+    if (value._fixedInitializationType) continue;
     const current = value.type;
     if (
       current.type === type.type ||

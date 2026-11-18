@@ -1685,6 +1685,37 @@ scope, and a call head as a `function` (`p + q(2) + 1` declares `p: number`
 and `q: function`). `ce.assume()` declares the names that it constrains, as
 it is a host statement and not a boxing.
 
+## Initialization-defined Program and Block contracts
+
+Program and Block variables establish their contract during preparation. Explicit
+annotations fix it. Otherwise numeric initializers give `number`, callable
+initializers give `function`, mutable lists erase lengths and widen elements,
+and tuples retain arity with widened components. Constants can retain precision.
+An empty unannotated list retains unknown elements. Initialization is not executed
+to discover a type.
+
+An uninitialized declaration can use a unique later initialization in its same
+straight-line sequence, before any use, to establish the contract. Initialization
+inside branches, loops or called functions is not searched. An intervening runtime
+application, or one in the proposed later initializer, conservatively stops this
+inference: `let x; x=1+2` remains unknown, while `let x; x=1` establishes number.
+Use a declaration initializer or an annotation when more precision is needed.
+Without such evidence,
+`unknown` is final for that binding. The runtime slot remains uninitialized until
+its initialization executes, and reads still check that state.
+
+Assignments only validate against finalized contracts, including inferred ones;
+evaluation and `N()` cannot refine or widen them. Callable values keep their own
+argument checks and do not promote their variable into an operator. Per-use
+checker facts are separate from these contracts. These rules replace assignment
+convergence for sequence locals; they do not redesign the host's standalone
+inference APIs, recursive inference or namespace publication.
+
+An unannotated function parameter assigned in its body keeps an unknown contract;
+neither a use nor the assigned value fixes it. Explicit parameter annotations
+continue to supply contracts. This uses the existing written-binding record and
+does not add an assignment inference pass.
+
 ## A static type does not depend on a value
 
 The static type of a node is a function of the definitions, of their
@@ -1701,7 +1732,8 @@ invalidates no cached type: the type version (`typeVersion`,
   value moves the type version. A definition whose value an activation holds
   (a parameter, a local of a block) has no value there either, also a
   constant: `const h = (k) => k + 1` in a block holds a value of one run of
-  the block, so `Map(h, [1, 2])` is typed `list<unknown^2>` inside the run
+  the block. Its prepared constant signature can still type `Map(h, [1, 2])`
+  as `vector<2>` inside the run
   and after it.
 - The type of a call whose free head resolves to such a definition, one
   whose value an activation holds, is not derived from that value: the call

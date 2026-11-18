@@ -1,0 +1,240 @@
+{
+  "privateRoot": "/private/tmp/ce-init-contracts-current-measurement-20261118",
+  "originalAnchor": "ffff1d44fc566ef01fb52a0ce67b6797797f4dcf",
+  "causalCurrentAnchor": "fd7bad6e1a5155d239cd074a27031a2934b3e82a",
+  "sourceBuildConfigDependenciesUnchangedAcrossMeasuredWindow": true,
+  "candidateStillMatchesImplementationSource": true,
+  "finalCertificateSha256": "af659e4405e5d7ef2603cfb7245f6c54c4e8c9a16d1059f9396b29bcc44e19d9",
+  "originalRevalidation": {
+    "checks": {
+      "ceSource": true,
+      "tychoSource": true,
+      "productionBuild": true,
+      "configuration": true
+    },
+    "priorCertificate": "/private/tmp/program-type-work-20261116/three-arm/identity-after-traces.json",
+    "newCertificate": "/private/tmp/ce-init-contracts-current-measurement-20261118/timing-historical/identity-start.json"
+  },
+  "changedSourcePaths": [
+    {
+      "path": "src/compute-engine/boxed-expression/boxed-function.ts",
+      "current": "f93873f8740622fb5c22d14078017ac158e4c0b8fce222f2c8e7ecb34727d9ef",
+      "candidate": "7d0d478970f0989edbdeb8055ea5a0629b91deff0bdbbf94443ad9a28dd5d3f2"
+    },
+    {
+      "path": "src/compute-engine/boxed-expression/boxed-symbol.ts",
+      "current": "9a6ef24891ebc9f7e5741909dd38ddf1cf8cfe3ed718963b81304f5973c92359",
+      "candidate": "2a89ff294feff3c391530ad6ea3c1b59c131b00eed9c5e9bdc341847857a0fb7"
+    },
+    {
+      "path": "src/compute-engine/boxed-expression/boxed-value-definition.ts",
+      "current": "40e920390d2683b73e7e7f1ea56e58cb68031c2fd40d18be5b93e0aa7a59ebfa",
+      "candidate": "055b242e3d542002c3482febcbeb8f2635e0e9a76d742eea3b9551b9ef4cf2eb"
+    },
+    {
+      "path": "src/compute-engine/boxed-expression/call-result-type.ts",
+      "current": "356a14c8c7f97a02e99b5b5a870f2527067568e9643b90e39a7151ce56d776c2",
+      "candidate": "d9e9a3c2fb5b451cb1c14210c911b9d32a2c5b1eaee5870fe4be37b5fdd1eb5d"
+    },
+    {
+      "path": "src/compute-engine/boxed-expression/declared-local.ts",
+      "current": "007d4e4bc9ba4045d1740dfe3bd209328f537b376bcf43701c0c5f559aba35c9",
+      "candidate": "ca9e08b70aa3b3232cfdfed2efa11115de8bb41b6f1ed61346839963ac82804a"
+    },
+    {
+      "path": "src/compute-engine/boxed-expression/matrix-operand.ts",
+      "current": "ca1aa3aaf67507e8a97a59e88104e16fd12d79e32a6fcbd6ed60813034696b39",
+      "candidate": "b28f4a058da1085751947ef2d983650da269443b4ea2220f444c905f14949482"
+    },
+    {
+      "path": "src/compute-engine/boxed-expression/proved-absent-domain.ts",
+      "current": "cbc839525aed31e4fa1d27d959cf7154de284e0e380f497f349c25e8977e6238",
+      "candidate": "4c03bec68387c36285991187f287b1196aa1be6711b1934ed29a608a0e7f38d1"
+    },
+    {
+      "path": "src/compute-engine/engine-declarations.ts",
+      "current": "3a8a79959e04a62ce8b7fa3ad2f4a8e0d41efbaddd26e9fc892998e1768359a9",
+      "candidate": "11494481acfd44d3bad371301ac56a9f5f69d365eedec49bbee0f2411404a452"
+    },
+    {
+      "path": "src/compute-engine/function-utils.ts",
+      "current": "57aae8cef3fc08ea9c09212fd1e5b58d2b2f73c5929981f46a7897950499752f",
+      "candidate": "613524030b8cfd1c75a76ed498964df0ee1119acebc679defb30b58e21895cb8"
+    },
+    {
+      "path": "src/compute-engine/library/assignment-evidence.ts",
+      "current": "abbae4cb59f54419ad30ca153346aba08c52de466052eb0a538805fade763282",
+      "candidate": null
+    },
+    {
+      "path": "src/compute-engine/library/control-structures.ts",
+      "current": "966bfb511adb4e9e455f5455ff2dcb9947c78253f6876925526f12cdcddf7a6c",
+      "candidate": "8f4c014efb8d7053a7ebbafabf1ff5d0565665ac1171c4eb9e09a5891e73e41e"
+    },
+    {
+      "path": "src/compute-engine/library/core.ts",
+      "current": "9cf52e6d892a7f84ed6d4bcad4ffc1025ff85e74d62e19f8eca527f9ffad97f9",
+      "candidate": "90a37429001e6bf49407065b16c32ea6121b99a4f6ee323825078e8b7aebeb1d"
+    },
+    {
+      "path": "src/compute-engine/types-definitions.ts",
+      "current": "4899649f1ad87231f0053fbdd0c9fa04a7bf5d72a3c793290349534725d2b496",
+      "candidate": "5312f98a331452f664f54fce2bb5b0f59e12b27edad6a0bfe2ad89c30c0c7d56"
+    },
+    {
+      "path": "src/compute-engine/types-expression.ts",
+      "current": "61a590fcd7ba941cde82464a549a750bee7e7833835662f54a167f067b1310d9",
+      "candidate": "1c7225fbedb92093329df0c9e29f6e5f7e0915155c4823dd8db8180682402cf0"
+    },
+    {
+      "path": "src/epsil/docs/declarations.md",
+      "current": "b068a09367fbdcf3c1b47e7ef9e4363006446e3e4f83e32e84e666fa9d7a0d33",
+      "candidate": "972f3509e8ef9de19abf1a20729c519f0989d3eec23217b36269e9d7519a3839"
+    },
+    {
+      "path": "src/epsil/docs/errors.md",
+      "current": "ff47492e373ae8cf9f8a8ab59700debaa8e5871b453a1308573a87d036431afb",
+      "candidate": "b25a9c8ce487015808617375e971fcb42b03f7e24602ddfeef1c0045c16720bd"
+    },
+    {
+      "path": "src/epsil/docs/examples.md",
+      "current": "6a4a51e73f6842ffb8ee2820976221ffd88f14d4fa84857e0b47b28f82d55b48",
+      "candidate": "a0d59a5524f02dafaa47243ac93cd6dadeaaa51939ccc947b95bb45929c47997"
+    },
+    {
+      "path": "src/epsil/docs/for-agents.md",
+      "current": "475eccc4d56cd9de3c3b013371e959f12a2b79d95737c6ca90ea45bbb177cb3a",
+      "candidate": "a91906d4b04ba5ebfcafc3b2a611aee611439f7f6bb43a6c81f8284b7b754172"
+    },
+    {
+      "path": "src/epsil/docs/types.md",
+      "current": "202fad35124648a4e500c249a0e258c69b1be82ab33934c25d5634105f09a903",
+      "candidate": "b9c51f4b1ab8900ac4b9123d85fc0d1fedbe943e59a90b464ef93442a43dc3f0"
+    },
+    {
+      "path": "src/epsil/error-explanations.ts",
+      "current": "e0693f0661f46ef62cf1dbe537a9d1dead2434248dce5e433ff285d600137b0d",
+      "candidate": "b0c6d38df5f69e5e50becb2a4818a66e710dccf869e6855a642fbdb50dcb527c"
+    },
+    {
+      "path": "src/epsil/execute-epsil.ts",
+      "current": "da76d56cf6d173e349542ff94537e7ecadd8b5fb79042c07b4abf8072fcd0520",
+      "candidate": "a266f9352d03f37771327fd80187327df3dcccdef8d7a451630ae945a48e9299"
+    },
+    {
+      "path": "src/epsil/static-diagnostics.ts",
+      "current": "30d017188558e36a77efc88530bb71ef6bc1c8fca08b0909609bc89f64794f3f",
+      "candidate": "ed80316f04573cd69288cc41c368f31c97e2bb3d09cb28acaad19850f92f8778"
+    }
+  ],
+  "configurationMatches": {
+    "scripts/build.mjs": true,
+    "package.json": true,
+    "package-lock.json": true,
+    "tsconfig.json": true
+  },
+  "runtime": {
+    "node": "26.13.0",
+    "v8": "14.6.202.34-node.40",
+    "platform": "darwin-arm64",
+    "cores": 18
+  },
+  "producerHashes": {
+    "build-controls.py": "8ac67e35bd8faf9a646b6856c8e0235ba51600636c4a8d494d7e5661af702af1",
+    "controls.py": "cc88a753726435a3ec7aa8ec2d1d25ba475a95db8d4e030ce5cbacbd9999b3e3",
+    "extended-child.mjs": "feca69f96b9692d9f99d3c41cbd5f8fe055ee4a67890c15b61270668c8a863b0",
+    "final-identity.py": "09ba8e6dc5efdfa0da360b34e3b31b3299b5ad56520dcebcd1562e86eeb2ca4f",
+    "map-proofs.py": "ac72f42a65e78e93bc2a51de75b4d06fd701d57d51a15f1e089b965c797c067f",
+    "monitor.py": "6c4cf1efa70b9cebe601e9fec28e2bf3283009d168c63907cf3fe781e271d1e1",
+    "observer-calibration.mjs": "878fbf4c471ed0a4647ec63c12bbde41ab5d96e5a659de3d759c31f69a542369",
+    "prepare-frozen.py": "150c9044b4a5ba966581fcca5a6742514ba32038e593b52cc1657c736bbbd950",
+    "prepare-report.py": "ffea8ddc45a7aea8baf96e2793034a51ae5c6264f153772caef958ef598a38d9",
+    "program-regression-child.mjs": "1128b6ff7404e97682478cbc7a1f58230207e373672843a1d8ac067e863a94eb",
+    "program-regression-symbolize.mjs": "972aaad39f24f27e2e48e4c442ccba2013568930eadd793fa15e645a0f0a2934",
+    "program-type-work-instrument.mjs": "d6cac982195a329a419243f35c6af406a6993665019a03d0d9633bdc62b1e854",
+    "program-type-work-trace.mjs": "bf0699aa0869a7e92499a1c33afa11b31c468c29ba8705515ec16ce7aa87f28a",
+    "recover-collection-allocation.py": "310ca7d31bf2c208a1af0e2d9c5f2ec05e601cf3626c7159395774388226d3de",
+    "retention-child.mjs": "2523ff30e9c34860249a945d2fbcf6729a1d479b6ea4221504b09b63d9e0c858",
+    "run-matrix.py": "12d8501447599c1490ca27dce03e132c786fa5ed8d46231672b7cdd8f061b7ca",
+    "run-retention.py": "07c73072c42dcceb39fd9e2866ba5cde6d7dc701a462a41bafca720db803c7d7",
+    "run-traces.py": "1ae339bccb758555af94f6ffdabfceddd800fbf74f6ce55e71ff6eb84fc5681c",
+    "summarize-traces.py": "a452811d2f66879c078952c04c83546bb084116b842fdc48af95dcb106b33fc7",
+    "summarize.py": "e711ff8e1ab36a2e96e4ff399cc85c79c9bedfdaad57b1e62c7a795fdf3a83a8",
+    "symbolize-all.py": "3b72fe42597499998d8f78516c6c71a0fb038c392b6811cd77749c1477f1eeb3",
+    "trace-child.mjs": "e84ad2c0955eec00fdc2c788171b0a6daca12c8c974c46c7b39951bad48ad51f",
+    "workflow.py": "12c292937615fb3efc0ccb6a35b5a2bbd91a1fa8d2dd446cf042803ffa94de74"
+  },
+  "observerIdentitySha256": "f64fc2106d90edd5da2a083bc9154f6fcffe40938a244bd86fc2e1e648077ed4",
+  "controlWorktrees": "removed after preserving plain source/build snapshots at the same paths; source identity rechecked",
+  "lock": {
+    "owner": "codex-init-contracts:measurement",
+    "minutes": 40,
+    "acquireLoad": [
+      6.9,
+      9.6,
+      6.4
+    ],
+    "releaseLoad": [
+      3.3,
+      4.0,
+      4.5
+    ],
+    "released": true
+  },
+  "hostToolchain": {
+    "original": {
+      "root": "/private/tmp/program-only-accepted-baseline-20261115/tycho",
+      "configuration": {
+        "package.json": "6f9f777cdde6a9a2d831e9b7a8c8bf885e43cc13ddfd3cb3a33f82fc9e2dc988",
+        "package-lock.json": "705388b2314127eb345f922fa5fa9808920c1703f3a031bec299cf6691a0e3e5",
+        "tsconfig.json": "ce6eec5ca03ab7efc77b5d1ad990c84ec08eef05d11aaa2947303ba12ad3748a"
+      },
+      "dependencies": {
+        "tsx": {
+          "realpath": "/Users/arno/dev/tycho/node_modules/tsx/package.json",
+          "sha256": "ab5f14c4251638844ade3905d3cfc52fc1c833644694d655a05f6d0ca746b83c"
+        },
+        "esbuild": {
+          "realpath": "/Users/arno/dev/tycho/node_modules/esbuild/package.json",
+          "sha256": "9d0bc453f4e791553c4cc2298ba023b409241fd9801e494741666eb0f6051490"
+        }
+      }
+    },
+    "current": {
+      "root": "/private/tmp/program-only-type-work-revision-20261116/tycho",
+      "configuration": {
+        "package.json": "6f9f777cdde6a9a2d831e9b7a8c8bf885e43cc13ddfd3cb3a33f82fc9e2dc988",
+        "package-lock.json": "705388b2314127eb345f922fa5fa9808920c1703f3a031bec299cf6691a0e3e5",
+        "tsconfig.json": "ce6eec5ca03ab7efc77b5d1ad990c84ec08eef05d11aaa2947303ba12ad3748a"
+      },
+      "dependencies": {
+        "tsx": {
+          "realpath": "/Users/arno/dev/tycho/node_modules/tsx/package.json",
+          "sha256": "ab5f14c4251638844ade3905d3cfc52fc1c833644694d655a05f6d0ca746b83c"
+        },
+        "esbuild": {
+          "realpath": "/Users/arno/dev/tycho/node_modules/esbuild/package.json",
+          "sha256": "9d0bc453f4e791553c4cc2298ba023b409241fd9801e494741666eb0f6051490"
+        }
+      }
+    },
+    "candidate": {
+      "root": "/private/tmp/program-only-type-work-revision-20261116/tycho",
+      "configuration": {
+        "package.json": "6f9f777cdde6a9a2d831e9b7a8c8bf885e43cc13ddfd3cb3a33f82fc9e2dc988",
+        "package-lock.json": "705388b2314127eb345f922fa5fa9808920c1703f3a031bec299cf6691a0e3e5",
+        "tsconfig.json": "ce6eec5ca03ab7efc77b5d1ad990c84ec08eef05d11aaa2947303ba12ad3748a"
+      },
+      "dependencies": {
+        "tsx": {
+          "realpath": "/Users/arno/dev/tycho/node_modules/tsx/package.json",
+          "sha256": "ab5f14c4251638844ade3905d3cfc52fc1c833644694d655a05f6d0ca746b83c"
+        },
+        "esbuild": {
+          "realpath": "/Users/arno/dev/tycho/node_modules/esbuild/package.json",
+          "sha256": "9d0bc453f4e791553c4cc2298ba023b409241fd9801e494741666eb0f6051490"
+        }
+      }
+    }
+  }
+}

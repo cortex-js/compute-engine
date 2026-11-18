@@ -38,3 +38,24 @@ export function provedAbsentDomainOf(x: Expression): Type | undefined {
   if (x.type.type !== 'missing') return undefined;
   return provedAbsentDomainHook(describe(x));
 }
+
+/**
+ * The type that the assignment of `value` records on its target binding,
+ * or `undefined` when the type of `value` is `unknown`.
+ *
+ * An access PROVED to find nothing is typed `missing`, its absence marker
+ * alone (`provedAbsentDomainOf()`). An operator that propagates absence
+ * reads the domain of such an access to choose its marker: `At(M, 7) + 1`
+ * for a matrix `M` of two rows is the sum of a row and a number, and its
+ * value is `Missing`. A use of a local does not see the access, so the
+ * local records the domain beside the marker, `missing | vector<…>`, and
+ * `r + 1` after `r = At(M, 7)` is `Missing` too, not the `NaN` of an absent
+ * number.
+ */
+export function initializationType(value: Expression): Type | undefined {
+  if (value.type.isUnknown) return undefined;
+  const t = value.type.type;
+  if (t !== 'missing') return t;
+  const domain = provedAbsentDomainOf(value);
+  return domain === undefined ? t : { kind: 'union', types: [t, domain] };
+}

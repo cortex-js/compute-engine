@@ -1,0 +1,272 @@
+[
+  {
+    "file": "compute-engine/boxed-expression/boxed-function.ts",
+    "beforeSha256": "f93873f8740622fb5c22d14078017ac158e4c0b8fce222f2c8e7ecb34727d9ef",
+    "afterSha256": "de889ad849f6f91ca8ef0e87662f6f901bce83e631b63f82877f15894b69b85d",
+    "requestedFunctions": [
+      "boundCallType"
+    ],
+    "unavailableFunctions": [],
+    "probes": [
+      {
+        "kind": "expression-read",
+        "line": 4580
+      },
+      {
+        "kind": "expression-read",
+        "line": 4729
+      },
+      {
+        "kind": "boundCallType",
+        "line": 16598
+      },
+      {
+        "kind": "operand-map",
+        "reason": "appliesToListCoordinateTuple",
+        "line": 16665
+      },
+      {
+        "kind": "operand-map",
+        "reason": "addsPointToNumberCollection",
+        "line": 16681
+      },
+      {
+        "kind": "operand-map",
+        "reason": "passedThrough",
+        "line": 16839
+      },
+      {
+        "kind": "operand-map",
+        "reason": "withCodomainForAbsentAnswer",
+        "line": 17157
+      },
+      {
+        "kind": "operand-map",
+        "reason": "withCodomainForAbsentAnswer",
+        "line": 17271
+      }
+    ]
+  },
+  {
+    "file": "compute-engine/boxed-expression/effects-inference.ts",
+    "beforeSha256": "1b0844a5acff5ca2b2c6a30ee96282245589a39d02e34a75038d229690c0a479",
+    "afterSha256": "a5e0f187047292497d41c964478840d47a8e4c39e973da5290a5237e1cc71736",
+    "requestedFunctions": [
+      "functionLiteralCallSignatureType",
+      "functionLiteralSignatureType",
+      "functionLiteralArrowEffects"
+    ],
+    "unavailableFunctions": [],
+    "probes": [
+      {
+        "kind": "functionLiteralCallSignatureType",
+        "line": 1931
+      },
+      {
+        "kind": "signature-demand",
+        "reason": "single/full"
+      },
+      {
+        "kind": "signature-demand",
+        "reason": "single/full"
+      },
+      {
+        "kind": "signature-demand",
+        "reason": "written/full"
+      },
+      {
+        "kind": "signature-demand",
+        "reason": "current/effects-only"
+      },
+      {
+        "kind": "signature-demand",
+        "reason": "current/full"
+      },
+      {
+        "kind": "functionLiteralSignatureType",
+        "line": 2062
+      },
+      {
+        "kind": "functionLiteralArrowEffects",
+        "line": 2215
+      }
+    ]
+  },
+  {
+    "file": "compute-engine/library/control-structures.ts",
+    "beforeSha256": "966bfb511adb4e9e455f5455ff2dcb9947c78253f6876925526f12cdcddf7a6c",
+    "afterSha256": "b487bd40270e91645b73dc64d7677416871915a5e2205cb2115bba4fb5756d8f",
+    "requestedFunctions": [
+      "canonicalBlock",
+      "canonicalProgram",
+      "canonicalSequence"
+    ],
+    "unavailableFunctions": [],
+    "probes": [
+      {
+        "kind": "canonicalBlock",
+        "line": 4331
+      },
+      {
+        "kind": "canonicalProgram",
+        "line": 4339
+      },
+      {
+        "kind": "canonicalSequence",
+        "line": 4393
+      }
+    ]
+  },
+  {
+    "file": "compute-engine/library/assignment-evidence.ts",
+    "beforeSha256": "abbae4cb59f54419ad30ca153346aba08c52de466052eb0a538805fade763282",
+    "afterSha256": "035f98ef0b6b5bfb784a9864d5efa0f819fca04ea4333849617059e90301a55f",
+    "requestedFunctions": [
+      "withEvidenceSession",
+      "registerEvidenceSite"
+    ],
+    "unavailableFunctions": [],
+    "probes": [
+      {
+        "kind": "registerEvidenceSite",
+        "line": 160
+      },
+      {
+        "kind": "withEvidenceSession",
+        "line": 197
+      },
+      {
+        "kind": "evidence-pass"
+      }
+    ]
+  },
+  {
+    "file": "compute-engine/library/core.ts",
+    "beforeSha256": "9cf52e6d892a7f84ed6d4bcad4ffc1025ff85e74d62e19f8eca527f9ffad97f9",
+    "afterSha256": "14de6f7c0b91ec193a0febde122ba3d82b900cb7cc23f35d839e3ee9725690b7",
+    "requestedFunctions": [
+      "joinAssignmentEvidence",
+      "joinEvidenceOnBinding",
+      "writeEvidenceType"
+    ],
+    "unavailableFunctions": [],
+    "probes": [
+      {
+        "kind": "joinAssignmentEvidence",
+        "line": 4196
+      },
+      {
+        "kind": "joinEvidenceOnBinding",
+        "line": 4533
+      },
+      {
+        "kind": "writeEvidenceType",
+        "line": 4575
+      }
+    ]
+  },
+  {
+    "file": "compute-engine/boxed-expression/boxed-value-definition.ts",
+    "beforeSha256": "40e920390d2683b73e7e7f1ea56e58cb68031c2fd40d18be5b93e0aa7a59ebfa",
+    "afterSha256": "71b19f961ac29617a5d023dc3c0fe4e828d07fe74d2c683bf89364a0e0d6d1d5",
+    "requestedFunctions": [
+      "initializeLocalContract"
+    ],
+    "unavailableFunctions": [
+      "initializeLocalContract"
+    ],
+    "probes": [
+      {
+        "kind": "binding-read",
+        "line": 744
+      },
+      {
+        "kind": "binding-read",
+        "line": 836
+      },
+      {
+        "kind": "binding-write",
+        "line": 842
+      },
+      {
+        "kind": "binding-read",
+        "line": 1141
+      },
+      {
+        "kind": "binding-read",
+        "line": 1589
+      },
+      {
+        "kind": "binding-write",
+        "line": 1754
+      },
+      {
+        "kind": "binding-write",
+        "line": 1759
+      }
+    ]
+  },
+  {
+    "file": "compute-engine/index.ts",
+    "beforeSha256": "bc9d80d8d15fd668a21ca337372ecced3c933073215ab10a42b50cbd9c7aed35",
+    "afterSha256": "55aa9505622bbe105e9e2dc0f89d509e1798971bc03811f121353c2031c99df9",
+    "requestedFunctions": [],
+    "unavailableFunctions": [],
+    "probes": [
+      {
+        "kind": "lookup",
+        "line": 3033
+      }
+    ]
+  },
+  {
+    "file": "compute-engine/collection-utils.ts",
+    "beforeSha256": "cc1ea639f5b529b27ad46168d6341b8f0ed42f7b551e59389f2d066565ca1881",
+    "afterSha256": "6f0fa9ca78bea0c54c9c2c68c43a08ea516b91cdc772f29015ae45bdb4bc96b8",
+    "requestedFunctions": [
+      "appliesToListCoordinateTuple",
+      "addsPointToNumberCollection"
+    ],
+    "unavailableFunctions": [],
+    "probes": [
+      {
+        "kind": "appliesToListCoordinateTuple",
+        "line": 6504
+      },
+      {
+        "kind": "addsPointToNumberCollection",
+        "line": 6540
+      }
+    ]
+  },
+  {
+    "file": "compute-engine/boxed-expression/derive-application-type.ts",
+    "beforeSha256": "cc0d180f4bcbbada93d8b578379f43c7d342c0b8621ddfe78156155e64bb849a",
+    "afterSha256": "3deb14716c1f5ee943f23e6bf1f2d449734a95fdce3346cbb128710cc68ad87a",
+    "requestedFunctions": [
+      "withCodomainForAbsentAnswer"
+    ],
+    "unavailableFunctions": [],
+    "probes": [
+      {
+        "kind": "withCodomainForAbsentAnswer",
+        "line": 1526
+      }
+    ]
+  },
+  {
+    "file": "compute-engine/boxed-expression/broadcast-lift-type.ts",
+    "beforeSha256": "32ab6bb2173b0cb7ca7ccfdb9489a3d42f3e4c05a99a755d58a1d040072c494e",
+    "afterSha256": "e8cc2b657176a576b63565e89890ce16894f718374c6f290930d151dcb3d4f6b",
+    "requestedFunctions": [
+      "passesAbsentCellsThrough"
+    ],
+    "unavailableFunctions": [],
+    "probes": [
+      {
+        "kind": "passesAbsentCellsThrough",
+        "line": 792
+      }
+    ]
+  }
+]

@@ -23,6 +23,8 @@ function run(source: string): unknown {
 /** The value of the Epsil program `source` on a new engine that declares each
  * name of `names` with the type `unknown` and no value, as MathJSON. A later
  * statement of the program assigns it. */
+// Symbolic inputs use host declarations; a source let without a value now
+// reserves an uninitialized slot and cannot provide a symbolic input.
 function runWith(names: string[], source: string): unknown {
   const ce = new ComputeEngine();
   for (const name of names) ce.declare(name, 'unknown');
@@ -108,15 +110,16 @@ describe('a parameter annotated in the function is checked when a later value de
   test('an element of a list stays, by the name of the function', () => {
     const list = ['List', ['h', 'm'], 2];
     expect(
-      run('function h(k: integer) { 2*k }\nlet m\nh([m, 1])')
+      runWith(['m'], 'function h(k: integer) { 2*k }\nh([m, 1])')
     ).toEqual(list);
-    expect(run('let h = (k: integer) => 2*k\nlet m\nh([m, 1])')).toEqual(list);
+    expect(runWith(['m'], 'let h = (k: integer) => 2*k\nh([m, 1])')).toEqual(list);
   });
 
   test('a function that calls an annotated function keeps the inner call', () => {
     expect(
-      run(
-        'function h(k: integer) { 2*k }\nfunction f(x: real) { h(x) + 1 }\nlet q\nf(q)'
+      runWith(
+        ['q'],
+        'function h(k: integer) { 2*k }\nfunction f(x: real) { h(x) + 1 }\nf(q)'
       )
     ).toEqual(['Add', ['h', 'q'], 1]);
   });
@@ -124,7 +127,7 @@ describe('a parameter annotated in the function is checked when a later value de
   test('a recursive function is not unrolled for a symbolic argument', () => {
     const fact =
       'function fact(n: integer) { if n <= 1 { 1 } else { n * fact(n - 1) } }\n';
-    expect(run(fact + 'let m\nfact(m)')).toEqual(['fact', 'm']);
+    expect(runWith(['m'], fact + 'fact(m)')).toEqual(['fact', 'm']);
     expect(run(fact + 'fact(5)')).toBe(120);
   });
 
@@ -184,7 +187,7 @@ describe('what an annotated parameter does not hold', () => {
   });
 
   test('a predicate at a boolean parameter is applied', () => {
-    expect(run('function p(b: boolean) { b }\nlet x\np(x > 0)')).toEqual([
+    expect(runWith(['x'], 'function p(b: boolean) { b }\np(x > 0)')).toEqual([
       'Less',
       0,
       'x',
@@ -192,7 +195,7 @@ describe('what an annotated parameter does not hold', () => {
   });
 
   test('a symbol at a parameter typed symbol is its own value', () => {
-    expect(run('function f(s: symbol) { s }\nlet q\nf(q)')).toBe('q');
+    expect(runWith(['q'], 'function f(s: symbol) { s }\nf(q)')).toBe('q');
     const declared = new ComputeEngine();
     declared.declare('f', '(symbol) -> symbol');
     declared.assign('f', declared.box(['Function', 's', 's']));
@@ -200,7 +203,7 @@ describe('what an annotated parameter does not hold', () => {
   });
 
   test('an expression at a parameter typed expression is applied', () => {
-    expect(run('function f(e: expression) { e }\nlet q\nf(q + 1)')).toEqual([
+    expect(runWith(['q'], 'function f(e: expression) { e }\nf(q + 1)')).toEqual([
       'Add',
       'q',
       1,
@@ -208,12 +211,12 @@ describe('what an annotated parameter does not hold', () => {
   });
 
   test('a bare parameter beside an annotated one holds nothing', () => {
-    expect(run('function f(a: integer, b) { a + b }\nlet q\nf(1, q)')).toEqual([
+    expect(runWith(['q'], 'function f(a: integer, b) { a + b }\nf(1, q)')).toEqual([
       'Add',
       'q',
       1,
     ]);
-    expect(run('let f = (a: integer, b) => a + b\nlet q\nf(1, q)')).toEqual([
+    expect(runWith(['q'], 'let f = (a: integer, b) => a + b\nf(1, q)')).toEqual([
       'Add',
       'q',
       1,
@@ -221,8 +224,8 @@ describe('what an annotated parameter does not hold', () => {
   });
 
   test('a literal with no annotation holds nothing', () => {
-    expect(run('let m\n((k) => 2*k)(m)')).toEqual(['Multiply', 2, 'm']);
-    expect(run('function h(k) { 2*k }\nlet m\nh(m)')).toEqual([
+    expect(runWith(['m'], '((k) => 2*k)(m)')).toEqual(['Multiply', 2, 'm']);
+    expect(runWith(['m'], 'function h(k) { 2*k }\nh(m)')).toEqual([
       'Multiply',
       2,
       'm',
@@ -278,10 +281,10 @@ describe('an annotated parameter and a symbol that its type lists', () => {
 describe('the order of the checks of an annotated parameter', () => {
   test('an absent value beside an undecided argument gives Missing', () => {
     expect(
-      run('function f(k: integer, x: real) { k + x }\nlet m\nf(m, Missing)')
+      runWith(['m'], 'function f(k: integer, x: real) { k + x }\nf(m, Missing)')
     ).toBe('Missing');
     expect(
-      run('let f = (k: integer, x: real) => k + x\nlet m\nf(m, Missing)')
+      runWith(['m'], 'let f = (k: integer, x: real) => k + x\nf(m, Missing)')
     ).toBe('Missing');
   });
 
@@ -297,22 +300,24 @@ describe('the order of the checks of an annotated parameter', () => {
 describe('an annotated parameter and the map of a broadcastable or a point-list parameter', () => {
   test('an element of a broadcastable map applies the body', () => {
     expect(
-      run('function h(k: broadcastable<integer>) { 2*k }\nlet m\nh([m, 1])')
+      runWith(['m'], 'function h(k: broadcastable<integer>) { 2*k }\nh([m, 1])')
     ).toEqual(['List', ['Multiply', 2, 'm'], 2]);
   });
 
   test('a symbol beside a broadcastable map applies the body', () => {
     expect(
-      run(
-        'function h(k: integer, x: broadcastable<real>) { k*x }\nlet m\nh(m, [1, 2])'
+      runWith(
+        ['m'],
+        'function h(k: integer, x: broadcastable<real>) { k*x }\nh(m, [1, 2])'
       )
     ).toEqual(['List', 'm', ['Multiply', 2, 'm']]);
   });
 
   test('a symbol beside a point-list map applies the body', () => {
     expect(
-      run(
-        'function f(k: integer, p: tuple<real, real>) { k*PointX(p) }\nlet m\nf(m, [(1, 2), (3, 4)])'
+      runWith(
+        ['m'],
+        'function f(k: integer, p: tuple<real, real>) { k*PointX(p) }\nf(m, [(1, 2), (3, 4)])'
       )
     ).toEqual(['List', 'm', ['Multiply', 3, 'm']]);
   });
@@ -320,7 +325,7 @@ describe('an annotated parameter and the map of a broadcastable or a point-list 
 
 describe('the application that waits belongs to the literal that answered', () => {
   test('a function with no annotation does not wait for an inner application', () => {
-    const held = run('let w = (x) => ((k: integer) => 2*k)(x)\nlet m\nw(m)');
+    const held = runWith(['m'], 'let w = (x) => ((k: integer) => 2*k)(x)\nw(m)');
     expect((held as unknown[])[0]).toBe('Apply');
     expect(
       runWith(

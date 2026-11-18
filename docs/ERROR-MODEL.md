@@ -317,25 +317,34 @@ dictionary construction, the omission by `ListFrom`, the `Map` bypass, the
 covariance family); and the parse of an empty slot to `Nothing`. Those
 passages are kept as history.
 
-### Block locals: a declaration has a value; an assignment is a statement — user decision of 2026-11-02
+### Block locals: initialization and statement assignments
 
-A local of a block always has a value when it is read. There is no error
-value for a read of a local with no value, and no symbolic read of such a
-local: each case below is a static error, put in place by the
-canonicalization, so the expression is invalid, `epsil check` reports it
-before the program runs, and a compilation declines it.
+Program and Block declarations may reserve uninitialized slots (accepted
+2026-11-16). An explicit annotation fixes the contract; otherwise preparation
+uses an initializer or a unique later straight-line initialization before any use.
+It does not search branches, loops or calls. Reading an uninitialized slot gives
+`read-before-initialization` at runtime; there is no symbolic read of that slot.
+Compilation conservatively declines source declarations without an initializer,
+except signatures paired with their function definitions. Standalone `Declare`
+outside these sequences retains `declaration-without-value`.
+
+The other declaration-placement, name and assignment errors below remain static
+errors in the canonical form. A fixed contract uses the same store admission
+whether annotated or inferred: a refused store retains the previous admitted
+value and reports its error; a failed RHS does not overwrite a numeric slot.
 
 | Code                                | Example                                              | Replacement                                         |
 | ----------------------------------- | ---------------------------------------------------- | --------------------------------------------------- |
-| `declaration-without-value`         | `Declare(x, "integer")` then `Assign(x, 5)`          | `Declare(x, "integer", 5)`                          |
+| `read-before-initialization`        | `Block(Declare(x, "integer"), x)`                   | initialize `x` before reading it                     |
 | `declaration-below-statement`       | `Block(If(c, Declare(t, "unknown", 1)), t)`          | `Block(Declare(t, "unknown", 0), If(c, Assign(t, 1)), t)` |
 | `assignment-to-undeclared-variable` | `Block(Assign(a, 1), a)`, `If(c, Assign(a, 1))`      | `Block(Declare(a, "unknown", 1), a)`                |
 | `read-before-declaration`           | `Block(Declare(b, "unknown", k), Declare(k, "integer", 2))` | declare `k` before the first use             |
 | `assignment-in-operand`             | `f(Assign(a, 2))`, `Assign(t, Assign(u, v))`         | `Block(Declare(a, "unknown", 2), f(a))`             |
 | `assignment-type-mismatch`          | `Block(Declare(a, "unknown", 1), Assign(a, "x"), a)` | use another name                                    |
 
-- A declaration is `Declare(x, type, v)`, or a `Declare` whose attributes
-  dictionary has a `value` entry. The three-operand `Declare(x, "unknown",
+- A declaration is `Declare(x, type, v)`, a `Declare` whose attributes
+  dictionary has a `value` entry, or a declaration reserving a slot without a
+  value. The three-operand `Declare(x, "unknown",
   v)` of the `where` clause and of the `;` parse is a declaration. Only a
   `Declare` that is a statement of a block or a function body declares a
   local. An `Assign` writes the variable that is in scope and never makes

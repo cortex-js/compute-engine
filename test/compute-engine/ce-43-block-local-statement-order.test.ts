@@ -33,7 +33,7 @@ describe('CE-43: block local types do not depend on statement order', () => {
       ['mutate', 'v'],
       'v',
     ]);
-    expect(assignFirst).toEqual({ type: 'vector<real^2>', sound: true });
+    expect(assignFirst).toEqual({ type: 'list<number>', sound: true });
   });
 
   test('a scalar local used at a real parameter', () => {
@@ -44,7 +44,7 @@ describe('CE-43: block local types do not depend on statement order', () => {
         ['rk', 'u'],
         'u',
       ])
-    ).toEqual({ type: 'integer', sound: true });
+    ).toEqual({ type: 'number', sound: true });
   });
 
   test('a use does not narrow the type of an assigned local below its value', () => {
@@ -55,7 +55,7 @@ describe('CE-43: block local types do not depend on statement order', () => {
     ] as MathJsonExpression[]) {
       const ce = engine();
       const e = ce.box(mj);
-      expect(e.type.toString()).toBe('vector<real^1>');
+      expect(e.type.toString()).toBe('list<number>');
     }
   });
 });
@@ -80,7 +80,7 @@ describe('CE-43: an assignment in a match case is an assignment of the block loc
     // Before: typed `vector<integer^3>`, evaluated to `[]`.
     expect(
       run('let xs = [1, 2, 3]\nwhile let [h, ...] = xs { xs = Rest(xs) }\nxs')
-    ).toEqual({ type: 'list<integer>', value: '[]', sound: true });
+    ).toEqual({ type: 'list<number>', value: '[]', sound: true });
   });
 
   test('a match case that assigns a value of another kind', () => {

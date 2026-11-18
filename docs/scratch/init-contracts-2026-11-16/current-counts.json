@@ -1,0 +1,497 @@
+{
+  "root": "/private/tmp/ce-init-contracts-current-review",
+  "base": "fd7bad6e1a5155d239cd074a27031a2934b3e82a",
+  "metric": "physical and lexical token-bearing changed lines; relocation not yet subtracted",
+  "rows": [
+    {
+      "path": "src/compute-engine/boxed-expression/boxed-function.ts",
+      "category": "production",
+      "add": 6,
+      "del": 27,
+      "net": -21,
+      "codeAdd": 6,
+      "codeDel": 17,
+      "codeNet": -11
+    },
+    {
+      "path": "src/compute-engine/boxed-expression/boxed-symbol.ts",
+      "category": "production",
+      "add": 17,
+      "del": 13,
+      "net": 4,
+      "codeAdd": 16,
+      "codeDel": 6,
+      "codeNet": 10
+    },
+    {
+      "path": "src/compute-engine/boxed-expression/boxed-value-definition.ts",
+      "category": "production",
+      "add": 53,
+      "del": 46,
+      "net": 7,
+      "codeAdd": 45,
+      "codeDel": 23,
+      "codeNet": 22
+    },
+    {
+      "path": "src/compute-engine/boxed-expression/call-result-type.ts",
+      "category": "production",
+      "add": 27,
+      "del": 0,
+      "net": 27,
+      "codeAdd": 17,
+      "codeDel": 0,
+      "codeNet": 17
+    },
+    {
+      "path": "src/compute-engine/boxed-expression/declared-local.ts",
+      "category": "production",
+      "add": 1,
+      "del": 70,
+      "net": -69,
+      "codeAdd": 0,
+      "codeDel": 21,
+      "codeNet": -21
+    },
+    {
+      "path": "src/compute-engine/boxed-expression/matrix-operand.ts",
+      "category": "production",
+      "add": 14,
+      "del": 6,
+      "net": 8,
+      "codeAdd": 7,
+      "codeDel": 3,
+      "codeNet": 4
+    },
+    {
+      "path": "src/compute-engine/boxed-expression/proved-absent-domain.ts",
+      "category": "production",
+      "add": 21,
+      "del": 0,
+      "net": 21,
+      "codeAdd": 7,
+      "codeDel": 0,
+      "codeNet": 7
+    },
+    {
+      "path": "src/compute-engine/engine-declarations.ts",
+      "category": "production",
+      "add": 16,
+      "del": 8,
+      "net": 8,
+      "codeAdd": 16,
+      "codeDel": 8,
+      "codeNet": 8
+    },
+    {
+      "path": "src/compute-engine/function-utils.ts",
+      "category": "production",
+      "add": 17,
+      "del": 7,
+      "net": 10,
+      "codeAdd": 17,
+      "codeDel": 7,
+      "codeNet": 10
+    },
+    {
+      "path": "src/compute-engine/library/assignment-evidence.ts",
+      "category": "production",
+      "add": 0,
+      "del": 362,
+      "net": -362,
+      "codeAdd": 0,
+      "codeDel": 204,
+      "codeNet": -204
+    },
+    {
+      "path": "src/compute-engine/library/control-structures.ts",
+      "category": "production",
+      "add": 78,
+      "del": 163,
+      "net": -85,
+      "codeAdd": 76,
+      "codeDel": 153,
+      "codeNet": -77
+    },
+    {
+      "path": "src/compute-engine/library/core.ts",
+      "category": "production",
+      "add": 53,
+      "del": 422,
+      "net": -369,
+      "codeAdd": 47,
+      "codeDel": 342,
+      "codeNet": -295
+    },
+    {
+      "path": "src/compute-engine/types-definitions.ts",
+      "category": "production",
+      "add": 6,
+      "del": 5,
+      "net": 1,
+      "codeAdd": 2,
+      "codeDel": 1,
+      "codeNet": 1
+    },
+    {
+      "path": "src/compute-engine/types-expression.ts",
+      "category": "production",
+      "add": 7,
+      "del": 0,
+      "net": 7,
+      "codeAdd": 2,
+      "codeDel": 0,
+      "codeNet": 2
+    },
+    {
+      "path": "src/epsil/error-explanations.ts",
+      "category": "production",
+      "add": 1,
+      "del": 0,
+      "net": 1,
+      "codeAdd": 1,
+      "codeDel": 0,
+      "codeNet": 1
+    },
+    {
+      "path": "src/epsil/execute-epsil.ts",
+      "category": "production",
+      "add": 1,
+      "del": 0,
+      "net": 1,
+      "codeAdd": 1,
+      "codeDel": 0,
+      "codeNet": 1
+    },
+    {
+      "path": "src/epsil/static-diagnostics.ts",
+      "category": "production",
+      "add": 5,
+      "del": 1,
+      "net": 4,
+      "codeAdd": 4,
+      "codeDel": 0,
+      "codeNet": 4
+    },
+    {
+      "path": "test/compute-engine/annotated-parameter-undecided.test.ts",
+      "category": "tests",
+      "add": 25,
+      "del": 20,
+      "net": 5,
+      "codeAdd": 23,
+      "codeDel": 20,
+      "codeNet": 3
+    },
+    {
+      "path": "test/compute-engine/binding-units-commit.test.ts",
+      "category": "tests",
+      "add": 1,
+      "del": 1,
+      "net": 0,
+      "codeAdd": 1,
+      "codeDel": 1,
+      "codeNet": 0
+    },
+    {
+      "path": "test/compute-engine/block-local-list-rank-join.test.ts",
+      "category": "tests",
+      "add": 0,
+      "del": 54,
+      "net": -54,
+      "codeAdd": 0,
+      "codeDel": 36,
+      "codeNet": -36
+    },
+    {
+      "path": "test/compute-engine/block-locals-declaration-rules.test.ts",
+      "category": "tests",
+      "add": 26,
+      "del": 47,
+      "net": -21,
+      "codeAdd": 23,
+      "codeDel": 38,
+      "codeNet": -15
+    },
+    {
+      "path": "test/compute-engine/bound-once.test.ts",
+      "category": "tests",
+      "add": 5,
+      "del": 5,
+      "net": 0,
+      "codeAdd": 5,
+      "codeDel": 5,
+      "codeNet": 0
+    },
+    {
+      "path": "test/compute-engine/ce-1179-loop-body-scalar-result.test.ts",
+      "category": "tests",
+      "add": 4,
+      "del": 3,
+      "net": 1,
+      "codeAdd": 4,
+      "codeDel": 3,
+      "codeNet": 1
+    },
+    {
+      "path": "test/compute-engine/ce-1309-untyped-integer-local.test.ts",
+      "category": "tests",
+      "add": 7,
+      "del": 2,
+      "net": 5,
+      "codeAdd": 7,
+      "codeDel": 2,
+      "codeNet": 5
+    },
+    {
+      "path": "test/compute-engine/ce-43-block-local-statement-order.test.ts",
+      "category": "tests",
+      "add": 4,
+      "del": 4,
+      "net": 0,
+      "codeAdd": 4,
+      "codeDel": 4,
+      "codeNet": 0
+    },
+    {
+      "path": "test/compute-engine/ce-636-block-local-without-value.test.ts",
+      "category": "tests",
+      "add": 5,
+      "del": 9,
+      "net": -4,
+      "codeAdd": 3,
+      "codeDel": 3,
+      "codeNet": 0
+    },
+    {
+      "path": "test/compute-engine/ce-689-type-cache-across-calls.test.ts",
+      "category": "tests",
+      "add": 2,
+      "del": 2,
+      "net": 0,
+      "codeAdd": 2,
+      "codeDel": 2,
+      "codeNet": 0
+    },
+    {
+      "path": "test/compute-engine/collection-type-followups.test.ts",
+      "category": "tests",
+      "add": 1,
+      "del": 1,
+      "net": 0,
+      "codeAdd": 1,
+      "codeDel": 1,
+      "codeNet": 0
+    },
+    {
+      "path": "test/compute-engine/compile-source-initialization-admission.test.ts",
+      "category": "tests",
+      "add": 81,
+      "del": 0,
+      "net": 81,
+      "codeAdd": 71,
+      "codeDel": 0,
+      "codeNet": 71
+    },
+    {
+      "path": "test/compute-engine/d17-run-keeps-type-caches.test.ts",
+      "category": "tests",
+      "add": 5,
+      "del": 5,
+      "net": 0,
+      "codeAdd": 5,
+      "codeDel": 5,
+      "codeNet": 0
+    },
+    {
+      "path": "test/compute-engine/d18-end-of-literal-event.test.ts",
+      "category": "tests",
+      "add": 6,
+      "del": 8,
+      "net": -2,
+      "codeAdd": 3,
+      "codeDel": 3,
+      "codeNet": 0
+    },
+    {
+      "path": "test/compute-engine/declared-parameter-undecided.test.ts",
+      "category": "tests",
+      "add": 1,
+      "del": 1,
+      "net": 0,
+      "codeAdd": 1,
+      "codeDel": 1,
+      "codeNet": 0
+    },
+    {
+      "path": "test/compute-engine/fixed-unknown-matrix-order.test.ts",
+      "category": "tests",
+      "add": 31,
+      "del": 0,
+      "net": 31,
+      "codeAdd": 27,
+      "codeDel": 0,
+      "codeNet": 27
+    },
+    {
+      "path": "test/compute-engine/integrate-block-integrand.test.ts",
+      "category": "tests",
+      "add": 5,
+      "del": 6,
+      "net": -1,
+      "codeAdd": 4,
+      "codeDel": 6,
+      "codeNet": -2
+    },
+    {
+      "path": "test/compute-engine/lazy-view-scope.test.ts",
+      "category": "tests",
+      "add": 15,
+      "del": 7,
+      "net": 8,
+      "codeAdd": 15,
+      "codeDel": 7,
+      "codeNet": 8
+    },
+    {
+      "path": "test/compute-engine/product-of-reassigned-variable.test.ts",
+      "category": "tests",
+      "add": 2,
+      "del": 2,
+      "net": 0,
+      "codeAdd": 2,
+      "codeDel": 2,
+      "codeNet": 0
+    },
+    {
+      "path": "test/compute-engine/protocol-dispatch.test.ts",
+      "category": "tests",
+      "add": 1,
+      "del": 1,
+      "net": 0,
+      "codeAdd": 1,
+      "codeDel": 1,
+      "codeNet": 0
+    },
+    {
+      "path": "test/compute-engine/tycho-item-332-block-let-literal-type.test.ts",
+      "category": "tests",
+      "add": 10,
+      "del": 10,
+      "net": 0,
+      "codeAdd": 9,
+      "codeDel": 9,
+      "codeNet": 0
+    },
+    {
+      "path": "test/compute-engine/tycho-item-332-compiled-program-parity.test.ts",
+      "category": "tests",
+      "add": 6,
+      "del": 6,
+      "net": 0,
+      "codeAdd": 6,
+      "codeDel": 6,
+      "codeNet": 0
+    },
+    {
+      "path": "test/compute-engine/tycho-row-426-apply-lambda-type.test.ts",
+      "category": "tests",
+      "add": 8,
+      "del": 1,
+      "net": 7,
+      "codeAdd": 8,
+      "codeDel": 1,
+      "codeNet": 7
+    },
+    {
+      "path": "test/epsil/ce-1303-while-undecided-condition.test.ts",
+      "category": "tests",
+      "add": 3,
+      "del": 5,
+      "net": -2,
+      "codeAdd": 1,
+      "codeDel": 2,
+      "codeNet": -1
+    },
+    {
+      "path": "test/epsil/ce-1389-destructure-unevaluated-tuple.test.ts",
+      "category": "tests",
+      "add": 3,
+      "del": 1,
+      "net": 2,
+      "codeAdd": 3,
+      "codeDel": 1,
+      "codeNet": 2
+    },
+    {
+      "path": "test/epsil/function-body-error-location.test.ts",
+      "category": "tests",
+      "add": 1,
+      "del": 1,
+      "net": 0,
+      "codeAdd": 1,
+      "codeDel": 1,
+      "codeNet": 0
+    },
+    {
+      "path": "test/epsil/initialization-contracts.test.ts",
+      "category": "tests",
+      "add": 203,
+      "del": 0,
+      "net": 203,
+      "codeAdd": 182,
+      "codeDel": 0,
+      "codeNet": 182
+    },
+    {
+      "path": "test/epsil/iterate-list-with-failed-cell.test.ts",
+      "category": "tests",
+      "add": 15,
+      "del": 8,
+      "net": 7,
+      "codeAdd": 15,
+      "codeDel": 8,
+      "codeNet": 7
+    },
+    {
+      "path": "test/epsil/member-call.test.ts",
+      "category": "tests",
+      "add": 1,
+      "del": 1,
+      "net": 0,
+      "codeAdd": 1,
+      "codeDel": 1,
+      "codeNet": 0
+    },
+    {
+      "path": "test/epsil/program.test.ts",
+      "category": "tests",
+      "add": 7,
+      "del": 3,
+      "net": 4,
+      "codeAdd": 7,
+      "codeDel": 3,
+      "codeNet": 4
+    },
+    {
+      "path": "test/epsil/static-declared-type.test.ts",
+      "category": "tests",
+      "add": 2,
+      "del": 5,
+      "net": -3,
+      "codeAdd": 1,
+      "codeDel": 3,
+      "codeNet": -2
+    },
+    {
+      "path": "test/epsil/type-variables-epsil.test.ts",
+      "category": "tests",
+      "add": 2,
+      "del": 3,
+      "net": -1,
+      "codeAdd": 1,
+      "codeDel": 1,
+      "codeNet": 0
+    }
+  ]
+}

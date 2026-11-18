@@ -1,4 +1,3 @@
-import { widenValueTypes } from '../../common/type/widen-value.js';
 import { inStaticTypingView } from '../static-typing-view.js';
 import { activationRecordOf, isActivatedDefinition } from './ambient-chain.js';
 import { valueIsHidden } from './hidden-values.js';
@@ -327,18 +326,11 @@ export class _BoxedValueDefinition
    * an inferred signature is the recorded one (`declaredType`). */
   _signatureSkeleton: Type | undefined = undefined;
 
-  /** True when an assignment to this binding recorded the type of its value
-   * at canonicalization time (`joinAssignmentEvidence`, `library/core.ts`).
-   * The static type of a valueless binding with this flag is the join of the
-   * types of its assigned values only. A use of the binding (an argument at
-   * a typed parameter) does not narrow it (`BoxedSymbol._inferWithoutFacts`,
-   * `boxed-symbol.ts`), and the first assignment replaces a type that came
-   * from uses only. The order of the uses and the assignments in a block
-   * then does not change the static type. A narrowing by a use cannot be
-   * part of that type: a meet with the uses is not sound, because it can
-   * exclude a value that an assignment gives (`v = [1.5]` and a use at a
-   * `list<integer>` parameter gave `vector<integer^1>`). */
-  _assignmentEvidence: boolean = false;
+  /** A sequence initializer or annotation fixed this binding's static contract. */
+  _fixedInitializationType = false;
+
+  /** The source declaration reserves a slot without an initial value. */
+  _requiresInitialization = false;
 
   /** Memo of the signature derived from `_signatureSkeleton`, keyed on the
    * identities of the skeleton and of the stored value's type object.
@@ -964,9 +956,9 @@ export class _BoxedValueDefinition
       // matches the restored type.
       _placeholderSkeleton: this._placeholderSkeleton,
       _signatureSkeleton: this._signatureSkeleton,
-      // The evidence flag decides how the next write joins the type, so it
-      // is restored with the type.
-      _assignmentEvidence: this._assignmentEvidence,
+      // Finalization is restored with the contract it protects.
+      _fixedInitializationType: this._fixedInitializationType,
+      _requiresInitialization: this._requiresInitialization,
       // Effects annotation provenance rides in the tuple: the typed-`let`
       // upgrade writes it alongside `type`/`inferredType`
       // (`docs/EFFECTS-MODEL.md`, rollback
@@ -1001,11 +993,13 @@ export class _BoxedValueDefinition
       _isSelfReferential: boolean;
       _placeholderSkeleton: Type | undefined;
       _signatureSkeleton: Type | undefined;
-      _assignmentEvidence: boolean;
+      _fixedInitializationType: boolean;
+      _requiresInitialization: boolean;
       effectsDeclared: boolean;
     };
     this._type = s._type;
-    this._assignmentEvidence = s._assignmentEvidence;
+    this._fixedInitializationType = s._fixedInitializationType;
+    this._requiresInitialization = s._requiresInitialization;
     this._placeholderSkeleton = s._placeholderSkeleton;
     this._signatureSkeleton = s._signatureSkeleton;
     this._value = s._value;
@@ -1065,7 +1059,8 @@ export class _BoxedValueDefinition
       _programVariable: this._programVariable,
       _placeholderSkeleton: this._placeholderSkeleton,
       _signatureSkeleton: this._signatureSkeleton,
-      _assignmentEvidence: this._assignmentEvidence,
+      _fixedInitializationType: this._fixedInitializationType,
+      _requiresInitialization: this._requiresInitialization,
       // COPIED, not aliased: provenance is appended to in place, so a
       // snapshot sharing the array would grow with the writes it exists to
       // undo and restore the post-write history.
@@ -1109,7 +1104,8 @@ export class _BoxedValueDefinition
     this._programVariable = s._programVariable as boolean;
     this._placeholderSkeleton = s._placeholderSkeleton as Type | undefined;
     this._signatureSkeleton = s._signatureSkeleton as Type | undefined;
-    this._assignmentEvidence = s._assignmentEvidence as boolean;
+    this._fixedInitializationType = s._fixedInitializationType as boolean;
+    this._requiresInitialization = s._requiresInitialization as boolean;
     this._typeProvenance = s._typeProvenance as
       TypeProvenanceEntry[] | undefined;
     this.effectsDeclared = s.effectsDeclared as boolean;
@@ -1140,6 +1136,7 @@ export class _BoxedValueDefinition
    */
   get declaredType(): BoxedType {
     const t = this._type;
+    if (this._fixedInitializationType) return t ?? BoxedType.unknown;
     // A static type does not depend on a value: a variable with no type is
     // `unknown`, whatever it holds.
     if (t === undefined || t === null)
@@ -1249,6 +1246,7 @@ export class _BoxedValueDefinition
    * @internal
    */
   _wildcardRecursiveSignature(): Type | undefined {
+    if (this._fixedInitializationType) return undefined;
     const t = this._type;
     if (t === undefined || t === null || !isWildcardFunctionType(t.type))
       return undefined;
@@ -1757,10 +1755,7 @@ export class _BoxedValueDefinition
   }
 
   private _writeType(t: Type | TypeString | BoxedType): void {
-    if (
-      this._isConstant &&
-      !(this._programVariable && this.inferredType && this._value === undefined)
-    )
+    if (this._isConstant && !(this._blockLocal && !this._fixedInitializationType && this._value === undefined))
       throw new Error(
         `The type of the constant "${this.name}" cannot be changed`
       );
@@ -2377,25 +2372,18 @@ function holdsFunctionLiteral(x0: Expression | null | undefined): boolean {
  * set and a tuple the same way (a list loses its dimensions). Any other type
  * is kept.
  *
- * With `tiers`, a numeric type widens to its tier instead
- * (`widenAssignedType()`: `5` to `integer`, `0.5` to `real`), an element
- * type loses only its literal cargo (`widenValueTypes()`: `complex` stays
- * `complex`), and a character type is kept. That is the
- * type of a `let` with no declared type (see `Declare`): `let c = [(1, 2)]`
- * is a `list<tuple<integer, integer>>` of any length.
  */
 export function widenLocalType(
   ce: ComputeEngine,
-  t: Type,
-  tiers: boolean | 'nested' = false
+  t: Type
 ): Type {
-  if (t === 'never') return t;
+  if (t === 'never') return 'unknown';
   if (typeof t === 'object') {
     if (t.kind === 'list') {
       // A list with n dimensions (a matrix `matrix<integer^(2x2)>` has two)
       // widens to n nested lists: `list<list<number>>`. The lengths are not
       // kept, so a local can hold a longer list later.
-      let widened: Type = widenLocalType(ce, t.elements, tiers && 'nested');
+      let widened: Type = widenLocalType(ce, t.elements);
       const rank = Math.max(1, t.dimensions?.length ?? 1);
       for (let i = 0; i < rank; i++)
         widened = { kind: 'list', elements: widened };
@@ -2404,29 +2392,48 @@ export function widenLocalType(
     if (t.kind === 'set')
       return {
         kind: 'set',
-        elements: widenLocalType(ce, t.elements, tiers && 'nested'),
+        elements: widenLocalType(ce, t.elements),
       };
     if (t.kind === 'tuple')
       return {
         kind: 'tuple',
         elements: t.elements.map((e) => ({
           ...e,
-          type: widenLocalType(ce, e.type, tiers && 'nested'),
+          type: widenLocalType(ce, e.type),
         })),
       };
-    if (t.kind === 'union') return t;
+    if (t.kind === 'union') return { ...t, types: t.types.map((x) => widenLocalType(ce, x)) };
+    if (t.kind === 'signature') return 'function';
   }
   const bt = ce.type(t);
-  if (bt.matches('number')) {
-    if (tiers === 'nested') return widenValueTypes(t);
-    return tiers ? widenAssignedType(ce, t) : 'number';
-  }
-  // A character is a string of one character in a value, but the type
-  // `character` is not a subtype of `string`: both widen to `string`, so
-  // that `let prev = ""` then `prev = ch` is valid. A type of a local keeps
-  // `character`: a `list<string>` does not hold the characters of a word.
-  if (tiers && bt.matches('character')) return t;
+  if (bt.matches('number')) return 'number';
   if (bt.matches('string') || bt.matches('character')) return 'string';
   if (bt.matches('boolean')) return 'boolean';
   return t;
+}
+
+/** Establish a sequence local's contract from its initializer, without evaluating it. */
+export function initializeLocalContract(
+  ce: ComputeEngine,
+  name: string,
+  type: Type,
+  constant = false
+): void {
+  const binding = ce.context.lexicalScope.bindings.get(name);
+  if (!binding || !('value' in binding) || binding.value._blockLocal !== true)
+    return;
+  const target = binding.value;
+  if (target._fixedInitializationType) return;
+  const next = constant ? type : widenLocalType(ce, type);
+  const wasCallable = containsSignatureArm(target.type.type);
+  target._setType(() => ce.type(next));
+  target._fixedInitializationType = true;
+  // A precise constant arrow records inferred parameter requirements, not
+  // authored annotations; calls keep the existing inferred-call admission.
+  target.inferredType = constant && ce.type(next).matches('function');
+  ce._noteStateEvent({
+    kind: 'type-write',
+    callableBefore: wasCallable,
+    callableAfter: containsSignatureArm(next),
+  });
 }

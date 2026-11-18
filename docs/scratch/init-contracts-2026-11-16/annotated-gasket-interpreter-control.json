@@ -1,0 +1,46 @@
+{
+  "arm": "control",
+  "root": "/private/tmp/ce-init-contracts-current-measurement-20261118/current/ce",
+  "command": [
+    "node",
+    "--import",
+    "/Users/arno/dev/compute-engine/node_modules/tsx/dist/loader.mjs",
+    "/Users/arno/dev/compute-engine/docs/scratch/init-contracts-2026-11-16/annotated-gasket-interpreter.mjs",
+    "/private/tmp/ce-init-contracts-current-measurement-20261118/current/ce",
+    "/private/tmp/ce-init-contracts-20261116/test/compute-engine/fixtures/epsil-gasket/a-user-functions.epsil"
+  ],
+  "wallCapSeconds": 30,
+  "timedOut": false,
+  "processExitCode": 0,
+  "wallSeconds": 6.850279417005368,
+  "result": {
+    "root": "/private/tmp/ce-init-contracts-current-measurement-20261118/current/ce",
+    "fixture": "/private/tmp/ce-init-contracts-20261116/test/compute-engine/fixtures/epsil-gasket/a-user-functions.epsil",
+    "sourceSha256": "97df7a76ed9fc39a1157588348e6859fe0e0a137fa03f65ae1af83c8e31ed892",
+    "precision": 21,
+    "route": "executeEpsil-interpreter",
+    "executionMs": 6486.48225,
+    "value": [
+      "Tuple",
+      224,
+      [
+        "List",
+        4,
+        6,
+        18,
+        54,
+        86,
+        28,
+        8,
+        8,
+        4,
+        4,
+        4,
+        0
+      ]
+    ],
+    "diagnostics": [],
+    "matchesOracle": true
+  },
+  "stderr": ""
+}

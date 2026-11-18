@@ -1,0 +1,403 @@
+{
+  "root": "/private/tmp/ce-init-contracts-current-measurement-20261118/current/ce",
+  "fixtures": "/private/tmp/ce-init-contracts-20261116",
+  "results": [
+    {
+      "name": "gasket-a-user-functions-original",
+      "source": "// Apollonian gasket (-1, 2, 2, 3) from Descartes' circle theorem.\n// A circle is the tuple (k, x, y): curvature and centre.\nconst minR = 0.008\n// Complex square root of (re, im), principal branch.\nfunction csqrt(re, im) {\n  let m = sqrt(re^2 + im^2)\n  let a = sqrt(max(0, (m + re) / 2))\n  let b = sqrt(max(0, (m - re) / 2))\n  (a, b) if im >= 0 else (a, -b)\n}\n// The four candidates for a circle tangent to a, b and c.\nfunction fourth(a, b, c) {\n  let ka = a[1]; let kb = b[1]; let kc = c[1]\n  let disc = 2 * sqrt(max(0, ka * kb + kb * kc + kc * ka))\n  // kz = k * z as (re, im)\n  let ax = ka * a[2]; let ay = ka * a[3]\n  let bx = kb * b[2]; let by = kb * b[3]\n  let cx = kc * c[2]; let cy = kc * c[3]\n  let sx = ax + bx + cx; let sy = ay + by + cy\n  let px = (ax * bx - ay * by) + (bx * cx - by * cy) + (cx * ax - cy * ay)\n  let py = (ax * by + ay * bx) + (bx * cy + by * cx) + (cx * ay + cy * ax)\n  let (rx, ry) = csqrt(px, py)\n  rx = 2 * rx; ry = 2 * ry\n  let out: list<tuple<number, number, number>> = []\n  for k in [ka + kb + kc + disc, ka + kb + kc - disc] {\n    for (zx, zy) in [(sx + rx, sy + ry), (sx - rx, sy - ry)] {\n      out = [...out, (k, zx / k, zy / k)]\n    }\n  }\n  out\n}\nfunction tangent(p, q) {\n  let d = sqrt((p[2] - q[2])^2 + (p[3] - q[3])^2)\n  let rp = 1 / p[1]; let rq = 1 / q[1]\n  abs(d - abs(rp + rq)) < 1e-6 || abs(d - abs(rp - rq)) < 1e-6\n}\nfunction seen(acc, c) {\n  count(acc, e => abs(e[1] - c[1]) < 1e-6 && abs(e[2] - c[2]) < 1e-6 && abs(e[3] - c[3]) < 1e-6) > 0\n}\nfunction ok(p, q, r, c) {\n  c[1] > 0 && 1 / c[1] >= minR && tangent(c, p) && tangent(c, q) && tangent(c, r)\n}\nconst outer = (-1, 0, 0)\nconst A = (2, 0.5, 0)\nconst B = (2, -0.5, 0)\nlet cands = fourth(outer, A, B)\nlet C = first(filter(cands, c => c[1] > 0 && c[3] > 0))\nlet D = first(filter(cands, c => c[1] > 0 && c[3] < 0))\nlet circles = [(A[1], A[2], A[3], 1), (B[1], B[2], B[3], 1), (C[1], C[2], C[3], 1), (D[1], D[2], D[3], 1)]\n// Work queue of gaps (p, q, r, depth); no recursion.\nlet queue = [(outer, A, C, 2), (outer, B, C, 2), (A, B, C, 2), (outer, A, D, 2), (outer, B, D, 2), (A, B, D, 2)]\nlet i = 1\nwhile i <= length(queue) {\n  let gap = queue[i]\n  let p = gap[1]; let q = gap[2]; let r = gap[3]; let depth = gap[4]\n  for c in fourth(p, q, r) {\n    if ok(p, q, r, c) && !seen(circles, c) {\n      circles = [...circles, (c[1], c[2], c[3], depth)]\n      queue = [...queue, (p, q, c, depth + 1), (p, r, c, depth + 1), (q, r, c, depth + 1)]\n    }\n  }\n  i = i + 1\n}\nlet counts = listFrom(map(d => count(circles, c => c[4] == d), 1..12))\n(length(circles), counts)\n",
+      "large": true,
+      "parseDiagnostics": [],
+      "valid": true,
+      "typeBefore": "tuple<integer | signed_infinity, list<number>>",
+      "compilation": {
+        "success": false,
+        "diagnostic": {
+          "code": "outside-profile",
+          "kind": "capability",
+          "message": "Could not compile: DefineFunction(\"csqrt\", Function(Block(Declare(m, {\"value\" -> sqrt(\"im\"^2 + \"re\"^2)}), Declare(a, {\"value\" -> sqrt(max(0, 1/2 )…)…)): the operator DefineFunction is not supported by the compiler",
+          "operator": "DefineFunction",
+          "value": "DefineFunction(\"csqrt\", Function(Block(Declare(m, {\"value\" -> sqrt(\"im\"^2 + \"re\"^2)}), Declare(a, {\"value\" -> sqrt(max(0, 1/2 )…)…))"
+        },
+        "error": "Could not compile: DefineFunction(\"csqrt\", Function(Block(Declare(m, {\"value\" -> sqrt(\"im\"^2 + \"re\"^2)}), Declare(a, {\"value\" -> sqrt(max(0, 1/2 )…)…)): the operator DefineFunction is not supported by the compiler"
+      },
+      "interpreter": {
+        "executed": false,
+        "reason": "Large interpreter run omitted; compile success and native run recorded separately."
+      }
+    },
+    {
+      "name": "gasket-a-existing-seen-annotation",
+      "source": "// Apollonian gasket (-1, 2, 2, 3) from Descartes' circle theorem.\n// A circle is the tuple (k, x, y): curvature and centre.\nconst minR = 0.008\n// Complex square root of (re, im), principal branch.\nfunction csqrt(re, im) {\n  let m = sqrt(re^2 + im^2)\n  let a = sqrt(max(0, (m + re) / 2))\n  let b = sqrt(max(0, (m - re) / 2))\n  (a, b) if im >= 0 else (a, -b)\n}\n// The four candidates for a circle tangent to a, b and c.\nfunction fourth(a, b, c) {\n  let ka = a[1]; let kb = b[1]; let kc = c[1]\n  let disc = 2 * sqrt(max(0, ka * kb + kb * kc + kc * ka))\n  // kz = k * z as (re, im)\n  let ax = ka * a[2]; let ay = ka * a[3]\n  let bx = kb * b[2]; let by = kb * b[3]\n  let cx = kc * c[2]; let cy = kc * c[3]\n  let sx = ax + bx + cx; let sy = ay + by + cy\n  let px = (ax * bx - ay * by) + (bx * cx - by * cy) + (cx * ax - cy * ay)\n  let py = (ax * by + ay * bx) + (bx * cy + by * cx) + (cx * ay + cy * ax)\n  let (rx, ry) = csqrt(px, py)\n  rx = 2 * rx; ry = 2 * ry\n  let out: list<tuple<number, number, number>> = []\n  for k in [ka + kb + kc + disc, ka + kb + kc - disc] {\n    for (zx, zy) in [(sx + rx, sy + ry), (sx - rx, sy - ry)] {\n      out = [...out, (k, zx / k, zy / k)]\n    }\n  }\n  out\n}\nfunction tangent(p, q) {\n  let d = sqrt((p[2] - q[2])^2 + (p[3] - q[3])^2)\n  let rp = 1 / p[1]; let rq = 1 / q[1]\n  abs(d - abs(rp + rq)) < 1e-6 || abs(d - abs(rp - rq)) < 1e-6\n}\nfunction seen(acc: list<tuple<number, number, number, number>>, c) {\n  count(acc, e => abs(e[1] - c[1]) < 1e-6 && abs(e[2] - c[2]) < 1e-6 && abs(e[3] - c[3]) < 1e-6) > 0\n}\nfunction ok(p, q, r, c) {\n  c[1] > 0 && 1 / c[1] >= minR && tangent(c, p) && tangent(c, q) && tangent(c, r)\n}\nconst outer = (-1, 0, 0)\nconst A = (2, 0.5, 0)\nconst B = (2, -0.5, 0)\nlet cands = fourth(outer, A, B)\nlet C = first(filter(cands, c => c[1] > 0 && c[3] > 0))\nlet D = first(filter(cands, c => c[1] > 0 && c[3] < 0))\nlet circles = [(A[1], A[2], A[3], 1), (B[1], B[2], B[3], 1), (C[1], C[2], C[3], 1), (D[1], D[2], D[3], 1)]\n// Work queue of gaps (p, q, r, depth); no recursion.\nlet queue = [(outer, A, C, 2), (outer, B, C, 2), (A, B, C, 2), (outer, A, D, 2), (outer, B, D, 2), (A, B, D, 2)]\nlet i = 1\nwhile i <= length(queue) {\n  let gap = queue[i]\n  let p = gap[1]; let q = gap[2]; let r = gap[3]; let depth = gap[4]\n  for c in fourth(p, q, r) {\n    if ok(p, q, r, c) && !seen(circles, c) {\n      circles = [...circles, (c[1], c[2], c[3], depth)]\n      queue = [...queue, (p, q, c, depth + 1), (p, r, c, depth + 1), (q, r, c, depth + 1)]\n    }\n  }\n  i = i + 1\n}\nlet counts = listFrom(map(d => count(circles, c => c[4] == d), 1..12))\n(length(circles), counts)\n",
+      "large": true,
+      "parseDiagnostics": [],
+      "valid": true,
+      "typeBefore": "tuple<integer | signed_infinity, list<number>>",
+      "compilation": {
+        "success": false,
+        "diagnostic": {
+          "code": "outside-profile",
+          "kind": "capability",
+          "message": "Could not compile: DefineFunction(\"csqrt\", Function(Block(Declare(m, {\"value\" -> sqrt(\"im\"^2 + \"re\"^2)}), Declare(a, {\"value\" -> sqrt(max(0, 1/2 )…)…)): the operator DefineFunction is not supported by the compiler",
+          "operator": "DefineFunction",
+          "value": "DefineFunction(\"csqrt\", Function(Block(Declare(m, {\"value\" -> sqrt(\"im\"^2 + \"re\"^2)}), Declare(a, {\"value\" -> sqrt(max(0, 1/2 )…)…))"
+        },
+        "error": "Could not compile: DefineFunction(\"csqrt\", Function(Block(Declare(m, {\"value\" -> sqrt(\"im\"^2 + \"re\"^2)}), Declare(a, {\"value\" -> sqrt(max(0, 1/2 )…)…)): the operator DefineFunction is not supported by the compiler"
+      },
+      "interpreter": {
+        "executed": false,
+        "reason": "Large interpreter run omitted; compile success and native run recorded separately."
+      }
+    },
+    {
+      "name": "gasket-b-inlined-tuples-original",
+      "source": "// Apollonian gasket (-1, 2, 2, 3), every helper inlined: no user function\n// definitions, circles and gaps as tuples. Same result as a-user-functions.\nlet circles = [(2, 0.5, 0, 1), (2, -0.5, 0, 1), (3, 0, 0.6666666666666666, 1), (3, 0, -0.6666666666666666, 1)]\nlet queue = [((-1, 0, 0), (2, 0.5, 0), (3, 0, 0.6666666666666666), 2), ((-1, 0, 0), (2, -0.5, 0), (3, 0, 0.6666666666666666), 2), ((2, 0.5, 0), (2, -0.5, 0), (3, 0, 0.6666666666666666), 2), ((-1, 0, 0), (2, 0.5, 0), (3, 0, -0.6666666666666666), 2), ((-1, 0, 0), (2, -0.5, 0), (3, 0, -0.6666666666666666), 2), ((2, 0.5, 0), (2, -0.5, 0), (3, 0, -0.6666666666666666), 2)]\nlet i = 1\nwhile i <= Length(queue) {\n  let gap = queue[i]\n  let p = gap[1]; let q = gap[2]; let r = gap[3]; let depth = gap[4]\n  let ka = p[1]; let kb = q[1]; let kc = r[1]\n  let disc = 2 * Sqrt(Max(0, ka * kb + kb * kc + kc * ka))\n  let ax = ka * p[2]; let ay = ka * p[3]\n  let bx = kb * q[2]; let by = kb * q[3]\n  let cx = kc * r[2]; let cy = kc * r[3]\n  let sx = ax + bx + cx; let sy = ay + by + cy\n  let px = (ax * bx - ay * by) + (bx * cx - by * cy) + (cx * ax - cy * ay)\n  let py = (ax * by + ay * bx) + (bx * cy + by * cx) + (cx * ay + cy * ax)\n  let m = Sqrt(px^2 + py^2)\n  let rx = 2 * Sqrt(Max(0, (m + px) / 2))\n  let ry = 2 * Sqrt(Max(0, (m - px) / 2))\n  if py < 0 { ry = -ry }\n  for k in [ka + kb + kc + disc, ka + kb + kc - disc] {\n    for z in [(sx + rx, sy + ry), (sx - rx, sy - ry)] {\n      let x = z[1] / k\n      let y = z[2] / k\n      let good = k > 0 && 1 / k >= 0.008\n      for t in [p, q, r] {\n        let d = Sqrt((x - t[2])^2 + (y - t[3])^2)\n        let rt = 1 / t[1]\n        if !(Abs(d - Abs(1 / k + rt)) < 1e-6 || Abs(d - Abs(1 / k - rt)) < 1e-6) { good = false }\n      }\n      if good {\n        let j = 1\n        while j <= Length(circles) {\n          let e = circles[j]\n          if Abs(e[1] - k) < 1e-6 && Abs(e[2] - x) < 1e-6 && Abs(e[3] - y) < 1e-6 { good = false }\n          j = j + 1\n        }\n      }\n      if good {\n        let c = (k, x, y)\n        circles = [...circles, (k, x, y, depth)]\n        queue = [...queue, (p, q, c, depth + 1), (p, r, c, depth + 1), (q, r, c, depth + 1)]\n      }\n    }\n  }\n  i = i + 1\n}\nLength(circles)\n",
+      "large": true,
+      "parseDiagnostics": [],
+      "valid": true,
+      "typeBefore": "integer | signed_infinity",
+      "compilation": {
+        "success": false,
+        "diagnostic": {
+          "code": "outside-profile",
+          "kind": "capability",
+          "message": "Could not compile: Tuple(Tuple(-1, 0, 0), Tuple(2, 0.5, 0), Tuple(3, 0, 0.6666666666666666), 2): a tuple of tuples",
+          "operator": "Tuple",
+          "value": "Tuple(Tuple(-1, 0, 0), Tuple(2, 0.5, 0), Tuple(3, 0, 0.6666666666666666), 2)"
+        },
+        "error": "Could not compile: Tuple(Tuple(-1, 0, 0), Tuple(2, 0.5, 0), Tuple(3, 0, 0.6666666666666666), 2): a tuple of tuples"
+      },
+      "interpreter": {
+        "executed": false,
+        "reason": "Large interpreter run omitted; compile success and native run recorded separately."
+      }
+    },
+    {
+      "name": "gasket-c-inlined-flat-lists-original",
+      "source": "// Apollonian gasket (-1, 2, 2, 3), every helper inlined, no tuples: a circle\n// is a list [k, x, y, depth] and a gap is a flat list of three circles and a\n// depth. Same result as a-user-functions.\nlet circles = [[2, 0.5, 0, 1], [2, -0.5, 0, 1], [3, 0, 0.6666666666666666, 1], [3, 0, -0.6666666666666666, 1]]\nlet queue = [[-1, 0, 0, 2, 0.5, 0, 3, 0, 0.6666666666666666, 2], [-1, 0, 0, 2, -0.5, 0, 3, 0, 0.6666666666666666, 2], [2, 0.5, 0, 2, -0.5, 0, 3, 0, 0.6666666666666666, 2], [-1, 0, 0, 2, 0.5, 0, 3, 0, -0.6666666666666666, 2], [-1, 0, 0, 2, -0.5, 0, 3, 0, -0.6666666666666666, 2], [2, 0.5, 0, 2, -0.5, 0, 3, 0, -0.6666666666666666, 2]]\nlet i = 1\nwhile i <= Length(queue) {\n  let g = queue[i]\n  let ka = g[1]; let kb = g[4]; let kc = g[7]; let depth = g[10]\n  let disc = 2 * Sqrt(Max(0, ka * kb + kb * kc + kc * ka))\n  let ax = ka * g[2]; let ay = ka * g[3]\n  let bx = kb * g[5]; let by = kb * g[6]\n  let cx = kc * g[8]; let cy = kc * g[9]\n  let sx = ax + bx + cx; let sy = ay + by + cy\n  let px = (ax * bx - ay * by) + (bx * cx - by * cy) + (cx * ax - cy * ay)\n  let py = (ax * by + ay * bx) + (bx * cy + by * cx) + (cx * ay + cy * ax)\n  let m = Sqrt(px^2 + py^2)\n  let rx = 2 * Sqrt(Max(0, (m + px) / 2))\n  let ry = 2 * Sqrt(Max(0, (m - px) / 2))\n  if py < 0 { ry = -ry }\n  for k in [ka + kb + kc + disc, ka + kb + kc - disc] {\n    for z in [[sx + rx, sy + ry], [sx - rx, sy - ry]] {\n      let x = z[1] / k\n      let y = z[2] / k\n      let good = k > 0 && 1 / k >= 0.008\n      for t in [[g[1], g[2], g[3]], [g[4], g[5], g[6]], [g[7], g[8], g[9]]] {\n        let d = Sqrt((x - t[2])^2 + (y - t[3])^2)\n        let rt = 1 / t[1]\n        if !(Abs(d - Abs(1 / k + rt)) < 1e-6 || Abs(d - Abs(1 / k - rt)) < 1e-6) { good = false }\n      }\n      if good {\n        let j = 1\n        while j <= Length(circles) {\n          let e = circles[j]\n          if Abs(e[1] - k) < 1e-6 && Abs(e[2] - x) < 1e-6 && Abs(e[3] - y) < 1e-6 { good = false }\n          j = j + 1\n        }\n      }\n      if good {\n        circles = [...circles, [k, x, y, depth]]\n        queue = [...queue, [g[1], g[2], g[3], g[4], g[5], g[6], k, x, y, depth + 1], [g[1], g[2], g[3], g[7], g[8], g[9], k, x, y, depth + 1], [g[4], g[5], g[6], g[7], g[8], g[9], k, x, y, depth + 1]]\n      }\n    }\n  }\n  i = i + 1\n}\nLength(circles)\n",
+      "large": true,
+      "parseDiagnostics": [],
+      "valid": true,
+      "typeBefore": "integer | signed_infinity",
+      "compilation": {
+        "success": false,
+        "diagnostic": {
+          "code": "outside-profile",
+          "kind": "capability",
+          "message": "Could not compile: Loop(Block(If(Not(LessEqual(i, Length(\"queue\"))), Break()), Block(Declare(g, {\"value\" -> At(\"queue\", i)}), Declare(\"ka\", {\"val)…))): a Loop with no Element clause",
+          "operator": "Loop",
+          "value": "Loop(Block(If(Not(LessEqual(i, Length(\"queue\"))), Break()), Block(Declare(g, {\"value\" -> At(\"queue\", i)}), Declare(\"ka\", {\"val)…)))"
+        },
+        "error": "Could not compile: Loop(Block(If(Not(LessEqual(i, Length(\"queue\"))), Break()), Block(Declare(g, {\"value\" -> At(\"queue\", i)}), Declare(\"ka\", {\"val)…))): a Loop with no Element clause"
+      },
+      "interpreter": {
+        "executed": false,
+        "reason": "Large interpreter run omitted; compile success and native run recorded separately."
+      }
+    },
+    {
+      "name": "recursive-PROGRAM-original",
+      "source": "// A circle is the tuple (k, x, y): curvature and centre.\nconst minR = 0.008\n// Complex square root of (re, im), principal branch.\nfunction csqrt(re, im) {\n  let m = sqrt(re^2 + im^2)\n  let a = sqrt(max(0, (m + re) / 2))\n  let b = sqrt(max(0, (m - re) / 2))\n  (a, b) if im >= 0 else (a, -b)\n}\n// The four candidates for a circle tangent to a, b and c.\nfunction fourth(a, b, c) {\n  let ka = a[1]; let kb = b[1]; let kc = c[1]\n  let disc = 2 * sqrt(max(0, ka * kb + kb * kc + kc * ka))\n  // kz = k * z as (re, im)\n  let ax = ka * a[2]; let ay = ka * a[3]\n  let bx = kb * b[2]; let by = kb * b[3]\n  let cx = kc * c[2]; let cy = kc * c[3]\n  let sx = ax + bx + cx; let sy = ay + by + cy\n  let px = (ax * bx - ay * by) + (bx * cx - by * cy) + (cx * ax - cy * ay)\n  let py = (ax * by + ay * bx) + (bx * cy + by * cx) + (cx * ay + cy * ax)\n  let (rx, ry) = csqrt(px, py)\n  rx = 2 * rx; ry = 2 * ry\n  let out: list<tuple<number, number, number>> = []\n  for k in [ka + kb + kc + disc, ka + kb + kc - disc] {\n    for (zx, zy) in [(sx + rx, sy + ry), (sx - rx, sy - ry)] {\n      out = [...out, (k, zx / k, zy / k)]\n    }\n  }\n  out\n}\nfunction tangent(p, q) {\n  let d = sqrt((p[2] - q[2])^2 + (p[3] - q[3])^2)\n  let rp = 1 / p[1]; let rq = 1 / q[1]\n  abs(d - abs(rp + rq)) < 1e-6 || abs(d - abs(rp - rq)) < 1e-6\n}\nfunction seen(acc, c) {\n  count(acc, e => abs(e[1] - c[1]) < 1e-6 && abs(e[2] - c[2]) < 1e-6 && abs(e[3] - c[3]) < 1e-6) > 0\n}\nfunction ok(p, q, r, c) {\n  c[1] > 0 && 1 / c[1] >= minR && tangent(c, p) && tangent(c, q) && tangent(c, r)\n}\nconst outer = (-1, 0, 0)\nconst A = (2, 0.5, 0)\nconst B = (2, -0.5, 0)\nlet cands = fourth(outer, A, B)\nlet C = first(filter(cands, c => c[1] > 0 && c[3] > 0))\nlet D = first(filter(cands, c => c[1] > 0 && c[3] < 0))\nlet circles = [(A[1], A[2], A[3], 1), (B[1], B[2], B[3], 1), (C[1], C[2], C[3], 1), (D[1], D[2], D[3], 1)]\n// Fill the gap (p, q, r): every admitted candidate is added at `depth`, and\n// the three gaps it makes are filled by recursive calls.\nfunction fill(p, q, r, depth, acc) {\n  let out = acc\n  for c in fourth(p, q, r) {\n    if ok(p, q, r, c) && !seen(out, c) {\n      out = [...out, (c[1], c[2], c[3], depth)]\n      out = fill(p, q, c, depth + 1, out)\n      out = fill(p, r, c, depth + 1, out)\n      out = fill(q, r, c, depth + 1, out)\n    }\n  }\n  out\n}\nfor gap in [(outer, A, C), (outer, B, C), (A, B, C), (outer, A, D), (outer, B, D), (A, B, D)] {\n  circles = fill(gap[1], gap[2], gap[3], 2, circles)\n}\nlet counts = listFrom(map(d => count(circles, c => c[4] == d), 1..12))\n(length(circles), counts)",
+      "large": true,
+      "parseDiagnostics": [],
+      "valid": true,
+      "typeBefore": "tuple<integer | signed_infinity, list<number>>",
+      "compilation": {
+        "success": false,
+        "diagnostic": {
+          "code": "outside-profile",
+          "kind": "capability",
+          "message": "Could not compile: DefineFunction(\"csqrt\", Function(Block(Declare(m, {\"value\" -> sqrt(\"im\"^2 + \"re\"^2)}), Declare(a, {\"value\" -> sqrt(max(0, 1/2 )…)…)): the operator DefineFunction is not supported by the compiler",
+          "operator": "DefineFunction",
+          "value": "DefineFunction(\"csqrt\", Function(Block(Declare(m, {\"value\" -> sqrt(\"im\"^2 + \"re\"^2)}), Declare(a, {\"value\" -> sqrt(max(0, 1/2 )…)…))"
+        },
+        "error": "Could not compile: DefineFunction(\"csqrt\", Function(Block(Declare(m, {\"value\" -> sqrt(\"im\"^2 + \"re\"^2)}), Declare(a, {\"value\" -> sqrt(max(0, 1/2 )…)…)): the operator DefineFunction is not supported by the compiler"
+      },
+      "interpreter": {
+        "executed": false,
+        "reason": "Large interpreter run omitted; compile success and native run recorded separately."
+      }
+    },
+    {
+      "name": "recursive-PROGRAM-existing-two-annotations",
+      "source": "// A circle is the tuple (k, x, y): curvature and centre.\nconst minR = 0.008\n// Complex square root of (re, im), principal branch.\nfunction csqrt(re, im) {\n  let m = sqrt(re^2 + im^2)\n  let a = sqrt(max(0, (m + re) / 2))\n  let b = sqrt(max(0, (m - re) / 2))\n  (a, b) if im >= 0 else (a, -b)\n}\n// The four candidates for a circle tangent to a, b and c.\nfunction fourth(a, b, c) {\n  let ka = a[1]; let kb = b[1]; let kc = c[1]\n  let disc = 2 * sqrt(max(0, ka * kb + kb * kc + kc * ka))\n  // kz = k * z as (re, im)\n  let ax = ka * a[2]; let ay = ka * a[3]\n  let bx = kb * b[2]; let by = kb * b[3]\n  let cx = kc * c[2]; let cy = kc * c[3]\n  let sx = ax + bx + cx; let sy = ay + by + cy\n  let px = (ax * bx - ay * by) + (bx * cx - by * cy) + (cx * ax - cy * ay)\n  let py = (ax * by + ay * bx) + (bx * cy + by * cx) + (cx * ay + cy * ax)\n  let (rx, ry) = csqrt(px, py)\n  rx = 2 * rx; ry = 2 * ry\n  let out: list<tuple<number, number, number>> = []\n  for k in [ka + kb + kc + disc, ka + kb + kc - disc] {\n    for (zx, zy) in [(sx + rx, sy + ry), (sx - rx, sy - ry)] {\n      out = [...out, (k, zx / k, zy / k)]\n    }\n  }\n  out\n}\nfunction tangent(p, q) {\n  let d = sqrt((p[2] - q[2])^2 + (p[3] - q[3])^2)\n  let rp = 1 / p[1]; let rq = 1 / q[1]\n  abs(d - abs(rp + rq)) < 1e-6 || abs(d - abs(rp - rq)) < 1e-6\n}\nfunction seen(acc: list<tuple<number, number, number, number>>, c) {\n  count(acc, e => abs(e[1] - c[1]) < 1e-6 && abs(e[2] - c[2]) < 1e-6 && abs(e[3] - c[3]) < 1e-6) > 0\n}\nfunction ok(p, q, r, c) {\n  c[1] > 0 && 1 / c[1] >= minR && tangent(c, p) && tangent(c, q) && tangent(c, r)\n}\nconst outer = (-1, 0, 0)\nconst A = (2, 0.5, 0)\nconst B = (2, -0.5, 0)\nlet cands = fourth(outer, A, B)\nlet C = first(filter(cands, c => c[1] > 0 && c[3] > 0))\nlet D = first(filter(cands, c => c[1] > 0 && c[3] < 0))\nlet circles = [(A[1], A[2], A[3], 1), (B[1], B[2], B[3], 1), (C[1], C[2], C[3], 1), (D[1], D[2], D[3], 1)]\n// Fill the gap (p, q, r): every admitted candidate is added at `depth`, and\n// the three gaps it makes are filled by recursive calls.\nfunction fill(p, q, r, depth, acc: list<tuple<number, number, number, number>>) {\n  let out = acc\n  for c in fourth(p, q, r) {\n    if ok(p, q, r, c) && !seen(out, c) {\n      out = [...out, (c[1], c[2], c[3], depth)]\n      out = fill(p, q, c, depth + 1, out)\n      out = fill(p, r, c, depth + 1, out)\n      out = fill(q, r, c, depth + 1, out)\n    }\n  }\n  out\n}\nfor gap in [(outer, A, C), (outer, B, C), (A, B, C), (outer, A, D), (outer, B, D), (A, B, D)] {\n  circles = fill(gap[1], gap[2], gap[3], 2, circles)\n}\nlet counts = listFrom(map(d => count(circles, c => c[4] == d), 1..12))\n(length(circles), counts)",
+      "large": true,
+      "parseDiagnostics": [],
+      "valid": true,
+      "typeBefore": "tuple<integer | signed_infinity, list<number>>",
+      "compilation": {
+        "success": false,
+        "diagnostic": {
+          "code": "outside-profile",
+          "kind": "capability",
+          "message": "Could not compile: DefineFunction(\"csqrt\", Function(Block(Declare(m, {\"value\" -> sqrt(\"im\"^2 + \"re\"^2)}), Declare(a, {\"value\" -> sqrt(max(0, 1/2 )…)…)): the operator DefineFunction is not supported by the compiler",
+          "operator": "DefineFunction",
+          "value": "DefineFunction(\"csqrt\", Function(Block(Declare(m, {\"value\" -> sqrt(\"im\"^2 + \"re\"^2)}), Declare(a, {\"value\" -> sqrt(max(0, 1/2 )…)…))"
+        },
+        "error": "Could not compile: DefineFunction(\"csqrt\", Function(Block(Declare(m, {\"value\" -> sqrt(\"im\"^2 + \"re\"^2)}), Declare(a, {\"value\" -> sqrt(max(0, 1/2 )…)…)): the operator DefineFunction is not supported by the compiler"
+      },
+      "interpreter": {
+        "executed": false,
+        "reason": "Large interpreter run omitted; compile success and native run recorded separately."
+      }
+    },
+    {
+      "name": "recursive-small-original",
+      "source": "function f(acc) {let out=acc; out=[...out,1]; out}; f([0])",
+      "large": false,
+      "parseDiagnostics": [],
+      "valid": true,
+      "typeBefore": "list<list<any>>",
+      "compilation": {
+        "success": false,
+        "diagnostic": {
+          "code": "outside-profile",
+          "kind": "capability",
+          "message": "Could not compile: DefineFunction(f, Function(Block(Declare(\"out\", {\"value\" -> \"acc\"}), Assign(\"out\", ListJoin(\"out\", List(1))), \"out\"), \"acc\")): the operator DefineFunction is not supported by the compiler",
+          "operator": "DefineFunction",
+          "value": "DefineFunction(f, Function(Block(Declare(\"out\", {\"value\" -> \"acc\"}), Assign(\"out\", ListJoin(\"out\", List(1))), \"out\"), \"acc\"))"
+        },
+        "error": "Could not compile: DefineFunction(f, Function(Block(Declare(\"out\", {\"value\" -> \"acc\"}), Assign(\"out\", ListJoin(\"out\", List(1))), \"out\"), \"acc\")): the operator DefineFunction is not supported by the compiler",
+        "runRoute": "interpreter-fallback",
+        "runValue": [
+          [
+            0,
+            1
+          ]
+        ]
+      },
+      "interpreter": {
+        "value": [
+          "List",
+          [
+            "List",
+            0,
+            1
+          ]
+        ],
+        "diagnostics": []
+      },
+      "typeAfter": "list<error^1>"
+    },
+    {
+      "name": "recursive-small-annotated",
+      "source": "function f(acc:list) {let out=acc; out=[...out,1]; out}; f([0])",
+      "large": false,
+      "parseDiagnostics": [],
+      "valid": true,
+      "typeBefore": "list<integer>",
+      "compilation": {
+        "success": false,
+        "diagnostic": {
+          "code": "outside-profile",
+          "kind": "capability",
+          "message": "Could not compile: DefineFunction(f, Function(Block(Declare(\"out\", {\"value\" -> \"acc\"}), Assign(\"out\", ListJoin(\"out\", List(1))), \"out\"), Typed(…))): the operator DefineFunction is not supported by the compiler",
+          "operator": "DefineFunction",
+          "value": "DefineFunction(f, Function(Block(Declare(\"out\", {\"value\" -> \"acc\"}), Assign(\"out\", ListJoin(\"out\", List(1))), \"out\"), Typed(…)))"
+        },
+        "error": "Could not compile: DefineFunction(f, Function(Block(Declare(\"out\", {\"value\" -> \"acc\"}), Assign(\"out\", ListJoin(\"out\", List(1))), \"out\"), Typed(…))): the operator DefineFunction is not supported by the compiler",
+        "runRoute": "interpreter-fallback",
+        "runValue": [
+          0,
+          1
+        ]
+      },
+      "interpreter": {
+        "value": [
+          "List",
+          0,
+          1
+        ],
+        "diagnostics": []
+      },
+      "typeAfter": "list<integer>"
+    },
+    {
+      "name": "empty-carrier-original",
+      "source": "let xs=[]; let i=1; while i<=3 {xs=[...xs,i*i]; i=i+1}; length(xs)",
+      "large": false,
+      "parseDiagnostics": [],
+      "valid": true,
+      "typeBefore": "integer | signed_infinity",
+      "compilation": {
+        "success": false,
+        "diagnostic": {
+          "code": "outside-profile",
+          "kind": "capability",
+          "message": "Could not compile: List(): an empty list",
+          "operator": "List",
+          "value": "List()"
+        },
+        "error": "Could not compile: List(): an empty list",
+        "runRoute": "interpreter-fallback",
+        "runValue": 3
+      },
+      "interpreter": {
+        "value": 3,
+        "diagnostics": []
+      },
+      "typeAfter": "integer | signed_infinity"
+    },
+    {
+      "name": "empty-carrier-annotated",
+      "source": "let xs: list<real> = []; let i:integer=1; while i<=3 {xs=[...xs,i*i]; i=i+1}; length(xs)",
+      "large": false,
+      "parseDiagnostics": [],
+      "valid": true,
+      "typeBefore": "integer | signed_infinity",
+      "compilation": {
+        "success": false,
+        "diagnostic": {
+          "code": "outside-profile",
+          "kind": "capability",
+          "message": "Could not compile: Declare(\"xs\", \"list<real>\", {\"value\" -> []}): a local of type list<real>",
+          "operator": "Declare",
+          "value": "Declare(\"xs\", \"list<real>\", {\"value\" -> []})"
+        },
+        "error": "Could not compile: Declare(\"xs\", \"list<real>\", {\"value\" -> []}): a local of type list<real>",
+        "runRoute": "interpreter-fallback",
+        "runValue": 3
+      },
+      "interpreter": {
+        "value": 3,
+        "diagnostics": []
+      },
+      "typeAfter": "integer | signed_infinity"
+    },
+    {
+      "name": "growing-rows-original",
+      "source": "let xs=[[1,2]]; let i=1; while i<=length(xs)&&i<=3 {xs=[...xs,[3,4]];i=i+1};length(xs)",
+      "large": false,
+      "parseDiagnostics": [],
+      "valid": true,
+      "typeBefore": "integer | signed_infinity",
+      "compilation": {
+        "success": false,
+        "diagnostic": {
+          "code": "outside-profile",
+          "kind": "capability",
+          "message": "Could not compile: Loop(Block(If(Not(And(LessEqual(i, Length(\"xs\")), LessEqual(i, 3))), Break()), Block(Assign(\"xs\", ListJoin(\"xs\", List(List(3, 4))))…))): a Loop with no Element clause",
+          "operator": "Loop",
+          "value": "Loop(Block(If(Not(And(LessEqual(i, Length(\"xs\")), LessEqual(i, 3))), Break()), Block(Assign(\"xs\", ListJoin(\"xs\", List(List(3, 4))))…)))"
+        },
+        "error": "Could not compile: Loop(Block(If(Not(And(LessEqual(i, Length(\"xs\")), LessEqual(i, 3))), Break()), Block(Assign(\"xs\", ListJoin(\"xs\", List(List(3, 4))))…))): a Loop with no Element clause",
+        "runRoute": "interpreter-fallback",
+        "runValue": 4
+      },
+      "interpreter": {
+        "value": 4,
+        "diagnostics": []
+      },
+      "typeAfter": "integer | signed_infinity"
+    },
+    {
+      "name": "growing-rows-annotated",
+      "source": "let xs: list<list<real>> = [[1,2]]; let i:integer=1; while i<=length(xs)&&i<=3 {xs=[...xs,[3,4]];i=i+1};length(xs)",
+      "large": false,
+      "parseDiagnostics": [],
+      "valid": true,
+      "typeBefore": "integer | signed_infinity",
+      "compilation": {
+        "success": false,
+        "diagnostic": {
+          "code": "outside-profile",
+          "kind": "capability",
+          "message": "Could not compile: Declare(\"xs\", \"list<list<real>>\", {\"value\" -> [[1,2]]}): a local of type list<list<real>>",
+          "operator": "Declare",
+          "value": "Declare(\"xs\", \"list<list<real>>\", {\"value\" -> [[1,2]]})"
+        },
+        "error": "Could not compile: Declare(\"xs\", \"list<list<real>>\", {\"value\" -> [[1,2]]}): a local of type list<list<real>>",
+        "runRoute": "interpreter-fallback",
+        "runValue": 4
+      },
+      "interpreter": {
+        "value": 4,
+        "diagnostics": []
+      },
+      "typeAfter": "integer | signed_infinity"
+    },
+    {
+      "name": "rank-change-original",
+      "source": "let L=[1,2];L=[[1,2]];L",
+      "large": false,
+      "parseDiagnostics": [],
+      "valid": false,
+      "typeBefore": "error",
+      "compilation": {
+        "success": false,
+        "diagnostic": {
+          "code": "static-type-error",
+          "kind": "correctness",
+          "message": "Could not compile: Block(Declare(L, {\"value\" -> [1,2]}), Error(ErrorCode(\"assignment-type-mismatch\", \"L\", \"list<number>\", \"matrix<integer^(1x2)))…): a sub-expression of the static type error (an error of the canonical form)",
+          "operator": "Block",
+          "value": "Block(Declare(L, {\"value\" -> [1,2]}), Error(ErrorCode(\"assignment-type-mismatch\", \"L\", \"list<number>\", \"matrix<integer^(1x2)))…)"
+        },
+        "error": "Could not compile: Block(Declare(L, {\"value\" -> [1,2]}), Error(ErrorCode(\"assignment-type-mismatch\", \"L\", \"list<number>\", \"matrix<integer^(1x2)))…): a sub-expression of the static type error (an error of the canonical form)",
+        "runRoute": "interpreter-fallback",
+        "runValue": null
+      },
+      "interpreter": {
+        "value": [
+          "List",
+          1,
+          2
+        ],
+        "diagnostics": [
+          {
+            "severity": "error",
+            "message": [
+              "static-type-error",
+              "`L` has the type `list<number>`, and the value has the type `matrix<integer^(1x2)>`",
+              "L := [[1, 2]]",
+              "assignment-type-mismatch"
+            ],
+            "code": "assignment-type-mismatch",
+            "range": [
+              12,
+              21,
+              12
+            ]
+          }
+        ]
+      },
+      "typeAfter": "error"
+    },
+    {
+      "name": "rank-change-annotated",
+      "source": "let L: list<integer|list<integer>> = [1,2];L=[[1,2]];L",
+      "large": false,
+      "parseDiagnostics": [],
+      "valid": true,
+      "typeBefore": "list<integer | list<integer>>",
+      "compilation": {
+        "success": false,
+        "diagnostic": {
+          "code": "outside-profile",
+          "kind": "capability",
+          "message": "Could not compile: Declare(L, \"list<integer|list<integer>>\", {\"value\" -> [1,2]}): a local of type list<integer|list<integer>>",
+          "operator": "Declare",
+          "value": "Declare(L, \"list<integer|list<integer>>\", {\"value\" -> [1,2]})"
+        },
+        "error": "Could not compile: Declare(L, \"list<integer|list<integer>>\", {\"value\" -> [1,2]}): a local of type list<integer|list<integer>>",
+        "runRoute": "interpreter-fallback",
+        "runValue": [
+          [
+            1,
+            2
+          ]
+        ]
+      },
+      "interpreter": {
+        "value": [
+          "List",
+          [
+            "List",
+            1,
+            2
+          ]
+        ],
+        "diagnostics": []
+      },
+      "typeAfter": "list<integer | list<integer>>"
+    }
+  ]
+}

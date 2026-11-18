@@ -1,6 +1,6 @@
+import { initializationType } from '../boxed-expression/proved-absent-domain.js';
 import { noteOverlapAdmitted } from '../boxed-expression/store-admission.js';
 import { installAnonymousCalleeDerivation } from '../boxed-expression/callee-type-derivation.js';
-import { provedAbsentDomainOf } from '../boxed-expression/proved-absent-domain.js';
 import { mayHoldRestriction } from '../boxed-expression/conditional-value.js';
 import {
   runOperandSteps,
@@ -55,6 +55,8 @@ import { instantiatedResultTypeOverActuals } from '../boxed-expression/generic-i
 import { actualOfDescriptor } from '../boxed-expression/derive-application-type.js';
 import {
   appliedLiteralResultType,
+  curriedSignature,
+  inferredArgumentMaps,
   componentwiseTupleCallType,
 } from '../boxed-expression/call-result-type.js';
 import {
@@ -108,7 +110,7 @@ import {
   scopeActivationTemplate,
 } from '../boxed-expression/ambient-chain.js';
 import {
-  isAssignedLocal,
+  isDeclaredLocal,
   markAssignedLocal,
   markLocalBinding,
 } from '../boxed-expression/declared-local.js';
@@ -130,18 +132,6 @@ import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { rangeCount } from '../numerics/range-count.js';
 import { exactArithmeticRange } from './range-closed-form.js';
 import { randomCount } from './random-utils.js';
-import {
-  coarsenEvidenceType,
-  joinEvidenceTypes,
-  isDeclaredLocal,
-  isEvidenceLost,
-  hasUnknownFirstValue,
-  isFirstValue,
-  isOpenLocal,
-  markEvidenceLost,
-  markOpenLocal,
-  registerEvidenceSite,
-} from './assignment-evidence.js';
 import { isRingConstant } from './ring-constructions.js';
 import { RING_CONSTANTS } from '../latex-syntax/utils.js';
 import {
@@ -419,7 +409,7 @@ import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
 import { splitByPattern, replaceByPattern } from './regexp.js';
 import {
   inferTypeFromValue,
-  widenAssignedType,
+  initializeLocalContract,
   widenLocalType,
 } from '../boxed-expression/boxed-value-definition.js';
 import { reduceType } from '../../common/type/reduce.js';
@@ -4157,120 +4147,6 @@ function readsVariable(ce: ComputeEngine, expr: Expression): boolean {
 }
 
 /**
- * Record ASSIGNMENT EVIDENCE at canonicalization time: the binding `name`,
- * when it is an inferred, valueless, non-constant one — the hoisted
- * block-local `canonicalBlock` creates, or an auto-declared symbol — takes
- * the JOIN of its recorded type and the widened type of the value assigned
- * to it. `Assign` only writes its binding at evaluation time, so without this
- * a block-local bound by assignment (`Block(Assign(d, [4,5,4]), Length(d))`)
- * stays `unknown`-typed on every route that never evaluates — compilation in
- * particular, whose operand type gates then fail closed on a local whose type
- * is manifest in the program (Tycho item 235).
- *
- * The recorded type is the join over every `Assign` canonicalized against
- * this binding (each pass widens through the same `widenAssignedType` table
- * the evaluation-time assignment uses), so a read placed between two
- * assignments of different kinds sees a type that admits both — reads resolve
- * the binding lazily, so every read in the block observes the final joined
- * type, including re-reads in a loop body after a reassignment. The binding
- * stays `inferred` and valueless: evaluation still creates the runtime
- * binding afresh and type-checks the assigned value there. Shared by the
- * plain-symbol and the destructuring targets of the `Assign` canonical
- * handler, the latter calling it once per pattern leaf, and by the `Declare`
- * canonical handler for an untyped `let` with an initial value.
- *
- * `assignedType` returns the CURRENT static type of the assigned value, or
- * `undefined` when the value is invalid or `unknown`-typed (nothing is
- * recorded then). It is a function because the enclosing block reads it again
- * after the whole block is canonicalized.
- *
- * With `currentScopeOnly`, the target is the binding of `name` in the
- * CURRENT lexical scope, and nothing is recorded when that scope does not
- * bind the name. A `let` uses it: at run time `Declare` creates (or
- * upgrades) the binding in the current scope only, so a lookup through the
- * scope chain could reach an OUTER binding of the same name (an
- * auto-declared free symbol, a local of an enclosing block) that the `let`
- * never writes, and record a type on it. An `Assign` writes the binding the
- * name resolves to, and looks it up through the scope chain.
- */
-function joinAssignmentEvidence(
-  ce: ComputeEngine,
-  name: string,
-  assignedType: () => Type | undefined,
-  options?: { currentScopeOnly?: boolean }
-): void {
-  const def = options?.currentScopeOnly
-    ? ce.context.lexicalScope.bindings.get(name)
-    : ce.lookupDefinition(name);
-  if (
-    !def ||
-    !isValueDef(def) ||
-    !def.value.inferredType ||
-    (def.value.isConstant &&
-      !(options?.currentScopeOnly && def.value._programVariable)) ||
-    def.value.value !== undefined
-  )
-    return;
-  const target = def.value;
-  // A block local whose first value has the type `unknown` keeps the type
-  // `unknown`: no later value narrows it (`markOpenLocal()`).
-  if (isOpenLocal(target)) return;
-  const first = assignedType();
-  const declaration =
-    target._blockLocal === true && isFirstValue(target, first === undefined);
-  if (first !== undefined) joinEvidenceOnBinding(ce, target, first);
-  // The value's type is read NOW, but a read in the value of a local that a
-  // later statement widens (through a loop's back edge) makes it too narrow.
-  // The enclosing block canonicalization joins the value's type again after
-  // every statement is canonicalized, until no recorded type changes (see
-  // `withEvidenceSession`, `library/assignment-evidence.ts`). A block local
-  // with a declared type is excluded: its declared type is the contract,
-  // and a use of it (a call with a `list<real>` parameter) narrows it back
-  // after the first join, which a second join must not undo.
-  if (isDeclaredLocal(target)) return;
-  // Whether a read of the value's type has succeeded. A value whose type
-  // could not be read on the first read gave no information, and the site
-  // records nothing until a read succeeds. A value whose type could be read
-  // before but not now (its type became `unknown`, or a destructured leaf
-  // is no longer found in the value's tuple type) has LOST information: the
-  // type recorded from the earlier read may be too narrow for what the
-  // value now holds, so the site writes `unknown` on the binding, which is
-  // wide and therefore sound, and marks the binding so that no other site
-  // narrows it again in this session (`markEvidenceLost`).
-  let hasRead = first !== undefined;
-  registerEvidenceSite(ce, {
-    rejoin: (coarse) => {
-      if (isEvidenceLost(ce, target)) return false;
-      const t = assignedType();
-      // The declaration of a block local whose value still has the type
-      // `unknown` when every statement of the block is canonicalized makes
-      // the local open (`markOpenLocal()`), when a later value gave it a
-      // type: the local keeps the type `unknown`. The value is read here,
-      // not when the declaration is canonicalized: a call of a function
-      // whose result type is known only after the whole block is
-      // canonicalized (a recursive function) has the type `unknown` then.
-      if (t === undefined && declaration && target._assignmentEvidence) {
-        markOpenLocal(target);
-        markEvidenceLost(ce, target);
-        if (target.type.isUnknown) return false;
-        writeEvidenceType(ce, target, 'unknown');
-        return true;
-      }
-      if (t === undefined) {
-        if (!hasRead) return false;
-        markEvidenceLost(ce, target);
-        if (target.type.isUnknown) return false;
-        writeEvidenceType(ce, target, 'unknown');
-        return true;
-      }
-      hasRead = true;
-      return joinEvidenceOnBinding(ce, target, t, coarse);
-    },
-    reset: () => writeEvidenceType(ce, target, 'unknown'),
-  });
-}
-
-/**
  * Type the variable `name`, which a statement gives a function literal, as a
  * function before the literal is canonicalized, declaring it when no scope
  * does. A self-reference in the body (`f(n) = n * f(n-1)`) then resolves to
@@ -4291,6 +4167,7 @@ function typeFunctionTarget(ce: ComputeEngine, name: string): void {
     !def ||
     !isValueDef(def) ||
     !def.value.inferredType ||
+    def.value._fixedInitializationType ||
     def.value.type.matches('function')
   )
     return;
@@ -4396,21 +4273,14 @@ function rawDeclaredValue(
  * the local: `["Error", ["ErrorCode", "assignment-type-mismatch", name,
  * localType, valueType]]`. Otherwise `undefined`.
  *
- * The type of the local is its declared type (`Declare(x, "integer", 0)`),
- * or else the type of the values assigned to it before this one, widened by
- * `widenLocalType()`: after `s = 0`, the value `s + 0.5` is accepted and the
- * value `"x"` is refused. A local with no value type yet (its first
- * assignment) is not checked, and neither is a local whose first value has
- * the type `unknown` (`hasUnknownFirstValue()`): it can hold any value.
+ * A sequence local has the contract supplied by its annotation or
+ * initializer. Unknown locals accept writes without acquiring their types.
  *
  * The test is permissive where the type of the value is not settled: a
  * value whose type is `unknown`, `any`, or holds one of them (a free
  * symbol), and a value that is absent or has no value (`never`, `nothing`,
  * `missing`, `error`), is accepted. A union is accepted when one of its
- * members is accepted. For a local with no declared type, a value type that
- * is narrower than the type of the local in the other direction (the empty
- * list `list<never>` of `let xs = []`, then `xs = [1]`) is accepted too, and
- * the type of the local is the join of its values.
+ * members is accepted.
  */
 function localAssignmentMismatch(
   ce: ComputeEngine,
@@ -4426,11 +4296,10 @@ function localAssignmentMismatch(
   if (local.type.isUnknown || valueType.isUnknown) return undefined;
   // A declared type is the contract: a first value of type `unknown` does
   // not turn off the check of a local with a declared type.
-  if (!isDeclaredLocal(local) && hasUnknownFirstValue(local)) return undefined;
   const open = (t: BoxedType): boolean =>
     /\b(any|unknown|never|nothing|missing|error)\b/.test(t.toString());
   if (open(valueType) || open(local.type)) return undefined;
-  const declared = isDeclaredLocal(local);
+  const declared = isDeclaredLocal(local) || local._fixedInitializationType === true;
   const target = declared
     ? local.type.type
     : widenLocalType(ce, local.type.type);
@@ -4504,94 +4373,6 @@ function patternAssignmentMismatch(
     if (mismatch !== undefined) return mismatch;
   }
   return undefined;
-}
-
-/**
- * The type that the assignment of `value` records on its target binding,
- * or `undefined` when the type of `value` is `unknown`.
- *
- * An access PROVED to find nothing is typed `missing`, its absence marker
- * alone (`provedAbsentDomainOf()`). An operator that propagates absence
- * reads the domain of such an access to choose its marker: `At(M, 7) + 1`
- * for a matrix `M` of two rows is the sum of a row and a number, and its
- * value is `Missing`. A use of a local does not see the access, so the
- * local records the domain beside the marker, `missing | vector<…>`, and
- * `r + 1` after `r = At(M, 7)` is `Missing` too, not the `NaN` of an absent
- * number.
- */
-function assignedEvidenceType(value: Expression): Type | undefined {
-  if (value.type.isUnknown) return undefined;
-  const t = value.type.type;
-  if (t !== 'missing') return t;
-  const domain = provedAbsentDomainOf(value);
-  return domain === undefined ? t : { kind: 'union', types: [t, domain] };
-}
-
-/** Join `assignedType` (widened) with the recorded type of the binding
- * `target`. Return `true` when the recorded type changed. With `coarse`, the
- * join is bounded in height by `coarsenEvidenceType`. */
-function joinEvidenceOnBinding(
-  ce: ComputeEngine,
-  target: BoxedValueDefinition,
-  assignedType: Type,
-  coarse = false
-): boolean {
-  // A binding whose evidence was lost in this session stays `unknown`.
-  if (isEvidenceLost(ce, target)) return false;
-  // A value typed `never` claims no value, so it is no evidence. `never` is
-  // the bottom type and matches every type, so the widening table below read
-  // it as an integer, and the binding gained an `integer` member that no
-  // assignment gives it: with `circles` a list of points, a first read of
-  // `circles = g(gap[1], 2, circles)` inside a `for` loop, taken before the
-  // types of the loop settled, typed the call `never`, `circles` became
-  // `integer | list<…>`, and the JavaScript target declined `Length(circles)`.
-  if (assignedType === 'never') return false;
-  const widened = widenAssignedType(ce, assignedType);
-  const recorded = target.type;
-  // The type of a binding with no assignment evidence yet came from uses
-  // only (an argument at a typed parameter narrowed it). A use is a
-  // requirement on the value, not a value, so the first assignment replaces
-  // that type instead of joining with it. Otherwise the static type depends
-  // on the order of the statements: `mutate(v); v = [1.5, 2]` gave
-  // `list<real>` and `v = [1.5, 2]; mutate(v)` gave `vector<real^2>`.
-  // A block local with a declared type (`isDeclaredLocal()`) is excluded:
-  // its type came from the declaration, which is the contract, not from a
-  // use, so an assignment joins with it. With `xs: any`, `xs = "abc"` keeps
-  // `xs` typed `any`.
-  const fromUsesOnly = !target._assignmentEvidence && !isDeclaredLocal(target);
-  const joined =
-    recorded.isUnknown || fromUsesOnly
-      ? widened
-      : joinEvidenceTypes(recorded.type, widened);
-  if (joined === undefined) return false;
-  const next = coarse ? coarsenEvidenceType(joined) : joined;
-  if (!fromUsesOnly && !recorded.isUnknown && isSubtype(next, recorded.type))
-    return false;
-  writeEvidenceType(ce, target, next);
-  return true;
-}
-
-/** Write the type `next` on the binding `target`. */
-function writeEvidenceType(
-  ce: ComputeEngine,
-  target: BoxedValueDefinition,
-  next: Type
-): void {
-  const wasCallable = containsSignatureArm(target.type.type);
-  target._setType(() => ce.type(next));
-  // From now on, the type of the binding is the join of its assignment
-  // evidence, and a use does not narrow it (`_assignmentEvidence`).
-  target._assignmentEvidence = true;
-  // The `_type` expression caches key on the engine's `any` axis, which a
-  // `_setType()` write does not advance: without the event, an
-  // expression typed before this join — a lambda body canonicalized earlier
-  // in the same block — keeps its stale narrower type for the rest of the
-  // generation.
-  ce._noteStateEvent({
-    kind: 'type-write',
-    callableBefore: wasCallable,
-    callableAfter: containsSignatureArm(target.type.type),
-  });
 }
 
 /**
@@ -4670,40 +4451,6 @@ function tuplePatternLeafTypes(
     if (leafType !== 'unknown') leaves.set(name, leafType);
   }
   return leaves;
-}
-
-/**
- * Record assignment evidence on each leaf of the destructuring pattern
- * `pattern` from the value type `valueType()` (`tuplePatternLeafTypes`),
- * one evidence site per leaf. Nothing is recorded when the first read of
- * the value type does not fit the pattern. Each site reads the value type
- * again when the enclosing block re-runs the sites, so a leaf that is no
- * longer found in a later read loses its evidence (`joinAssignmentEvidence`).
- * `options` is passed to `joinAssignmentEvidence` for each leaf. With
- * `leafType`, the evidence of each leaf is `leafType(name, type)` of the
- * type that the value type gives that leaf.
- */
-function recordPatternEvidence(
-  ce: ComputeEngine,
-  pattern: Expression,
-  valueType: () => Type,
-  options?: { currentScopeOnly?: boolean },
-  leafType?: (name: string, type: Type) => Type
-): void {
-  const first = tuplePatternLeafTypes(pattern, valueType());
-  if (first === undefined) return;
-  for (const name of first.keys())
-    joinAssignmentEvidence(
-      ce,
-      name,
-      () => {
-        const t = tuplePatternLeafTypes(pattern, valueType())?.get(name);
-        return t === undefined || leafType === undefined
-          ? t
-          : leafType(name, t);
-      },
-      options
-    );
 }
 
 /**
@@ -5701,6 +5448,20 @@ function anonymousApplicationType(
 ): Type {
   const { engine } = context;
   const t = fn.type;
+  const curried = curriedSignature(t, args.map((arg) => {
+    const structure = arg.structureOf?.();
+    return { operator: structure?.kind === 'application' ? structure.head : '' };
+  }));
+  if (curried !== undefined) {
+    if (args.some((arg) => arg.type === 'error')) return 'error';
+    // Partial application can map to residual functions. Keep no single
+    // callable claim when the existing mapping rules do not settle that.
+    const slots = typeof t === 'object' && t.kind === 'signature' ? t.args : undefined;
+    if (applyLiteralMapType(fn, args, context) !== undefined ||
+        args.some((arg, i) => inferredArgumentMaps(slots?.[i]?.type, arg.type) === undefined))
+      return 'unknown';
+    return curried;
+  }
   // A function literal with scalar parameters maps over a collection
   // argument (`applyLiteralMaps`): the call is typed as the mapped
   // collection (`applyLiteralMapType`).
@@ -8217,9 +7978,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // The local that the assignment writes is an assigned local: a `let`
         // of it takes the widened type of its value (see `Declare`).
         for (const name of targets) {
+          // A write can be the parameter's first reference. Resolve its
+          // binding before recording the write, as a read of the name does.
+          const parameter = ce._isFunctionLiteralParameter(name)
+            ? ce.symbol(name).valueDefinition : undefined;
           const def = ce.lookupDefinition(name);
-          if (def !== undefined && isValueDef(def))
-            markAssignedLocal(def.value);
+          const target = parameter ?? (def !== undefined && isValueDef(def) ? def.value : undefined);
+          if (target !== undefined) markAssignedLocal(target);
         }
         // A function value is checked against the type of the local BEFORE
         // the retype below writes the type `function` on the local:
@@ -8336,33 +8101,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           if (mismatch !== undefined) return mismatch;
         }
 
-        // A DATA-valued RHS records assignment evidence on the target's
-        // binding at canonicalization time (`joinAssignmentEvidence`, which
-        // owns the join rule), mirroring the `Function`-valued branch above.
-        if (
-          symbolName !== undefined &&
-          !isFunction(canonRhs, 'Function') &&
-          canonRhs.isValid
-        )
-          joinAssignmentEvidence(ce, symbolName, () =>
-            assignedEvidenceType(canonRhs)
-          );
-        // A destructuring target `(x, y) := v` records the same evidence on
-        // each pattern leaf, from the matching position of the RHS's static
-        // tuple type: `(xs, n) := ([1, 2, 3], 2)` types `xs` a list and `n` an
-        // integer, so `Length(xs)` later in the block compiles. Nested
-        // patterns descend into nested tuple types; a `_` position binds
-        // nothing. The evaluation-time write is atomic — a shape mismatch
-        // anywhere in the pattern writes no leaf at all (`bindTuplePattern`)
-        // — and so is the evidence: the pairs are collected over the whole
-        // pattern first, and an RHS type that is not a tuple of the pattern's
-        // arity at any level (a symbol of unknown type, an arity mismatch the
-        // evaluation will report) records nothing, leaving every leaf
-        // `unknown`. A union RHS type is read arm by arm
-        // (`tuplePatternLeafTypes`).
-        if (isFunction(symbol, 'Tuple') && canonRhs.isValid)
-          recordPatternEvidence(ce, symbol, () => canonRhs.type.type);
-
         const result = ce._fn('Assign', [symbol, canonRhs]);
 
         return result;
@@ -8451,34 +8189,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               : sym(symbolExpr)) ?? 'Nothing',
           ]);
 
-        // A declaration has a value: `Declare(x)` and `Declare(x, "integer")`
-        // are static errors, as is a `let x: integer` with no value. The
-        // name is declared with its value in one statement,
-        // `Declare(x, "integer", 5)`, so that a read of it never finds a
-        // local with no value.
-        //
-        // One exception: a `Declare` of a function type without a value is
-        // the signature of a function that a function definition statement
-        // of the same name in the same statement list defines
-        // (`let f: (integer) -> integer; function f(x) { x + 1 }`). The
-        // definition gives the name its value from the start of the list.
-        // A function type with no such definition is an error whose third
-        // operand `"function"` asks for the definition.
+        // Sequence declarations reserve a slot; execution initializes it only
+        // when its initializer or a later assignment runs.
         const pairedNames = takePairedFunctionNames();
-        if (!declareHasValue(args)) {
-          const isFunctionSignature =
-            isSymbol(symbolExpr) && declaresFunctionType(ce, args[1]);
-          if (
-            !isFunctionSignature ||
-            pairedNames?.has(sym(symbolExpr) ?? '') !== true
-          )
-            return ce.error(
-              isSymbol(symbolExpr)
-                ? isFunctionSignature
-                  ? ['declaration-without-value', symbolExpr.symbol, 'function']
-                  : ['declaration-without-value', symbolExpr.symbol]
-                : ['declaration-without-value']
-            );
+        const local = isSymbol(symbolExpr)
+          ? ce.context.lexicalScope.bindings.get(symbolExpr.symbol)
+          : undefined;
+        if (!declareHasValue(args) && !(local && isValueDef(local) && local.value._blockLocal)) {
+          const signature = isSymbol(symbolExpr) && declaresFunctionType(ce, args[1]);
+          if (!signature || !pairedNames?.has(sym(symbolExpr) ?? ''))
+            return ce.error(['declaration-without-value', sym(symbolExpr) ?? 'Nothing']);
         }
 
         // A local declared with a function literal and no type is typed as
@@ -8489,106 +8209,23 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         )
           typeFunctionTarget(ce, symbolExpr.symbol);
 
-        // A `let` with an initial value and no declared type is an
-        // assignment for typing purposes: the initializer's static type is
-        // recorded on the hoisted binding as assignment evidence
-        // (`joinAssignmentEvidence`, the rule `Assign` uses), so a later read
-        // of the local in the block — and the compile route, which never
-        // runs the `Declare` — sees the type the program gives it. Without
-        // this only a closed literal initializer typed the local (through
-        // the `Block` hoist), and `let cands = fourth(a, b)` or
-        // `let gap = queue[i]` stayed `unknown`, so `filter(cands, …)` and
-        // `gap[1]` failed the compiler's shape gates although the callee's
-        // declared result type and the list's element type were known (Tycho
-        // item 332, program a). A declared type is the contract and takes no
-        // evidence; a `Function` value goes through the function-definition
-        // route; an invalid or unknown-typed value records nothing. A
-        // destructuring `let (a, b) = v` records evidence on each leaf, as
-        // `(a, b) := v` does (`recordPatternEvidence`). The target of each
-        // write is the binding in the CURRENT scope only, the one the `let`
-        // creates at run time (see `joinAssignmentEvidence`).
-        //
-        // A local of a `let` that an `Assign` of the block writes, at any
-        // depth (`isAssignedLocal()`), has the widened type of its value
-        // (`widenLocalType()` with tiers): no literal type, no length, so a
-        // later value of the same kind is admitted (`let c = [(1, 2)]` is a
-        // list of pairs of any length). A local that is never assigned, and
-        // a `const`, keep the type of the value (`let v = [1, 2]` is a
-        // `vector<integer^2>`). The type is read again when every statement
-        // of the block is canonicalized (`withEvidenceSession`), after the
-        // assignments that follow the declaration.
-        const recordInitializerEvidence = (
+        const recordInitializerContract = (
           typeOp: Expression | undefined,
           value: Expression | undefined,
           constant = false
         ): void => {
-          // A type operand `"unknown"` declares no type (the parse of an
-          // untyped `let k = v`), so it is read as no type operand.
-          const declaresType =
-            typeOp !== undefined &&
+          const declaresType = typeOp !== undefined &&
             !(isString(typeOp) && typeOp.string === 'unknown') &&
             !isSymbol(typeOp, 'unknown');
-          // The value of a declaration with a type is the first value of
-          // the local. Record it, so that a later assignment of a value of
-          // type `unknown` is not taken as the first value, which would turn
-          // off the type check of every later assignment
-          // (`localAssignmentMismatch()`).
-          if (declaresType && value !== undefined && isSymbol(symbolExpr)) {
-            const def = ce.context.lexicalScope.bindings.get(symbolExpr.symbol);
-            if (def && isValueDef(def)) isFirstValue(def.value, false);
-          }
           if (declaresType || value === undefined) return;
-          if (
-            isSymbol(symbolExpr) &&
-            ((isFunction(value, 'Function') && value.isValid) ||
-              value.type.matches('function'))
-          ) {
-            typeFunctionTarget(ce, symbolExpr.symbol);
-            return;
+          const type = value.isValid ? (initializationType(value) ?? 'unknown') : 'unknown';
+          if (isSymbol(symbolExpr))
+            initializeLocalContract(ce, symbolExpr.symbol, type, constant);
+          else if (isFunction(symbolExpr, 'Tuple')) {
+            const leaves = tuplePatternLeafTypes(symbolExpr, type);
+            for (const name of tuplePatternNames(symbolExpr))
+              initializeLocalContract(ce, name, leaves?.get(name) ?? 'unknown', constant);
           }
-          if (!value.isValid) return;
-          if (isFunction(value, 'Function')) return;
-          // The bindings of the declared names, read now: the type is read
-          // again later, outside the scope of the block. Each local is
-          // widened only when that local is assigned.
-          const locals = new Map(
-            (isFunction(symbolExpr, 'Tuple')
-              ? tuplePatternNames(symbolExpr)
-              : isSymbol(symbolExpr)
-                ? [symbolExpr.symbol]
-                : []
-            ).map((name) => [name, ce.context.lexicalScope.bindings.get(name)])
-          );
-          const widened = (name: string, t: Type): Type => {
-            const def = locals.get(name);
-            return !constant &&
-              def !== undefined &&
-              isValueDef(def) &&
-              isAssignedLocal(def.value)
-              ? widenLocalType(ce, t, true)
-              : t;
-          };
-          if (isFunction(symbolExpr, 'Tuple')) {
-            recordPatternEvidence(
-              ce,
-              symbolExpr,
-              () => value.type.type,
-              { currentScopeOnly: true },
-              widened
-            );
-            return;
-          }
-          if (!isSymbol(symbolExpr)) return;
-          const local = symbolExpr.symbol;
-          joinAssignmentEvidence(
-            ce,
-            local,
-            () => {
-              const t = assignedEvidenceType(value);
-              return t === undefined ? undefined : widened(local, t);
-            },
-            { currentScopeOnly: true }
-          );
         };
 
         // A constant whose value is a constant default (an Epsil
@@ -8637,7 +8274,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const op =
             args[1].operator === 'Dictionary' ? initialValue(args[1]) : args[1];
           if (isDictionary(op) && op.get('type') === undefined)
-            recordInitializerEvidence(
+            recordInitializerContract(
               undefined,
               op.get('value'),
               hasConstantAttribute(op)
@@ -8649,7 +8286,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         if (args.length === 3) {
           const value = initialValue(args[2]);
-          recordInitializerEvidence(args[1], value);
+          recordInitializerContract(args[1], value);
           if (isDictionary(value)) markConstantLocal(ce, symbolExpr, value);
           noteDeclaration(isDictionary(value) ? value : undefined);
           return ce._fn('Declare', [symbolExpr, args[1], value]);
@@ -8658,6 +8295,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (args.length === 4) {
           const attributes = initialValue(args[3]);
           const initializer = initialValue(args[2]);
+          recordInitializerContract(args[1], initializer, hasConstantAttribute(attributes));
           markConstantLocal(ce, symbolExpr, attributes);
           noteDeclaration(
             isDictionary(attributes) ? attributes : undefined,
@@ -14761,15 +14399,8 @@ function* assignSteps(
   // host `ce.assign` keeps throwing.
   try {
     const binding = ce.lookupDefinition(symbolName);
-    if (
-      binding !== undefined &&
-      isValueDef(binding) &&
-      binding.value._programVariable &&
-      !(
-        isFunction(val, 'Function') &&
-        containsSignatureArm(binding.value.type.type)
-      )
-    ) {
+    if (binding !== undefined && isValueDef(binding) && binding.value._programVariable &&
+        (binding.value._fixedInitializationType || !(isFunction(val, 'Function') && containsSignatureArm(binding.value.type.type)))) {
       const local = binding.value;
       if (local.isConstant || isDeclaredLocal(local)) {
         if (assertAssignable(ce, symbolName, val) === 'overlap')

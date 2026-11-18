@@ -258,6 +258,10 @@ A second declaration in one scope is a mistake in practice — a `let` where an 
 
 A `let` in a NESTED block is not a re-declaration: `for k in xs { if c { let k = 1 … } }` and a closure body that declares a name its enclosing scope also has are ordinary shadowing, and stay legal. The initializer of such a shadowing `let` reads the OUTER name. Across programs — a rerun notebook cell or a later REPL line — a top-level `let` or `const` may replace an earlier declaration and establish a new type. Assignment instead preserves the current binding and its contract. Only a repeat within one program is reported.
 
+## `read-before-initialization`
+
+A variable declared without a value was read before its initializer assignment ran. Give it a value before reading it. For example, write `let x; x = 1; x`. An assignment in a branch or loop initializes the variable only when that assignment executes.
+
 ## `read-before-declaration`
 
 A statement of a program or block uses a variable before the statement that declares it. A variable is declared by a `let` or a `const`. This includes a variable initialized with a function: `let a = h(1); let h = (x) => x + 1; a` uses `h` too early. A top-level `function` statement is different: it is prepared before the other statements and can be called above its definition. In `do { let a = k; let k = 2; a }` the first statement reads `k`, which the block declares only in the next statement. In `do { k = 5; let k = 2 }` the first statement assigns it.

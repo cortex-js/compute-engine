@@ -388,9 +388,9 @@ describe('CE-689: the type cache across calls of a function literal', () => {
       ],
     ]);
     const divide = find(block, (e) => e.operator === 'Divide');
-    expect(divide.type.toString()).toBe('infinity | nan | real');
+    expect(divide.type.toString()).toBe('number');
     expect(block.evaluate().toString()).toBe(
-      '["infinity | nan | real","infinity | nan | real"]'
+      '["number","number"]'
     );
   });
 

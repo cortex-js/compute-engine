@@ -72,7 +72,12 @@ function interpreted(ce: ComputeEngine, expr: unknown, board: number[]) {
 }
 
 describe('CE-1309: a condition on a call of a function that calls another', () => {
-  const ce = engine(OTHELLO);
+  const ce = engine(OTHELLO.replace(/let (col|row|found|n|v) =/g, 'let $1: integer ='));
+  test('unannotated numeric locals do not establish integer results', () => {
+    const original = engine(OTHELLO);
+    expect(() => compile(original.box(['legal', 'L', 1]), { fallback: false }))
+      .toThrow(/not integer/);
+  });
   test.each(['javascript', 'interval-js'])('compiles on %s', (to) => {
     const exprs = [
       ['If', ['Greater', ['flips', 'L', 20, 1], 0], 1, 0],
@@ -120,7 +125,7 @@ describe('CE-1309: the lane of a local with no declared type', () => {
   };
 
   test('a count in a loop is an integer', () => {
-    expect(run('let n = 0\nfor j in 1..k { n = n + B[j] }\nn')).toBe(6);
+    expect(run('let n: integer = 0\nfor j in 1..k { n = n + B[j] }\nn')).toBe(6);
   });
 
   test('a local that a loop makes a real stays a real', () => {

@@ -183,7 +183,7 @@ describe('The type of the Product of matrices that are not square', () => {
       ['Declare', 'x', "'unknown'", ['List', m]],
       ['Product', 'x'],
     ]);
-    expect(expr.type.toString()).toBe('matrix<integer^(2x3)>');
+    expect(expr.type.toString()).toBe('list<any> | number');
     const value = expr.evaluate();
     expect(value.toString()).toBe('[[1,2,3],[4,5,6]]');
     expect(value.type.matches(expr.type)).toBe(true);
@@ -196,7 +196,7 @@ describe('The type of the Product of matrices that are not square', () => {
       ['Declare', 'x', "'unknown'", ['List', m, m]],
       ['Product', 'x'],
     ]);
-    expect(expr.type.toString()).toBe('number');
+    expect(expr.type.toString()).toBe('list<any> | number');
   });
 
   // Elements of several shapes can multiply to a matrix: a 2x3 and a 3x2

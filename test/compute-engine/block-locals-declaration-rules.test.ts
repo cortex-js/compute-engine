@@ -3,11 +3,9 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { explainErrorCode } from '../../src/epsil/error-explanations';
 
-// The rules of block locals (`docs/ERROR-MODEL.md`): a declaration has a
-// value, a local is declared at the own level of a block and an assignment
-// writes a declared variable, an assignment is a statement and not an
-// operand, and a reassignment keeps the type of the local. Each broken rule
-// is a static error in place in the canonical form.
+// Block declarations establish fixed contracts; initialization may occur later.
+// Declaration placement and statement-only assignment remain static rules,
+// while reading an uninitialized slot is a runtime error.
 
 function run(expr: MathJsonExpression): {
   canonical: string;
@@ -23,7 +21,7 @@ function run(expr: MathJsonExpression): {
   };
 }
 
-describe('A DECLARATION HAS A VALUE', () => {
+describe('A DECLARATION HAS A FIXED INITIALIZATION CONTRACT', () => {
   test('a declaration with a value, then an assignment', () => {
     const r = run([
       'Block',
@@ -32,20 +30,18 @@ describe('A DECLARATION HAS A VALUE', () => {
       'b',
     ]);
     expect(r.value).toBe('2');
-    expect(r.type).toBe('integer');
+    expect(r.type).toBe('number');
   });
 
-  test('`Declare(x, type)` then `Assign(x, v)` is not a pair', () => {
+  test('a typed declaration can initialize in a later statement', () => {
     const r = run([
       'Block',
       ['Declare', 'a', "'integer'"],
       ['Assign', 'a', 5],
       'a',
     ]);
-    expect(r.type).toBe('error');
-    expect(r.value).toBe(
-      'Error(ErrorCode("declaration-without-value", "a"))'
-    );
+    expect(r.type).toBe('integer');
+    expect(r.value).toBe('5');
   });
 
   test('a `Declare` with no value at the top level', () => {
@@ -72,39 +68,22 @@ describe('A DECLARATION HAS A VALUE', () => {
     ).toBe('3');
   });
 
-  test('a function type with no function definition in the same block', () => {
-    // No definition of `f` in the block.
-    expect(
-      run([
-        'Block',
-        ['Declare', 'f', "'(integer) -> integer'"],
-        ['Assign', 'f', ['Function', ['Add', 'x', 1], 'x']],
-        ['f', 2],
-      ]).canonical
-    ).toContain('ErrorCode("declaration-without-value", "f", "function")');
-    // A definition in an enclosing block does not pair with the declaration.
-    expect(
-      run([
-        'Block',
-        ['DefineFunction', 'f', ['Function', 'x', 'x']],
-        ['Block', ['Declare', 'f', "'(integer) -> integer'"], ['f', 2]],
-      ]).canonical
-    ).toContain('ErrorCode("declaration-without-value", "f", "function")');
-    // The Epsil message names the fix.
-    const { diagnostics } = executeEpsil(
-      new ComputeEngine(),
-      'let f: (integer) -> integer\nf(2)'
-    );
-    expect(diagnostics.map((d) => d.message[1])).toEqual([
-      '`f` is declared without a value: define `f` with a function statement in the same block, or give the declaration a value',
-    ]);
-    // A declaration of a type that is not a function type stays an error.
-    expect(
-      executeEpsil(
-        new ComputeEngine(),
-        'let g: integer\ng = 2'
-      ).diagnostics.map((d) => d.message[3])
-    ).toEqual(['declaration-without-value']);
+  test('a typed function variable initializes later and an uninitialized shadow fails on read', () => {
+    expect(run([
+      'Block',
+      ['Declare', 'f', "'(integer) -> integer'"],
+      ['Assign', 'f', ['Function', ['Add', 'x', 1], 'x']],
+      ['f', 2],
+    ]).value).toBe('3');
+    expect(run([
+      'Block',
+      ['DefineFunction', 'f', ['Function', 'x', 'x']],
+      ['Block', ['Declare', 'f', "'(integer) -> integer'"], ['f', 2]],
+    ]).value).toContain('read-before-initialization');
+    const uninitialized = executeEpsil(new ComputeEngine(),
+      'let f: (integer) -> integer; f(2)');
+    expect(uninitialized.value.toString()).toContain('read-before-initialization');
+    expect(executeEpsil(new ComputeEngine(), 'let g: integer; g=2; g').value.json).toBe(2);
   });
 
   test('the three-operand `Declare` of the `where` clause and of `;`', () => {
@@ -115,7 +94,7 @@ describe('A DECLARATION HAS A VALUE', () => {
       'xs',
     ]);
     expect(r.value).toBe('[1,2]');
-    expect(r.type).toBe('list<integer>');
+    expect(r.type).toBe('list<unknown>');
   });
 
   test('the LaTeX `let` declares the local with its value', () => {
@@ -124,7 +103,7 @@ describe('A DECLARATION HAS A VALUE', () => {
       ce.parse('\\operatorname{let} k \\coloneq 2; k+1', { form: 'raw' }).json
     ).toEqual(['Block', ['Declare', 'k', "'unknown'", 2], ['Add', 'k', 1]]);
     expect(ce.parse('\\operatorname{let} k; k').evaluate().toString()).toBe(
-      'Error(ErrorCode("declaration-without-value", "k"))'
+      'Error(ErrorCode("read-before-initialization", "k"))'
     );
   });
 });

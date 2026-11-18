@@ -132,7 +132,7 @@ describe('1. FLATMAP OVER A SOURCE WITH ABSENT CELLS', () => {
       epsil(
         'let l = [1, Missing]\nflatMap(l, x => [x, x])'
       )
-    ).toEqual(['[1,1,"Missing","Missing"]', 'list<integer | missing>']);
+    ).toEqual(['[1,1,"Missing","Missing"]', 'list<missing | number>']);
   });
 
   test('a callback result that is a union of a list and an absent value', () => {

@@ -215,12 +215,12 @@ describe('D17: a run keeps the cached types', () => {
     );
     const probed = find(block, (x) => x.operator === 'TypeOfD17').op1;
     const map = block.ops[block.ops.length - 1];
-    expect(probed.type.toString()).toBe('list<unknown^2>');
-    expect(map.type.toString()).toBe('list<unknown^2>');
+    expect(probed.type.toString()).toBe('vector<2>');
+    expect(map.type.toString()).toBe('vector<2>');
     expect(block.evaluate().toString()).toBe('[2,3]');
-    expect(types).toEqual(['list<unknown^2>']);
-    expect(probed.type.toString()).toBe('list<unknown^2>');
-    expect(map.type.toString()).toBe('list<unknown^2>');
+    expect(types).toEqual(['vector<2>']);
+    expect(probed.type.toString()).toBe('vector<2>');
+    expect(map.type.toString()).toBe('vector<2>');
   });
 
   // A guard of behaviour that the change must keep: it holds before the

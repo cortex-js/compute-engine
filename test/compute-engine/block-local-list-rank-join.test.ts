@@ -1,21 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { joinEvidenceTypes } from '../../src/compute-engine/library/assignment-evidence';
-import { parseType } from '../../src/common/type/parse';
-import { typeToString } from '../../src/common/type/serialize';
 import type { MathJsonExpression } from '../../src/math-json';
-
-// The static type of a block local assigned more than once is the join of
-// the types of its assigned values (`joinEvidenceTypes`). The `elements` of
-// a list type with dimensions are its cells, so a join of two list types of
-// different ranks must join what one index returns (a cell of a vector, a
-// row of a matrix), not the cells. The join of `[1, 2]` and `[[1, 2]]` gave
-// `list<integer>`, and `Map` then refused an untyped callback whose
-// parameter was inferred `integer` from that type, while the compiled code
-// mapped the row.
-
-const join = (a: string, b: string): string =>
-  typeToString(joinEvidenceTypes(parseType(a), parseType(b)));
 
 // A local declared with a type that admits a vector and a matrix, assigned
 // a vector, then a matrix. With no declared type, the type of the local is
@@ -40,45 +25,6 @@ const doubleReal: MathJsonExpression = [
   ['Multiply', 2, 't'],
   ['Typed', 't', "'real'"],
 ];
-
-describe('the join of list types of different shapes', () => {
-  test('a vector and a matrix join on their rows', () => {
-    expect(join('vector<integer^2>', 'matrix<integer^(1x2)>')).toBe(
-      'list<integer | vector<integer^2>>'
-    );
-  });
-
-  test('a plain list and a matrix join on their rows', () => {
-    expect(join('list<integer>', 'matrix<integer>')).toBe(
-      'list<integer | vector<integer>>'
-    );
-  });
-
-  test('two vectors of different lengths keep the rank', () => {
-    expect(join('vector<integer^2>', 'vector<real^3>')).toBe('vector<real>');
-  });
-
-  test('two matrices keep the axis on which they agree', () => {
-    expect(join('matrix<integer^(2x2)>', 'matrix<integer^(1x2)>')).toBe(
-      'matrix<integer^(?x2)>'
-    );
-  });
-
-  test('two plain lists join their elements', () => {
-    expect(join('list<integer>', 'list<string>')).toBe(
-      'list<integer | string>'
-    );
-  });
-
-  // One index of `tensor<U>` returns `U | tensor<U>`: a join of these values
-  // joined the two tensors again, with no end (a stack overflow).
-  test('two tensors of unknown rank join their cells', () => {
-    expect(join('tensor<integer>', 'tensor<real>')).toBe('tensor<real>');
-    expect(join('tensor<integer>', 'tensor<integer>')).toBe(
-      'tensor<integer>'
-    );
-  });
-});
 
 describe('a block local assigned a vector, then a matrix', () => {
   const values: MathJsonExpression[] = [

@@ -996,7 +996,7 @@ function parseArray(cs: list<character>, i: integer) -> tuple<json, integer> {
   else {
     let more = true
     while more {
-      let v = 0
+      let v: json = 0
       (v, j) := parseValue(cs, j)
       out = join(out, [v])
       j = skipWs(cs, j)
@@ -1020,7 +1020,7 @@ function parseObject(cs: list<character>, i: integer) -> tuple<json, integer> {
       let k = ""
       (k, j) := parseString(cs, skipWs(cs, j))
       j = skipWs(cs, skipWs(cs, j) + 1) // skip ":"
-      let v = 0
+      let v: json = 0
       (v, j) := parseValue(cs, j)
       keys = join(keys, [k])
       vals = join(vals, [v])

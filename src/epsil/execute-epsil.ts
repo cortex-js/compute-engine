@@ -2023,6 +2023,7 @@ function constantAssignmentName(e: unknown): string | undefined {
  */
 const BLOCK_LOCAL_ERROR_CODES = [
   'read-before-declaration',
+  'read-before-initialization',
   'variable-redeclaration',
   'declaration-without-value',
   'declaration-below-statement',

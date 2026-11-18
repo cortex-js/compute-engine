@@ -66,6 +66,7 @@ import {
   componentwiseTupleCallType,
   inferredPointSignature,
   partialApplicationType,
+  curriedSignature,
   wildcardRecursiveSignature,
 } from './call-result-type.js';
 import {
@@ -690,33 +691,6 @@ let _effectsComputeCount = 0;
  */
 function mixOperandHash(h: number, operandHash: number): number {
   return Math.imul(((h << 5) | (h >>> 27)) ^ operandHash, 0x9e3779b1) | 0;
-}
-
-/**
- * The signature of a partial application: `sig` applied to the arguments
- * `ops`, when they are fewer than its fixed parameters and the literal
- * would be curried by `makeLambda` (function-utils.ts) — a plain signature
- * with no optional parameter, no variadic tail and no type parameter.
- * `undefined` when the call is saturated or is not curried, and when an
- * argument is a `Spread` (`g(...args)`), whose element count is unknown
- * until it is evaluated.
- */
-function curriedSignature(
-  sig: Type,
-  ops: ReadonlyArray<{ readonly operator: string }>
-): Type | undefined {
-  if (typeof sig === 'string' || sig.kind !== 'signature') return undefined;
-  if (ops.some((x) => x.operator === 'Spread')) return undefined;
-  const argCount = ops.length;
-  if (
-    sig.variadicArg !== undefined ||
-    (sig.optArgs !== undefined && sig.optArgs.length > 0) ||
-    (sig.typeParams !== undefined && sig.typeParams.length > 0)
-  )
-    return undefined;
-  const args = sig.args ?? [];
-  if (argCount >= args.length) return undefined;
-  return { ...sig, args: args.slice(argCount) };
 }
 
 /** Read {@link _effectsComputeCount} — for tests. @internal */
@@ -18466,6 +18440,11 @@ function applyFunctionLiteralWith(
   evaluatedOps?: Expression[],
   awaitBody = false
 ): Expression | Promise<Expression> {
+  if (value === undefined && def._requiresInitialization && def.storedValue === undefined) {
+    const binding = callableBindingInContext(expr.engine, expr.operator, { value: def });
+    if (binding && isValueDef(binding) && binding.value === def)
+      return expr.engine.error(['read-before-initialization', expr.operator]);
+  }
   if (value && !value.type.matches('function')) {
     // A symbol that holds an error is applied as the error, as it is when it
     // is the callback of `Map`. (CE-108.1)

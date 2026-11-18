@@ -23,7 +23,9 @@ describe('CE-1389: destructuring a value that did not evaluate to a tuple', () =
   });
 
   test('a symbol with no value gets no `N` hint', () => {
-    const { diagnostics } = run('let p: tuple<real, real>\nlet (a, b) = p\na');
+    const ce = new ComputeEngine();
+    ce.declare('p', 'tuple<real, real>');
+    const { diagnostics } = executeEpsil(ce, 'let (a, b) = p\na');
     const error = diagnostics.find((d) => d.message[0] === 'runtime-error')!;
     expect(error.message[3]).toBe('unevaluated-tuple');
     expect(error.message[1]).toBe(

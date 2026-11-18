@@ -263,7 +263,7 @@ describe('what the dot does NOT do', () => {
   test('a library function is not reached: `xs.Sort()`', () => {
     const r = run('let xs = [3, 1, 2]; xs.Sort()');
     expect(r.value).toContain(
-      'ErrorCode("dot-call-not-a-protocol-function", "Sort", "vector<integer^3>")'
+      'ErrorCode("dot-call-not-a-protocol-function", "Sort", "list<number>")'
     );
     // The refusal is a canonicalization error, so the static check reports
     // it with the two spellings that work.

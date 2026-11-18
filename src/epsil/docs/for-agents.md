@@ -242,7 +242,7 @@ Dictionaries (string keys; dot access is shorthand for identifier-shaped
 keys):
 
 ```epsil
-let d = {one -> 1, two -> 2}
+let d: dictionary<number> = {one -> 1, two -> 2}
 (d.two, d["two"], isMissing(d.missing), Coalesce(d.missing, 0))
 // ➔ (2, 2, true, 0)
 ```

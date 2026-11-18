@@ -2,6 +2,12 @@
 
 ### Breaking Changes
 
+- Program and Block variables keep the contract supplied by an annotation or
+  inferred during initialization. Mutable numeric values establish `number`,
+  mutable lists erase lengths, and empty list elements stay unknown. A later
+  store must satisfy the contract. A declaration without a value reserves a slot.
+  Reading it before initialization reports `read-before-initialization`.
+
 - **`compile()` uses one compiler for JavaScript, GLSL and interval arithmetic,
   and the compilation APIs of the previous compilers are removed.**
   `compile(expr, { to })` with `to` set to `'javascript'` (the default),

@@ -1116,15 +1116,23 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
       ]);
     });
 
-  test('a call of a local that a local of an inner block shadows with a number', () => {
-    // The inner `f` holds `5`, not a function. The view read after the
-    // blocks gives the same elements as the view read in the inner block.
+  test('a fixed numeric shadow refuses a call before a lazy view is created', () => {
+    // The inner f has a fixed number contract. Both read placements report
+    // the noncallable head instead of treating it as provisional inference.
     const blocks = (read: string) =>
       `let h = []; let r: any = 0; if true { let f = x => x + 1; if true { let f = 5; h = Map(x => f(x), Range(1, Infinity))${read} } }`;
-    for (const debug of [false, true])
-      expect(
-        run(`${blocks('')}; ListFrom(Take(h, 2))`, debug)
-      ).toEqual(run(`${blocks('; r = ListFrom(Take(h, 2))')}; r`, debug));
+    for (const debug of [false, true]) {
+      for (const source of [
+        `${blocks('')}; ListFrom(Take(h, 2))`,
+        `${blocks('; r = ListFrom(Take(h, 2))')}; r`,
+      ]) {
+        const ce = new ComputeEngine();
+        ce._debugBindings = debug;
+        const result = executeEpsil(ce, source);
+        expect(result.diagnostics.length).toBeGreaterThan(0);
+        expect(result.diagnostics.every(d => d.message[3] === 'expected-function')).toBe(true);
+      }
+    }
   });
 
   test('a value that nests tuples of a view', () => {

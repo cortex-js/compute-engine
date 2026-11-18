@@ -1,10 +1,15 @@
 # Initialization contracts: delivery ledger
 
-Status: implementation and validation in progress. This is the bounded D1
-replacement authorized on November 16, not implementation of the full prepared-unit
-architecture. The acceptance was recorded in
-[the design](../../plans/2026-11-16-prepared-binding-replacement.md) before source
-edits. Production accounting and final validation below remain pending freeze.
+The November 18 candidate replaces assignment convergence on the source at
+`fd7bad6e1`. The shared checkout advanced by two documentation files before
+integration, then picked up independent compiler work through `41e777da6`.
+The [candidate patch](current-candidate.patch) was checked against both
+checkouts. All matched measurements use the frozen `fd7bad6e1` pair.
+The [per-file census](current-counts.json) covers 17 production TypeScript
+files, with 323 physical lines added and 1,130 removed, a net reduction of 807.
+Counting only token-bearing lines gives 264 added and 785 removed, or 521 net
+removed. The absence helper and residual-signature helper move between modules
+and earn zero net credit. The earlier consolidation is excluded.
 
 ## What disappears, and why
 
@@ -34,7 +39,8 @@ compiler execute the result; no experimental walker is involved.
 | Assignment admission, absence and destructuring | Retained `assertAssignable`, local mismatch checks, tuple leaf typing and atomic runtime writes. `initializationType` preserves the domain of proved-absent values; its existing logic is relocated, receiving zero removal credit. |
 | Callable initializers and partial application | Reuse existing residual-signature helper in anonymous call typing, so a partial application can initialize a callable. Mapped or uncertain partial results conservatively remain unknown. Relocating the helper receives zero deletion credit. Constants retain necessary inferred callable provenance while writes remain forbidden. |
 | Written unannotated parameters | Existing assignment identity metadata now finalizes these parameters as unknown at literal close and discards their use requirements. The first assignment resolves an unread parameter through its existing shadow frame. No RHS analysis, new tracker or recursive solver. |
-| Compiler admission | Source declarations without initializers decline except paired function signatures; generated temporaries are unaffected. Existing `pointLaneMismatch` is reused for collection initialization/assignment whose widened contract hides a known complex lane. No new shape solver or runtime type dispatch. |
+| Compiler admission | The November 18 base uses a single IR compiler. Its existing admission declines uninitialized source locals and the complex-point input witness. No retired compiler guard or IR change is included. The public fallback returns the interpreter value. |
+| Matrix product order | A fixed unknown binding can hold a matrix. Existing matrix-operand predicates now preserve noncommutative order for it. SVD reconstruction with unannotated destructured factors exposed this obligation. |
 | Use-site diagnostics and effects | Retained speculative diagnostic flow, source ranges, effect checks, invalid-expression checks and existing definition restoration. Fixed contracts do not supply path facts. Failed stores keep their previous admitted values. |
 | Legacy host/standalone inference | Retained `ce.assign`/`ce.declare`, standalone symbols, function result derivation and runtime binding mechanisms outside the migrated route. These are explicit compatibility consumers, not a fallback for sequence assignment convergence. |
 | Versions, expression caches and restoration | Retained type/value/callable versions, `BoundUnit` type environments, callable signature caches, definition restore points and their other consumers. This patch removes solver writes/registrations, not the entire engine cache architecture. |
@@ -43,14 +49,53 @@ compiler execute the result; no experimental walker is involved.
 
 ## Accounting rules
 
-Compare the candidate with consolidated anchor
-`dbcfdca7e5b5a8852b6554a1ad359dfac4724c1e`. Report physical added/deleted
-lines and a separate lexical code-line count from [count-diff.mjs](count-diff.mjs).
-That lexical metric excludes comments/trivia and is not the earlier AST metric.
-Tests, documentation and private measurement instruments are separate. The earlier
-556-line consolidation earns no new credit. Both sides of relocated helper code
-are neutral; deleting its old location alone is not a mechanism removal.
+[count-diff.mjs](count-diff.mjs) compares the candidate against its own HEAD and
+includes untracked TypeScript tests. The lexical metric counts lines containing
+TypeScript tokens. Comments, documentation and measurement scripts receive no
+production credit. The 32 TypeScript test files add 488 physical lines and
+remove 222 (+266). Two additional Epsil corpus fixtures gain annotations.
+All 4,084 snapshots passed in the first current-source full run.
 
-Final source census, test/snapshot costs, validation and measurement links will be
-filled after the last correctness fix. No performance conclusion follows merely
-from the number of deleted lines.
+The [matched measurements](MEASUREMENTS-CURRENT.md) compare the patch against
+both its source control and the original baseline. The [witness results](WITNESSES-CURRENT.md)
+distinguish original source, annotation migrations, interpreter fallback and
+native compilation.
+
+## Coordinator decision
+
+**Revise before adoption.** The candidate clears the mechanism-removal gate.
+On the real notebook rerun it brings evidence passes from two to zero and
+actual bound-call derivations from four to three. On the loop-carried
+collection fixture, boxing eliminates 24 rejoins and reduces bound-call
+derivations from 468 to 380, while binding declared-type reads rise from
+4,997 to 9,752. Declaration typing, admission and repeated contract reads
+still have a cost after convergence disappears.
+
+Relative to the current control, median boxing improves about 10% and notebook
+reruns about 6%. Relative to the original baseline these still take 1.71× and
+1.27× as long. First Program `N()` takes 1.23× as long as the current control
+and repeated collection `N()` takes 1.12×. The approved semantics and measured
+code reduction can be reviewed independently of the outstanding performance
+gate. Further optimization requires a separate coordinator decision.
+
+## Validation
+
+The frozen candidate passed 1,910 suites, 73,963 tests and 4,084 snapshots
+(10 suites and 763 tests skipped, one todo). The first run before the matrix
+correction and expectation migrations had ten failures in four suites.
+TypeScript, changed-source lint, dependency-cycle checks and independent Sol
+review passed. A second full run on the integrated shared checkout passed 1,912
+suites, 73,983 tests and 4,084 snapshots, with the same skip/todo counts.
+On the shared checkout the 17 surviving curated suites passed
+5,058 tests and 1,341 snapshots. The `test:core` wrapper itself exits 1 on
+its stale compiler-test path, also absent at the unchanged control. See
+[CE-1446](../../../issues/CE-1446.md).
+
+The in-repository Epsil guides and the CE type and error references accompany
+the source patch. The public site edits live in the separate cortexjs.io
+checkout under `docs/compute-engine/`:
+
+- `08-guide-types.md`
+- `13-guide-compile.md`
+- `84-reference-control-structures.md`
+- `85-reference-core.md`

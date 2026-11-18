@@ -489,10 +489,10 @@ describe('a local of a block is declared', () => {
       ['Declare', 'b', "'unknown'", ['List', 1, 2]],
       'b',
     ]);
-    expect(literal.type.toString()).toBe('vector<integer^2>');
+    expect(literal.type.toString()).toBe('list<number>');
   });
 
-  test('only the assigned leaf of a destructuring declaration is widened', () => {
+  test('each mutable destructuring leaf has its initialization contract', () => {
     const typeOf = (tail: string) =>
       new ComputeEngine()
         .box(
@@ -501,8 +501,8 @@ describe('a local of a block is declared', () => {
           )[0]
         )
         .type.toString();
-    expect(typeOf('b')).toBe('vector<integer^2>');
-    expect(typeOf('a')).toBe('vector<integer>');
+    expect(typeOf('b')).toBe('list<number>');
+    expect(typeOf('a')).toBe('list<number>');
   });
 
   test('a destructuring declaration declares each name', () => {
@@ -678,7 +678,7 @@ describe('a local of a block is declared', () => {
           ['g', 2],
         ]).json
       )
-    ).toBe('declaration-without-value');
+    ).toBe('variable-redeclaration');
     expect(
       JSON.stringify(
         ce.box([

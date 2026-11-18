@@ -1,0 +1,3605 @@
+{
+  "rawRoot": "/private/tmp/ce-init-contracts-current-measurement-20261118",
+  "timing": {
+    "historical/box": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            72.72140624999999,
+            75.77432312500001
+          ],
+          "medianUs": 74.2478646875,
+          "rangeUs": [
+            72.72140624999999,
+            75.77432312500001
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            76.49718750000005,
+            88.23236937499999
+          ],
+          "medianUs": 82.36477843750002,
+          "rangeUs": [
+            76.49718750000005,
+            88.23236937499999
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            41.97609375000006,
+            45.01526031249995
+          ],
+          "medianUs": 43.495677031250004,
+          "rangeUs": [
+            41.97609375000006,
+            45.01526031249995
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 1.8936313688903852,
+        "candidate/current": 0.9014516410535931,
+        "candidate/original": 1.7070171050367997
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "historical/parse-box": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            90.382265625,
+            100.736953125
+          ],
+          "medianUs": 95.55960937500001,
+          "rangeUs": [
+            90.382265625,
+            100.736953125
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            106.952083125,
+            94.01835937500003
+          ],
+          "medianUs": 100.48522125000002,
+          "rangeUs": [
+            94.01835937500003,
+            106.952083125
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            63.07609374999998,
+            59.72710937499997
+          ],
+          "medianUs": 61.40160156249998,
+          "rangeUs": [
+            59.72710937499997,
+            63.07609374999998
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 1.6365244341015643,
+        "candidate/current": 0.9509817283205712,
+        "candidate/original": 1.5563048347807504
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "historical/check": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            145.48296875000005,
+            148.18192625000023
+          ],
+          "medianUs": 146.83244750000014,
+          "rangeUs": [
+            145.48296875000005,
+            148.18192625000023
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            154.80057250000002,
+            150.90588499999996
+          ],
+          "medianUs": 152.85322874999997,
+          "rangeUs": [
+            150.90588499999996,
+            154.80057250000002
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            156.85671874999997,
+            136.96927000000002
+          ],
+          "medianUs": 146.91299437499998,
+          "rangeUs": [
+            136.96927000000002,
+            156.85671874999997
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 1.0404336893429411,
+        "candidate/current": 0.9606107028341078,
+        "candidate/original": 0.9994517375720062
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "historical/notebook": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            127.00385374999995,
+            135.18213625
+          ],
+          "medianUs": 131.09299499999997,
+          "rangeUs": [
+            127.00385374999995,
+            135.18213625
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            149.60317750000002,
+            129.67692749999998
+          ],
+          "medianUs": 139.6400525,
+          "rangeUs": [
+            129.67692749999998,
+            149.60317750000002
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            104.91309874999992,
+            102.04627625
+          ],
+          "medianUs": 103.47968749999995,
+          "rangeUs": [
+            102.04627625,
+            104.91309874999992
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 1.3494440877587695,
+        "candidate/current": 0.9387922208064193,
+        "candidate/original": 1.2668476120011478
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "extended/total/program/evaluate": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            141.97958374999985,
+            140.73250000000002
+          ],
+          "medianUs": 141.35604187499993,
+          "rangeUs": [
+            140.73250000000002,
+            141.97958374999985
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            150.90651125000008,
+            150.38010375
+          ],
+          "medianUs": 150.64330750000005,
+          "rangeUs": [
+            150.38010375,
+            150.90651125000008
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            123.74520750000016,
+            119.02770874999987
+          ],
+          "medianUs": 121.38645812500002,
+          "rangeUs": [
+            119.02770874999987,
+            123.74520750000016
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 1.241022349831414,
+        "candidate/current": 0.9383492982255445,
+        "candidate/original": 1.1645124510465235
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "extended/first/program/evaluate": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            44.7918090820314,
+            54.84572363281259
+          ],
+          "medianUs": 49.81876635742199,
+          "rangeUs": [
+            44.7918090820314,
+            54.84572363281259
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            46.26910400390627,
+            53.18245458984383
+          ],
+          "medianUs": 49.72577929687505,
+          "rangeUs": [
+            46.26910400390627,
+            53.18245458984383
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            48.74839257812491,
+            42.0234069824218
+          ],
+          "medianUs": 45.38589978027335,
+          "rangeUs": [
+            42.0234069824218,
+            48.74839257812491
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 1.0956217578061105,
+        "candidate/current": 1.0018699970490517,
+        "candidate/original": 1.0976705672600844
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "extended/first/program/N": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            67.67783593749988,
+            61.926635742187486
+          ],
+          "medianUs": 64.80223583984369,
+          "rangeUs": [
+            61.926635742187486,
+            67.67783593749988
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            52.16772460937491,
+            53.21767187499993
+          ],
+          "medianUs": 52.69269824218742,
+          "rangeUs": [
+            52.16772460937491,
+            53.21767187499993
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            79.28570556640624,
+            45.75691748046873
+          ],
+          "medianUs": 62.52131152343748,
+          "rangeUs": [
+            45.75691748046873,
+            79.28570556640624
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 0.8427957916787208,
+        "candidate/current": 1.2298143386394471,
+        "candidate/original": 1.0364823491514752
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "extended/repeat/program/evaluate": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            33.16044281249997,
+            31.675625000000025
+          ],
+          "medianUs": 32.41803390625,
+          "rangeUs": [
+            31.675625000000025,
+            33.16044281249997
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            32.38726562499998,
+            34.21251312499997
+          ],
+          "medianUs": 33.29988937499998,
+          "rangeUs": [
+            32.38726562499998,
+            34.21251312499997
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            32.521080624999996,
+            34.925
+          ],
+          "medianUs": 33.7230403125,
+          "rangeUs": [
+            32.521080624999996,
+            34.925
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 0.9874521711690636,
+        "candidate/current": 0.9735177658154016,
+        "candidate/original": 0.9613022315260743
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "extended/repeat/program/N": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            33.885703125000006,
+            34.32053374999995
+          ],
+          "medianUs": 34.10311843749998,
+          "rangeUs": [
+            33.885703125000006,
+            34.32053374999995
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            34.36011718750002,
+            35.0305078125
+          ],
+          "medianUs": 34.695312500000014,
+          "rangeUs": [
+            34.36011718750002,
+            35.0305078125
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            39.241692499999985,
+            37.21097656250002
+          ],
+          "medianUs": 38.226334531250004,
+          "rangeUs": [
+            37.21097656250002,
+            39.241692499999985
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 0.9076285478440685,
+        "candidate/current": 0.9829315829768062,
+        "candidate/original": 0.8921367652873101
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "extended/box/loop/evaluate": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            50.52648437500004,
+            39.08957031249997
+          ],
+          "medianUs": 44.808027343750005,
+          "rangeUs": [
+            39.08957031249997,
+            50.52648437500004
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            44.39217437500002,
+            43.248645625
+          ],
+          "medianUs": 43.82041000000001,
+          "rangeUs": [
+            43.248645625,
+            44.39217437500002
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            50.72101562499995,
+            54.31321624999999
+          ],
+          "medianUs": 52.517115937499966,
+          "rangeUs": [
+            50.72101562499995,
+            54.31321624999999
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 0.8344024460930067,
+        "candidate/current": 1.0225378389602016,
+        "candidate/original": 0.8532080740510491
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "extended/total/loop/evaluate": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1077.9149999999981,
+            1143.1633299999999
+          ],
+          "medianUs": 1110.539164999999,
+          "rangeUs": [
+            1077.9149999999981,
+            1143.1633299999999
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1096.545410000001,
+            1052.9029200000014
+          ],
+          "medianUs": 1074.7241650000012,
+          "rangeUs": [
+            1052.9029200000014,
+            1096.545410000001
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1269.708340000002,
+            1249.2225000000008
+          ],
+          "medianUs": 1259.4654200000014,
+          "rangeUs": [
+            1249.2225000000008,
+            1269.708340000002
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 0.8533177234830314,
+        "candidate/current": 1.0333248299111222,
+        "candidate/original": 0.8817543914782494
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "extended/first/loop/evaluate": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1020.5315703124995,
+            1064.7861328125005
+          ],
+          "medianUs": 1042.6588515624999,
+          "rangeUs": [
+            1020.5315703124995,
+            1064.7861328125005
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1069.0475234375008,
+            1026.8118515625008
+          ],
+          "medianUs": 1047.929687500001,
+          "rangeUs": [
+            1026.8118515625008,
+            1069.0475234375008
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1139.538734374998,
+            1157.3958359375
+          ],
+          "medianUs": 1148.467285156249,
+          "rangeUs": [
+            1139.538734374998,
+            1157.3958359375
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 0.9124593282232066,
+        "candidate/current": 0.9949702389383821,
+        "candidate/original": 0.9078698758237995
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "extended/first/loop/N": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1080.4290390624978,
+            1027.2828749999974
+          ],
+          "medianUs": 1053.8559570312477,
+          "rangeUs": [
+            1027.2828749999974,
+            1080.4290390624978
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1060.3564453125002,
+            1135.698890625001
+          ],
+          "medianUs": 1098.0276679687506,
+          "rangeUs": [
+            1060.3564453125002,
+            1135.698890625001
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1225.8489609375013,
+            1190.168296875001
+          ],
+          "medianUs": 1208.008628906251,
+          "rangeUs": [
+            1190.168296875001,
+            1225.8489609375013
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 0.908956808498066,
+        "candidate/current": 0.9597717687576884,
+        "candidate/original": 0.8723910838165323
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "extended/repeat/loop/evaluate": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            867.73729,
+            926.0456250000016
+          ],
+          "medianUs": 896.8914575000008,
+          "rangeUs": [
+            867.73729,
+            926.0456250000016
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            903.6899999999991,
+            893.5781250000014
+          ],
+          "medianUs": 898.6340625000003,
+          "rangeUs": [
+            893.5781250000014,
+            903.6899999999991
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1000.7770800000002,
+            939.5445849999987
+          ],
+          "medianUs": 970.1608324999995,
+          "rangeUs": [
+            939.5445849999987,
+            1000.7770800000002
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 0.9262732862388574,
+        "candidate/current": 0.9980608291264282,
+        "candidate/original": 0.9244770840612154
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "extended/repeat/loop/N": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            876.0752099999991,
+            922.3893750000002
+          ],
+          "medianUs": 899.2322924999996,
+          "rangeUs": [
+            876.0752099999991,
+            922.3893750000002
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 1,
+          "processMediansUs": [
+            937.4327100000005
+          ],
+          "medianUs": 937.4327100000005,
+          "rangeUs": [
+            937.4327100000005,
+            937.4327100000005
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1091.8979149999996,
+            1030.447079999999
+          ],
+          "medianUs": 1061.1724974999993,
+          "rangeUs": [
+            1030.447079999999,
+            1091.8979149999996
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 0.8833933335140934,
+        "candidate/current": 0.9592499631253524,
+        "candidate/original": 0.8473950225985762
+      },
+      "coverage": {
+        "original": 2,
+        "current": 1,
+        "candidate": 2
+      }
+    },
+    "extended/box/collection/evaluate": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            2904.6979199999987,
+            3155.2599999999984
+          ],
+          "medianUs": 3029.9789599999986,
+          "rangeUs": [
+            2904.6979199999987,
+            3155.2599999999984
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 0,
+          "processMediansUs": [],
+          "medianUs": null,
+          "rangeUs": null
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1936.0858300000018,
+            1898.0404199999975
+          ],
+          "medianUs": 1917.0631249999997,
+          "rangeUs": [
+            1898.0404199999975,
+            1936.0858300000018
+          ]
+        }
+      },
+      "ratios": null,
+      "coverage": {
+        "original": 2,
+        "current": 0,
+        "candidate": 2
+      }
+    },
+    "extended/total/collection/evaluate": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            5234.6087499999885,
+            4850.706660000005
+          ],
+          "medianUs": 5042.657704999997,
+          "rangeUs": [
+            4850.706660000005,
+            5234.6087499999885
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            5374.91,
+            5959.17875000001
+          ],
+          "medianUs": 5667.044375000005,
+          "rangeUs": [
+            5374.91,
+            5959.17875000001
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 1,
+          "processMediansUs": [
+            4042.1741699999984
+          ],
+          "medianUs": 4042.1741699999984,
+          "rangeUs": [
+            4042.1741699999984,
+            4042.1741699999984
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 1.4019792657771615,
+        "candidate/current": 0.8898214609445321,
+        "candidate/original": 1.2475112384877765
+      },
+      "coverage": {
+        "original": 1,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "extended/repeat/collection/evaluate": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1451.218329999997,
+            1392.0649999999978
+          ],
+          "medianUs": 1421.6416649999974,
+          "rangeUs": [
+            1392.0649999999978,
+            1451.218329999997
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1488.5287500000004,
+            1417.1208400000023
+          ],
+          "medianUs": 1452.8247950000014,
+          "rangeUs": [
+            1417.1208400000023,
+            1488.5287500000004
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            861.2008350000008,
+            930.3891650000003
+          ],
+          "medianUs": 895.7950000000005,
+          "rangeUs": [
+            861.2008350000008,
+            930.3891650000003
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 1.6218273098197697,
+        "candidate/current": 0.9785362074578277,
+        "candidate/original": 1.5870167449025687
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    },
+    "extended/repeat/collection/N": {
+      "arms": {
+        "candidate": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1498.1008299999985,
+            1756.4574999999968
+          ],
+          "medianUs": 1627.2791649999976,
+          "rangeUs": [
+            1498.1008299999985,
+            1756.4574999999968
+          ]
+        },
+        "current": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            1460.7554200000004,
+            1436.0112500000014
+          ],
+          "medianUs": 1448.383335000001,
+          "rangeUs": [
+            1436.0112500000014,
+            1460.7554200000004
+          ]
+        },
+        "original": {
+          "acceptedProcesses": 2,
+          "processMediansUs": [
+            863.9552099999992,
+            900.1820850000001
+          ],
+          "medianUs": 882.0686474999997,
+          "rangeUs": [
+            863.9552099999992,
+            900.1820850000001
+          ]
+        }
+      },
+      "ratios": {
+        "current/original": 1.6420301743011463,
+        "candidate/current": 1.1235141455145208,
+        "candidate/original": 1.844844128189012
+      },
+      "coverage": {
+        "original": 2,
+        "current": 2,
+        "candidate": 2
+      }
+    }
+  },
+  "allocation": {
+    "extended/box/collection/evaluate": {
+      "iterations": 2000,
+      "arms": {
+        "candidate": 7043111.44,
+        "current": 8425424.012,
+        "original": 4318651.524
+      }
+    },
+    "extended/repeat/collection/evaluate": {
+      "iterations": 2000,
+      "arms": {
+        "candidate": 3157040.852,
+        "current": 3148909.18,
+        "original": 1728471.116
+      }
+    },
+    "extended/total/collection/evaluate": {
+      "iterations": 2000,
+      "arms": {
+        "candidate": 10836726.004,
+        "current": 12088997.016,
+        "original": 7953573.484
+      }
+    },
+    "historical/notebook": {
+      "iterations": 20000,
+      "arms": {
+        "candidate": 414162.092,
+        "current": 429695.866,
+        "original": 335510.566
+      }
+    },
+    "extended/box/loop/evaluate": {
+      "iterations": 20000,
+      "arms": {
+        "candidate": 147498.3628,
+        "current": 148547.77,
+        "original": 147370.9532
+      }
+    },
+    "extended/first/loop/evaluate": {
+      "iterations": 4096,
+      "arms": {
+        "candidate": 2779709.142578125,
+        "current": 2742520.779296875,
+        "original": 2926175.66796875
+      }
+    },
+    "extended/repeat/loop/evaluate": {
+      "iterations": 20000,
+      "arms": {
+        "candidate": 2732170.676,
+        "current": 2709112.9,
+        "original": 2861689.8536
+      }
+    },
+    "extended/total/loop/evaluate": {
+      "iterations": 20000,
+      "arms": {
+        "candidate": 2940775.7544,
+        "current": 2915782.242,
+        "original": 3069382.684
+      }
+    },
+    "extended/first/program/evaluate": {
+      "iterations": 4096,
+      "arms": {
+        "candidate": 130311.9296875,
+        "current": 132476.59375,
+        "original": 109659.310546875
+      }
+    },
+    "extended/repeat/program/evaluate": {
+      "iterations": 20000,
+      "arms": {
+        "candidate": 103400.9416,
+        "current": 103334.3828,
+        "original": 90367.6716
+      }
+    },
+    "extended/total/program/evaluate": {
+      "iterations": 20000,
+      "arms": {
+        "candidate": 370530.3332,
+        "current": 381696.9776,
+        "original": 285295.6344
+      }
+    },
+    "historical/box": {
+      "iterations": 20000,
+      "arms": {
+        "candidate": 218364.906,
+        "current": 228882.3068,
+        "original": 139593.2088
+      }
+    },
+    "historical/check": {
+      "iterations": 20000,
+      "arms": {
+        "candidate": 435558.1888,
+        "current": 438048.5468,
+        "original": 387791.5968
+      }
+    },
+    "historical/parse-box": {
+      "iterations": 20000,
+      "arms": {
+        "candidate": 269290.7824,
+        "current": 279622.6264,
+        "original": 190159.0372
+      }
+    }
+  },
+  "retention": {
+    "program-3-retain": {
+      "original": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          658.0390625,
+          659.4296875,
+          665.7421875
+        ],
+        "medianKiB": 659.4296875,
+        "rangeKiB": [
+          658.0390625,
+          665.7421875
+        ],
+        "afterDropHeapUsedBytes": [
+          52331904,
+          52332728,
+          52339704
+        ]
+      },
+      "current": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          -327.6171875,
+          -327.0,
+          -340.046875
+        ],
+        "medianKiB": -327.6171875,
+        "rangeKiB": [
+          -340.046875,
+          -327.0
+        ],
+        "afterDropHeapUsedBytes": [
+          33771232,
+          33829224,
+          33774632
+        ]
+      },
+      "candidate": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          -325.9140625,
+          -320.3671875,
+          -338.2265625
+        ],
+        "medianKiB": -325.9140625,
+        "rangeKiB": [
+          -338.2265625,
+          -320.3671875
+        ],
+        "afterDropHeapUsedBytes": [
+          33770016,
+          33772104,
+          33731824
+        ]
+      }
+    },
+    "program-3-drop": {
+      "original": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          391.4921875,
+          384.8046875,
+          385.4296875
+        ],
+        "medianKiB": 385.4296875,
+        "rangeKiB": [
+          384.8046875,
+          391.4921875
+        ],
+        "afterDropHeapUsedBytes": [
+          52165968,
+          52152016,
+          52153352
+        ]
+      },
+      "current": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          -504.8515625,
+          -504.2890625,
+          -522.0546875
+        ],
+        "medianKiB": -504.8515625,
+        "rangeKiB": [
+          -522.0546875,
+          -504.2890625
+        ],
+        "afterDropHeapUsedBytes": [
+          33729720,
+          33726400,
+          33728800
+        ]
+      },
+      "candidate": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          -519.671875,
+          -519.6953125,
+          -524.4453125
+        ],
+        "medianKiB": -519.6953125,
+        "rangeKiB": [
+          -524.4453125,
+          -519.671875
+        ],
+        "afterDropHeapUsedBytes": [
+          33668224,
+          33668464,
+          33666856
+        ]
+      }
+    },
+    "program-40-retain": {
+      "original": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          9891.3984375,
+          9879.359375,
+          9859.8828125
+        ],
+        "medianKiB": 9879.359375,
+        "rangeKiB": [
+          9859.8828125,
+          9891.3984375
+        ],
+        "afterDropHeapUsedBytes": [
+          61790256,
+          61774192,
+          61755712
+        ]
+      },
+      "current": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          1800.859375,
+          1790.3515625,
+          1784.84375
+        ],
+        "medianKiB": 1790.3515625,
+        "rangeKiB": [
+          1784.84375,
+          1800.859375
+        ],
+        "afterDropHeapUsedBytes": [
+          35971800,
+          35995408,
+          35994704
+        ]
+      },
+      "candidate": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          1772.171875,
+          1772.8984375,
+          1773.9921875
+        ],
+        "medianKiB": 1772.8984375,
+        "rangeKiB": [
+          1772.171875,
+          1773.9921875
+        ],
+        "afterDropHeapUsedBytes": [
+          35896328,
+          35891600,
+          35927936
+        ]
+      }
+    },
+    "program-40-drop": {
+      "original": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          9626.2734375,
+          9624.8984375,
+          9595.359375
+        ],
+        "medianKiB": 9624.8984375,
+        "rangeKiB": [
+          9595.359375,
+          9626.2734375
+        ],
+        "afterDropHeapUsedBytes": [
+          61622400,
+          61625744,
+          61589896
+        ]
+      },
+      "current": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          1634.8828125,
+          1622.2578125,
+          1630.671875
+        ],
+        "medianKiB": 1630.671875,
+        "rangeKiB": [
+          1622.2578125,
+          1634.8828125
+        ],
+        "afterDropHeapUsedBytes": [
+          35935648,
+          35938880,
+          35960848
+        ]
+      },
+      "candidate": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          1604.09375,
+          1605.6796875,
+          1605.3828125
+        ],
+        "medianKiB": 1605.3828125,
+        "rangeKiB": [
+          1604.09375,
+          1605.6796875
+        ],
+        "afterDropHeapUsedBytes": [
+          35895224,
+          35862632,
+          35865488
+        ]
+      }
+    },
+    "notebook-3-retain": {
+      "original": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          -386.265625,
+          -371.3515625,
+          -364.03125
+        ],
+        "medianKiB": -371.3515625,
+        "rangeKiB": [
+          -386.265625,
+          -364.03125
+        ],
+        "afterDropHeapUsedBytes": [
+          36250592,
+          36249208,
+          36247800
+        ]
+      },
+      "current": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          -526.6796875,
+          -526.6796875,
+          -526.7109375
+        ],
+        "medianKiB": -526.6796875,
+        "rangeKiB": [
+          -526.7109375,
+          -526.6796875
+        ],
+        "afterDropHeapUsedBytes": [
+          32087512,
+          32085976,
+          32087360
+        ]
+      },
+      "candidate": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          -499.8671875,
+          -501.7109375,
+          -505.4140625
+        ],
+        "medianKiB": -501.7109375,
+        "rangeKiB": [
+          -505.4140625,
+          -499.8671875
+        ],
+        "afterDropHeapUsedBytes": [
+          32060480,
+          32063744,
+          32054608
+        ]
+      }
+    },
+    "notebook-3-drop": {
+      "original": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          -423.8828125,
+          -421.734375,
+          -406.8125
+        ],
+        "medianKiB": -421.734375,
+        "rangeKiB": [
+          -423.8828125,
+          -406.8125
+        ],
+        "afterDropHeapUsedBytes": [
+          36253264,
+          36256728,
+          36254048
+        ]
+      },
+      "current": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          -565.7421875,
+          -552.21875,
+          -552.21875
+        ],
+        "medianKiB": -552.21875,
+        "rangeKiB": [
+          -565.7421875,
+          -552.21875
+        ],
+        "afterDropHeapUsedBytes": [
+          32065272,
+          32066976,
+          32068008
+        ]
+      },
+      "candidate": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          -528.0625,
+          -530.984375,
+          -531.0
+        ],
+        "medianKiB": -530.984375,
+        "rangeKiB": [
+          -531.0,
+          -528.0625
+        ],
+        "afterDropHeapUsedBytes": [
+          32031752,
+          32028944,
+          32029200
+        ]
+      }
+    },
+    "notebook-40-retain": {
+      "original": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          1470.2265625,
+          1466.703125,
+          1462.96875
+        ],
+        "medianKiB": 1466.703125,
+        "rangeKiB": [
+          1462.96875,
+          1470.2265625
+        ],
+        "afterDropHeapUsedBytes": [
+          38185280,
+          38187864,
+          38185480
+        ]
+      },
+      "current": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          -290.6796875,
+          -289.828125,
+          -290.2890625
+        ],
+        "medianKiB": -290.2890625,
+        "rangeKiB": [
+          -290.6796875,
+          -289.828125
+        ],
+        "afterDropHeapUsedBytes": [
+          32328992,
+          32330232,
+          32329632
+        ]
+      },
+      "candidate": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          -293.96875,
+          -293.9375,
+          -299.40625
+        ],
+        "medianKiB": -293.96875,
+        "rangeKiB": [
+          -299.40625,
+          -293.9375
+        ],
+        "afterDropHeapUsedBytes": [
+          32272136,
+          32272000,
+          32270776
+        ]
+      }
+    },
+    "notebook-40-drop": {
+      "original": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          1474.953125,
+          1473.8515625,
+          1487.75
+        ],
+        "medianKiB": 1474.953125,
+        "rangeKiB": [
+          1473.8515625,
+          1487.75
+        ],
+        "afterDropHeapUsedBytes": [
+          38107776,
+          38107776,
+          38106832
+        ]
+      },
+      "current": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          -305.625,
+          -316.4609375,
+          -316.1875
+        ],
+        "medianKiB": -316.1875,
+        "rangeKiB": [
+          -316.4609375,
+          -305.625
+        ],
+        "afterDropHeapUsedBytes": [
+          32268344,
+          32262056,
+          32261096
+        ]
+      },
+      "candidate": {
+        "processes": 3,
+        "lastCheckpointHeapDeltaKiB": [
+          -314.1640625,
+          -313.1171875,
+          -315.6015625
+        ],
+        "medianKiB": -314.1640625,
+        "rangeKiB": [
+          -315.6015625,
+          -313.1171875
+        ],
+        "afterDropHeapUsedBytes": [
+          32210176,
+          32209936,
+          32208648
+        ]
+      }
+    }
+  },
+  "traces": {
+    "candidate-extended-collection-box": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/candidate-extended-collection-box.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "canonicalProgram": 3,
+        "canonicalSequence": 15,
+        "binding-read": 53046,
+        "lookup": 4467,
+        "canonicalBlock": 12,
+        "expression-read": 17037,
+        "boundCallType": 1140,
+        "appliesToListCoordinateTuple": 1401,
+        "operand-map": 1914,
+        "addsPointToNumberCollection": 1401,
+        "passesAbsentCellsThrough": 2943,
+        "withCodomainForAbsentAnswer": 1386,
+        "initializeLocalContract": 60,
+        "binding-write": 168,
+        "initialization-contract-fixed": 60,
+        "functionLiteralCallSignatureType": 12,
+        "signature-demand": 12,
+        "functionLiteralSignatureType": 12,
+        "functionLiteralArrowEffects": 12
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 15309,
+        "binding-read/declaredType": 29256,
+        "binding-read/value": 2841,
+        "binding-read/storedValue": 5640,
+        "expression-read/type": 9555,
+        "expression-read/operatorDefinition": 7482,
+        "binding-write/_setType": 84,
+        "binding-write/_writeType": 84
+      },
+      "passIndexCounts": {},
+      "countsPerOperation": {
+        "canonicalProgram": 1.0,
+        "canonicalSequence": 5.0,
+        "binding-read": 17682.0,
+        "lookup": 1489.0,
+        "canonicalBlock": 4.0,
+        "expression-read": 5679.0,
+        "boundCallType": 380.0,
+        "appliesToListCoordinateTuple": 467.0,
+        "operand-map": 638.0,
+        "addsPointToNumberCollection": 467.0,
+        "passesAbsentCellsThrough": 981.0,
+        "withCodomainForAbsentAnswer": 462.0,
+        "initializeLocalContract": 20.0,
+        "binding-write": 56.0,
+        "initialization-contract-fixed": 20.0,
+        "functionLiteralCallSignatureType": 4.0,
+        "signature-demand": 4.0,
+        "functionLiteralSignatureType": 4.0,
+        "functionLiteralArrowEffects": 4.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 5103.0,
+        "binding-read/declaredType": 9752.0,
+        "binding-read/value": 947.0,
+        "binding-read/storedValue": 1880.0,
+        "expression-read/type": 3185.0,
+        "expression-read/operatorDefinition": 2494.0,
+        "binding-write/_setType": 28.0,
+        "binding-write/_writeType": 28.0
+      },
+      "passIndicesPerOperation": {},
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "candidate-extended-collection-total": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/candidate-extended-collection-total.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "lookup": 6930,
+        "canonicalProgram": 3,
+        "canonicalSequence": 15,
+        "binding-read": 68385,
+        "canonicalBlock": 12,
+        "expression-read": 28560,
+        "boundCallType": 1599,
+        "appliesToListCoordinateTuple": 1899,
+        "operand-map": 2604,
+        "addsPointToNumberCollection": 1899,
+        "passesAbsentCellsThrough": 3987,
+        "withCodomainForAbsentAnswer": 1881,
+        "initializeLocalContract": 60,
+        "binding-write": 339,
+        "initialization-contract-fixed": 60,
+        "functionLiteralCallSignatureType": 18,
+        "signature-demand": 18,
+        "functionLiteralSignatureType": 18,
+        "functionLiteralArrowEffects": 18
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 19668,
+        "binding-read/declaredType": 36669,
+        "binding-read/value": 4215,
+        "binding-read/storedValue": 7833,
+        "expression-read/type": 12459,
+        "expression-read/operatorDefinition": 16101,
+        "binding-write/_setType": 114,
+        "binding-write/_writeType": 114,
+        "binding-write/value": 111
+      },
+      "passIndexCounts": {},
+      "countsPerOperation": {
+        "lookup": 2310.0,
+        "canonicalProgram": 1.0,
+        "canonicalSequence": 5.0,
+        "binding-read": 22795.0,
+        "canonicalBlock": 4.0,
+        "expression-read": 9520.0,
+        "boundCallType": 533.0,
+        "appliesToListCoordinateTuple": 633.0,
+        "operand-map": 868.0,
+        "addsPointToNumberCollection": 633.0,
+        "passesAbsentCellsThrough": 1329.0,
+        "withCodomainForAbsentAnswer": 627.0,
+        "initializeLocalContract": 20.0,
+        "binding-write": 113.0,
+        "initialization-contract-fixed": 20.0,
+        "functionLiteralCallSignatureType": 6.0,
+        "signature-demand": 6.0,
+        "functionLiteralSignatureType": 6.0,
+        "functionLiteralArrowEffects": 6.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 6556.0,
+        "binding-read/declaredType": 12223.0,
+        "binding-read/value": 1405.0,
+        "binding-read/storedValue": 2611.0,
+        "expression-read/type": 4153.0,
+        "expression-read/operatorDefinition": 5367.0,
+        "binding-write/_setType": 38.0,
+        "binding-write/_writeType": 38.0,
+        "binding-write/value": 37.0
+      },
+      "passIndicesPerOperation": {},
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "candidate-extended-loop-box": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/candidate-extended-loop-box.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "canonicalProgram": 3,
+        "canonicalSequence": 6,
+        "binding-read": 582,
+        "initializeLocalContract": 3,
+        "binding-write": 6,
+        "initialization-contract-fixed": 3,
+        "lookup": 36,
+        "canonicalBlock": 3,
+        "expression-read": 90,
+        "boundCallType": 6,
+        "appliesToListCoordinateTuple": 6,
+        "operand-map": 15,
+        "addsPointToNumberCollection": 6,
+        "passesAbsentCellsThrough": 12,
+        "withCodomainForAbsentAnswer": 6
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 183,
+        "binding-read/declaredType": 291,
+        "binding-read/value": 48,
+        "binding-read/storedValue": 60,
+        "binding-write/_setType": 3,
+        "binding-write/_writeType": 3,
+        "expression-read/type": 42,
+        "expression-read/operatorDefinition": 48
+      },
+      "passIndexCounts": {},
+      "countsPerOperation": {
+        "canonicalProgram": 1.0,
+        "canonicalSequence": 2.0,
+        "binding-read": 194.0,
+        "initializeLocalContract": 1.0,
+        "binding-write": 2.0,
+        "initialization-contract-fixed": 1.0,
+        "lookup": 12.0,
+        "canonicalBlock": 1.0,
+        "expression-read": 30.0,
+        "boundCallType": 2.0,
+        "appliesToListCoordinateTuple": 2.0,
+        "operand-map": 5.0,
+        "addsPointToNumberCollection": 2.0,
+        "passesAbsentCellsThrough": 4.0,
+        "withCodomainForAbsentAnswer": 2.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 61.0,
+        "binding-read/declaredType": 97.0,
+        "binding-read/value": 16.0,
+        "binding-read/storedValue": 20.0,
+        "binding-write/_setType": 1.0,
+        "binding-write/_writeType": 1.0,
+        "expression-read/type": 14.0,
+        "expression-read/operatorDefinition": 16.0
+      },
+      "passIndicesPerOperation": {},
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "candidate-extended-loop-total": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/candidate-extended-loop-total.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "lookup": 2172,
+        "canonicalProgram": 3,
+        "canonicalSequence": 6,
+        "binding-read": 10836,
+        "initializeLocalContract": 3,
+        "binding-write": 609,
+        "initialization-contract-fixed": 3,
+        "canonicalBlock": 3,
+        "expression-read": 9900,
+        "boundCallType": 12,
+        "appliesToListCoordinateTuple": 12,
+        "operand-map": 21,
+        "addsPointToNumberCollection": 12,
+        "passesAbsentCellsThrough": 21,
+        "withCodomainForAbsentAnswer": 12
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 4104,
+        "binding-read/declaredType": 4212,
+        "binding-read/value": 1254,
+        "binding-read/storedValue": 1266,
+        "binding-write/_setType": 3,
+        "binding-write/_writeType": 3,
+        "expression-read/type": 57,
+        "expression-read/operatorDefinition": 9843,
+        "binding-write/value": 603
+      },
+      "passIndexCounts": {},
+      "countsPerOperation": {
+        "lookup": 724.0,
+        "canonicalProgram": 1.0,
+        "canonicalSequence": 2.0,
+        "binding-read": 3612.0,
+        "initializeLocalContract": 1.0,
+        "binding-write": 203.0,
+        "initialization-contract-fixed": 1.0,
+        "canonicalBlock": 1.0,
+        "expression-read": 3300.0,
+        "boundCallType": 4.0,
+        "appliesToListCoordinateTuple": 4.0,
+        "operand-map": 7.0,
+        "addsPointToNumberCollection": 4.0,
+        "passesAbsentCellsThrough": 7.0,
+        "withCodomainForAbsentAnswer": 4.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 1368.0,
+        "binding-read/declaredType": 1404.0,
+        "binding-read/value": 418.0,
+        "binding-read/storedValue": 422.0,
+        "binding-write/_setType": 1.0,
+        "binding-write/_writeType": 1.0,
+        "expression-read/type": 19.0,
+        "expression-read/operatorDefinition": 3281.0,
+        "binding-write/value": 201.0
+      },
+      "passIndicesPerOperation": {},
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "candidate-historical-box": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/candidate-historical-box.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "canonicalProgram": 3,
+        "canonicalSequence": 6,
+        "binding-read": 1089,
+        "lookup": 84,
+        "canonicalBlock": 3,
+        "binding-write": 18,
+        "expression-read": 180,
+        "boundCallType": 21,
+        "functionLiteralCallSignatureType": 6,
+        "signature-demand": 6,
+        "functionLiteralSignatureType": 6,
+        "appliesToListCoordinateTuple": 15,
+        "addsPointToNumberCollection": 15,
+        "operand-map": 21,
+        "passesAbsentCellsThrough": 21,
+        "withCodomainForAbsentAnswer": 12,
+        "functionLiteralArrowEffects": 6,
+        "initializeLocalContract": 6,
+        "initialization-contract-fixed": 6
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 300,
+        "binding-read/declaredType": 420,
+        "binding-read/value": 63,
+        "binding-read/storedValue": 306,
+        "binding-write/_setType": 9,
+        "binding-write/_writeType": 9,
+        "expression-read/type": 45,
+        "expression-read/operatorDefinition": 135
+      },
+      "passIndexCounts": {},
+      "countsPerOperation": {
+        "canonicalProgram": 1.0,
+        "canonicalSequence": 2.0,
+        "binding-read": 363.0,
+        "lookup": 28.0,
+        "canonicalBlock": 1.0,
+        "binding-write": 6.0,
+        "expression-read": 60.0,
+        "boundCallType": 7.0,
+        "functionLiteralCallSignatureType": 2.0,
+        "signature-demand": 2.0,
+        "functionLiteralSignatureType": 2.0,
+        "appliesToListCoordinateTuple": 5.0,
+        "addsPointToNumberCollection": 5.0,
+        "operand-map": 7.0,
+        "passesAbsentCellsThrough": 7.0,
+        "withCodomainForAbsentAnswer": 4.0,
+        "functionLiteralArrowEffects": 2.0,
+        "initializeLocalContract": 2.0,
+        "initialization-contract-fixed": 2.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 100.0,
+        "binding-read/declaredType": 140.0,
+        "binding-read/value": 21.0,
+        "binding-read/storedValue": 102.0,
+        "binding-write/_setType": 3.0,
+        "binding-write/_writeType": 3.0,
+        "expression-read/type": 15.0,
+        "expression-read/operatorDefinition": 45.0
+      },
+      "passIndicesPerOperation": {},
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "candidate-historical-check": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/candidate-historical-check.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "lookup": 150,
+        "canonicalProgram": 3,
+        "canonicalSequence": 6,
+        "binding-read": 1452,
+        "canonicalBlock": 3,
+        "binding-write": 18,
+        "expression-read": 348,
+        "boundCallType": 33,
+        "functionLiteralCallSignatureType": 9,
+        "signature-demand": 12,
+        "functionLiteralSignatureType": 9,
+        "appliesToListCoordinateTuple": 24,
+        "addsPointToNumberCollection": 24,
+        "operand-map": 33,
+        "passesAbsentCellsThrough": 33,
+        "withCodomainForAbsentAnswer": 18,
+        "functionLiteralArrowEffects": 12,
+        "initializeLocalContract": 6,
+        "initialization-contract-fixed": 6
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 417,
+        "binding-read/declaredType": 588,
+        "binding-read/value": 75,
+        "binding-read/storedValue": 372,
+        "binding-write/_setType": 9,
+        "binding-write/_writeType": 9,
+        "expression-read/type": 60,
+        "expression-read/operatorDefinition": 288
+      },
+      "passIndexCounts": {},
+      "countsPerOperation": {
+        "lookup": 50.0,
+        "canonicalProgram": 1.0,
+        "canonicalSequence": 2.0,
+        "binding-read": 484.0,
+        "canonicalBlock": 1.0,
+        "binding-write": 6.0,
+        "expression-read": 116.0,
+        "boundCallType": 11.0,
+        "functionLiteralCallSignatureType": 3.0,
+        "signature-demand": 4.0,
+        "functionLiteralSignatureType": 3.0,
+        "appliesToListCoordinateTuple": 8.0,
+        "addsPointToNumberCollection": 8.0,
+        "operand-map": 11.0,
+        "passesAbsentCellsThrough": 11.0,
+        "withCodomainForAbsentAnswer": 6.0,
+        "functionLiteralArrowEffects": 4.0,
+        "initializeLocalContract": 2.0,
+        "initialization-contract-fixed": 2.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 139.0,
+        "binding-read/declaredType": 196.0,
+        "binding-read/value": 25.0,
+        "binding-read/storedValue": 124.0,
+        "binding-write/_setType": 3.0,
+        "binding-write/_writeType": 3.0,
+        "expression-read/type": 20.0,
+        "expression-read/operatorDefinition": 96.0
+      },
+      "passIndicesPerOperation": {},
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "candidate-historical-notebook-edit": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/candidate-historical-notebook-edit.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "lookup": 153,
+        "canonicalProgram": 6,
+        "canonicalSequence": 6,
+        "binding-read": 978,
+        "initializeLocalContract": 12,
+        "binding-write": 48,
+        "initialization-contract-fixed": 12,
+        "expression-read": 183,
+        "boundCallType": 9,
+        "appliesToListCoordinateTuple": 9,
+        "operand-map": 27,
+        "addsPointToNumberCollection": 9,
+        "passesAbsentCellsThrough": 18,
+        "withCodomainForAbsentAnswer": 9
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 276,
+        "binding-read/declaredType": 414,
+        "binding-read/storedValue": 207,
+        "binding-read/value": 81,
+        "binding-write/_setType": 18,
+        "binding-write/_writeType": 18,
+        "expression-read/type": 15,
+        "expression-read/operatorDefinition": 168,
+        "binding-write/value": 12
+      },
+      "passIndexCounts": {},
+      "countsPerOperation": {
+        "lookup": 51.0,
+        "canonicalProgram": 2.0,
+        "canonicalSequence": 2.0,
+        "binding-read": 326.0,
+        "initializeLocalContract": 4.0,
+        "binding-write": 16.0,
+        "initialization-contract-fixed": 4.0,
+        "expression-read": 61.0,
+        "boundCallType": 3.0,
+        "appliesToListCoordinateTuple": 3.0,
+        "operand-map": 9.0,
+        "addsPointToNumberCollection": 3.0,
+        "passesAbsentCellsThrough": 6.0,
+        "withCodomainForAbsentAnswer": 3.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 92.0,
+        "binding-read/declaredType": 138.0,
+        "binding-read/storedValue": 69.0,
+        "binding-read/value": 27.0,
+        "binding-write/_setType": 6.0,
+        "binding-write/_writeType": 6.0,
+        "expression-read/type": 5.0,
+        "expression-read/operatorDefinition": 56.0,
+        "binding-write/value": 4.0
+      },
+      "passIndicesPerOperation": {},
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "candidate-historical-notebook": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/candidate-historical-notebook.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "lookup": 153,
+        "canonicalProgram": 6,
+        "canonicalSequence": 6,
+        "binding-read": 978,
+        "initializeLocalContract": 12,
+        "binding-write": 48,
+        "initialization-contract-fixed": 12,
+        "expression-read": 183,
+        "boundCallType": 9,
+        "appliesToListCoordinateTuple": 9,
+        "operand-map": 27,
+        "addsPointToNumberCollection": 9,
+        "passesAbsentCellsThrough": 18,
+        "withCodomainForAbsentAnswer": 9
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 276,
+        "binding-read/declaredType": 414,
+        "binding-read/storedValue": 207,
+        "binding-read/value": 81,
+        "binding-write/_setType": 18,
+        "binding-write/_writeType": 18,
+        "expression-read/type": 15,
+        "expression-read/operatorDefinition": 168,
+        "binding-write/value": 12
+      },
+      "passIndexCounts": {},
+      "countsPerOperation": {
+        "lookup": 51.0,
+        "canonicalProgram": 2.0,
+        "canonicalSequence": 2.0,
+        "binding-read": 326.0,
+        "initializeLocalContract": 4.0,
+        "binding-write": 16.0,
+        "initialization-contract-fixed": 4.0,
+        "expression-read": 61.0,
+        "boundCallType": 3.0,
+        "appliesToListCoordinateTuple": 3.0,
+        "operand-map": 9.0,
+        "addsPointToNumberCollection": 3.0,
+        "passesAbsentCellsThrough": 6.0,
+        "withCodomainForAbsentAnswer": 3.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 92.0,
+        "binding-read/declaredType": 138.0,
+        "binding-read/storedValue": 69.0,
+        "binding-read/value": 27.0,
+        "binding-write/_setType": 6.0,
+        "binding-write/_writeType": 6.0,
+        "expression-read/type": 5.0,
+        "expression-read/operatorDefinition": 56.0,
+        "binding-write/value": 4.0
+      },
+      "passIndicesPerOperation": {},
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "current-extended-collection-box": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/current-extended-collection-box.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "canonicalProgram": 3,
+        "canonicalSequence": 15,
+        "binding-read": 49752,
+        "withEvidenceSession": 15,
+        "lookup": 5907,
+        "canonicalBlock": 12,
+        "expression-read": 18573,
+        "boundCallType": 1404,
+        "appliesToListCoordinateTuple": 1896,
+        "operand-map": 2424,
+        "addsPointToNumberCollection": 1896,
+        "passesAbsentCellsThrough": 3957,
+        "withCodomainForAbsentAnswer": 1872,
+        "joinAssignmentEvidence": 69,
+        "evidence-target": 66,
+        "joinEvidenceOnBinding": 114,
+        "writeEvidenceType": 51,
+        "binding-write": 174,
+        "registerEvidenceSite": 72,
+        "functionLiteralCallSignatureType": 12,
+        "signature-demand": 12,
+        "functionLiteralSignatureType": 12,
+        "functionLiteralArrowEffects": 12,
+        "evidence-pass": 3,
+        "evidence-rejoin": 72
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 14073,
+        "binding-read/declaredType": 14991,
+        "binding-read/value": 3003,
+        "binding-read/storedValue": 17685,
+        "expression-read/type": 9756,
+        "expression-read/operatorDefinition": 8817,
+        "binding-write/_setType": 87,
+        "binding-write/_writeType": 87
+      },
+      "passIndexCounts": {
+        "evidence-pass/0": 3,
+        "evidence-rejoin/0": 72
+      },
+      "countsPerOperation": {
+        "canonicalProgram": 1.0,
+        "canonicalSequence": 5.0,
+        "binding-read": 16584.0,
+        "withEvidenceSession": 5.0,
+        "lookup": 1969.0,
+        "canonicalBlock": 4.0,
+        "expression-read": 6191.0,
+        "boundCallType": 468.0,
+        "appliesToListCoordinateTuple": 632.0,
+        "operand-map": 808.0,
+        "addsPointToNumberCollection": 632.0,
+        "passesAbsentCellsThrough": 1319.0,
+        "withCodomainForAbsentAnswer": 624.0,
+        "joinAssignmentEvidence": 23.0,
+        "evidence-target": 22.0,
+        "joinEvidenceOnBinding": 38.0,
+        "writeEvidenceType": 17.0,
+        "binding-write": 58.0,
+        "registerEvidenceSite": 24.0,
+        "functionLiteralCallSignatureType": 4.0,
+        "signature-demand": 4.0,
+        "functionLiteralSignatureType": 4.0,
+        "functionLiteralArrowEffects": 4.0,
+        "evidence-pass": 1.0,
+        "evidence-rejoin": 24.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 4691.0,
+        "binding-read/declaredType": 4997.0,
+        "binding-read/value": 1001.0,
+        "binding-read/storedValue": 5895.0,
+        "expression-read/type": 3252.0,
+        "expression-read/operatorDefinition": 2939.0,
+        "binding-write/_setType": 29.0,
+        "binding-write/_writeType": 29.0
+      },
+      "passIndicesPerOperation": {
+        "evidence-pass/0": 1.0,
+        "evidence-rejoin/0": 24.0
+      },
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "current-extended-collection-total": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/current-extended-collection-total.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "lookup": 8226,
+        "canonicalProgram": 3,
+        "canonicalSequence": 15,
+        "binding-read": 61974,
+        "withEvidenceSession": 15,
+        "canonicalBlock": 12,
+        "expression-read": 29145,
+        "boundCallType": 1824,
+        "appliesToListCoordinateTuple": 2355,
+        "operand-map": 3033,
+        "addsPointToNumberCollection": 2355,
+        "passesAbsentCellsThrough": 4935,
+        "withCodomainForAbsentAnswer": 2328,
+        "joinAssignmentEvidence": 69,
+        "evidence-target": 66,
+        "joinEvidenceOnBinding": 114,
+        "writeEvidenceType": 51,
+        "binding-write": 357,
+        "registerEvidenceSite": 72,
+        "functionLiteralCallSignatureType": 18,
+        "signature-demand": 18,
+        "functionLiteralSignatureType": 18,
+        "functionLiteralArrowEffects": 18,
+        "evidence-pass": 3,
+        "evidence-rejoin": 72
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 17292,
+        "binding-read/declaredType": 18375,
+        "binding-read/value": 4272,
+        "binding-read/storedValue": 22035,
+        "expression-read/type": 11946,
+        "expression-read/operatorDefinition": 17199,
+        "binding-write/_setType": 123,
+        "binding-write/_writeType": 123,
+        "binding-write/value": 111
+      },
+      "passIndexCounts": {
+        "evidence-pass/0": 3,
+        "evidence-rejoin/0": 72
+      },
+      "countsPerOperation": {
+        "lookup": 2742.0,
+        "canonicalProgram": 1.0,
+        "canonicalSequence": 5.0,
+        "binding-read": 20658.0,
+        "withEvidenceSession": 5.0,
+        "canonicalBlock": 4.0,
+        "expression-read": 9715.0,
+        "boundCallType": 608.0,
+        "appliesToListCoordinateTuple": 785.0,
+        "operand-map": 1011.0,
+        "addsPointToNumberCollection": 785.0,
+        "passesAbsentCellsThrough": 1645.0,
+        "withCodomainForAbsentAnswer": 776.0,
+        "joinAssignmentEvidence": 23.0,
+        "evidence-target": 22.0,
+        "joinEvidenceOnBinding": 38.0,
+        "writeEvidenceType": 17.0,
+        "binding-write": 119.0,
+        "registerEvidenceSite": 24.0,
+        "functionLiteralCallSignatureType": 6.0,
+        "signature-demand": 6.0,
+        "functionLiteralSignatureType": 6.0,
+        "functionLiteralArrowEffects": 6.0,
+        "evidence-pass": 1.0,
+        "evidence-rejoin": 24.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 5764.0,
+        "binding-read/declaredType": 6125.0,
+        "binding-read/value": 1424.0,
+        "binding-read/storedValue": 7345.0,
+        "expression-read/type": 3982.0,
+        "expression-read/operatorDefinition": 5733.0,
+        "binding-write/_setType": 41.0,
+        "binding-write/_writeType": 41.0,
+        "binding-write/value": 37.0
+      },
+      "passIndicesPerOperation": {
+        "evidence-pass/0": 1.0,
+        "evidence-rejoin/0": 24.0
+      },
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "current-extended-loop-box": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/current-extended-loop-box.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "canonicalProgram": 3,
+        "canonicalSequence": 6,
+        "binding-read": 609,
+        "withEvidenceSession": 6,
+        "joinAssignmentEvidence": 6,
+        "lookup": 39,
+        "registerEvidenceSite": 3,
+        "canonicalBlock": 3,
+        "expression-read": 90,
+        "boundCallType": 6,
+        "appliesToListCoordinateTuple": 6,
+        "operand-map": 15,
+        "addsPointToNumberCollection": 6,
+        "passesAbsentCellsThrough": 12,
+        "withCodomainForAbsentAnswer": 6,
+        "evidence-pass": 3,
+        "evidence-rejoin": 3,
+        "binding-write": 6
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 195,
+        "binding-read/declaredType": 306,
+        "binding-read/value": 48,
+        "binding-read/storedValue": 60,
+        "expression-read/type": 42,
+        "expression-read/operatorDefinition": 48,
+        "binding-write/_setType": 3,
+        "binding-write/_writeType": 3
+      },
+      "passIndexCounts": {
+        "evidence-pass/0": 3,
+        "evidence-rejoin/0": 3
+      },
+      "countsPerOperation": {
+        "canonicalProgram": 1.0,
+        "canonicalSequence": 2.0,
+        "binding-read": 203.0,
+        "withEvidenceSession": 2.0,
+        "joinAssignmentEvidence": 2.0,
+        "lookup": 13.0,
+        "registerEvidenceSite": 1.0,
+        "canonicalBlock": 1.0,
+        "expression-read": 30.0,
+        "boundCallType": 2.0,
+        "appliesToListCoordinateTuple": 2.0,
+        "operand-map": 5.0,
+        "addsPointToNumberCollection": 2.0,
+        "passesAbsentCellsThrough": 4.0,
+        "withCodomainForAbsentAnswer": 2.0,
+        "evidence-pass": 1.0,
+        "evidence-rejoin": 1.0,
+        "binding-write": 2.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 65.0,
+        "binding-read/declaredType": 102.0,
+        "binding-read/value": 16.0,
+        "binding-read/storedValue": 20.0,
+        "expression-read/type": 14.0,
+        "expression-read/operatorDefinition": 16.0,
+        "binding-write/_setType": 1.0,
+        "binding-write/_writeType": 1.0
+      },
+      "passIndicesPerOperation": {
+        "evidence-pass/0": 1.0,
+        "evidence-rejoin/0": 1.0
+      },
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "current-extended-loop-total": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/current-extended-loop-total.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "lookup": 2175,
+        "canonicalProgram": 3,
+        "canonicalSequence": 6,
+        "binding-read": 10863,
+        "withEvidenceSession": 6,
+        "joinAssignmentEvidence": 6,
+        "registerEvidenceSite": 3,
+        "canonicalBlock": 3,
+        "expression-read": 9900,
+        "boundCallType": 12,
+        "appliesToListCoordinateTuple": 12,
+        "operand-map": 21,
+        "addsPointToNumberCollection": 12,
+        "passesAbsentCellsThrough": 21,
+        "withCodomainForAbsentAnswer": 12,
+        "evidence-pass": 3,
+        "evidence-rejoin": 3,
+        "binding-write": 609
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 3816,
+        "binding-read/declaredType": 3927,
+        "binding-read/value": 1554,
+        "binding-read/storedValue": 1566,
+        "expression-read/type": 57,
+        "expression-read/operatorDefinition": 9843,
+        "binding-write/_setType": 3,
+        "binding-write/_writeType": 3,
+        "binding-write/value": 603
+      },
+      "passIndexCounts": {
+        "evidence-pass/0": 3,
+        "evidence-rejoin/0": 3
+      },
+      "countsPerOperation": {
+        "lookup": 725.0,
+        "canonicalProgram": 1.0,
+        "canonicalSequence": 2.0,
+        "binding-read": 3621.0,
+        "withEvidenceSession": 2.0,
+        "joinAssignmentEvidence": 2.0,
+        "registerEvidenceSite": 1.0,
+        "canonicalBlock": 1.0,
+        "expression-read": 3300.0,
+        "boundCallType": 4.0,
+        "appliesToListCoordinateTuple": 4.0,
+        "operand-map": 7.0,
+        "addsPointToNumberCollection": 4.0,
+        "passesAbsentCellsThrough": 7.0,
+        "withCodomainForAbsentAnswer": 4.0,
+        "evidence-pass": 1.0,
+        "evidence-rejoin": 1.0,
+        "binding-write": 203.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 1272.0,
+        "binding-read/declaredType": 1309.0,
+        "binding-read/value": 518.0,
+        "binding-read/storedValue": 522.0,
+        "expression-read/type": 19.0,
+        "expression-read/operatorDefinition": 3281.0,
+        "binding-write/_setType": 1.0,
+        "binding-write/_writeType": 1.0,
+        "binding-write/value": 201.0
+      },
+      "passIndicesPerOperation": {
+        "evidence-pass/0": 1.0,
+        "evidence-rejoin/0": 1.0
+      },
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "current-historical-box": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/current-historical-box.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "canonicalProgram": 3,
+        "canonicalSequence": 6,
+        "binding-read": 1317,
+        "withEvidenceSession": 6,
+        "lookup": 84,
+        "canonicalBlock": 3,
+        "binding-write": 24,
+        "expression-read": 198,
+        "boundCallType": 24,
+        "functionLiteralCallSignatureType": 6,
+        "signature-demand": 6,
+        "functionLiteralSignatureType": 6,
+        "appliesToListCoordinateTuple": 18,
+        "addsPointToNumberCollection": 18,
+        "operand-map": 24,
+        "passesAbsentCellsThrough": 24,
+        "withCodomainForAbsentAnswer": 12,
+        "functionLiteralArrowEffects": 6,
+        "joinAssignmentEvidence": 6,
+        "evidence-target": 3,
+        "joinEvidenceOnBinding": 6,
+        "writeEvidenceType": 3,
+        "registerEvidenceSite": 3,
+        "evidence-pass": 3,
+        "evidence-rejoin": 3
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 369,
+        "binding-read/declaredType": 516,
+        "binding-read/value": 75,
+        "binding-read/storedValue": 357,
+        "binding-write/_setType": 12,
+        "binding-write/_writeType": 12,
+        "expression-read/type": 54,
+        "expression-read/operatorDefinition": 144
+      },
+      "passIndexCounts": {
+        "evidence-pass/0": 3,
+        "evidence-rejoin/0": 3
+      },
+      "countsPerOperation": {
+        "canonicalProgram": 1.0,
+        "canonicalSequence": 2.0,
+        "binding-read": 439.0,
+        "withEvidenceSession": 2.0,
+        "lookup": 28.0,
+        "canonicalBlock": 1.0,
+        "binding-write": 8.0,
+        "expression-read": 66.0,
+        "boundCallType": 8.0,
+        "functionLiteralCallSignatureType": 2.0,
+        "signature-demand": 2.0,
+        "functionLiteralSignatureType": 2.0,
+        "appliesToListCoordinateTuple": 6.0,
+        "addsPointToNumberCollection": 6.0,
+        "operand-map": 8.0,
+        "passesAbsentCellsThrough": 8.0,
+        "withCodomainForAbsentAnswer": 4.0,
+        "functionLiteralArrowEffects": 2.0,
+        "joinAssignmentEvidence": 2.0,
+        "evidence-target": 1.0,
+        "joinEvidenceOnBinding": 2.0,
+        "writeEvidenceType": 1.0,
+        "registerEvidenceSite": 1.0,
+        "evidence-pass": 1.0,
+        "evidence-rejoin": 1.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 123.0,
+        "binding-read/declaredType": 172.0,
+        "binding-read/value": 25.0,
+        "binding-read/storedValue": 119.0,
+        "binding-write/_setType": 4.0,
+        "binding-write/_writeType": 4.0,
+        "expression-read/type": 18.0,
+        "expression-read/operatorDefinition": 48.0
+      },
+      "passIndicesPerOperation": {
+        "evidence-pass/0": 1.0,
+        "evidence-rejoin/0": 1.0
+      },
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "current-historical-check": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/current-historical-check.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "lookup": 150,
+        "canonicalProgram": 3,
+        "canonicalSequence": 6,
+        "binding-read": 1506,
+        "withEvidenceSession": 6,
+        "canonicalBlock": 3,
+        "binding-write": 24,
+        "expression-read": 357,
+        "boundCallType": 33,
+        "functionLiteralCallSignatureType": 9,
+        "signature-demand": 12,
+        "functionLiteralSignatureType": 9,
+        "appliesToListCoordinateTuple": 24,
+        "addsPointToNumberCollection": 24,
+        "operand-map": 33,
+        "passesAbsentCellsThrough": 33,
+        "withCodomainForAbsentAnswer": 18,
+        "functionLiteralArrowEffects": 12,
+        "joinAssignmentEvidence": 6,
+        "evidence-target": 3,
+        "joinEvidenceOnBinding": 6,
+        "writeEvidenceType": 3,
+        "registerEvidenceSite": 3,
+        "evidence-pass": 3,
+        "evidence-rejoin": 3
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 432,
+        "binding-read/declaredType": 579,
+        "binding-read/value": 81,
+        "binding-read/storedValue": 414,
+        "binding-write/_setType": 12,
+        "binding-write/_writeType": 12,
+        "expression-read/type": 69,
+        "expression-read/operatorDefinition": 288
+      },
+      "passIndexCounts": {
+        "evidence-pass/0": 3,
+        "evidence-rejoin/0": 3
+      },
+      "countsPerOperation": {
+        "lookup": 50.0,
+        "canonicalProgram": 1.0,
+        "canonicalSequence": 2.0,
+        "binding-read": 502.0,
+        "withEvidenceSession": 2.0,
+        "canonicalBlock": 1.0,
+        "binding-write": 8.0,
+        "expression-read": 119.0,
+        "boundCallType": 11.0,
+        "functionLiteralCallSignatureType": 3.0,
+        "signature-demand": 4.0,
+        "functionLiteralSignatureType": 3.0,
+        "appliesToListCoordinateTuple": 8.0,
+        "addsPointToNumberCollection": 8.0,
+        "operand-map": 11.0,
+        "passesAbsentCellsThrough": 11.0,
+        "withCodomainForAbsentAnswer": 6.0,
+        "functionLiteralArrowEffects": 4.0,
+        "joinAssignmentEvidence": 2.0,
+        "evidence-target": 1.0,
+        "joinEvidenceOnBinding": 2.0,
+        "writeEvidenceType": 1.0,
+        "registerEvidenceSite": 1.0,
+        "evidence-pass": 1.0,
+        "evidence-rejoin": 1.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 144.0,
+        "binding-read/declaredType": 193.0,
+        "binding-read/value": 27.0,
+        "binding-read/storedValue": 138.0,
+        "binding-write/_setType": 4.0,
+        "binding-write/_writeType": 4.0,
+        "expression-read/type": 23.0,
+        "expression-read/operatorDefinition": 96.0
+      },
+      "passIndicesPerOperation": {
+        "evidence-pass/0": 1.0,
+        "evidence-rejoin/0": 1.0
+      },
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "current-historical-notebook-edit": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/current-historical-notebook-edit.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "lookup": 159,
+        "canonicalProgram": 6,
+        "canonicalSequence": 6,
+        "binding-read": 1194,
+        "withEvidenceSession": 6,
+        "joinAssignmentEvidence": 12,
+        "expression-read": 210,
+        "boundCallType": 12,
+        "appliesToListCoordinateTuple": 12,
+        "operand-map": 36,
+        "addsPointToNumberCollection": 12,
+        "passesAbsentCellsThrough": 24,
+        "withCodomainForAbsentAnswer": 12,
+        "evidence-target": 6,
+        "joinEvidenceOnBinding": 12,
+        "writeEvidenceType": 6,
+        "binding-write": 60,
+        "registerEvidenceSite": 6,
+        "evidence-pass": 6,
+        "evidence-rejoin": 6
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 345,
+        "binding-read/declaredType": 507,
+        "binding-read/storedValue": 249,
+        "binding-read/value": 93,
+        "expression-read/type": 33,
+        "expression-read/operatorDefinition": 177,
+        "binding-write/_setType": 24,
+        "binding-write/_writeType": 24,
+        "binding-write/value": 12
+      },
+      "passIndexCounts": {
+        "evidence-pass/0": 6,
+        "evidence-rejoin/0": 6
+      },
+      "countsPerOperation": {
+        "lookup": 53.0,
+        "canonicalProgram": 2.0,
+        "canonicalSequence": 2.0,
+        "binding-read": 398.0,
+        "withEvidenceSession": 2.0,
+        "joinAssignmentEvidence": 4.0,
+        "expression-read": 70.0,
+        "boundCallType": 4.0,
+        "appliesToListCoordinateTuple": 4.0,
+        "operand-map": 12.0,
+        "addsPointToNumberCollection": 4.0,
+        "passesAbsentCellsThrough": 8.0,
+        "withCodomainForAbsentAnswer": 4.0,
+        "evidence-target": 2.0,
+        "joinEvidenceOnBinding": 4.0,
+        "writeEvidenceType": 2.0,
+        "binding-write": 20.0,
+        "registerEvidenceSite": 2.0,
+        "evidence-pass": 2.0,
+        "evidence-rejoin": 2.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 115.0,
+        "binding-read/declaredType": 169.0,
+        "binding-read/storedValue": 83.0,
+        "binding-read/value": 31.0,
+        "expression-read/type": 11.0,
+        "expression-read/operatorDefinition": 59.0,
+        "binding-write/_setType": 8.0,
+        "binding-write/_writeType": 8.0,
+        "binding-write/value": 4.0
+      },
+      "passIndicesPerOperation": {
+        "evidence-pass/0": 2.0,
+        "evidence-rejoin/0": 2.0
+      },
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "current-historical-notebook": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/current-historical-notebook.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "lookup": 159,
+        "canonicalProgram": 6,
+        "canonicalSequence": 6,
+        "binding-read": 1194,
+        "withEvidenceSession": 6,
+        "joinAssignmentEvidence": 12,
+        "expression-read": 210,
+        "boundCallType": 12,
+        "appliesToListCoordinateTuple": 12,
+        "operand-map": 36,
+        "addsPointToNumberCollection": 12,
+        "passesAbsentCellsThrough": 24,
+        "withCodomainForAbsentAnswer": 12,
+        "evidence-target": 6,
+        "joinEvidenceOnBinding": 12,
+        "writeEvidenceType": 6,
+        "binding-write": 60,
+        "registerEvidenceSite": 6,
+        "evidence-pass": 6,
+        "evidence-rejoin": 6
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 345,
+        "binding-read/declaredType": 507,
+        "binding-read/storedValue": 249,
+        "binding-read/value": 93,
+        "expression-read/type": 33,
+        "expression-read/operatorDefinition": 177,
+        "binding-write/_setType": 24,
+        "binding-write/_writeType": 24,
+        "binding-write/value": 12
+      },
+      "passIndexCounts": {
+        "evidence-pass/0": 6,
+        "evidence-rejoin/0": 6
+      },
+      "countsPerOperation": {
+        "lookup": 53.0,
+        "canonicalProgram": 2.0,
+        "canonicalSequence": 2.0,
+        "binding-read": 398.0,
+        "withEvidenceSession": 2.0,
+        "joinAssignmentEvidence": 4.0,
+        "expression-read": 70.0,
+        "boundCallType": 4.0,
+        "appliesToListCoordinateTuple": 4.0,
+        "operand-map": 12.0,
+        "addsPointToNumberCollection": 4.0,
+        "passesAbsentCellsThrough": 8.0,
+        "withCodomainForAbsentAnswer": 4.0,
+        "evidence-target": 2.0,
+        "joinEvidenceOnBinding": 4.0,
+        "writeEvidenceType": 2.0,
+        "binding-write": 20.0,
+        "registerEvidenceSite": 2.0,
+        "evidence-pass": 2.0,
+        "evidence-rejoin": 2.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 115.0,
+        "binding-read/declaredType": 169.0,
+        "binding-read/storedValue": 83.0,
+        "binding-read/value": 31.0,
+        "expression-read/type": 11.0,
+        "expression-read/operatorDefinition": 59.0,
+        "binding-write/_setType": 8.0,
+        "binding-write/_writeType": 8.0,
+        "binding-write/value": 4.0
+      },
+      "passIndicesPerOperation": {
+        "evidence-pass/0": 2.0,
+        "evidence-rejoin/0": 2.0
+      },
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "original-extended-collection-box": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/original-extended-collection-box.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "canonicalBlock": 15,
+        "binding-read": 40275,
+        "withEvidenceSession": 15,
+        "lookup": 1818,
+        "expression-read": 11241,
+        "boundCallType": 729,
+        "operand-map": 2868,
+        "appliesToListCoordinateTuple": 717,
+        "addsPointToNumberCollection": 717,
+        "passesAbsentCellsThrough": 1473,
+        "withCodomainForAbsentAnswer": 717,
+        "joinAssignmentEvidence": 63,
+        "evidence-target": 60,
+        "joinEvidenceOnBinding": 96,
+        "writeEvidenceType": 48,
+        "binding-write": 198,
+        "registerEvidenceSite": 66,
+        "evidence-pass": 3,
+        "evidence-rejoin": 66
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 11136,
+        "binding-read/declaredType": 12351,
+        "binding-read/storedValue": 14445,
+        "binding-read/value": 2343,
+        "expression-read/type": 7191,
+        "expression-read/operatorDefinition": 4050,
+        "binding-write/_setType": 99,
+        "binding-write/_writeType": 99
+      },
+      "passIndexCounts": {
+        "evidence-pass/0": 3,
+        "evidence-rejoin/0": 66
+      },
+      "countsPerOperation": {
+        "canonicalBlock": 5.0,
+        "binding-read": 13425.0,
+        "withEvidenceSession": 5.0,
+        "lookup": 606.0,
+        "expression-read": 3747.0,
+        "boundCallType": 243.0,
+        "operand-map": 956.0,
+        "appliesToListCoordinateTuple": 239.0,
+        "addsPointToNumberCollection": 239.0,
+        "passesAbsentCellsThrough": 491.0,
+        "withCodomainForAbsentAnswer": 239.0,
+        "joinAssignmentEvidence": 21.0,
+        "evidence-target": 20.0,
+        "joinEvidenceOnBinding": 32.0,
+        "writeEvidenceType": 16.0,
+        "binding-write": 66.0,
+        "registerEvidenceSite": 22.0,
+        "evidence-pass": 1.0,
+        "evidence-rejoin": 22.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 3712.0,
+        "binding-read/declaredType": 4117.0,
+        "binding-read/storedValue": 4815.0,
+        "binding-read/value": 781.0,
+        "expression-read/type": 2397.0,
+        "expression-read/operatorDefinition": 1350.0,
+        "binding-write/_setType": 33.0,
+        "binding-write/_writeType": 33.0
+      },
+      "passIndicesPerOperation": {
+        "evidence-pass/0": 1.0,
+        "evidence-rejoin/0": 22.0
+      },
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "original-extended-collection-total": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/original-extended-collection-total.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "lookup": 3897,
+        "canonicalBlock": 15,
+        "binding-read": 54954,
+        "withEvidenceSession": 15,
+        "expression-read": 22998,
+        "boundCallType": 1179,
+        "operand-map": 4560,
+        "appliesToListCoordinateTuple": 1140,
+        "addsPointToNumberCollection": 1140,
+        "passesAbsentCellsThrough": 2457,
+        "withCodomainForAbsentAnswer": 1140,
+        "joinAssignmentEvidence": 63,
+        "evidence-target": 60,
+        "joinEvidenceOnBinding": 96,
+        "writeEvidenceType": 48,
+        "binding-write": 387,
+        "registerEvidenceSite": 66,
+        "evidence-pass": 3,
+        "evidence-rejoin": 66,
+        "functionLiteralCallSignatureType": 9,
+        "signature-demand": 9,
+        "functionLiteralSignatureType": 9,
+        "functionLiteralArrowEffects": 9
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 15042,
+        "binding-read/declaredType": 16461,
+        "binding-read/storedValue": 19599,
+        "binding-read/value": 3852,
+        "expression-read/type": 10977,
+        "expression-read/operatorDefinition": 12021,
+        "binding-write/_setType": 135,
+        "binding-write/_writeType": 135,
+        "binding-write/value": 117
+      },
+      "passIndexCounts": {
+        "evidence-pass/0": 3,
+        "evidence-rejoin/0": 66
+      },
+      "countsPerOperation": {
+        "lookup": 1299.0,
+        "canonicalBlock": 5.0,
+        "binding-read": 18318.0,
+        "withEvidenceSession": 5.0,
+        "expression-read": 7666.0,
+        "boundCallType": 393.0,
+        "operand-map": 1520.0,
+        "appliesToListCoordinateTuple": 380.0,
+        "addsPointToNumberCollection": 380.0,
+        "passesAbsentCellsThrough": 819.0,
+        "withCodomainForAbsentAnswer": 380.0,
+        "joinAssignmentEvidence": 21.0,
+        "evidence-target": 20.0,
+        "joinEvidenceOnBinding": 32.0,
+        "writeEvidenceType": 16.0,
+        "binding-write": 129.0,
+        "registerEvidenceSite": 22.0,
+        "evidence-pass": 1.0,
+        "evidence-rejoin": 22.0,
+        "functionLiteralCallSignatureType": 3.0,
+        "signature-demand": 3.0,
+        "functionLiteralSignatureType": 3.0,
+        "functionLiteralArrowEffects": 3.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 5014.0,
+        "binding-read/declaredType": 5487.0,
+        "binding-read/storedValue": 6533.0,
+        "binding-read/value": 1284.0,
+        "expression-read/type": 3659.0,
+        "expression-read/operatorDefinition": 4007.0,
+        "binding-write/_setType": 45.0,
+        "binding-write/_writeType": 45.0,
+        "binding-write/value": 39.0
+      },
+      "passIndicesPerOperation": {
+        "evidence-pass/0": 1.0,
+        "evidence-rejoin/0": 22.0
+      },
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "original-extended-loop-box": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/original-extended-loop-box.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "canonicalBlock": 6,
+        "binding-read": 717,
+        "withEvidenceSession": 6,
+        "joinAssignmentEvidence": 6,
+        "evidence-target": 6,
+        "joinEvidenceOnBinding": 12,
+        "writeEvidenceType": 3,
+        "binding-write": 6,
+        "registerEvidenceSite": 9,
+        "lookup": 33,
+        "expression-read": 108,
+        "boundCallType": 6,
+        "operand-map": 24,
+        "appliesToListCoordinateTuple": 6,
+        "addsPointToNumberCollection": 6,
+        "passesAbsentCellsThrough": 12,
+        "withCodomainForAbsentAnswer": 6,
+        "evidence-pass": 3,
+        "evidence-rejoin": 9
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 213,
+        "binding-read/declaredType": 285,
+        "binding-read/storedValue": 165,
+        "binding-read/value": 54,
+        "binding-write/_setType": 3,
+        "binding-write/_writeType": 3,
+        "expression-read/type": 60,
+        "expression-read/operatorDefinition": 48
+      },
+      "passIndexCounts": {
+        "evidence-pass/0": 3,
+        "evidence-rejoin/0": 9
+      },
+      "countsPerOperation": {
+        "canonicalBlock": 2.0,
+        "binding-read": 239.0,
+        "withEvidenceSession": 2.0,
+        "joinAssignmentEvidence": 2.0,
+        "evidence-target": 2.0,
+        "joinEvidenceOnBinding": 4.0,
+        "writeEvidenceType": 1.0,
+        "binding-write": 2.0,
+        "registerEvidenceSite": 3.0,
+        "lookup": 11.0,
+        "expression-read": 36.0,
+        "boundCallType": 2.0,
+        "operand-map": 8.0,
+        "appliesToListCoordinateTuple": 2.0,
+        "addsPointToNumberCollection": 2.0,
+        "passesAbsentCellsThrough": 4.0,
+        "withCodomainForAbsentAnswer": 2.0,
+        "evidence-pass": 1.0,
+        "evidence-rejoin": 3.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 71.0,
+        "binding-read/declaredType": 95.0,
+        "binding-read/storedValue": 55.0,
+        "binding-read/value": 18.0,
+        "binding-write/_setType": 1.0,
+        "binding-write/_writeType": 1.0,
+        "expression-read/type": 20.0,
+        "expression-read/operatorDefinition": 16.0
+      },
+      "passIndicesPerOperation": {
+        "evidence-pass/0": 1.0,
+        "evidence-rejoin/0": 3.0
+      },
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "original-extended-loop-total": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/original-extended-loop-total.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "lookup": 2769,
+        "canonicalBlock": 6,
+        "binding-read": 13095,
+        "withEvidenceSession": 6,
+        "joinAssignmentEvidence": 6,
+        "evidence-target": 6,
+        "joinEvidenceOnBinding": 12,
+        "writeEvidenceType": 3,
+        "binding-write": 1209,
+        "registerEvidenceSite": 9,
+        "expression-read": 9984,
+        "boundCallType": 12,
+        "operand-map": 48,
+        "appliesToListCoordinateTuple": 12,
+        "addsPointToNumberCollection": 12,
+        "passesAbsentCellsThrough": 21,
+        "withCodomainForAbsentAnswer": 12,
+        "evidence-pass": 3,
+        "evidence-rejoin": 9
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 3843,
+        "binding-read/declaredType": 4515,
+        "binding-read/storedValue": 3480,
+        "binding-read/value": 1257,
+        "binding-write/_setType": 303,
+        "binding-write/_writeType": 303,
+        "expression-read/type": 102,
+        "expression-read/operatorDefinition": 9882,
+        "binding-write/value": 603
+      },
+      "passIndexCounts": {
+        "evidence-pass/0": 3,
+        "evidence-rejoin/0": 9
+      },
+      "countsPerOperation": {
+        "lookup": 923.0,
+        "canonicalBlock": 2.0,
+        "binding-read": 4365.0,
+        "withEvidenceSession": 2.0,
+        "joinAssignmentEvidence": 2.0,
+        "evidence-target": 2.0,
+        "joinEvidenceOnBinding": 4.0,
+        "writeEvidenceType": 1.0,
+        "binding-write": 403.0,
+        "registerEvidenceSite": 3.0,
+        "expression-read": 3328.0,
+        "boundCallType": 4.0,
+        "operand-map": 16.0,
+        "appliesToListCoordinateTuple": 4.0,
+        "addsPointToNumberCollection": 4.0,
+        "passesAbsentCellsThrough": 7.0,
+        "withCodomainForAbsentAnswer": 4.0,
+        "evidence-pass": 1.0,
+        "evidence-rejoin": 3.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 1281.0,
+        "binding-read/declaredType": 1505.0,
+        "binding-read/storedValue": 1160.0,
+        "binding-read/value": 419.0,
+        "binding-write/_setType": 101.0,
+        "binding-write/_writeType": 101.0,
+        "expression-read/type": 34.0,
+        "expression-read/operatorDefinition": 3294.0,
+        "binding-write/value": 201.0
+      },
+      "passIndicesPerOperation": {
+        "evidence-pass/0": 1.0,
+        "evidence-rejoin/0": 3.0
+      },
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "original-historical-box": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/original-historical-box.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "canonicalBlock": 6,
+        "binding-read": 888,
+        "withEvidenceSession": 6,
+        "lookup": 30,
+        "binding-write": 18,
+        "joinAssignmentEvidence": 6,
+        "evidence-target": 6,
+        "joinEvidenceOnBinding": 6,
+        "writeEvidenceType": 3,
+        "registerEvidenceSite": 6,
+        "expression-read": 24,
+        "boundCallType": 6,
+        "evidence-pass": 3,
+        "evidence-rejoin": 6
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 225,
+        "binding-read/declaredType": 267,
+        "binding-read/storedValue": 318,
+        "binding-read/value": 78,
+        "binding-write/_setType": 9,
+        "binding-write/_writeType": 9,
+        "expression-read/type": 6,
+        "expression-read/operatorDefinition": 18
+      },
+      "passIndexCounts": {
+        "evidence-pass/0": 3,
+        "evidence-rejoin/0": 6
+      },
+      "countsPerOperation": {
+        "canonicalBlock": 2.0,
+        "binding-read": 296.0,
+        "withEvidenceSession": 2.0,
+        "lookup": 10.0,
+        "binding-write": 6.0,
+        "joinAssignmentEvidence": 2.0,
+        "evidence-target": 2.0,
+        "joinEvidenceOnBinding": 2.0,
+        "writeEvidenceType": 1.0,
+        "registerEvidenceSite": 2.0,
+        "expression-read": 8.0,
+        "boundCallType": 2.0,
+        "evidence-pass": 1.0,
+        "evidence-rejoin": 2.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 75.0,
+        "binding-read/declaredType": 89.0,
+        "binding-read/storedValue": 106.0,
+        "binding-read/value": 26.0,
+        "binding-write/_setType": 3.0,
+        "binding-write/_writeType": 3.0,
+        "expression-read/type": 2.0,
+        "expression-read/operatorDefinition": 6.0
+      },
+      "passIndicesPerOperation": {
+        "evidence-pass/0": 1.0,
+        "evidence-rejoin/0": 2.0
+      },
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "original-historical-check": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/original-historical-check.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "lookup": 171,
+        "canonicalBlock": 3,
+        "withEvidenceSession": 3,
+        "binding-read": 1296,
+        "binding-write": 12,
+        "expression-read": 315,
+        "boundCallType": 30,
+        "functionLiteralCallSignatureType": 9,
+        "signature-demand": 12,
+        "functionLiteralSignatureType": 12,
+        "operand-map": 81,
+        "appliesToListCoordinateTuple": 21,
+        "addsPointToNumberCollection": 21,
+        "passesAbsentCellsThrough": 30,
+        "withCodomainForAbsentAnswer": 18,
+        "functionLiteralArrowEffects": 12,
+        "joinAssignmentEvidence": 6
+      },
+      "naturalReadCounts": {
+        "binding-read/type": 363,
+        "binding-read/declaredType": 411,
+        "binding-read/storedValue": 468,
+        "binding-read/value": 54,
+        "binding-write/_setType": 6,
+        "binding-write/_writeType": 6,
+        "expression-read/type": 117,
+        "expression-read/operatorDefinition": 198
+      },
+      "passIndexCounts": {},
+      "countsPerOperation": {
+        "lookup": 57.0,
+        "canonicalBlock": 1.0,
+        "withEvidenceSession": 1.0,
+        "binding-read": 432.0,
+        "binding-write": 4.0,
+        "expression-read": 105.0,
+        "boundCallType": 10.0,
+        "functionLiteralCallSignatureType": 3.0,
+        "signature-demand": 4.0,
+        "functionLiteralSignatureType": 4.0,
+        "operand-map": 27.0,
+        "appliesToListCoordinateTuple": 7.0,
+        "addsPointToNumberCollection": 7.0,
+        "passesAbsentCellsThrough": 10.0,
+        "withCodomainForAbsentAnswer": 6.0,
+        "functionLiteralArrowEffects": 4.0,
+        "joinAssignmentEvidence": 2.0
+      },
+      "naturalReadsPerOperation": {
+        "binding-read/type": 121.0,
+        "binding-read/declaredType": 137.0,
+        "binding-read/storedValue": 156.0,
+        "binding-read/value": 18.0,
+        "binding-write/_setType": 2.0,
+        "binding-write/_writeType": 2.0,
+        "expression-read/type": 39.0,
+        "expression-read/operatorDefinition": 66.0
+      },
+      "passIndicesPerOperation": {},
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "original-historical-notebook-edit": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/original-historical-notebook-edit.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "lookup": 165,
+        "joinAssignmentEvidence": 12,
+        "expression-read": 93,
+        "binding-read": 699,
+        "boundCallType": 3,
+        "operand-map": 12,
+        "appliesToListCoordinateTuple": 3,
+        "addsPointToNumberCollection": 3,
+        "passesAbsentCellsThrough": 6,
+        "withCodomainForAbsentAnswer": 3,
+        "binding-write": 18
+      },
+      "naturalReadCounts": {
+        "expression-read/operatorDefinition": 87,
+        "binding-read/type": 177,
+        "binding-read/declaredType": 201,
+        "binding-read/storedValue": 264,
+        "binding-read/value": 57,
+        "expression-read/type": 6,
+        "binding-write/_setType": 6,
+        "binding-write/_writeType": 6,
+        "binding-write/value": 6
+      },
+      "passIndexCounts": {},
+      "countsPerOperation": {
+        "lookup": 55.0,
+        "joinAssignmentEvidence": 4.0,
+        "expression-read": 31.0,
+        "binding-read": 233.0,
+        "boundCallType": 1.0,
+        "operand-map": 4.0,
+        "appliesToListCoordinateTuple": 1.0,
+        "addsPointToNumberCollection": 1.0,
+        "passesAbsentCellsThrough": 2.0,
+        "withCodomainForAbsentAnswer": 1.0,
+        "binding-write": 6.0
+      },
+      "naturalReadsPerOperation": {
+        "expression-read/operatorDefinition": 29.0,
+        "binding-read/type": 59.0,
+        "binding-read/declaredType": 67.0,
+        "binding-read/storedValue": 88.0,
+        "binding-read/value": 19.0,
+        "expression-read/type": 2.0,
+        "binding-write/_setType": 2.0,
+        "binding-write/_writeType": 2.0,
+        "binding-write/value": 2.0
+      },
+      "passIndicesPerOperation": {},
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    },
+    "original-historical-notebook": {
+      "file": "/private/tmp/ce-init-contracts-current-measurement-20261118/traces/original-historical-notebook.json",
+      "logicalOperations": 3,
+      "totalCounts": {
+        "lookup": 165,
+        "joinAssignmentEvidence": 12,
+        "expression-read": 93,
+        "binding-read": 699,
+        "boundCallType": 3,
+        "operand-map": 12,
+        "appliesToListCoordinateTuple": 3,
+        "addsPointToNumberCollection": 3,
+        "passesAbsentCellsThrough": 6,
+        "withCodomainForAbsentAnswer": 3,
+        "binding-write": 18
+      },
+      "naturalReadCounts": {
+        "expression-read/operatorDefinition": 87,
+        "binding-read/type": 177,
+        "binding-read/declaredType": 201,
+        "binding-read/storedValue": 264,
+        "binding-read/value": 57,
+        "expression-read/type": 6,
+        "binding-write/_setType": 6,
+        "binding-write/_writeType": 6,
+        "binding-write/value": 6
+      },
+      "passIndexCounts": {},
+      "countsPerOperation": {
+        "lookup": 55.0,
+        "joinAssignmentEvidence": 4.0,
+        "expression-read": 31.0,
+        "binding-read": 233.0,
+        "boundCallType": 1.0,
+        "operand-map": 4.0,
+        "appliesToListCoordinateTuple": 1.0,
+        "addsPointToNumberCollection": 1.0,
+        "passesAbsentCellsThrough": 2.0,
+        "withCodomainForAbsentAnswer": 1.0,
+        "binding-write": 6.0
+      },
+      "naturalReadsPerOperation": {
+        "expression-read/operatorDefinition": 29.0,
+        "binding-read/type": 59.0,
+        "binding-read/declaredType": 67.0,
+        "binding-read/storedValue": 88.0,
+        "binding-read/value": 19.0,
+        "expression-read/type": 2.0,
+        "binding-write/_setType": 2.0,
+        "binding-write/_writeType": 2.0,
+        "binding-write/value": 2.0
+      },
+      "passIndicesPerOperation": {},
+      "dropped": 0,
+      "zeroDropProof": "run-traces.py parsed complete output and asserted dropped==0 after direct child exit0"
+    }
+  },
+  "documentProfiles": {
+    "original": {
+      "cpuSamples": 7110,
+      "cpuMappedFraction": 0.852939558015972,
+      "allocationMappedFraction": 0.6981666419411662,
+      "topCpuSelf": [
+        {
+          "function": "(garbage collector)",
+          "source": "",
+          "percent": 7.747822266554748
+        },
+        {
+          "function": "post",
+          "source": "node:inspector",
+          "percent": 2.782424055558516
+        },
+        {
+          "function": "(program)",
+          "source": "",
+          "percent": 2.3047333220949215
+        },
+        {
+          "function": "operands",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-original/ce/src/math-json/utils.ts",
+          "percent": 2.2482646698396254
+        },
+        {
+          "function": "createSymbolExpression",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-original/ce/src/compute-engine/engine-expression-entrypoints.ts",
+          "percent": 1.5758815529621804
+        },
+        {
+          "function": "validateSymbol",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-original/ce/src/math-json/symbols.ts",
+          "percent": 1.421892018660422
+        },
+        {
+          "function": "BoxedFunction.constructor",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-original/ce/src/compute-engine/boxed-expression/boxed-function.ts",
+          "percent": 1.3380406556827205
+        },
+        {
+          "function": "boxInternal",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-original/ce/src/compute-engine/boxed-expression/box.ts",
+          "percent": 1.336555787796657
+        },
+        {
+          "function": "BoxedDictionary.json",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-original/ce/src/compute-engine/boxed-expression/boxed-dictionary.ts",
+          "percent": 1.2959402838543328
+        },
+        {
+          "function": "boxFunctionInternal",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-original/ce/src/compute-engine/boxed-expression/box.ts",
+          "percent": 1.215277019573179
+        }
+      ],
+      "topAllocationSelf": [
+        {
+          "function": "Map",
+          "source": "",
+          "percent": 7.4956960967959505
+        },
+        {
+          "function": "BoxedFunction.constructor",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-original/ce/src/compute-engine/boxed-expression/boxed-function.ts",
+          "percent": 6.33270881847578
+        },
+        {
+          "function": "Set",
+          "source": "",
+          "percent": 5.328672957500838
+        },
+        {
+          "function": "slice",
+          "source": "",
+          "percent": 4.024068797881018
+        },
+        {
+          "function": "boxFunctionInternal",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-original/ce/src/compute-engine/boxed-expression/box.ts",
+          "percent": 3.0667205872735464
+        },
+        {
+          "function": "BoxedSymbol.constructor",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-original/ce/src/compute-engine/boxed-expression/boxed-symbol.ts",
+          "percent": 2.891464705764289
+        },
+        {
+          "function": "next",
+          "source": "",
+          "percent": 2.615823312103977
+        },
+        {
+          "function": "box",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-original/ce/src/compute-engine/boxed-expression/box.ts",
+          "percent": 2.5947973274856566
+        },
+        {
+          "function": "boxInternal",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-original/ce/src/compute-engine/boxed-expression/box.ts",
+          "percent": 2.5335744567877483
+        },
+        {
+          "function": "sort",
+          "source": "",
+          "percent": 1.9725776385832212
+        }
+      ]
+    },
+    "current": {
+      "cpuSamples": 8942,
+      "cpuMappedFraction": 0.8854724889343106,
+      "allocationMappedFraction": 0.690643639564361,
+      "topCpuSelf": [
+        {
+          "function": "(garbage collector)",
+          "source": "",
+          "percent": 5.515330894532533
+        },
+        {
+          "function": "(program)",
+          "source": "",
+          "percent": 2.436350745602035
+        },
+        {
+          "function": "post",
+          "source": "node:inspector",
+          "percent": 1.7843665881945816
+        },
+        {
+          "function": "BoxedFunction.constructor",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-current/ce/src/compute-engine/boxed-expression/boxed-function.ts",
+          "percent": 1.4083125078688956
+        },
+        {
+          "function": "isFunction",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-current/ce/src/compute-engine/boxed-expression/type-guards.ts",
+          "percent": 1.3910448978960244
+        },
+        {
+          "function": "operands",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-current/ce/src/math-json/utils.ts",
+          "percent": 1.3203918868257631
+        },
+        {
+          "function": "canonicalSequence",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-current/ce/src/compute-engine/library/control-structures.ts",
+          "percent": 1.26742850470938
+        },
+        {
+          "function": "createSymbolExpression",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-current/ce/src/compute-engine/engine-expression-entrypoints.ts",
+          "percent": 1.2512159421890265
+        },
+        {
+          "function": "boxInternal",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-current/ce/src/compute-engine/boxed-expression/box.ts",
+          "percent": 1.1899528534461719
+        },
+        {
+          "function": "validateSymbol",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-current/ce/src/math-json/symbols.ts",
+          "percent": 1.1153609985531783
+        }
+      ],
+      "topAllocationSelf": [
+        {
+          "function": "Map",
+          "source": "",
+          "percent": 9.313732517966557
+        },
+        {
+          "function": "BoxedFunction.constructor",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-current/ce/src/compute-engine/boxed-expression/boxed-function.ts",
+          "percent": 5.919160320709253
+        },
+        {
+          "function": "Set",
+          "source": "",
+          "percent": 5.494437035147087
+        },
+        {
+          "function": "slice",
+          "source": "",
+          "percent": 3.2093922914306092
+        },
+        {
+          "function": "next",
+          "source": "",
+          "percent": 3.008654032524483
+        },
+        {
+          "function": "boxFunctionInternal",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-current/ce/src/compute-engine/boxed-expression/box.ts",
+          "percent": 2.9827714470029365
+        },
+        {
+          "function": "BoxedSymbol.constructor",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-current/ce/src/compute-engine/boxed-expression/boxed-symbol.ts",
+          "percent": 2.1791469597242994
+        },
+        {
+          "function": "boxInternal",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-current/ce/src/compute-engine/boxed-expression/box.ts",
+          "percent": 1.9526653765852149
+        },
+        {
+          "function": "canonicalSequence",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-current/ce/src/compute-engine/library/control-structures.ts",
+          "percent": 1.951937140582125
+        },
+        {
+          "function": "sort",
+          "source": "",
+          "percent": 1.8851848111566425
+        }
+      ]
+    },
+    "candidate": {
+      "cpuSamples": 8744,
+      "cpuMappedFraction": 0.8855732234669209,
+      "allocationMappedFraction": 0.6867248835511484,
+      "topCpuSelf": [
+        {
+          "function": "(garbage collector)",
+          "source": "",
+          "percent": 5.6693506041995585
+        },
+        {
+          "function": "post",
+          "source": "node:inspector",
+          "percent": 2.081894442941089
+        },
+        {
+          "function": "(program)",
+          "source": "",
+          "percent": 2.0248346358763536
+        },
+        {
+          "function": "isFunction",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-candidate/ce/src/compute-engine/boxed-expression/type-guards.ts",
+          "percent": 1.5929076666947426
+        },
+        {
+          "function": "operands",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-candidate/ce/src/math-json/utils.ts",
+          "percent": 1.5524425145740854
+        },
+        {
+          "function": "canonicalSequence",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-candidate/ce/src/compute-engine/library/control-structures.ts",
+          "percent": 1.5498260786973734
+        },
+        {
+          "function": "createSymbolExpression",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-candidate/ce/src/compute-engine/engine-expression-entrypoints.ts",
+          "percent": 1.4939848856026137
+        },
+        {
+          "function": "validateSymbol",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-candidate/ce/src/math-json/symbols.ts",
+          "percent": 1.4526595353855032
+        },
+        {
+          "function": "BoxedDictionary.json",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-candidate/ce/src/compute-engine/boxed-expression/boxed-dictionary.ts",
+          "percent": 1.3056015024793417
+        },
+        {
+          "function": "BoxedFunction.constructor",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-candidate/ce/src/compute-engine/boxed-expression/boxed-function.ts",
+          "percent": 1.2993650662800553
+        }
+      ],
+      "topAllocationSelf": [
+        {
+          "function": "Map",
+          "source": "",
+          "percent": 8.888197425852292
+        },
+        {
+          "function": "BoxedFunction.constructor",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-candidate/ce/src/compute-engine/boxed-expression/boxed-function.ts",
+          "percent": 6.322475500727382
+        },
+        {
+          "function": "Set",
+          "source": "",
+          "percent": 5.750495581329061
+        },
+        {
+          "function": "slice",
+          "source": "",
+          "percent": 3.2795253506687425
+        },
+        {
+          "function": "boxFunctionInternal",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-candidate/ce/src/compute-engine/boxed-expression/box.ts",
+          "percent": 3.091040403572232
+        },
+        {
+          "function": "next",
+          "source": "",
+          "percent": 3.065985961844137
+        },
+        {
+          "function": "BoxedSymbol.constructor",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-candidate/ce/src/compute-engine/boxed-expression/boxed-symbol.ts",
+          "percent": 2.282539175507159
+        },
+        {
+          "function": "boxInternal",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-candidate/ce/src/compute-engine/boxed-expression/box.ts",
+          "percent": 2.02243801685259
+        },
+        {
+          "function": "sort",
+          "source": "",
+          "percent": 2.0004703858797392
+        },
+        {
+          "function": "canonicalSequence",
+          "source": "/private/tmp/ce-init-contracts-current-measurement-20261118/mapped-candidate/ce/src/compute-engine/library/control-structures.ts",
+          "percent": 1.8401821284986168
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "Original/current contains unrelated compiler and other commits; only current/candidate is causal.",
+    "Three ordinary phase coverage gaps retain the preregistered repair cap.",
+    "One allocation profile per phase/arm; sampled bytes are estimates, not exact counts.",
+    "Original collection 20000-op allocation OOM; matched collection recovery uses2000ops on every arm.",
+    "Retention measures whole post-GC heap with one live engine/evaluator, not exact retained graph sizes or a leak proof.",
+    "Diagnostic getter counts overlap and are not fresh derivation counts.",
+    "Inclusive profile rows overlap; unmapped runtime/builtin/host frames remain explicit."
+  ],
+  "acceptedOrdinaryProcesses": 110,
+  "rejectedOrdinaryProcesses": 30
+}

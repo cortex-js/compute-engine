@@ -531,7 +531,7 @@ export function staticDiagnostics(
   ce._staticTypeCheckDepth += 1;
   // The pre-pass is one long WRITE: it applies the type effect of every
   // top-level statement onto real definitions (`_infer`,
-  // `_setElementRefinement`, the assignment-evidence map). None of that may
+  // `_setElementRefinement`, initializer contract preparation). None of that may
   // record what an assumption in force happens to prove, so the whole pass
   // runs with the assumptions hidden — the same bracket every other write
   // routine uses (`docs/plans/2026-08-29-assumptions-as-facts-type.md`
@@ -3304,6 +3304,10 @@ export function describeError(error: MathJsonExpression): string {
           : `a protocol function member is not a field (${payload.join(', ')})`;
       break;
     }
+    case 'read-before-initialization':
+      detail = payload.length === 0 ? 'a local is read before initialization'
+        : `\`${payload[0]}\` is read before it has been given a value`;
+      break;
     case 'read-before-declaration':
       // Payload: [name]. A statement of a block uses a local of the block
       // before the statement that declares it: a `let` or a `const`.

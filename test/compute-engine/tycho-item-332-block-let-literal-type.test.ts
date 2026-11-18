@@ -10,7 +10,7 @@ import { operands } from '../../src/math-json/utils';
  *
  * Two mechanisms are pinned here:
  * 1. `canonicalBlock` hoists the type of a closed literal initial value,
- *    widened through the assignment table (`let i = 1` is `integer`, not the
+ *    widened through the assignment table (`let i = 1` is `number`, not the
  *    singleton `1`, so a loop condition is not folded).
  * 2. A reference to a hoisted local from a NESTED block (an `if` branch, a
  *    loop body) binds to the hoisted binding instead of declaring a second
@@ -86,7 +86,7 @@ total`,
     );
   });
 
-  test('a let counter hoists the tier integer, not the singleton literal type', () => {
+  test('a let counter has number contract, not the singleton literal type', () => {
     // With `i` typed as the literal `1`, `i <= 3` would fold to `true` and the
     // compiled loop would never end (or the sum would be wrong).
     expectParity(
@@ -99,22 +99,22 @@ while i <= 3 {
 n`,
       6
     );
-    expect(lastOperandType(`let i = 1\ni`)).toBe('integer');
+    expect(lastOperandType(`let i = 1\ni`)).toBe('number');
     expect(lastOperandType(`let s = "ab"\ns`)).toBe('string');
   });
 
   test('the hoisted type is list-shaped after the first use and the assignment', () => {
     expect(lastOperandType(`let xs = []\nxs = [...xs, 4]\nLength(xs)`)).toBe(
-      'list<integer>'
+      'list<unknown>'
     );
     expect(
       lastOperandType(`let xs = []\nif true { xs = [...xs, 4] }\nLength(xs)`)
-    ).toBe('list<integer>');
+    ).toBe('list<unknown>');
     expect(
       lastOperandType(
         `let xs = []\nwhile false { xs = [...xs, 4] }\nLength(xs)`
       )
-    ).toBe('list<integer>');
+    ).toBe('list<unknown>');
   });
 
   test('a nested-block reference binds to the hoisted binding, not a copy', () => {
@@ -133,7 +133,7 @@ n`,
     walk(expr.ops![1]);
     expect(inner).toBeDefined();
     expect(inner!.valueDefinition).toBe(outer.valueDefinition);
-    expect(outer.valueDefinition?.type.toString()).toBe('list<integer>');
+    expect(outer.valueDefinition?.type.toString()).toBe('list<unknown>');
   });
 
   test('a declared type on the let still wins over the literal (Tycho item 235)', () => {
@@ -144,14 +144,14 @@ n`,
     ).toBe('list<number>');
   });
 
-  test('a scalar literal widens by the assignment table: real after a float assignment', () => {
+  test('a scalar contract remains number after a float assignment', () => {
     const ce = new ComputeEngine();
     const expr = box(ce, `let x = 1\nx = x + 0.5\nx`);
     expect(expr.evaluate().json).toEqual(1.5);
-    expect(expr.ops![2].type.toString()).toBe('real');
+    expect(expr.ops![2].type.toString()).toBe('number');
   });
 
-  test('a let whose value mentions a symbol is left unknown until it runs', () => {
+  test('a let initializer can read a captured symbol without executing it', () => {
     // The value is not a closed literal, so nothing is hoisted from it: the
     // binding must not be typed by binding `y` in the enclosing scope before
     // the block's own locals exist.

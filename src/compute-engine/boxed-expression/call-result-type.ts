@@ -2598,3 +2598,30 @@ export function componentwiseTupleCallType(
     elements: Array.from({ length: arity }, () => ({ type: 'number' })),
   };
 }
+
+/**
+ * The signature of a partial application: `sig` applied to the arguments
+ * `ops`, when they are fewer than its fixed parameters and the literal
+ * would be curried by `makeLambda` (function-utils.ts) — a plain signature
+ * with no optional parameter, no variadic tail and no type parameter.
+ * `undefined` when the call is saturated or is not curried, and when an
+ * argument is a `Spread` (`g(...args)`), whose element count is unknown
+ * until it is evaluated.
+ */
+export function curriedSignature(
+  sig: Type,
+  ops: ReadonlyArray<{ readonly operator: string }>
+): Type | undefined {
+  if (typeof sig === 'string' || sig.kind !== 'signature') return undefined;
+  if (ops.some((x) => x.operator === 'Spread')) return undefined;
+  const argCount = ops.length;
+  if (
+    sig.variadicArg !== undefined ||
+    (sig.optArgs !== undefined && sig.optArgs.length > 0) ||
+    (sig.typeParams !== undefined && sig.typeParams.length > 0)
+  )
+    return undefined;
+  const args = sig.args ?? [];
+  if (argCount >= args.length) return undefined;
+  return { ...sig, args: args.slice(argCount) };
+}
