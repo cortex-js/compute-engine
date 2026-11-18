@@ -17,6 +17,7 @@
 
 import type { Expression } from '../../global-types.js';
 import { Decline, hostVarOp, lower } from './lower.js';
+import { UNSUPPORTED_MODE } from './lower-context.js';
 import { readsVarsObject } from '../vars-inputs.js';
 import { passChecksOn, SliceInternalError, verify } from './verify.js';
 import {
@@ -484,7 +485,9 @@ export function sliceProgram(
   if ((bigint || interval) && options.target !== 'javascript')
     throw new Decline(
       'program',
-      `the ${options.mode} mode on ${options.target}`
+      `the ${options.mode} mode on ${options.target}`,
+      undefined,
+      UNSUPPORTED_MODE
     );
   const { rows, syntax } = tables(options);
   // Sums and short lists written out: JavaScript, the interval mode

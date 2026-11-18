@@ -159,7 +159,7 @@ describe('IR profile: an input with no type', () => {
     const ir = { profile: 'ir', fallback: false };
     const json = ['List', 'w', 'v'];
     expect(compiled(json, { ...ir, mode: 'bigint' }).diagnostic).toMatchObject({
-      code: 'outside-profile',
+      code: 'bigint-lane',
       message: expect.stringContaining('the bigint mode'),
     });
     expect(compiled(json, ir).diagnostic).toMatchObject(refusal('w,v'));
@@ -407,7 +407,7 @@ describe('IR profile: an input with no type', () => {
           ).toMatch(`Typed(p, "${type}"): the input p of type ${type}`);
       // A parameter declared `any` in the signature of a user function.
       expect(compiled(['fa', 'x'], { ...ir, to }).diagnostic).toMatchObject({
-        code: 'outside-profile',
+        code: 'unsettled-shape',
         message: expect.stringContaining('the parameter p of fa'),
       });
       // An argument of type `any` for a real parameter.

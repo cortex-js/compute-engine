@@ -6,7 +6,8 @@
  * Every option of `compile()` is mapped or declined by name
  * (`optionDecline()`); an input with no type is the decline
  * `'untyped-input'` of the existing compiler, another `Decline` of the
- * slice the public decline `'outside-profile'`, any other error a
+ * slice the public decline of the code of its reason (`'unsettled-shape'`,
+ * `'static-type-error'`, …) or `'outside-profile'`, any other error a
  * `'compile-error'`, and a cancellation is thrown as it is. `compile()`
  * applies `fallback` to every decline. See "Selecting the pipeline" in
  * `README.md`.
@@ -169,7 +170,9 @@ function refusal(name: IrOptionName, value: unknown): string | undefined {
 
 /** The decline of the first option of `options` that the profile does not
  *  have on the target `where` (`''` or ` on <target>`), by the classes of
- *  `table`. */
+ *  `table`: `'unsupported-mode'` for a `mode` (a mode that the target does
+ *  not offer, the decline of the existing compilers), `'outside-profile'`
+ *  for another option. */
 export function optionDecline(
   options: IrOptions | undefined,
   table: Readonly<Record<IrOptionName, string>>,
@@ -180,7 +183,10 @@ export function optionDecline(
     if (table[name] !== 'declined') continue;
     const text = refusal(name, options[name]);
     if (text !== undefined)
-      throw decline(`${text} is not supported by the profile 'ir'${where}`);
+      throw decline(
+        `${text} is not supported by the profile 'ir'${where}`,
+        name === 'mode' ? { code: 'unsupported-mode', kind: 'capability' } : {}
+      );
   }
 }
 
@@ -315,13 +321,17 @@ export function entryInputs(
 /** The error of `compile()` for the error `e` of the slice or the adapter:
  *  a cancellation or a decline of `compile()` as it is, an input with no
  *  type thrown as the existing compiler refuses it (`'untyped-input'`), a
- *  `Decline` as `'outside-profile'`, any other error as `'compile-error'`. */
+ *  `Decline` with the code of its reason (`'unsettled-shape'`, …) or
+ *  `'outside-profile'`, any other error as `'compile-error'`. */
 export function sliceError(e: unknown): unknown {
   if ((e as Error | undefined)?.name === 'CancellationError') return e;
   if (e instanceof CompileDeclineError) return e;
   if (e instanceof UntypedInputs) throwUntypedInputs(e.names);
   if (e instanceof Decline)
     return decline(e.message, {
+      ...(e.reason === undefined
+        ? {}
+        : { code: e.reason.code, kind: e.reason.kind ?? 'capability' }),
       ...(e.head === undefined ? {} : { operator: e.head }),
       value: e.node,
     });

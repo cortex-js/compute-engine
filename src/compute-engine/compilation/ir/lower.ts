@@ -99,12 +99,18 @@ import {
 } from './operators.js';
 import {
   Decline,
+  BIGINT_LANE,
   decline,
   handlerAnswer,
   hasOwnLowering,
+  hasUnsettledShape,
   isUntyped,
+  LANE_MISMATCH,
+  POSSIBLE_NOTHING,
+  STATIC_TYPE_ERROR,
   text,
   TUPLE_RULES,
+  UNSETTLED_SHAPE,
   UntypedInputs,
   type Binding,
   type Fn,
@@ -744,7 +750,11 @@ export function lower(
           node,
           !r.threads && types.some((t) => t.shape.length > 0)
             ? `${r.head} of a list`
-            : `${r.head} of ${types.map(typeToString).join(', ')}${bigint ? ', whose value is not an integer (the bigint mode)' : ''}`
+            : `${r.head} of ${types.map(typeToString).join(', ')}${bigint ? ', whose value is not an integer (the bigint mode)' : ''}`,
+          // A row off the integer lane: the bigint mode refuses it.
+          bigint && signatureOf(r, types, complex, false) !== undefined
+            ? BIGINT_LANE
+            : undefined
         );
       // An integer power is an integer for an exponent proved `>= 0`
       // only (`n^m` is a rational at `m < 0`).
@@ -752,7 +762,8 @@ export function lower(
       if (bigint && j !== undefined && !nonnegative(given[j]))
         decline(
           node,
-          `${r.head} of an exponent that is not proved nonnegative, whose value can be a rational (the bigint mode)`
+          `${r.head} of an exponent that is not proved nonnegative, whose value can be a rational (the bigint mode)`,
+          BIGINT_LANE
         );
       const [lanes] = signature;
       const operands = given.map((v, i) => {
@@ -858,7 +869,8 @@ export function lower(
     if (bigint && (lane === 'real' || lane === 'complex' || lane === 'color'))
       decline(
         e,
-        `a ${lane} value: the bigint mode computes integers and booleans only`
+        `a ${lane} value: the bigint mode computes integers and booleans only`,
+        BIGINT_LANE
       );
     if (shared && v !== undefined && b.effects === effects) {
       const reads = [...facts(e).names].map((n): [string, V | undefined] => [
@@ -893,7 +905,8 @@ export function lower(
     if (e.operator !== 'Error' && e.type.type === 'error')
       decline(
         e,
-        'a sub-expression of the static type error (an error of the canonical form)'
+        'a sub-expression of the static type error (an error of the canonical form)',
+        STATIC_TYPE_ERROR
       );
     if (options.vars?.includes(e.operator) === true)
       decline(e, `a call of the vars name ${e.operator}`);
@@ -1878,7 +1891,11 @@ export function lower(
     if (bigint) {
       const n = e.isInteger === true ? toBigint(e) : null;
       if (n === null)
-        decline(e, 'a number that is not an integer (the bigint mode)');
+        decline(
+          e,
+          'a number that is not an integer (the bigint mode)',
+          BIGINT_LANE
+        );
       return b.constant(
         Number.isSafeInteger(Number(n)) ? Number(n) : n,
         'integer'
@@ -2057,7 +2074,7 @@ export function lower(
   ): V | undefined => {
     const name = e.symbol;
     if (name === 'Nothing') {
-      if (want) decline(e, 'Nothing as a value');
+      if (want) decline(e, 'Nothing as a value', POSSIBLE_NOTHING);
       return undefined;
     }
     const known = lookup(name);
@@ -2206,7 +2223,11 @@ export function lower(
     }
     const ir = positional ? tupleOrInputType(t, cx.wide) : inputIR(t);
     if (ir === undefined)
-      decline(e, `the input ${name} of type ${engineTypeToString(t)}`);
+      decline(
+        e,
+        `the input ${name} of type ${engineTypeToString(t)}`,
+        hasUnsettledShape(t) ? UNSETTLED_SHAPE : undefined
+      );
     const shape = ir.shape.map((n) => {
       if (n !== 'run-time') return n;
       const length = b.param(name, scalarType('integer'), true);
@@ -2294,8 +2315,15 @@ export function lower(
           t = { lane: lane!.lane, shape: [{ v: outs[outs.length - 1] }] };
         }
       }
+      // Arms of two ranks, or a tuple and a list, have no settled shape;
+      // lists of two lengths do. Two lanes that do not join (a colour and
+      // a real) keep 'outside-profile'.
       if (t === undefined || tuples.get(x) !== tuples.get(y))
-        decline(node, t === undefined ? cause : 'arms of a tuple and a list');
+        decline(
+          node,
+          t === undefined ? cause : 'arms of a tuple and a list',
+          t !== undefined || n.length !== m.length ? UNSETTLED_SHAPE : undefined
+        );
       a.region.yields.push(widenIn(a.region, x, t));
       c.region.yields.push(widenIn(c.region, y, t));
       outs.push(keep(x, b.newValue(t)));
@@ -2450,7 +2478,14 @@ export function lower(
     let t: IRType | undefined = type(elements[0]);
     for (const v of elements) {
       t = joinType(t, type(v));
-      if (t === undefined) decline(e, 'elements of two types');
+      if (t === undefined)
+        decline(
+          e,
+          'elements of two types',
+          type(v).shape.length !== type(elements[0]).shape.length
+            ? UNSETTLED_SHAPE
+            : undefined
+        );
     }
     if (lengthValues(t).length > 0)
       decline(e, 'a list of lists of run-time length');
@@ -2501,7 +2536,13 @@ export function lower(
 
   const local = (s: Expression, v: V, lane: Lane): V => {
     if (!widensTo(type(v).lane, lane))
-      decline(s, `a value that is not ${lane}`);
+      decline(
+        s,
+        `a value that is not ${lane}`,
+        type(v).lane === 'complex' && isSubLane(lane, 'real')
+          ? LANE_MISMATCH
+          : undefined
+      );
     return widen(v, lane);
   };
 
@@ -2549,7 +2590,11 @@ export function lower(
           const v = cx.value(value)!;
           if (type(v).shape.length > 0) {
             if (typeName !== 'unknown')
-              decline(s, `a list value for a local declared ${typeName}`);
+              decline(
+                s,
+                `a list value for a local declared ${typeName}`,
+                UNSETTLED_SHAPE
+              );
             frame.names.set(name.symbol, { v, role: 'constant' });
             return void (result = v);
           }

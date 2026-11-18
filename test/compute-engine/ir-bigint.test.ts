@@ -598,7 +598,7 @@ describe('IR bigint: declines', () => {
     ['a power of an exponent that can be negative', ['Power', 'n', 'm'], {}],
     ['vars', ['Add', 'vq', 1], { vars: { vq: '_.q' } }],
   ];
-  test.each(DECLINES)('%s', (_, json, options) => {
+  test.each(DECLINES)('%s', (name, json, options) => {
     let error: unknown;
     try {
       compiled(json, options);
@@ -608,7 +608,7 @@ describe('IR bigint: declines', () => {
     expect(
       (error as { diagnostic?: { code?: string } } | undefined)?.diagnostic
         ?.code
-    ).toBe('outside-profile');
+    ).toBe(name === 'vars' ? 'outside-profile' : 'bigint-lane');
   });
   test('GLSL has no bigint mode', () => {
     expect(() =>

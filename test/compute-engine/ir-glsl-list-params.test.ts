@@ -299,7 +299,13 @@ describe('IR profile, batch G10: a list parameter that takes the length of its a
     ['f of a stated length, then of no stated length: the message', ['Add', ['f', 'A'], ['f', 'R']], /\(a list of no stated length here;/],
   ])('GLSL declines %s, with the cause', (_, json, cause) => {
     const d = failure(() => glsl(json));
-    expect(d?.code).toBe('outside-profile');
+    // A sub-expression of the static type error has the code of the
+    // existing compiler.
+    expect(d?.code).toBe(
+      /static type error/.test(cause.source)
+        ? 'static-type-error'
+        : 'outside-profile'
+    );
     expect(d?.message).toMatch(cause);
   });
 

@@ -1373,9 +1373,10 @@ describe('IR profile on GLSL: declines', () => {
     ['an input named active (reserved in GLSL ES 3.00)', ['Add', 'active', 1], {}, /the input name `active`/],
     ['an input named common', ['Add', 'common', 1], {}, /the input name `common`/],
     ['an input named sampler1D', ['Add', 'sampler1D', 1], {}, /the input name `sampler1D`/],
-  ])('%s', (_, json, options, message) => {
+  ])('%s', (name, json, options, message) => {
     const d = declined(json, options);
-    expect(d?.code).toBe('outside-profile');
+    // A mode that GLSL does not offer has the code of the existing compiler.
+    expect(d?.code).toBe(name === 'mode' ? 'unsupported-mode' : 'outside-profile');
     expect(d?.message).toMatch(message);
   });
 

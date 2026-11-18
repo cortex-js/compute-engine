@@ -349,7 +349,7 @@ describe('IR profile, colours: the declines', () => {
 
   test('the bigint mode declines the lane', () => {
     const d = failure(() => js(['Oklch', 1, 0, 'n'], { mode: 'bigint' }));
-    expect(d?.code).toBe('outside-profile');
+    expect(d?.code).toBe('bigint-lane');
     expect(d?.message).toMatch(/a color value: the bigint mode/);
   });
 });

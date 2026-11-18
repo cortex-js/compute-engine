@@ -32,7 +32,10 @@ import {
 import { functionEffects, type Effect } from './effects.js';
 import {
   decline,
+  hasUnsettledShape,
   isUntyped,
+  LANE_MISMATCH,
+  UNSETTLED_SHAPE,
   type Binding,
   type Fn,
   type Lowering,
@@ -176,7 +179,11 @@ function extendedReal(t: Type): boolean {
 export function scalarOf(node: Expression, t: Type, what: string): IRType {
   const ir = inputType(t);
   if (ir === undefined || ir.shape.length > 0)
-    decline(node, `${what} is not a scalar (${engineTypeToString(t)})`);
+    decline(
+      node,
+      `${what} is not a scalar (${engineTypeToString(t)})`,
+      hasUnsettledShape(t) ? UNSETTLED_SHAPE : undefined
+    );
   return { lane: ir.lane, shape: [] };
 }
 
@@ -736,7 +743,16 @@ export function functionLowering(
       if (cx.tuples.get(v) !== p.tuple || !isSubType(t, declared, cx.constant))
         decline(
           op,
-          `an argument of ${e.operator} that is not ${typeToString(declared, p.tuple)}`
+          `an argument of ${e.operator} that is not ${typeToString(declared, p.tuple)}`,
+          // A complex value at a real parameter of the same shape (not an
+          // input with no type, which the complex mode reads as complex).
+          t.lane === 'complex' &&
+            !isUntyped(op.type.type) &&
+            isSubLane(declared.lane, 'real') &&
+            cx.tuples.get(v) === p.tuple &&
+            sameShape(t.shape, declared.shape)
+            ? LANE_MISMATCH
+            : undefined
         );
       return [...length, v];
     });
@@ -878,7 +894,8 @@ export function functionLowering(
     )
       decline(
         e,
-        `the function ${fn.ir.source} reads the input ${name} of type ${engineTypeToString(t)}, which is not a scalar or a list of numbers of a stated length`
+        `the function ${fn.ir.source} reads the input ${name} of type ${engineTypeToString(t)}, which is not a scalar or a list of numbers of a stated length`,
+        hasUnsettledShape(t) ? UNSETTLED_SHAPE : undefined
       );
     const v = param(fn.ir, name, ir as IRType);
     if (tupleAxis(t) === 0) cx.tuples.set(v, 0);

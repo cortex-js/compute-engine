@@ -440,9 +440,12 @@ const DECLINES: [label: string, json: Json, cause: RegExp, options?: object][] =
 describe('IR profile, complex lane on GLSL: the declines', () => {
   // A rest parameter: a callback with more parameters than a row has
   // elements is given Jest's `done`.
-  test.each(DECLINES)('%s', (...[, json, cause, options]) => {
+  test.each(DECLINES)('%s', (...[name, json, cause, options]) => {
     const d = failure(() => glsl(json, options));
-    expect(d?.code).toBe('outside-profile');
+    // A mode that GLSL does not offer has the code of the existing compiler.
+    expect(d?.code).toBe(
+      name === 'the bigint mode' ? 'unsupported-mode' : 'outside-profile'
+    );
     expect(d?.message).toMatch(cause);
   });
 });

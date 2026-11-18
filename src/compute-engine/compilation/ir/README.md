@@ -555,9 +555,10 @@ spell them); `If` with no else of a number and `Which` with no `True` clause
 (their value is `NaN`); `Max` and `Min` of a list (their identity is `±∞`);
 `Factorial2` (`(−5)!!` is `1/3`); a `Sum` or a `Product` with an
 `iterationBudget` (its value over the budget is `NaN`); a random frame, a draw
-and an integral; and the option `vars`. A decline keeps the code
-`'outside-profile'` (the existing compiler's mode uses `'bigint-lane'`). GLSL
-has no such mode.
+and an integral; and the option `vars`. A decline of a node off the integer lane
+has the code `'bigint-lane'`, as in the existing compiler's mode; another
+decline (`vars`, an operator outside the slice) is `'outside-profile'`. GLSL has
+no such mode (`'unsupported-mode'`).
 
 The ABI is the one of the existing mode (`docs/COMPILATION-MODEL.md`, "The
 `bigint` mode"). An integer input takes a `bigint` or a safe-integer `number`;
@@ -939,18 +940,19 @@ an error of the code other than a `ReferenceError` or a cancellation is
 `entire`.
 
 `compile(expr, { to: 'interval-js', profile: 'ir' })` compiles with the mode
-(`adapter-interval.ts`). A decline is `'outside-profile'`; with `fallback` not
-`false`, the existing interval target then compiles the expression and a warning
-is logged. The result has `target: 'interval-js'`, `success`, `runtimeVersion`,
-`code`, `preambleOnce`, `preamblePerCall` when there is one, `preamble` (the
-two, in that order), `calling` (`'expression'`, or `'lambda'` for a root
-`Function` literal, which declines when its body reads a free name),
-`booleanInputs`, `listInputs`, `run`, `freeSymbols`, `freeSymbolTypes`,
-`unsupported` (empty) and `mode` (`'strict'`), as on the existing target, with
-`freeSymbols` and `freeSymbolTypes` by the rule of every target ("The report of
-the inputs", in "Selecting the pipeline"; `lowered` is `interval` for a real or
-integer input). `profile: 'ir'`, and for an expression `broadcast()`,
-`broadcastAsync()`, `shippable` and `willUsePool()`, built by
+(`adapter-interval.ts`). A decline has the code of its reason ("Selecting the
+pipeline"; a `mode` other than `'strict'` is `'unsupported-mode'`); with
+`fallback` not `false`, the existing interval target then compiles the
+expression and a warning is logged. The result has `target: 'interval-js'`,
+`success`, `runtimeVersion`, `code`, `preambleOnce`, `preamblePerCall` when
+there is one, `preamble` (the two, in that order), `calling` (`'expression'`, or
+`'lambda'` for a root `Function` literal, which declines when its body reads a
+free name), `booleanInputs`, `listInputs`, `run`, `freeSymbols`,
+`freeSymbolTypes`, `unsupported` (empty) and `mode` (`'strict'`), as on the
+existing target, with `freeSymbols` and `freeSymbolTypes` by the rule of every
+target ("The report of the inputs", in "Selecting the pipeline"; `lowered` is
+`interval` for a real or integer input). `profile: 'ir'`, and for an expression
+`broadcast()`, `broadcastAsync()`, `shippable` and `willUsePool()`, built by
 `createIntervalRuntime()` (`loadBroadcast()`, `loadBroadcastSlice()`) over the
 stored result. Options: `inputs`, `symbolic`, `symbolDeps`, `varsObjectRefs` and
 `cse: false` as on JavaScript; `constantFold: false`, no closed node evaluated;
@@ -1965,13 +1967,18 @@ pass (it serves `invariants`, which is off there).
 pipeline (experimental: the option can change or go without notice). All the
 glue is in `adapter.ts`; `compile-expression.ts` dispatches to it.
 
-- **A decline** (`Decline`, also a refusal of the target) is the public
-  diagnostic `'outside-profile'`, with the head in `operator` and the node in
-  `value`, except an input with no type (`UntypedInputs`), which is
-  `'untyped-input'` ("Inputs" above); any other error of the pipeline
-  (`SliceInternalError`, a printer error) is a `'compile-error'`. Both follow
-  `fallback`: the interpreter, or a throw with `fallback: false`. A
-  `CancellationError` is thrown as it is.
+- **A decline** (`Decline`, also a refusal of the target) is a public diagnostic
+  with the head in `operator` and the node in `value`. Its code is the one of
+  the existing compilers when the reason is the one that code names (the
+  `reason` of the `Decline`, `lower-context.ts`): `'static-type-error'`,
+  `'unsettled-shape'` (a shape not settled at compile time),
+  `'possible-nothing'`, `'bigint-lane'`, `'lane-mismatch'` (a complex value
+  where a real one is declared), `'unsupported-mode'`; otherwise, for a
+  capability the pipeline does not have, `'outside-profile'`. An input with no
+  type (`UntypedInputs`) is `'untyped-input'` ("Inputs" above); any other error
+  of the pipeline (`SliceInternalError`, a printer error) is a
+  `'compile-error'`. Both follow `fallback`: the interpreter, or a throw with
+  `fallback: false`. A `CancellationError` is thrown as it is.
 - **Options.** One table classifies every option of `compile()` (`IR_OPTIONS` in
   `adapter.ts`; `compile-expression.ts` fails the type check when an option has
   no class). Mapped: `iterationBudget` ("Loops and the runtime"), `vars`
@@ -2149,11 +2156,12 @@ its body reads as parameters ("User functions"); a call under a binder of the
 input's name declines. Declined with `'outside-profile'`: a list result of a
 user function of a run-time length, a root `Function` literal, the options
 `functions`, `operators`, `imports`, `preamble`, `strictTypes: true`,
-`broadcast: true`, `mode: 'bigint'`, loops whose passes can exceed the budget
-("Loops and the runtime"), and an input name that is not a plain GLSL
-identifier, is a reserved word (`gpu-reserved.ts`), can be a name of the printer
-(`v<digits>…`, `_gpu_…`, `_fn_…`) or is the name of a function that the code
-calls. `fallback: true` then compiles with the existing GLSL target and logs a
-warning (the console). `CE_JS_PROFILE_SHADOW=ir` also measures every `compile()`
-to `glsl` that asks for no profile, under the consumer `glsl:public`, which the
-statistics script totals apart from JavaScript.
+`broadcast: true`, loops whose passes can exceed the budget ("Loops and the
+runtime"), and an input name that is not a plain GLSL identifier, is a reserved
+word (`gpu-reserved.ts`), can be a name of the printer (`v<digits>…`, `_gpu_…`,
+`_fn_…`) or is the name of a function that the code calls; `mode: 'bigint'` is
+declined with `'unsupported-mode'`. `fallback: true` then compiles with the
+existing GLSL target and logs a warning (the console). `CE_JS_PROFILE_SHADOW=ir`
+also measures every `compile()` to `glsl` that asks for no profile, under the
+consumer `glsl:public`, which the statistics script totals apart from
+JavaScript.

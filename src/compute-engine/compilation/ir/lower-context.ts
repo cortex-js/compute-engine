@@ -6,7 +6,11 @@
 
 import type { Expression, FunctionInterface } from '../../global-types.js';
 import type { Type } from '../../../common/type/types.js';
-import { resolveTypeAlias } from '../../../common/type/utils.js';
+import type { CompileDiagnosticKind } from '../types.js';
+import {
+  isNumericScalarType,
+  resolveTypeAlias,
+} from '../../../common/type/utils.js';
 import {
   isExpression,
   isFunction,
@@ -17,13 +21,49 @@ import { STANDARD_LIBRARIES } from '../../library/library.js';
 
 export type Fn = Expression & FunctionInterface;
 
+/** The diagnostic code of a decline whose reason has a code of its own
+ *  (`CompileDiagnostic`, `../diagnostics.ts`), and its kind when it is not
+ *  `'capability'`. A decline with none is `'outside-profile'`
+ *  (`sliceError()`, `adapter.ts`). */
+export type DeclineReason = {
+  readonly code: string;
+  readonly kind?: CompileDiagnosticKind;
+};
+
+/** A sub-expression whose static type is `error`. */
+export const STATIC_TYPE_ERROR: DeclineReason = {
+  code: 'static-type-error',
+  kind: 'correctness',
+};
+
+/** A value whose shape is not settled at compile time (rules R1 to R6 of
+ *  "Shapes are settled at compile time", `docs/COMPILATION-MODEL.md`). */
+export const UNSETTLED_SHAPE: DeclineReason = { code: 'unsettled-shape' };
+
+/** A mode that the target does not offer. */
+export const UNSUPPORTED_MODE: DeclineReason = { code: 'unsupported-mode' };
+
+/** A complex value bound where a real one is declared. */
+export const LANE_MISMATCH: DeclineReason = {
+  code: 'lane-mismatch',
+  kind: 'correctness',
+};
+
+/** In the bigint mode, a node that is not on the integer lane. */
+export const BIGINT_LANE: DeclineReason = { code: 'bigint-lane' };
+
+/** A value that can be `Nothing` where the code needs a value. */
+export const POSSIBLE_NOTHING: DeclineReason = { code: 'possible-nothing' };
+
 /** A program that the slice does not compile: the text of the node, its
- *  head (when it is a function) and the cause. */
+ *  head (when it is a function), the cause, and the code of the cause when
+ *  it has one. */
 export class Decline extends Error {
   constructor(
     readonly node: string,
     readonly cause: string,
-    readonly head?: string
+    readonly head?: string,
+    readonly reason?: DeclineReason
   ) {
     super(`${node}: ${cause}`);
     this.name = 'Decline';
@@ -42,6 +82,55 @@ export class UntypedInputs extends Decline {
         : `the inputs ${names.join(', ')} have no type`
     );
   }
+}
+
+/** The class of shape of the values of `t` (`'scalar'`, `'boolean'`,
+ *  `'string'`, `'list'`, `'tuple'`), or `undefined` when its values can
+ *  have more than one, or another (`any`, `value`, `broadcastable<real>`,
+ *  a union of a list and a scalar, a set, …). */
+function shapeClass(t: Type): string | undefined {
+  const r = resolveTypeAlias(t);
+  if (isNumericScalarType(r)) return 'scalar';
+  if (r === 'boolean' || r === 'string') return r;
+  if (typeof r === 'string') return undefined;
+  if (r.kind === 'tuple') return 'tuple';
+  if (r.kind === 'value') return typeof r.value;
+  if (r.kind === 'list') return 'list';
+  if (r.kind !== 'union') return undefined;
+  const classes = new Set(r.types.map(shapeClass));
+  return classes.size === 1 ? [...classes][0] : undefined;
+}
+
+/** Whether the shape of a value of the declared type `t` is not settled at
+ *  compile time (rules R1 to R6 of "Shapes are settled at compile time",
+ *  `docs/COMPILATION-MODEL.md`): `t` is `any`, `unknown`, `value`,
+ *  `expression`, `broadcastable<…>`, a bare collection, or a collection
+ *  whose elements are of such a type or of a union of several classes of
+ *  shapes (`list<number | tensor>`). A union of shapes at the top
+ *  (`list<real> | real`) is not: it is a declaration that the existing
+ *  compilers read with one body per member. */
+export function hasUnsettledShape(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string')
+    return [
+      'any',
+      'unknown',
+      'value',
+      'expression',
+      'list',
+      'collection',
+      'indexed_collection',
+    ].includes(r);
+  if (r.kind === 'broadcastable') return true;
+  if (
+    r.kind === 'list' ||
+    r.kind === 'collection' ||
+    r.kind === 'indexed_collection'
+  )
+    return (
+      hasUnsettledShape(r.elements) || shapeClass(r.elements) === undefined
+    );
+  return false;
 }
 
 /** Whether `t` is `unknown` or `any`, after the transparent aliases that
@@ -108,8 +197,17 @@ export function text(e: Expression, budget = 120): string {
   return s + ')';
 }
 
-export function decline(e: Expression, cause: string): never {
-  throw new Decline(text(e), cause, isFunction(e) ? e.operator : undefined);
+export function decline(
+  e: Expression,
+  cause: string,
+  reason?: DeclineReason
+): never {
+  throw new Decline(
+    text(e),
+    cause,
+    isFunction(e) ? e.operator : undefined,
+    reason
+  );
 }
 
 /** The binding of a name. `lane` is the declared lane of a local. A

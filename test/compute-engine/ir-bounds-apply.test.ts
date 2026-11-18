@@ -477,7 +477,7 @@ describe('IR profile, batch G12: real bounds, real Ranges and Apply', () => {
       ['Range', 'r', 5],
     ])
       expect(failure(() => js(json, { mode: 'bigint' }))?.code).toBe(
-        'outside-profile'
+        'bigint-lane'
       );
     expect(
       js(['Apply', fn(['Multiply', 'z', 'z'], 'z'), 'n'], { mode: 'bigint' })
