@@ -78,6 +78,13 @@
 
 ### Resolved Issues
 
+- **The interval `sinc` encloses its turning points.** The extrema of the
+  cardinal sine were tabulated to 6 digits, so an interval that holds one
+  missed the extremum: `sinc({ lo: 4, hi: 5 })` had the lower end
+  `-0.21723362821118977`, above the minimum `-0.21723362821122166`, and on
+  `[7, 8]` the upper end was 2e-13 below the maximum. The extrema are now
+  computed to the precision of a double, and each end other than `1` is
+  widened by the error of its computation.
 - **A recursive function with an annotated parameter no longer maps over a
   list that its other parameter takes whole.** With
   `r := (n: number, s) ↦ If(n = 0, s, r(n − 1, [1, 2]))`, `r(1, [0])` was

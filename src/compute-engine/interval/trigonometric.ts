@@ -950,12 +950,27 @@ function asechRaw(x: Interval | IntervalResult): IntervalResult {
  * global bounds [-0.2172, 1] to guarantee a correct enclosure.
  */
 
-// Approximate locations of the first 10 positive local extrema of sinc(x)
-// (solutions of tan(x) = x, alternating max/min).
+// The first 10 positive local extrema of sinc(x), the roots of tan(x) = x
+// (alternating min/max), to the precision of a double: Newton's method on
+// x·cos(x) − sin(x) from a 6-digit guess. A guess of 6 digits is 5e-7 from the
+// root, where sinc differs from its extremum by about 3e-14, more than the
+// outward rounding of the result covers.
 const SINC_EXTREMA = [
   4.49341, 7.72525, 10.90412, 14.06619, 17.22076, 20.3713, 23.51945, 26.66605,
   29.8116, 32.95639,
-];
+].map((x) => {
+  for (let i = 0; i < 8; i++)
+    x -= (x * Math.cos(x) - Math.sin(x)) / (-x * Math.sin(x));
+  return x;
+});
+
+/** The ulps by which an end of sinc that is not 1 is widened: the error of
+ *  `Math.sin(t) / t`, and of an extremum that is a double near the root. */
+const SINC_ULPS = 4;
+
+/** An extremum counts when the interval comes this close to it: counting one
+ *  just outside only widens the result. */
+const SINC_EXTREMUM_MARGIN = 1e-9;
 
 function sincRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
@@ -980,9 +995,11 @@ function sincRaw(x: Interval | IntervalResult): IntervalResult {
 
   // Check known extrema within the interval
   const lastExtremum = SINC_EXTREMA[SINC_EXTREMA.length - 1];
+  const near = (e: number) =>
+    e >= xVal.lo - SINC_EXTREMUM_MARGIN && e <= xVal.hi + SINC_EXTREMUM_MARGIN;
   for (const e of SINC_EXTREMA) {
-    if (e >= xVal.lo && e <= xVal.hi) update(sincVal(e));
-    if (-e >= xVal.lo && -e <= xVal.hi) update(sincVal(-e));
+    if (near(e)) update(sincVal(e));
+    if (near(-e)) update(sincVal(-e));
   }
 
   // For the portion of the interval beyond the last tabulated extremum, the
@@ -1000,6 +1017,12 @@ function sincRaw(x: Interval | IntervalResult): IntervalResult {
     update(-1 / minBeyondAbs);
   }
 
+  // Every end but 1 (sinc(0), the exact maximum) is a computed value: widen
+  // it by the error of its computation. The ends stay within [-1, 1].
+  for (let i = 0; i < SINC_ULPS; i++) {
+    if (lo !== 1) lo = Math.max(-1, nextDown(lo));
+    if (hi !== 1) hi = Math.min(1, nextUp(hi));
+  }
   return ok({ lo, hi });
 }
 

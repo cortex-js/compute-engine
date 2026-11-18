@@ -6,6 +6,7 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { sinc } from '../../src/compute-engine/interval';
 
 const ce = new ComputeEngine();
 
@@ -89,5 +90,36 @@ describe('SINC - JavaScript compilation', () => {
     expect(result.success).toBe(true);
     const fn = result.run!;
     expect(Math.abs(fn({ x: Math.PI }))).toBeLessThan(1e-10);
+  });
+});
+
+describe('SINC - the interval kernel encloses its turning points', () => {
+  // CE-1436: the extrema were tabulated to 6 digits, so the end that an
+  // extremum sets missed the true extremum by 3e-14 to 2e-13.
+  const ce = new ComputeEngine();
+  ce.precision = 40;
+  const inside = (box: [number, number], value: string) => {
+    const r = sinc({ lo: box[0], hi: box[1] }) as {
+      value: { lo: number; hi: number };
+    };
+    const v = ce.parse(value).N();
+    expect(v.isLess(r.value.lo)).toBe(false);
+    expect(v.isGreater(r.value.hi)).toBe(false);
+  };
+  test('the minimum on [4, 5] and the maximum on [7, 8]', () => {
+    inside([4, 5], '-0.2172336282112216574');
+    inside([7, 8], '0.1283745535258991367');
+    inside([-5, -4], '-0.2172336282112216574');
+  });
+  test('a box that ends just before a turning point', () => {
+    // The minimum at 4.4934094579… is 8e-9 past the end of the box, where
+    // sinc is above it by less than 1e-32: the widened end encloses both.
+    inside([4.4934, 4.49340945], '-0.2172336282112216574');
+    // One that ends within the margin of 1e-9 counts the extremum.
+    inside([4.4934, 4.4934094575], '-0.2172336282112216574');
+  });
+  test('the point 0 still has the upper end 1', () => {
+    const r = sinc({ lo: 0, hi: 0 }) as { value: { lo: number; hi: number } };
+    expect(r.value.hi).toBe(1);
   });
 });
