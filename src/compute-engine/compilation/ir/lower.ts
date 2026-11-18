@@ -140,6 +140,14 @@ import {
   tupleOrInputType,
   userBinding,
 } from './lower-functions.js';
+import {
+  COLLECTION,
+  enclosureInput,
+  enclosureLowering,
+  enclosureRefusal,
+  isEnclosureCollection,
+  isEnclosureNode,
+} from './lower-enclosure.js';
 
 export { Decline } from './lower-context.js';
 
@@ -918,6 +926,17 @@ export function lower(
       if (typeof claim.value === 'boolean' && e.isPure === true)
         return b.constant(claim.value, 'boolean');
     const user = userBinding(e);
+    // The value kind `enclosure`: a call that the kind cannot lower
+    // declines (`enclosureRefusal()`).
+    if (interval) {
+      const refused = enclosureRefusal(
+        e,
+        user !== undefined ||
+          fns.recursive(e) ||
+          (!created.has(e) && hasOwnLowering(e.operator, e.operatorDefinition))
+      );
+      if (refused !== undefined) decline(e, refused);
+    }
     if (user !== undefined || fns.recursive(e)) return fns.call(e, user);
     // A host's handler (of a library head, or of a host operator): its
     // expression is lowered in place of `e`.
@@ -934,6 +953,11 @@ export function lower(
           ? `${e.operator} is an unknown operator (no definition)`
           : `${e.operator} is not the library operator here (a user definition)`
       );
+    // The value kind `enclosure` (`lower-enclosure.ts`): a collection of
+    // enclosures declines; a node that may read or make one is lowered by
+    // the kind, before a closed node is evaluated.
+    if (interval && isEnclosureCollection(e.type.type)) decline(e, COLLECTION);
+    if (interval && isEnclosureNode(e)) return enclosures(e);
     const closed = closedValue(e);
     if (closed !== undefined) return closed;
     switch (e.operator) {
@@ -2185,6 +2209,7 @@ export function lower(
    *  its elements, which `input()` marks a tuple. `any` is read as
    *  `unknown`: such an input is refused at the end (`program()`). */
   const inputIR = (t: Type) =>
+    (interval ? enclosureInput(t) : undefined) ??
     tupleOrInputType(isUntyped(t) ? 'unknown' : t, cx.wide);
 
   /** `ir`, the type of an input, is the IR type of the engine type `t`. */
@@ -2222,6 +2247,10 @@ export function lower(
       given(name, t);
     }
     const ir = positional ? tupleOrInputType(t, cx.wide) : inputIR(t);
+    if (ir === undefined && interval && isEnclosureCollection(t))
+      decline(e, COLLECTION);
+    if (!positional && interval && enclosureInput(t) !== undefined)
+      enclosure = true;
     if (ir === undefined)
       decline(
         e,
@@ -3039,6 +3068,9 @@ export function lower(
   };
   const lists = listLowering(cx);
   const fns = functionLowering(cx, lists);
+  // The program reads or makes an enclosure (`Program.valueKinds`).
+  let enclosure = false;
+  const enclosures = enclosureLowering(cx, () => (enclosure = true));
 
   /** The program of the entry `f`, refused when an input that it reads has
    *  no type at any occurrence (`seen`, `typed`). A decline of the lowering
@@ -3047,7 +3079,11 @@ export function lower(
     const p = b.program(f);
     const names = [...seen].filter((name) => !typed.has(name));
     if (names.length > 0) throw new UntypedInputs(names);
-    return { ...p, inputs };
+    return {
+      ...p,
+      inputs,
+      ...(enclosure ? { valueKinds: ['enclosure'] } : {}),
+    };
   };
   // A root function literal: its parameters, by position, come first.
   if (isFunction(root, 'Function') && isLibrary(root)) {

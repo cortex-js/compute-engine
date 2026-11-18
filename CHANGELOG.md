@@ -16,9 +16,16 @@
   `operators`, `imports`, `preamble`, a `mode` other than `'strict'`
   (`unsupported-mode`) and a `vars` entry that is not a read of the inputs
   object decline; `strictTypes: true` declines an undeclared input, as on
-  `javascript`: with `fallback: false` it throws an `Error`, as there. An expression with an input or a result of the kind
-  `enclosure` is not compiled on `interval-js` until a later release: it
-  throws a `KindDeclineError`, whatever `fallback` says.
+  `javascript`: with `fallback: false` it throws an `Error`, as there. The
+  value kind `enclosure` compiles in the mode as on the deleted target (an
+  input `x: enclosure` is a `{ lo, hi }` record checked at entry, and an
+  operation of the kind computes the doubles of `.N()`). It declines, with
+  the kind message, a `Sum`, `Product` or `Integrate` that reads an
+  enclosure and a call of a user function with an enclosure argument, which
+  the deleted target computed by the rules of a real; a decline of an expression with an
+  input or a result of the kind throws a `KindDeclineError`, whatever
+  `fallback` says. A host function with a `compile` handler that returns
+  text is not compiled in the mode, also beside an enclosure.
   `ce.registerCompilationTarget('interval-js', …)` and
   `ce.unregisterCompilationTarget('interval-js')` now throw, since
   `compile()` routes this name itself.

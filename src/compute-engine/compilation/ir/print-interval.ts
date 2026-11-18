@@ -46,6 +46,7 @@ import {
   type OperatorRow,
 } from './operators.js';
 import { PLAIN_ROWS, PLAIN_SPELLINGS } from './plain.js';
+import { ENCLOSURE_ROWS, ENCLOSURE_SPELLINGS } from './lower-enclosure.js';
 
 const ia = (kernel: string, arity = 1) =>
   `_IA.${kernel}(${arity === 2 ? '$0, $1' : '$0'})`;
@@ -154,6 +155,8 @@ export const JS_INTERVAL: Syntax = Object.freeze({
     'rangecount': '_IA.rangeCount($0, $1, $2)',
     'rangestep': '($1 >= $0 ? 1 : -1)',
     ...PLAIN_SPELLINGS,
+    // The value kind `enclosure` (`lower-enclosure.ts`).
+    ...ENCLOSURE_SPELLINGS,
   },
   // A loop that fills an array, with no `Array.from()`.
   map: (lengths, body) => {
@@ -252,6 +255,7 @@ export const INTERVAL_ROWS: readonly OperatorRow[] = deepFreeze([
   row(undefined, 2, [[[R, R], R, 'negdiv']], {}),
   ...['atleast', 'atmost'].map((op) => row(undefined, 2, arith(op, 2), list)),
   ...PLAIN_ROWS,
+  ...ENCLOSURE_ROWS,
 ]);
 
 /** The closed form of each `integrate` of `p` (its second region) that

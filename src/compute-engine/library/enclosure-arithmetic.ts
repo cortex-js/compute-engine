@@ -1692,9 +1692,9 @@ function roundingApply(
       if (step === undefined || s === undefined)
         return fromResult(ce, kernel(v), nan);
       // A step `m` or `1/m`, with `m` a safe integer, scales through the
-      // exact point `m` (`intervalRoundToStep()` of the `interval-js`
-      // target): `1/100` has no double, and a division by an enclosure of
-      // it would widen a tie across its jump.
+      // exact point `m` (`rounding()` of the interval mode,
+      // `compilation/ir/lower-enclosure.ts`): `1/100` has no double, and a
+      // division by an enclosure of it would widen a tie across its jump.
       const q = isNumber(step.lo) ? asRational(step.lo) : undefined;
       if (q !== undefined) {
         const p = Math.abs(Number(q[0]));

@@ -905,6 +905,56 @@ as a rational of odd denominator, where `_IA.powReal` takes the scalar
 and a base whose upper end raised to the exponent underflows to 0 (an upper end
 `+∞` included) the lower end `-5e-324` where `_IA.powInterval` gives 0.
 
+Enclosures (`lower-enclosure.ts`; `docs/COMPILATION-MODEL.md`, "The enclosure
+on `interval-js`"). A value of the kind `enclosure` is an interval of the mode:
+an input whose type has an `enclosure` arm and whose other arms are numbers
+(`enclosure`, `real | enclosure`, `number | enclosure`, `enclosure | nan`) is a
+`real` input (`enclosureInput()`, read by `inputIR()`, so also for a name that
+holds an enclosure, `c := Enclosure(1, 3)`). A node with an operand or a result
+that may be an enclosure, other than a head that holds, passes or chooses a
+value (`CONTROL_FLOW_HEADS`, `List`, `Tuple`, `Hold`, `Apply`), is lowered by
+the kind before `closedValue()`, with operations of its own rows (`enc.*`,
+`ENCLOSURE_ROWS`, of no head, spelled in `JS_INTERVAL`): no pass of the mode
+reads them, and the mode's rules for a real (the exact-zero rule of `fold`,
+`narrow`, `subtractions()`, the power and constant rules above) never make
+them, so a program with no enclosure compiles as before. Each node is the `_IA`
+call of the `.N()` route of the interpreter for the same form
+(`enclosure-arithmetic.ts`), so the two routes give the same doubles: a number
+or a constant of class 2 as an operand is the interval of its outward
+conversion (`outwardDoubles()`: `x + 0.1` reads `[0.09999999999999999, 0.1]`;
+not the mode's `inexact` literal), an infinite literal is the point `±∞`; an
+arithmetic result is `_IA.enclose()` of its kernels (the library's marks
+removed, `empty` for an infinite singleton or a `NaN` end); an operand of an
+arithmetic kernel that may be infinite is read through `_IA.finiteOperand()`; a
+comparison reads its operands through `_IA.stripEnclosure()`, each once, and an
+extremum wraps its result in it; a power takes the kind's own exponent table
+(`_IA.square`, `_IA.sqrt`, `_IA.pow` of an integer, `_IA.powRational` of `p/q`
+with an odd `q`, `_IA.powRealBranch` of a float read as such a `p/q`,
+`1 / x^|n|` for a negative integer `n`, `_IA.powInterval` of an exponent that is
+not a point over a base proved positive); a rounding with a step is
+`round(x / k) · k`; `Mod` is `empty` for a zero divisor; a literal
+`Enclosure(a, b)` is the interval `[min(down), max(up)]` of its outward
+endpoints, and a symbolic endpoint declines. The heads are an allow-list that
+fails closed: any other head, and an operand that the interpreter leaves
+unevaluated (`Factorial(x)`, `Log(x, c)` with `c: enclosure`, `Mod(5, c)`),
+declines with a message that names the kind type `enclosure`, and so do a
+collection of enclosures (`list<enclosure>`), a `Sum`, `Product`, `Integrate`
+or `NIntegrate` whose operands read an enclosure (the loop would add the terms
+by the rules of a real), and a call of a user function or of a host's
+`compile` handler with an argument that may be an enclosure (its body would be
+lowered by the rules of a real; `enclosureRefusal()`, before the call is
+lowered). The program then has
+`valueKinds: ['enclosure']`, and the result (`adapter-interval.ts`) checks the
+host value of each input of the kind before `run()` and before the loop of
+`broadcast()` and `broadcastAsync()` (a record `{ lo, hi }`, or a number by the
+numeric arms of a union): a refused value throws. `shippable` is `false`,
+`willUsePool()` answers `false`, and the stored form cannot be loaded
+(`createIntervalRuntime()` refuses `valueKinds`); `run()` and the batches load a
+copy without it, after the checks. A direct trigonometric function under an
+angular unit other than radians multiplies its operand by the outward interval
+of the factor, where `.N()` multiplies each endpoint exactly: the two can differ
+by the rounding of the factor.
+
 Values computed once (`computedOnce()` of `print-interval.ts`). A value that
 depends on no input, parameter, loop index or draw is computed when the code is
 loaded, in `preambleOnce`, and read by its name: a constant that is not a number
@@ -951,8 +1001,9 @@ gives interval results (`interval-fallback.ts`): at a point box a number is a
 point only when the interpreter's value is exactly that double, and otherwise
 `entire`, and a boolean is decided only when every number it is computed from is
 exact, and otherwise `'maybe'`; over a wider box, or with a draw, a number is
-`entire` and a boolean `'maybe'`. An expression with an input or a result of the
-kind `enclosure` has no fallback: it throws a `KindDeclineError`. The result has
+`entire` and a boolean `'maybe'`. A decline of an expression with an input or a
+result of the kind `enclosure` has no fallback (it would read an enclosure input
+as its midpoint): it throws a `KindDeclineError`. The result has
 `target: 'interval-js'`, `success`, `runtimeVersion`, `code`, `preambleOnce`,
 `preamblePerCall` when there is one, `preamble` (the two, in that order),
 `calling` (`'expression'`, or `'lambda'` for a root `Function` literal, which

@@ -41,14 +41,10 @@ function compileI(x: Expression, fallback = false) {
   return compile(x, { to: 'interval-js', fallback });
 }
 
-/** The compilation of `x` declines (`success: false`, as the `interval-js`
- * target reports a decline without `fallback`) with a message that matches
- * `message`. */
+/** The compilation of `x` declines (without `fallback`, the interval mode
+ * throws the decline) with a message that matches `message`. */
 function expectDecline(x: Expression, message: RegExp | string): void {
-  const result = compileI(x);
-  expect(result.success).toBe(false);
-  if (typeof message === 'string') expect(result.error).toContain(message);
-  else expect(result.error).toMatch(message);
+  expect(() => compileI(x)).toThrow(message);
 }
 
 /** `run()` throws with a message that matches `message`, and no
@@ -81,8 +77,7 @@ function enclosed(r: unknown): unknown {
   return IA.enclose(r as never);
 }
 
-// Skipped until the interval mode of the profile ir compiles the enclosure kind (the follow-up to the deletion of the existing interval target).
-describe.skip('ENCLOSURE COMPILE: x + 1 with x: enclosure', () => {
+describe('ENCLOSURE COMPILE: x + 1 with x: enclosure', () => {
   const ce = engine();
   let result: ReturnType<typeof compileI>;
   beforeAll(() => {
@@ -177,8 +172,7 @@ describe.skip('ENCLOSURE COMPILE: x + 1 with x: enclosure', () => {
   });
 });
 
-// Skipped until the interval mode of the profile ir compiles the enclosure kind (the follow-up to the deletion of the existing interval target).
-describe.skip('ENCLOSURE COMPILE: the runner', () => {
+describe('ENCLOSURE COMPILE: the runner', () => {
   test('y: real | missing cannot be declared', () => {
     // `Missing` is a result only: no compiled input is declared absent.
     const ce = engine();
@@ -346,8 +340,7 @@ describe.skip('ENCLOSURE COMPILE: the runner', () => {
   });
 });
 
-// Skipped until the interval mode of the profile ir compiles the enclosure kind (the follow-up to the deletion of the existing interval target).
-describe.skip('ENCLOSURE COMPILE: the declines', () => {
+describe('ENCLOSURE COMPILE: the declines', () => {
   test('the operators that the interpreter leaves unevaluated', () => {
     const ce = engine();
     ce.declare('c', 'enclosure');
@@ -381,6 +374,45 @@ describe.skip('ENCLOSURE COMPILE: the declines', () => {
     );
   });
 
+  test('a call of a user function with an enclosure argument', () => {
+    // The body would be lowered by the rules of a real (`f(t) = t^{-2}` at
+    // `[-1, 1]` would be `singular`, where `.N()` gives `[1, +oo]`; a
+    // `Factorial` in the body would compute).
+    for (const def of [
+      'f(t) \\coloneq t^{-2}',
+      'f(t) \\coloneq t^{0.2}',
+      'f(t) \\coloneq \\sqrt{t}',
+      'f(t) \\coloneq t + \\frac{1}{3}',
+      'f(t) \\coloneq t!',
+    ]) {
+      const ce = engine();
+      ce.parse(def).evaluate();
+      expectDecline(ce.box(['f', 'x']), KIND);
+      expectDecline(ce.box(['Less', ['f', 'x'], 1]), KIND);
+    }
+  });
+
+  test('Sum, Product and Integrate of an enclosure', () => {
+    // Their terms would be added with the mode's rules, not the kind's
+    // (`Sum(x^k, k = 1..5)` at `[-0.3, 0.7]` missed the value of `.N()`).
+    const ce = engine();
+    ce.declare('t', 'real');
+    for (const json of [
+      ['Sum', ['Power', 'x', 'k'], ['Limits', 'k', 1, 5]],
+      ['Sum', ['Power', 'x', ['Divide', 'k', 3]], ['Limits', 'k', 1, 3]],
+      ['Product', ['Power', 'x', 'k'], ['Limits', 'k', 1, 3]],
+      ['Sum', 'k', ['Limits', 'k', 1, ['Floor', ['Enclosure', 2, 3]]]],
+      ['Integrate', ['Multiply', 'x', 's'], ['Limits', 's', 0, 1]],
+      ['Add', 't', ['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 1, 3]]],
+    ] as Json[])
+      expectDecline(ce.box(json), KIND);
+    // With no enclosure, unchanged.
+    expect(
+      compileI(ce.box(['Sum', ['Multiply', 'k', 't'], ['Limits', 'k', 1, 3]]))
+        .success
+    ).toBe(true);
+  });
+
   test('a measurement keeps the interpreter fallback', () => {
     const ce = new ComputeEngine();
     const result = compileI(
@@ -388,10 +420,11 @@ describe.skip('ENCLOSURE COMPILE: the declines', () => {
       true
     );
     expect(result.success).toBe(false);
-    expect(result.run({ t: 1 } as never)).toEqual({
-      kind: 'interval',
-      value: { lo: 2, hi: 2 },
-    });
+    // The fallback runs (no throw). A measurement is not a number whose
+    // exact value is a double, so its value at a point is `entire`, the
+    // "cannot bound" answer of the fallback (`toIntervalValue()`,
+    // `interval-fallback.ts`).
+    expect(result.run({ t: 1 } as never)).toEqual({ kind: 'entire' });
   });
 
   test('an enclosure result throws with fallback: true', () => {
@@ -403,8 +436,7 @@ describe.skip('ENCLOSURE COMPILE: the declines', () => {
   });
 });
 
-// Skipped until the interval mode of the profile ir compiles the enclosure kind (the follow-up to the deletion of the existing interval target).
-describe.skip('ENCLOSURE COMPILE: the same doubles as .N()', () => {
+describe('ENCLOSURE COMPILE: the same doubles as .N()', () => {
   const ce = new ComputeEngine();
 
   /** The compiled value of the closed expression `json`. */
@@ -672,41 +704,25 @@ describe.skip('ENCLOSURE COMPILE: the same doubles as .N()', () => {
   });
 
   test('a chained comparison evaluates its middle operand once', () => {
-    // `x < F() < y` is two comparisons that share `F()`. The compiled code
-    // must call `F` once for each run, as the interpreter evaluates each
-    // operand once: a function with an effect must not run twice.
+    // `x < F(t) < y` is two comparisons that share `F(t)`. The compiled code
+    // computes `F(t)` once for each run, as the interpreter evaluates each
+    // operand once. The interval mode compiles no host function with an
+    // effect (it refuses the text of a `compile` handler), so the operand is
+    // a library function, and the code holds one call of its kernel.
     // The operand reads `t`, so the compiler cannot evaluate it once at
     // compile time as a constant.
     const ce = engine();
     ce.declare('y', 'enclosure');
     ce.declare('t', 'real');
-    let calls = 0;
-    const host = globalThis as { encCountedMiddle?: (v: unknown) => unknown };
-    host.encCountedMiddle = (v) => {
-      calls += 1;
-      return v;
-    };
-    ce.declare('EncCountedMiddle', {
-      signature: '(real) -> real',
-      evaluate: ([v]) => v,
-      compile: (args, compile) =>
-        `globalThis.encCountedMiddle(${compile(args[0])})`,
-    });
-    let actual: unknown;
-    try {
-      const result = compileI(
-        ce.box(['Less', 'x', ['EncCountedMiddle', 't'], 'y'])
-      );
-      expect(result.success).toBe(true);
-      actual = result.run({
-        x: { lo: 0, hi: 1 },
-        y: { lo: 2, hi: 3 },
-        t: 1.5,
-      } as never);
-    } finally {
-      delete host.encCountedMiddle;
-    }
-    expect(calls).toBe(1);
+    const result = compileI(ce.box(['Less', 'x', ['Sqrt', 't'], 'y']));
+    expect(result.success).toBe(true);
+    const text = `${result.preamble ?? ''}\n${result.code}`;
+    expect(text.match(/_IA\.sqrt\(/g)).toHaveLength(1);
+    const actual = result.run({
+      x: { lo: 0, hi: 1 },
+      y: { lo: 2, hi: 3 },
+      t: 2.25,
+    } as never);
     const interpreted = ce
       .box(['Less', ['Enclosure', 0, 1], 1.5, ['Enclosure', 2, 3]])
       .evaluate();

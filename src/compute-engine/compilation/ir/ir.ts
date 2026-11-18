@@ -164,6 +164,9 @@ export type Program = {
     string,
     { readonly type: Type; readonly declared: boolean }
   >;
+  /** The value kind types that the program reads or makes (the interval
+   *  mode: `['enclosure']`, `lower-enclosure.ts`). */
+  readonly valueKinds?: readonly string[];
 };
 
 export const scalarType = (lane: Lane): IRType => ({ lane, shape: [] });

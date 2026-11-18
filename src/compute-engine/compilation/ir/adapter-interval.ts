@@ -8,7 +8,22 @@
  */
 
 import type { Expression } from '../../global-types.js';
-import type { CompilationResult, IntervalValue } from '../types.js';
+import type { Type } from '../../../common/type/types.js';
+import { provablyDisjoint } from '../../../common/type/subtype.js';
+import { SIGNED_INFINITY_TYPE } from '../../../common/type/primitive.js';
+import { withoutKindArms } from '../../../common/type/utils.js';
+import {
+  hasEnclosureArm,
+  isEnclosureEntry,
+} from '../../library/enclosure-compile.js';
+import { kindEntryError } from '../javascript-runtime.js';
+import { visitIntervalInputCells } from '../broadcast.js';
+import type {
+  BroadcastInputs,
+  BroadcastOptions,
+  CompilationResult,
+  IntervalValue,
+} from '../types.js';
 import { INTERVAL_RUNTIME_VERSION } from '../../../common/runtime-versions.js';
 import {
   isShippableCode,
@@ -19,7 +34,7 @@ import {
 import { createIntervalRuntime } from '../interval-runtime.js';
 import { readsVarsObject } from '../vars-inputs.js';
 import { withIntegralClosedFormBudgets } from '../interval-quadrature.js';
-import { isBooleanBindingType } from '../type-facts.js';
+import { declaredTypeText, isBooleanBindingType } from '../type-facts.js';
 import { compileSlice } from './index.js';
 import { entryOf } from './ir.js';
 import {
@@ -50,6 +65,105 @@ const IR_INTERVAL_OPTIONS = {
   keyof typeof IR_OPTIONS,
   'mapped' | 'no-op' | 'declined'
 >;
+
+/** The run-time check of the host value of an input whose type has an
+ *  `enclosure` arm: `value` for `run()`, `cell` for a cell `[lo, hi]` of
+ *  `broadcast()`. */
+type KindEntry = {
+  readonly name: string;
+  readonly label: string;
+  readonly value: (v: unknown) => boolean;
+  readonly cell: (lo: number, hi: number) => boolean;
+};
+
+/**
+ * The checks of the inputs `names` of the engine types `types` that have an
+ * `enclosure` arm (`docs/plans/2026-10-26-value-kinds.md`, section 4.9.2,
+ * "Compilation"). An input typed `enclosure` admits what the `entry` of the
+ * kind admits: a record `{ lo, hi }` with `lo <= hi`, not the same infinity
+ * twice and no `NaN`, or a finite number. A union (`number | enclosure`,
+ * `enclosure | nan`) is checked by arm: a record by the `entry` of the kind,
+ * a number by the numeric arms (`NaN` admitted when an arm admits `nan` or
+ * `missing`, `±Infinity` when an arm admits an infinity). A cell of
+ * `broadcast()` whose two bounds are the same value (`NaN` and `±Infinity`
+ * included) is read as that number when the type has a numeric arm.
+ */
+function kindEntries(
+  names: readonly string[],
+  typeOf: (name: string) => Type | undefined
+): KindEntry[] {
+  const entries: KindEntry[] = [];
+  for (const name of names) {
+    const t = typeOf(name);
+    if (t === undefined || !hasEnclosureArm(t)) continue;
+    const rest = withoutKindArms(t, { has: (k) => k === 'enclosure' });
+    const numeric = rest !== 'never';
+    const admitsNaN =
+      numeric &&
+      (!provablyDisjoint(rest, 'nan') || !provablyDisjoint(rest, 'missing'));
+    const admitsInfinity =
+      numeric && !provablyDisjoint(rest, SIGNED_INFINITY_TYPE);
+    const asNumber = (v: number): boolean =>
+      Number.isFinite(v) || (Number.isNaN(v) ? admitsNaN : admitsInfinity);
+    entries.push({
+      name,
+      label: `"${name}" (type \`${declaredTypeText(t)}\`)`,
+      value: (v) =>
+        typeof v === 'number' ? asNumber(v) : isEnclosureEntry(v),
+      cell: (lo, hi) =>
+        numeric && (lo === hi || (Number.isNaN(lo) && Number.isNaN(hi)))
+          ? asNumber(lo)
+          : isEnclosureEntry({ lo, hi }),
+    });
+  }
+  return entries;
+}
+
+/** Throw when a value of the inputs object `vars` is refused by its
+ *  check; an input not given is refused. */
+function checkKindInputs(entries: readonly KindEntry[], vars: unknown): void {
+  for (const entry of entries) {
+    const v =
+      vars !== null &&
+      typeof vars === 'object' &&
+      Object.prototype.hasOwnProperty.call(vars, entry.name)
+        ? (vars as Record<string, unknown>)[entry.name]
+        : undefined;
+    if (!entry.value(v)) throw kindEntryError(entry.label);
+  }
+}
+
+/** Throw when a cell of a batch is refused by its check, or when an input
+ *  that has a check is not given. Called before the loop. */
+function checkKindCells(
+  entries: readonly KindEntry[],
+  inputs: BroadcastInputs,
+  options: BroadcastOptions | undefined,
+  booleans: readonly string[],
+  lists: readonly string[]
+): void {
+  const byName = new Map(entries.map((e) => [e.name, e]));
+  const names = visitIntervalInputCells(
+    inputs,
+    options,
+    (name, lo, hi) => {
+      const entry = byName.get(name);
+      if (entry !== undefined && !entry.cell(lo, hi))
+        throw kindEntryError(entry.label);
+    },
+    booleans,
+    // A boolean for an input of a kind type is refused, as `run()` refuses
+    // it.
+    (name, value) => {
+      const entry = byName.get(name);
+      if (entry !== undefined && !entry.value(value))
+        throw kindEntryError(entry.label);
+    },
+    lists
+  );
+  for (const entry of entries)
+    if (!names.includes(entry.name)) throw kindEntryError(entry.label);
+}
 
 /** The closed forms of the integrals take the antiderivative budget of the
  *  outermost compilation in progress. */
@@ -124,7 +238,22 @@ function compileInterval(
     );
     const once = s.preambleOnce;
     const perCall = s.preamblePerCall;
-    const shippable = isShippableCode(`${once}\n${perCall ?? ''}\n${s.code}`);
+    // A program that reads or makes an enclosure (`lower-enclosure.ts`): the
+    // checks of its inputs of the kind are functions of this host, so the
+    // result is not shippable, the pool is not used, and a stored copy
+    // cannot be loaded (`valueKinds`); `run()` and the batches apply the
+    // checks before they load a copy without `valueKinds`.
+    const kinds = p.valueKinds;
+    const entries =
+      kinds === undefined
+        ? []
+        : kindEntries(
+            [...inputs, ...reads.keys()],
+            (name) => p.inputs?.get(name)?.type
+          );
+    const shippable =
+      kinds === undefined &&
+      isShippableCode(`${once}\n${perCall ?? ''}\n${s.code}`);
     const result: CompilationResult<'interval-js', IntervalValue> = {
       target: 'interval-js',
       success: true,
@@ -140,9 +269,15 @@ function compileInterval(
           }),
       ...(perCall === undefined ? {} : { preamblePerCall: perCall }),
       calling: s.calling,
+      ...(kinds !== undefined ? { valueKinds: [...kinds] } : {}),
       ...(booleans.length > 0 ? { booleanInputs: booleans } : {}),
       ...(lists.length > 0 ? { listInputs: lists } : {}),
-      run: s.run as CompilationResult<'interval-js', IntervalValue>['run'],
+      run: (entries.length === 0
+        ? s.run
+        : (vars: unknown) => {
+            checkKindInputs(entries, vars);
+            return s.run(vars);
+          }) as CompilationResult<'interval-js', IntervalValue>['run'],
       freeSymbols: report.freeSymbols,
       freeSymbolTypes: report.freeSymbolTypes,
       unsupported: [],
@@ -155,8 +290,14 @@ function compileInterval(
     const runtime = createIntervalRuntime();
     let batch: ReturnType<typeof runtime.loadBroadcast> | undefined;
     let slice: ReturnType<typeof runtime.loadBroadcastSlice> | undefined;
-    result.broadcast = (cells, o) =>
-      (batch ??= runtime.loadBroadcast(result))(cells, o);
+    const stored = { ...result, valueKinds: undefined };
+    const check = (cells: BroadcastInputs, o?: BroadcastOptions) => {
+      if (entries.length > 0) checkKindCells(entries, cells, o, booleans, lists);
+    };
+    result.broadcast = (cells, o) => {
+      check(cells, o);
+      return (batch ??= runtime.loadBroadcast(stored))(cells, o);
+    };
     const engine = expr.engine;
     const spec: BroadcastAsyncSpec = {
       kind: 'interval-js',
@@ -166,12 +307,21 @@ function compileInterval(
       lists,
       booleans,
       slice: (cells, o, out, range) =>
-        (slice ??= runtime.loadBroadcastSlice(result))(cells, o, out, range),
+        (slice ??= runtime.loadBroadcastSlice(stored))(cells, o, out, range),
       workers: () => engine.workers,
     };
-    result.broadcastAsync = makeBroadcastAsync(spec);
+    const broadcastAsync = makeBroadcastAsync(spec);
+    // A cell that a check refuses rejects the promise before any slice runs.
+    result.broadcastAsync =
+      entries.length === 0
+        ? broadcastAsync
+        : async (cells, o) => {
+            check(cells, o);
+            return broadcastAsync(cells, o);
+          };
     result.shippable = shippable;
-    result.willUsePool = makeWillUsePool(spec);
+    result.willUsePool =
+      kinds === undefined ? makeWillUsePool(spec) : () => false;
     return result;
   } catch (e) {
     throw sliceError(e);

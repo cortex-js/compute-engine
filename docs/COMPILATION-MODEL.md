@@ -4149,18 +4149,13 @@ The design is `docs/plans/2026-10-26-value-kinds.md`, section 4.8.
 
 ### The enclosure on `interval-js`
 
-**Not available at present.** Since `interval-js` compiles with the
-interval mode of the IR pipeline, which does not lower the kind, an
-expression with an input or a result of the kind `enclosure` declines on
-`interval-js` with a `KindDeclineError`, also with `fallback: true`. This
-section describes the compiled form that the earlier interval target gave,
-which the interval mode is to give in a follow-up.
-
 `Enclosure(lo, hi)`, an interval that holds one real (`TYPE-SYSTEM.md`,
-"Enclosures"), is the one library kind with a compile contract
-(`ENCLOSURE_COMPILE`, `library/enclosure-compile.ts`). The contract answers
-for the target `interval-js` only; every other target declines with the
-kind message. The design is section 4.9.2 of
+"Enclosures"), is the one library kind with a compiled form, on the target
+`interval-js` only: the interval mode of the IR pipeline lowers it
+(`compilation/ir/lower-enclosure.ts`; `compilation/ir/README.md`, "The
+interval mode", "Enclosures"). Its compile contract (`ENCLOSURE_COMPILE`,
+`library/enclosure-compile.ts`) has no hook that writes code; every other
+target declines with the kind message. The design is section 4.9.2 of
 `docs/plans/2026-10-26-value-kinds.md`, "Compilation".
 
 **The representation.** An enclosure is the `{ lo, hi }` interval of the
@@ -4177,7 +4172,7 @@ double, else the record of its outward conversion (`0.1` is
 `{ lo: 0.09999999999999999, hi: 0.1 }`). A complex literal and an endpoint
 with a free variable decline.
 
-**One kernel for each form.** The hooks emit, operation by operation, the
+**One kernel for each form.** The lowering emits, operation by operation, the
 `_IA` call that the `.N()` route of the interpreter makes for the same form
 (`enclosure-arithmetic.ts`), so the compiled code and `.N()` give the same
 doubles: `add`/`mul` folds, `div`, `sub`, `negate`; for a power, one kernel
@@ -4186,8 +4181,9 @@ another integer, `powRational` for a rational with an odd denominator,
 `powRealBranch` or `pow` for a float exponent by the target's selection
 rule, `exp` for the base `e`, `powInterval` for an exponent that is not a
 point, only when the base is provably positive); a negative integer power
-as `1 / x^|n|`; the step of `Round`/`Floor`/`Ceil`/`Truncate` through
-`intervalRoundToStep()`; `Log(x)` with `log10`, `Log(x, 2)` with `log2`,
+as `1 / x^|n|`; the step of `Round`/`Floor`/`Ceil`/`Truncate` as
+`round(x / k) · k` (an exact step `1/m` or `m` through the point `m`);
+`Log(x)` with `log10`, `Log(x, 2)` with `log2`,
 another base with `div(ln x, ln b)`; `mod`, `hypot`, `atan2`; the unary
 functions of the `apply` table through `ENCLOSURE_UNARY_KERNELS`. Three
 run-time helpers of `IntervalArithmetic` (`interval/util.ts`) connect the
@@ -4215,10 +4211,11 @@ library's results to the interpreter's rules:
 
 **A possible enclosure.** On this target only, an operand whose type has
 an `enclosure` arm (`real | enclosure`, the value of `If(t > 0, x, 0)` with
-`x: enclosure`) is dispatched to the hooks as a certain one, and a free
-symbol with such a type sets up the kind lowering and its entry check. A
-number is a point interval on this target, so the code of a hook is valid
-for it. So `Factorial(y)` with `y: real | enclosure` declines, as the
+`x: enclosure`) is lowered as a certain one, and a free symbol with such a
+type is an interval input with its entry check. A number is a point
+interval on this target, so the code of the kind is valid for it. The
+heads that hold, pass or choose a value (`If`, `Which`, `Block`, `Loop`,
+`List`, `Tuple`) are lowered as for an interval. So `Factorial(y)` with `y: real | enclosure` declines, as the
 interpreter leaves `Factorial` of an enclosure unevaluated.
 
 **The entry check of the interval runner.** For each free symbol whose type
@@ -4248,15 +4245,21 @@ this target collapses each `{ lo, hi }` input to its midpoint
 for an enclosure. `Measurement`, `Quantity` and the `javascript` target keep
 the fallback.
 
-**The declines.** A hook answers `undefined`, and the compilation declines
-with the kind message, exactly where the interpreter leaves the call
-unevaluated: an operator that is not in the `apply` table (`Factorial`),
+**The declines.** The heads of the kind are an allow-list that fails
+closed: a node with an operand or a result that may be an enclosure
+declines with the kind message when its head is not in the list, and
+where the interpreter leaves the call unevaluated: an operator that is not in the `apply` table (`Factorial`),
 `Gamma(s, x)` with two operands, `Log` with an enclosure base, `Round`
 with an enclosure step, `Mod` with a divisor that is not a point, a power
 with a base that is not provably positive and an exponent that is not a
 point (`(-2)^Enclosure(1, 2)`), and an integer exponent that is not a safe
-integer. `Mean`, `Sum` and `Product` decline too: the library has no kernel
-for them, and their list forms decline by the collection limit.
+integer. `Mean`, `Sum`, `Product`, `Integrate` and `NIntegrate` decline
+too when an operand reads an enclosure: the library has no kernel for them,
+and the mode's loop would add the terms by the rules of a real. So does a
+call of a user function or of a host's `compile` handler with an argument
+that may be an enclosure: its body would be lowered by the rules of a real
+(`f(t) = t^{-2}` at `x: [-1, 1]` would be `singular`, where `.N()` gives
+`Enclosure(1, +oo)`).
 
 **Accepted differences between the interpreter and the compiled code.**
 
@@ -4272,11 +4275,16 @@ for them, and their list forms decline by the collection limit.
    compiled answer is the target's three-valued one: `'maybe'` where the
    interpreter stays unevaluated, `'true'` for the touching `LessEqual`
    that the interpreter answers `True` too.
-3. **An angular mode other than radians.** The target scales an angle by
-   the exact factor (`rewriteAngularUnit(expr, { exactFactors: true })`),
-   enclosed outward, so the result contains the true value. The `.N()` route
-   computes the exact product and converts it once. The endpoints of the
-   two routes may differ by the rounding of the factor.
+3. **An angular mode other than radians.** The compiled code multiplies
+   the operand of a direct trigonometric function by the outward interval
+   of the exact factor (`π/180` in degrees), so the result contains the
+   true value; the `.N()` route multiplies each endpoint exactly and
+   converts the product once. The endpoints of the two routes may differ
+   by the rounding of the factor (`Sin(x)` at `x: [30, 30]` in degrees is
+   `[0.4999999999999998, 0.5000000000000002]` compiled and
+   `[0.4999999999999999, 0.5000000000000001]` under `.N()`). The result of
+   an inverse function is multiplied by the same interval on both
+   routes.
 4. **A non-integer point exponent with a negative base at run time.** An
    exponent that is a free symbol of a number type (`x^n` with
    `n: integer`) lowers to `_IA.powInterval`, whose run-time point shortcut
@@ -4287,12 +4295,14 @@ for them, and their list forms decline by the collection limit.
 
 **The limits kept from phase 1.**
 
-- Code with an enclosure input cannot be loaded again from its stored form:
-  the loaders of `createIntervalRuntime()` (`load()`, `loadBroadcast()`,
+- Code that reads or makes an enclosure (`valueKinds: ['enclosure']`)
+  cannot be loaded again from its stored form: the loaders of
+  `createIntervalRuntime()` (`load()`, `loadBroadcast()`,
   `loadBroadcastSlice()`) refuse code that names a kind type, because the
-  `entry` check is a function of the host. `shippable` is `false`
-  (`ENCLOSURE_COMPILE` says so), so the kernel pool is not used and
-  `willUsePool()` answers `false`.
+  `entry` check is a function of the host. The `run()`, `broadcast()` and
+  `broadcastAsync()` of the result apply the checks and then run a copy
+  without `valueKinds`. `shippable` is `false`, so the kernel pool is not
+  used and `willUsePool()` answers `false`.
 - An input typed `list<enclosure>` declines (`entry` and `lowered()`
   describe one value).
 

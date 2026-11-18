@@ -105,12 +105,14 @@ describe('the interval fallback at a point box', () => {
   });
 });
 
-describe('an enclosure input on interval-js is a kind decline', () => {
+describe('a decline with an enclosure input on interval-js is a kind decline', () => {
   const ceE = new ComputeEngine();
   ceE.declare('y', 'enclosure');
   test.each([true, false])('with fallback: %s', (fallback) => {
+    // `y + 1` compiles; `Factorial` of an enclosure declines (the
+    // interpreter leaves it unevaluated), and has no fallback.
     expect(() =>
-      compile(ceE.parse('y + 1'), { to: 'interval-js', fallback })
+      compile(ceE.box(['Factorial', 'y']), { to: 'interval-js', fallback })
     ).toThrow(KindDeclineError);
   });
 });
