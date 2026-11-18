@@ -42,9 +42,11 @@ describe('trigonometry', () => {
     expect(v.im).toBeCloseTo(Math.PI / 3, 14);
   });
 
-  test('TrigExpand keeps an assigned variable and handles a tangent pole', () => {
+  test('TrigExpand reads an assigned variable and handles a tangent pole', () => {
+    // As `Expand`, the operand is rewritten with the values of its symbols
+    // (CE-1410).
     expect(run('let y = 5\ntrigExpand(sin(x + y))')).toBe(
-      'sin(y) * cos(x) + sin(x) * cos(y)'
+      'sin(5) * cos(x) + sin(x) * cos(5)'
     );
     expect(run('trigExpand(tan(x + Pi/2))')).toBe('-cos(x) / sin(x)');
   });

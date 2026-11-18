@@ -2,6 +2,19 @@
 
 ### Resolved Issues
 
+- **`TrigExpand`, `TrigReduce` and `TrigToExp` rewrite the value of a
+  variable, and the result of another rewrite.** With `y := \sin(2x)`,
+  `TrigExpand(y)` was `y`; it is now `2\sin(x)\cos(x)`, as
+  `TrigExpand(\sin(2x))`. `TrigReduce(TrigExpand(\cos(2x)))` was
+  `TrigExpand(\frac12 e^{2ix}+\frac12 e^{-2ix})`; it is now `\cos(2x)`, and
+  `TrigExpand(TrigReduce(\sin(x)^2))` is `\frac12\sin(x)^2-\frac12\cos(x)^2+\frac12`
+  (it was `TrigReduce(\sin(x)^2)`). As for `Expand`, each symbol of the
+  operand that holds a value is replaced by that value: with `y = 5`,
+  `TrigExpand(\sin(x+y))` is `\sin(5)\cos(x)+\sin(x)\cos(5)` (it kept `y`).
+  `Integrate`, `Limit` and `Expand` of a `TrigReduce` or `TrigToExp` call now
+  work on the rewritten expression: `\int TrigReduce(\sin(x)^2)\,dx` is
+  `\frac12 x-\frac14\sin(2x)` (it stayed unevaluated).
+
 - **A quantifier nested in a quantifier of the other kind gives the right
   answer.** `\forall x\in\{1,2\}, \exists y\in\{1,2\}, y=x` was `False`; it
   is now `True`. The inner quantifier was merged into the outer one and

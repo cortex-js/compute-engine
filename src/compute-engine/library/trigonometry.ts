@@ -7,7 +7,11 @@ import {
   pointNormBroadcasts,
   pointNormType,
 } from './utils.js';
-import { bignumPreferred, boxBignumResult } from '../boxed-expression/utils.js';
+import {
+  bignumPreferred,
+  boxBignumResult,
+  reduceTransformerOperand,
+} from '../boxed-expression/utils.js';
 import {
   asFloat,
   floatIfFloatOperand,
@@ -276,7 +280,9 @@ const ARCTAN_CARRIER = parseType('complex | signed_infinity');
  * result, `value`, stands. A collection operand keeps its shape under all
  * three verbs, but no shape is claimed.
  *
- * The three verbs are `lazy`, so their operand is not evaluated first, but
+ * The three verbs are `lazy`, so their operand is not evaluated first (the
+ * evaluate handler only resolves the values of its symbols and inner
+ * transformers, with `reduceTransformerOperand()`), but
  * their `canonical` handler binds it (`.canonical`, which evaluates
  * nothing), so the operand's type is known here, with the binding it is
  * evaluated with: a function parameter that has the name of a global is
@@ -1835,7 +1841,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   //
   // Trigonometric rewrite verbs (transformation functions like Expand/Factor).
   // These are `lazy` so the operand is transformed structurally rather than
-  // evaluated first, then the result is canonicalized.
+  // evaluated first, then the result is canonicalized. As for `Expand`, the
+  // operand is first reduced by `reduceTransformerOperand()`: a symbol that
+  // holds a value is replaced by that value (`TrigExpand(y)` with
+  // `y := Sin(2x)` expands `Sin(2x)`), and an inner transformer is evaluated
+  // (`TrigReduce(TrigExpand(Cos(2x)))` reduces the expanded form).
   //
   {
     TrigExpand: {
@@ -1866,7 +1876,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         ),
       evaluate: ([x], { numericApproximation }) => {
         if (!x) return x;
-        const r = trigExpand(x.canonical);
+        const r = trigExpand(reduceTransformerOperand(x.canonical));
         return numericApproximation ? r.N() : r;
       },
     },
@@ -1898,7 +1908,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         ),
       evaluate: ([x], { numericApproximation }) => {
         if (!x) return x;
-        const r = trigToExp(x.canonical);
+        const r = trigToExp(reduceTransformerOperand(x.canonical));
         return numericApproximation ? r.N() : r;
       },
     },
@@ -1931,7 +1941,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         ),
       evaluate: ([x], { numericApproximation }) => {
         if (!x) return x;
-        const r = trigReduce(x.canonical);
+        const r = trigReduce(reduceTransformerOperand(x.canonical));
         return numericApproximation ? r.N() : r;
       },
     },

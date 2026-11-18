@@ -346,6 +346,8 @@ const TRANSFORMER_HEADS = new Set([
   'Together',
   'Distribute',
   'TrigExpand',
+  'TrigReduce',
+  'TrigToExp',
   'PolynomialQuotient',
   'PolynomialRemainder',
   'PolynomialGCD',

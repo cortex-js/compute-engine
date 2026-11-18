@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 
 //
@@ -288,5 +289,88 @@ describe('Trig rewrite: round-trip serialization', () => {
       const reparsed = ce.parse(latex);
       expect(reparsed.json).toEqual([op, ['Sin', 'x']]);
     }
+  });
+});
+
+describe('Trig rewrite: the operand denotes a value', () => {
+  test('a symbol that holds a formula is rewritten through its value', () => {
+    const ce = new ComputeEngine();
+    ce.assign('y', ce.box(['Sin', ['Multiply', 2, 'x']]));
+    expect(ce.box(['TrigExpand', 'y']).evaluate().toString()).toBe(
+      '2sin(x) * cos(x)'
+    );
+    expect(
+      ce
+        .box(['TrigExpand', ['Multiply', 2, 'y']])
+        .evaluate()
+        .toString()
+    ).toBe('4sin(x) * cos(x)');
+    expect(ce.box(['TrigToExp', 'y']).evaluate().toString()).toBe(
+      '-1/2i * e^(2i * x) + 1/2i * e^(-2i * x)'
+    );
+    expect(
+      ce
+        .box(['TrigReduce', ['Power', 'y', 2]])
+        .evaluate()
+        .toString()
+    ).toBe('-1/2 * cos(4x) + 1/2');
+    expect(
+      ce.parse('\\operatorname{TrigExpand}(y)').evaluate().toString()
+    ).toBe('2sin(x) * cos(x)');
+  });
+  test('the variable of Solve or Integrate is not replaced by its value', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    expect(
+      ce
+        .box([
+          'Solve',
+          ['Equal', ['TrigReduce', ['Power', ['Sin', 'x'], 2]], 0],
+          'x',
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[pi * ArbitraryInteger(1)]');
+    expect(
+      ce
+        .box(['Integrate', ['TrigToExp', ['Sin', 'x']], 'x'])
+        .evaluate()
+        .toString()
+    ).toBe('-1/2 * e^(i * x) - 1/2 * e^(-i * x)');
+  });
+  test('an inner rewrite is evaluated before the outer one', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['TrigReduce', ['TrigExpand', ['Cos', ['Multiply', 2, 'x']]]])
+        .evaluate()
+        .toString()
+    ).toBe('cos(2x)');
+    expect(
+      ce
+        .parse(
+          '\\operatorname{TrigReduce}(\\operatorname{TrigExpand}(\\cos(2x)))'
+        )
+        .evaluate()
+        .toString()
+    ).toBe('cos(2x)');
+    expect(
+      ce
+        .box(['TrigExpand', ['TrigReduce', ['Power', ['Sin', 'x'], 2]]])
+        .evaluate()
+        .toString()
+    ).toBe('-1/2 * cos(x)^2 + 1/2 * sin(x)^2 + 1/2');
+    expect(
+      ce
+        .box(['TrigReduce', ['TrigToExp', ['Cos', 'x']]])
+        .evaluate()
+        .toString()
+    ).toBe('cos(x)');
+    expect(
+      ce
+        .box(['Expand', ['TrigToExp', ['Sin', 'x']]])
+        .evaluate()
+        .toString()
+    ).toBe('-1/2i * e^(i * x) + 1/2i * e^(-i * x)');
   });
 });
