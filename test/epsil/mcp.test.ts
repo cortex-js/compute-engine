@@ -522,6 +522,7 @@ describe('MCP server compile tool', () => {
         source: '\\operatorname{SinIntegral}(x)',
         format: 'latex',
         to: 'glsl',
+        declarations: { x: 'real' },
       }),
     ]);
     const result = payload(response);

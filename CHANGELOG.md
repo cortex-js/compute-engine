@@ -176,6 +176,27 @@
 
 ### Resolved Issues
 
+- **The special functions compile to JavaScript again.** Since 0.194.0 they
+  declined and fell back to the interpreter: `Heaviside`, `Remainder`,
+  `Smoothstep`, `InverseHaversine`, `ErfInv`, `Erfi`, `Beta`,
+  `BetaRegularized`, `GammaRegularized`, `Digamma`, `Trigamma`, `PolyGamma`,
+  `AiryAi`, `AiryBi`, `AiryAiPrime`, `AiryBiPrime`, `BesselJ`, `BesselY`,
+  `BesselI`, `BesselK` (of an integer order), `SinIntegral`, `CosIntegral`,
+  `ExpIntegralEi`, `LogIntegral`, `AGM`, `EllipticK`, `EllipticE`,
+  `EllipticF`, `EllipticPi`, `Hypergeometric1F1`, `Hypergeometric2F1`,
+  `HurwitzZeta`, `LerchPhi`, `PolyLog`, `DirichletEta`, `DirichletBeta`,
+  `StieltjesGamma`, `ClausenCl`, `LambertW`, `Fibonacci`, `IsPrime`, `LCM`, and
+  `Binomial`, `Choose` and `GCD` of reals. Each gives the interpreter's real
+  value, NaN where it is not real; with `mode: 'complex'`, `InverseHaversine`,
+  `EllipticK`, `EllipticE(m)`, `Hypergeometric2F1`, `HurwitzZeta`, `LerchPhi`,
+  `PolyLog` and `LambertW(x)` give its complex value. On GLSL, within
+  single-float precision: `Arccot`, `Arcsec`, `Arccsc`, `Arcoth`, `Arsech`,
+  `Arcsch`, `Haversine`, `Erf`, `Erfc`, `Gamma`, `GammaLn`, `Factorial` of a
+  real, `Factorial2`, `Zeta`, `Binomial` and `LCM` of integers, `Heaviside`,
+  `Remainder`, `Smoothstep`, `InverseHaversine`, `ErfInv`, `Beta`, `Digamma`,
+  `Trigamma` and `BesselJ` of an integer order. `compile(Equal(x))`
+  declines on every target; it threw `internal error: Cannot read properties
+  of undefined`.
 - **`N()` of a definite integral with a complex bound gives the value of its
   closed form.** `∫_i^0 t dt` is `0.5` under `N()`, as `evaluate()` gives
   `1/2`; it was `0`, the quadrature over the real parts of the bounds.

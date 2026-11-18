@@ -1577,7 +1577,7 @@ export function lower(
         decline(e, 'an error of the canonical form');
     }
     const reduction = REDUCTIONS.get(e.operator);
-    const r = rowOfHead(rows, reduction?.row ?? e.operator);
+    const r = rowOfHead(rows, reduction?.row ?? e.operator, e.nops);
     if (r === undefined)
       decline(e, `the operator ${e.operator} is not supported by the compiler`);
     // The interpreter does not evaluate a `Sum` or a `Product` over a bound
@@ -1613,6 +1613,7 @@ export function lower(
     }
     // The pairs of a chain, joined by `And`.
     if (r.arity === 'chain') {
+      if (e.nops < 2) decline(e, `${e.operator} with ${e.nops} operands`);
       let prev = value(e.ops[0])!;
       const pair = (i: number) => {
         const v = value(e.ops[i + 1])!;

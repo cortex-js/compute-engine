@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../../src/compute-engine';
 import { compile } from '../../../src/compute-engine/compilation/compile-expression';
+import { CompileDeclineError } from '../../../src/compute-engine/compilation/diagnostics';
 
 /**
  * NIGHTLY — compiled-JS vs interpreter parity fuzz (~2,400 evaluation points).
@@ -26,10 +27,21 @@ ce.declare('y', 'real');
 
 type Case = { name: string; src: any; vars?: string[]; points?: number[][] };
 
-const P_STD = [0, 1, -1, 0.5, -0.5, 2, -2, 2.5, -2.5, 3.7, -3.7, 0.1, 10, -10, 100, 1e-8, 7.25, -0.75, 12.5, -6.5];
-const P_POS = [0.1, 0.5, 1, 2, 2.5, 3.7, 7.25, 10, 100, 0.001, 1e-8, 42.42, 5, 12.5, 0.9, 1.1, 6, 8, 3, 55.5];
-const P_UNIT = [-0.99, -0.5, -0.1, 0, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99, -0.75, 0.25, 0.6, -0.3, 0.85];
-const P_SMALL = [-3, -2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.7, -3.7];
+const P_STD = [
+  0, 1, -1, 0.5, -0.5, 2, -2, 2.5, -2.5, 3.7, -3.7, 0.1, 10, -10, 100, 1e-8,
+  7.25, -0.75, 12.5, -6.5,
+];
+const P_POS = [
+  0.1, 0.5, 1, 2, 2.5, 3.7, 7.25, 10, 100, 0.001, 1e-8, 42.42, 5, 12.5, 0.9,
+  1.1, 6, 8, 3, 55.5,
+];
+const P_UNIT = [
+  -0.99, -0.5, -0.1, 0, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99, -0.75, 0.25, 0.6, -0.3,
+  0.85,
+];
+const P_SMALL = [
+  -3, -2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.7, -3.7,
+];
 const L = (s: string) => 'latex:' + s;
 
 const CASES: Case[] = [
@@ -43,9 +55,17 @@ const CASES: Case[] = [
   { name: 'negate-sum', src: ['Negate', ['Add', 'x', 1]] },
   { name: 'rational-coef', src: ['Multiply', ['Rational', 2, 3], 'x'] },
   { name: 'x-over-pi', src: ['Divide', 'x', 'Pi'] },
-  { name: 'linear-comb', src: ['Add', ['Multiply', 2, 'x'], ['Multiply', -3, 'y']], vars: ['x', 'y'] },
+  {
+    name: 'linear-comb',
+    src: ['Add', ['Multiply', 2, 'x'], ['Multiply', -3, 'y']],
+    vars: ['x', 'y'],
+  },
   { name: 'div-zero', src: ['Divide', 1, 'x'] },
-  { name: 'sum-of-prods', src: ['Add', ['Multiply', 'x', 'y'], ['Multiply', 'x', 'x'], 1], vars: ['x', 'y'] },
+  {
+    name: 'sum-of-prods',
+    src: ['Add', ['Multiply', 'x', 'y'], ['Multiply', 'x', 'x'], 1],
+    vars: ['x', 'y'],
+  },
   // powers
   { name: 'square', src: ['Power', 'x', 2] },
   { name: 'cube', src: ['Power', 'x', 3] },
@@ -66,7 +86,18 @@ const CASES: Case[] = [
   { name: 'root5', src: ['Root', 'x', 5] },
   { name: 'root-x-y', src: ['Root', 'x', 'y'], vars: ['x', 'y'] },
   { name: 'square-of-sum', src: ['Square', ['Add', 'x', 1]] },
-  { name: 'pow00', src: ['Power', 'x', 'y'], vars: ['x', 'y'], points: [[0, 0], [0, 1], [1, 0], [0, -1], [-1, 0]] },
+  {
+    name: 'pow00',
+    src: ['Power', 'x', 'y'],
+    vars: ['x', 'y'],
+    points: [
+      [0, 0],
+      [0, 1],
+      [1, 0],
+      [0, -1],
+      [-1, 0],
+    ],
+  },
   // abs/sign/rounding
   { name: 'abs', src: ['Abs', 'x'] },
   { name: 'sign', src: ['Sign', 'x'] },
@@ -79,20 +110,130 @@ const CASES: Case[] = [
   // mod/remainder/gcd
   { name: 'mod-x-3', src: ['Mod', 'x', 3] },
   { name: 'mod-x-neg3', src: ['Mod', 'x', -3] },
-  { name: 'mod-x-y', src: ['Mod', 'x', 'y'], vars: ['x', 'y'], points: [[7, 3], [-7, 3], [7, -3], [-7, -3], [7.5, 2], [-7.5, 2], [5, 2.5], [-5, 2.5]] },
-  { name: 'rem-x-y', src: ['Remainder', 'x', 'y'], vars: ['x', 'y'], points: [[7, 3], [-7, 3], [7, -3], [-7, -3], [7.5, 2], [-7.5, 2], [7, 4], [-7, 4]] },
-  { name: 'gcd', src: ['GCD', 'x', 'y'], vars: ['x', 'y'], points: [[12, 8], [7, 3], [100, 36], [9, 81]] },
+  {
+    name: 'mod-x-y',
+    src: ['Mod', 'x', 'y'],
+    vars: ['x', 'y'],
+    points: [
+      [7, 3],
+      [-7, 3],
+      [7, -3],
+      [-7, -3],
+      [7.5, 2],
+      [-7.5, 2],
+      [5, 2.5],
+      [-5, 2.5],
+    ],
+  },
+  {
+    name: 'rem-x-y',
+    src: ['Remainder', 'x', 'y'],
+    vars: ['x', 'y'],
+    points: [
+      [7, 3],
+      [-7, 3],
+      [7, -3],
+      [-7, -3],
+      [7.5, 2],
+      [-7.5, 2],
+      [7, 4],
+      [-7, 4],
+    ],
+  },
+  {
+    name: 'gcd',
+    src: ['GCD', 'x', 'y'],
+    vars: ['x', 'y'],
+    points: [
+      [12, 8],
+      [7, 3],
+      [100, 36],
+      [9, 81],
+    ],
+  },
   // CO-P2-26: explicit negative-operand / zero / signed-zero edge coverage —
   // the axis whose absence let the Mod / Round / Arccot / odd-root convention
   // splits (P0-41/42) survive to review. Each parity-checks vs the interpreter.
-  { name: 'mod-edges', src: ['Mod', 'x', 'y'], vars: ['x', 'y'], points: [[7, 3], [-7, 3], [7, -3], [-7, -3], [0, 3], [-0, 3], [5.5, 2], [-5.5, 2], [5, 2.5], [-5, 2.5]] },
-  { name: 'rem-edges', src: ['Remainder', 'x', 'y'], vars: ['x', 'y'], points: [[7, 3], [-7, 3], [7, -3], [-7, -3], [0, 3], [-0, 3], [7.5, 2], [-7.5, 2]] },
-  { name: 'round-halves', src: ['Round', 'x'], points: [[2.5], [-2.5], [0.5], [-0.5], [3.5], [-3.5], [1.5], [-1.5], [0], [-0], [12.5], [-6.5]] },
-  { name: 'sign-zero', src: ['Sign', 'x'], points: [[0], [-0], [3.2], [-3.2], [1e-12], [-1e-12]] },
-  { name: 'arccot-edges', src: ['Arccot', 'x'], points: [[-2], [-0.5], [2], [0.5], [0], [-0], [-10], [10]] },
-  { name: 'root3-neg', src: ['Root', 'x', 3], points: [[-8], [-27], [8], [27], [0], [-0], [-1], [1]] },
-  { name: 'root5-neg', src: ['Root', 'x', 5], points: [[-32], [32], [-1], [1], [0], [-0]] },
-  { name: 'lcm', src: ['LCM', 'x', 'y'], vars: ['x', 'y'], points: [[12, 8], [7, 3], [4, 6]] },
+  {
+    name: 'mod-edges',
+    src: ['Mod', 'x', 'y'],
+    vars: ['x', 'y'],
+    points: [
+      [7, 3],
+      [-7, 3],
+      [7, -3],
+      [-7, -3],
+      [0, 3],
+      [-0, 3],
+      [5.5, 2],
+      [-5.5, 2],
+      [5, 2.5],
+      [-5, 2.5],
+    ],
+  },
+  {
+    name: 'rem-edges',
+    src: ['Remainder', 'x', 'y'],
+    vars: ['x', 'y'],
+    points: [
+      [7, 3],
+      [-7, 3],
+      [7, -3],
+      [-7, -3],
+      [0, 3],
+      [-0, 3],
+      [7.5, 2],
+      [-7.5, 2],
+    ],
+  },
+  {
+    name: 'round-halves',
+    src: ['Round', 'x'],
+    points: [
+      [2.5],
+      [-2.5],
+      [0.5],
+      [-0.5],
+      [3.5],
+      [-3.5],
+      [1.5],
+      [-1.5],
+      [0],
+      [-0],
+      [12.5],
+      [-6.5],
+    ],
+  },
+  {
+    name: 'sign-zero',
+    src: ['Sign', 'x'],
+    points: [[0], [-0], [3.2], [-3.2], [1e-12], [-1e-12]],
+  },
+  {
+    name: 'arccot-edges',
+    src: ['Arccot', 'x'],
+    points: [[-2], [-0.5], [2], [0.5], [0], [-0], [-10], [10]],
+  },
+  {
+    name: 'root3-neg',
+    src: ['Root', 'x', 3],
+    points: [[-8], [-27], [8], [27], [0], [-0], [-1], [1]],
+  },
+  {
+    name: 'root5-neg',
+    src: ['Root', 'x', 5],
+    points: [[-32], [32], [-1], [1], [0], [-0]],
+  },
+  {
+    name: 'lcm',
+    src: ['LCM', 'x', 'y'],
+    vars: ['x', 'y'],
+    points: [
+      [12, 8],
+      [7, 3],
+      [4, 6],
+    ],
+  },
   // trig
   { name: 'sin', src: ['Sin', 'x'] },
   { name: 'cos', src: ['Cos', 'x'] },
@@ -100,14 +241,40 @@ const CASES: Case[] = [
   { name: 'cot', src: ['Cot', 'x'] },
   { name: 'sec', src: ['Sec', 'x'] },
   { name: 'csc', src: ['Csc', 'x'] },
-  { name: 'sin2-plus-cos2', src: ['Add', ['Power', ['Sin', 'x'], 2], ['Power', ['Cos', 'x'], 2]] },
+  {
+    name: 'sin2-plus-cos2',
+    src: ['Add', ['Power', ['Sin', 'x'], 2], ['Power', ['Cos', 'x'], 2]],
+  },
   { name: 'arcsin', src: ['Arcsin', 'x'], points: P_UNIT.map((v) => [v]) },
   { name: 'arccos', src: ['Arccos', 'x'], points: P_UNIT.map((v) => [v]) },
   { name: 'arctan', src: ['Arctan', 'x'] },
-  { name: 'arctan2', src: ['Arctan2', 'x', 'y'], vars: ['x', 'y'], points: [[1, 1], [-1, 1], [1, -1], [-1, -1], [0, 1], [1, 0], [0, -1], [-1, 0], [3.5, -2]] },
+  {
+    name: 'arctan2',
+    src: ['Arctan2', 'x', 'y'],
+    vars: ['x', 'y'],
+    points: [
+      [1, 1],
+      [-1, 1],
+      [1, -1],
+      [-1, -1],
+      [0, 1],
+      [1, 0],
+      [0, -1],
+      [-1, 0],
+      [3.5, -2],
+    ],
+  },
   { name: 'arccot', src: ['Arccot', 'x'] },
-  { name: 'arcsec', src: ['Arcsec', 'x'], points: [[1], [2], [-2], [1.5], [-1.5], [10], [-10]] },
-  { name: 'arccsc', src: ['Arccsc', 'x'], points: [[1], [2], [-2], [1.5], [-1.5], [10], [-10]] },
+  {
+    name: 'arcsec',
+    src: ['Arcsec', 'x'],
+    points: [[1], [2], [-2], [1.5], [-1.5], [10], [-10]],
+  },
+  {
+    name: 'arccsc',
+    src: ['Arccsc', 'x'],
+    points: [[1], [2], [-2], [1.5], [-1.5], [10], [-10]],
+  },
   // hyperbolic
   { name: 'sinh', src: ['Sinh', 'x'], points: P_SMALL.map((v) => [v]) },
   { name: 'cosh', src: ['Cosh', 'x'], points: P_SMALL.map((v) => [v]) },
@@ -116,11 +283,23 @@ const CASES: Case[] = [
   { name: 'sech', src: ['Sech', 'x'] },
   { name: 'csch', src: ['Csch', 'x'] },
   { name: 'arsinh', src: ['Arsinh', 'x'] },
-  { name: 'arcosh', src: ['Arcosh', 'x'], points: [[1], [1.5], [2], [10], [100]] },
+  {
+    name: 'arcosh',
+    src: ['Arcosh', 'x'],
+    points: [[1], [1.5], [2], [10], [100]],
+  },
   { name: 'artanh', src: ['Artanh', 'x'], points: P_UNIT.map((v) => [v]) },
-  { name: 'arcoth', src: ['Arcoth', 'x'], points: [[2], [-2], [1.5], [-1.5], [10]] },
+  {
+    name: 'arcoth',
+    src: ['Arcoth', 'x'],
+    points: [[2], [-2], [1.5], [-1.5], [10]],
+  },
   { name: 'arsech', src: ['Arsech', 'x'], points: [[0.1], [0.5], [0.9], [1]] },
-  { name: 'arcsch', src: ['Arcsch', 'x'], points: [[0.5], [-0.5], [2], [-2], [10]] },
+  {
+    name: 'arcsch',
+    src: ['Arcsch', 'x'],
+    points: [[0.5], [-0.5], [2], [-2], [10]],
+  },
   // exp/log
   { name: 'exp', src: ['Exp', 'x'] },
   { name: 'ln', src: ['Ln', 'x'], points: P_POS.map((v) => [v]) },
@@ -132,10 +311,42 @@ const CASES: Case[] = [
   { name: 'ln-neg', src: ['Ln', 'x'], points: [[-1], [-2.5]] },
   { name: 'exp2', src: ['Power', 2, 'x'] },
   // min/max, misc
-  { name: 'max', src: ['Max', 'x', 'y'], vars: ['x', 'y'], points: [[1, 2], [-1, -2], [0, 0], [3.5, 3.4], [-0.5, 0.5]] },
-  { name: 'min', src: ['Min', 'x', 'y'], vars: ['x', 'y'], points: [[1, 2], [-1, -2], [0, 0], [3.5, 3.4], [-0.5, 0.5]] },
+  {
+    name: 'max',
+    src: ['Max', 'x', 'y'],
+    vars: ['x', 'y'],
+    points: [
+      [1, 2],
+      [-1, -2],
+      [0, 0],
+      [3.5, 3.4],
+      [-0.5, 0.5],
+    ],
+  },
+  {
+    name: 'min',
+    src: ['Min', 'x', 'y'],
+    vars: ['x', 'y'],
+    points: [
+      [1, 2],
+      [-1, -2],
+      [0, 0],
+      [3.5, 3.4],
+      [-0.5, 0.5],
+    ],
+  },
   { name: 'max3', src: ['Max', 'x', 0, ['Negate', 'x']] },
-  { name: 'hypot', src: ['Hypot', 'x', 'y'], vars: ['x', 'y'], points: [[3, 4], [-3, 4], [0, 0], [1.5, -2.5]] },
+  {
+    name: 'hypot',
+    src: ['Hypot', 'x', 'y'],
+    vars: ['x', 'y'],
+    points: [
+      [3, 4],
+      [-3, 4],
+      [0, 0],
+      [1.5, -2.5],
+    ],
+  },
   { name: 'heaviside', src: ['Heaviside', 'x'] },
   // constants
   { name: 'pi-x', src: ['Multiply', 'Pi', 'x'] },
@@ -145,72 +356,229 @@ const CASES: Case[] = [
   { name: 'catalan', src: ['Add', 'CatalanConstant', 'x'] },
   { name: 'half-x', src: ['Multiply', 'Half', 'x'] },
   // piecewise / conditionals / boolean
-  { name: 'if', src: ['If', ['Greater', 'x', 0], ['Multiply', 2, 'x'], ['Negate', 'x']] },
-  { name: 'which', src: ['Which', ['Less', 'x', 0], ['Negate', 'x'], ['Less', 'x', 2], ['Multiply', 10, 'x'], 'True', ['Power', 'x', 2]] },
+  {
+    name: 'if',
+    src: ['If', ['Greater', 'x', 0], ['Multiply', 2, 'x'], ['Negate', 'x']],
+  },
+  {
+    name: 'which',
+    src: [
+      'Which',
+      ['Less', 'x', 0],
+      ['Negate', 'x'],
+      ['Less', 'x', 2],
+      ['Multiply', 10, 'x'],
+      'True',
+      ['Power', 'x', 2],
+    ],
+  },
   { name: 'when', src: ['If', ['Greater', 'x', 1], ['Power', 'x', 2]] },
   { name: 'less', src: ['Less', 'x', 2] },
   { name: 'lesseq', src: ['LessEqual', 'x', 2] },
   { name: 'equal', src: ['Equal', 'x', 2] },
-  { name: 'and-or', src: ['Or', ['And', ['Greater', 'x', 0], ['Less', 'x', 3]], ['Less', 'x', -5]] },
+  {
+    name: 'and-or',
+    src: [
+      'Or',
+      ['And', ['Greater', 'x', 0], ['Less', 'x', 3]],
+      ['Less', 'x', -5],
+    ],
+  },
   { name: 'not', src: ['Not', ['Greater', 'x', 0]] },
   { name: 'chained-less', src: ['Less', -1, 'x', 1] },
   // special functions
-  { name: 'gamma', src: ['Gamma', 'x'], points: [[0.5], [1], [1.5], [2], [3], [4.5], [7], [-0.5], [-1.5], [-2.5]] },
-  { name: 'gammaln', src: ['GammaLn', 'x'], points: [[0.5], [1], [2], [5], [10], [100]] },
-  { name: 'factorial', src: ['Factorial', 'x'], points: [[0], [1], [2], [3], [5], [10]] },
-  { name: 'factorial2', src: ['Factorial2', 'x'], points: [[0], [1], [2], [5], [7], [8]] },
-  { name: 'binomial', src: ['Binomial', 'x', 'y'], vars: ['x', 'y'], points: [[5, 2], [10, 3], [7, 0], [6, 6], [20, 10]] },
-  { name: 'choose', src: ['Choose', 'x', 'y'], vars: ['x', 'y'], points: [[5, 2], [10, 3], [20, 10]] },
+  {
+    name: 'gamma',
+    src: ['Gamma', 'x'],
+    points: [[0.5], [1], [1.5], [2], [3], [4.5], [7], [-0.5], [-1.5], [-2.5]],
+  },
+  {
+    name: 'gammaln',
+    src: ['GammaLn', 'x'],
+    points: [[0.5], [1], [2], [5], [10], [100]],
+  },
+  {
+    name: 'factorial',
+    src: ['Factorial', 'x'],
+    points: [[0], [1], [2], [3], [5], [10]],
+  },
+  {
+    name: 'factorial2',
+    src: ['Factorial2', 'x'],
+    points: [[0], [1], [2], [5], [7], [8]],
+  },
+  {
+    name: 'binomial',
+    src: ['Binomial', 'x', 'y'],
+    vars: ['x', 'y'],
+    points: [
+      [5, 2],
+      [10, 3],
+      [7, 0],
+      [6, 6],
+      [20, 10],
+    ],
+  },
+  {
+    name: 'choose',
+    src: ['Choose', 'x', 'y'],
+    vars: ['x', 'y'],
+    points: [
+      [5, 2],
+      [10, 3],
+      [20, 10],
+    ],
+  },
   { name: 'erf', src: ['Erf', 'x'], points: P_SMALL.map((v) => [v]) },
   { name: 'erfc', src: ['Erfc', 'x'], points: P_SMALL.map((v) => [v]) },
   { name: 'erfinv', src: ['ErfInv', 'x'], points: P_UNIT.map((v) => [v]) },
-  { name: 'erfi', src: ['Erfi', 'x'], points: [[-2], [-1], [-0.5], [0], [0.5], [1], [2]] },
+  {
+    name: 'erfi',
+    src: ['Erfi', 'x'],
+    points: [[-2], [-1], [-0.5], [0], [0.5], [1], [2]],
+  },
   { name: 'zeta', src: ['Zeta', 'x'], points: [[2], [3], [4], [1.5], [5]] },
-  { name: 'digamma', src: ['Digamma', 'x'], points: [[1], [2], [0.5], [5], [10.5]] },
-  { name: 'beta', src: ['Beta', 'x', 'y'], vars: ['x', 'y'], points: [[1, 1], [2, 3], [0.5, 0.5], [5, 2]] },
-  { name: 'lambertw', src: ['LambertW', 'x'], points: [[0], [0.5], [1], [2], [10], [-0.2]] },
-  { name: 'besselj0', src: ['BesselJ', 0, 'x'], points: [[0], [1], [2.5], [5], [10]] },
-  { name: 'bessely1', src: ['BesselY', 1, 'x'], points: [[0.5], [1], [2.5], [5]] },
+  {
+    name: 'digamma',
+    src: ['Digamma', 'x'],
+    points: [[1], [2], [0.5], [5], [10.5]],
+  },
+  {
+    name: 'beta',
+    src: ['Beta', 'x', 'y'],
+    vars: ['x', 'y'],
+    points: [
+      [1, 1],
+      [2, 3],
+      [0.5, 0.5],
+      [5, 2],
+    ],
+  },
+  {
+    name: 'lambertw',
+    src: ['LambertW', 'x'],
+    points: [[0], [0.5], [1], [2], [10], [-0.2]],
+  },
+  {
+    name: 'besselj0',
+    src: ['BesselJ', 0, 'x'],
+    points: [[0], [1], [2.5], [5], [10]],
+  },
+  {
+    name: 'bessely1',
+    src: ['BesselY', 1, 'x'],
+    points: [[0.5], [1], [2.5], [5]],
+  },
   { name: 'airyai', src: ['AiryAi', 'x'], points: [[-2], [0], [1], [2]] },
   { name: 'sinc', src: ['Sinc', 'x'], points: P_SMALL.map((v) => [v]) },
-  { name: 'fresnelS', src: ['FresnelS', 'x'], points: [[0], [0.5], [1], [2], [-1]] },
-  { name: 'fresnelC', src: ['FresnelC', 'x'], points: [[0], [0.5], [1], [2], [-1]] },
-  { name: 'si', src: ['SinIntegral', 'x'], points: [[0], [0.5], [1], [2], [10], [-2]] },
+  {
+    name: 'fresnelS',
+    src: ['FresnelS', 'x'],
+    points: [[0], [0.5], [1], [2], [-1]],
+  },
+  {
+    name: 'fresnelC',
+    src: ['FresnelC', 'x'],
+    points: [[0], [0.5], [1], [2], [-1]],
+  },
+  {
+    name: 'si',
+    src: ['SinIntegral', 'x'],
+    points: [[0], [0.5], [1], [2], [10], [-2]],
+  },
   { name: 'ci', src: ['CosIntegral', 'x'], points: [[0.5], [1], [2], [10]] },
   { name: 'ei', src: ['ExpIntegralEi', 'x'], points: [[0.5], [1], [2], [-1]] },
   { name: 'li', src: ['LogIntegral', 'x'], points: [[2], [3], [10], [0.5]] },
-  { name: 'agm', src: ['AGM', 'x', 'y'], vars: ['x', 'y'], points: [[1, 2], [1, 10], [3, 4]] },
-  { name: 'elliptick', src: ['EllipticK', 'x'], points: [[0], [0.5], [0.9], [-1]] },
-  { name: 'elliptice', src: ['EllipticE', 'x'], points: [[0], [0.5], [0.9], [-1]] },
-  { name: 'hyp2f1', src: ['Hypergeometric2F1', 1, 2, 3, 'x'], points: [[0], [0.25], [0.5], [-0.5]] },
-  { name: 'hyp1f1', src: ['Hypergeometric1F1', 1, 2, 'x'], points: [[0], [0.5], [1], [-1], [3]] },
-  { name: 'fibonacci', src: ['Fibonacci', 'x'], points: [[1], [2], [5], [10], [20]] },
+  {
+    name: 'agm',
+    src: ['AGM', 'x', 'y'],
+    vars: ['x', 'y'],
+    points: [
+      [1, 2],
+      [1, 10],
+      [3, 4],
+    ],
+  },
+  {
+    name: 'elliptick',
+    src: ['EllipticK', 'x'],
+    points: [[0], [0.5], [0.9], [-1]],
+  },
+  {
+    name: 'elliptice',
+    src: ['EllipticE', 'x'],
+    points: [[0], [0.5], [0.9], [-1]],
+  },
+  {
+    name: 'hyp2f1',
+    src: ['Hypergeometric2F1', 1, 2, 3, 'x'],
+    points: [[0], [0.25], [0.5], [-0.5]],
+  },
+  {
+    name: 'hyp1f1',
+    src: ['Hypergeometric1F1', 1, 2, 'x'],
+    points: [[0], [0.5], [1], [-1], [3]],
+  },
+  {
+    name: 'fibonacci',
+    src: ['Fibonacci', 'x'],
+    points: [[1], [2], [5], [10], [20]],
+  },
   { name: 'chop', src: ['Chop', 'x'], points: [[0], [1e-12], [0.5], [-1e-12]] },
   // complex-valued
   { name: 'complex-add', src: ['Add', 'x', ['Complex', 0, 1]] },
   { name: 'complex-mul', src: ['Multiply', ['Complex', 1, 1], 'x'] },
   { name: 'sqrt-neg-const', src: ['Sqrt', -4] },
   { name: 'real-part', src: ['Real', ['Multiply', ['Complex', 2, 3], 'x']] },
-  { name: 'imag-part', src: ['Imaginary', ['Multiply', ['Complex', 2, 3], 'x']] },
+  {
+    name: 'imag-part',
+    src: ['Imaginary', ['Multiply', ['Complex', 2, 3], 'x']],
+  },
   { name: 'conj', src: ['Conjugate', ['Add', 'x', ['Complex', 0, 2]]] },
   { name: 'cexp', src: ['Exp', ['Multiply', ['Complex', 0, 1], 'x']] },
   { name: 'cabs', src: ['Abs', ['Add', 'x', ['Complex', 0, 1]]] },
   // collections / component access
   { name: 'first-tuple', src: ['First', ['Tuple', ['Multiply', 2, 'x'], 5]] },
-  { name: 'second-tuple', src: ['Second', ['Tuple', ['Multiply', 2, 'x'], ['Add', 'x', 1]]] },
+  {
+    name: 'second-tuple',
+    src: ['Second', ['Tuple', ['Multiply', 2, 'x'], ['Add', 'x', 1]]],
+  },
   { name: 'mean-const', src: ['Add', 'x', ['Mean', ['List', 1, 2, 4]]] },
   { name: 'median-const', src: ['Add', 'x', ['Median', ['List', 1, 2, 4, 8]]] },
   // Sum / Product
   { name: 'sum-i', src: ['Sum', 'i', ['Limits', 'i', 1, 10]] },
   { name: 'sum-i2', src: ['Sum', ['Power', 'i', 2], ['Limits', 'i', 1, 10]] },
-  { name: 'sum-xi', src: ['Sum', ['Multiply', 'x', 'i'], ['Limits', 'i', 1, 5]] },
-  { name: 'sum-neg-range', src: ['Sum', ['Power', 'i', 2], ['Limits', 'i', -3, 3]] },
-  { name: 'sum-negate-i', src: ['Sum', ['Negate', 'i'], ['Limits', 'i', -3, -1]] },
-  { name: 'sum-symbolic-ub', src: ['Sum', 'i', ['Limits', 'i', 1, 'x']], points: [[5], [10], [1], [0]] },
-  { name: 'sum-large', src: ['Sum', ['Divide', 1, ['Power', 'i', 2]], ['Limits', 'i', 1, 200]] },
+  {
+    name: 'sum-xi',
+    src: ['Sum', ['Multiply', 'x', 'i'], ['Limits', 'i', 1, 5]],
+  },
+  {
+    name: 'sum-neg-range',
+    src: ['Sum', ['Power', 'i', 2], ['Limits', 'i', -3, 3]],
+  },
+  {
+    name: 'sum-negate-i',
+    src: ['Sum', ['Negate', 'i'], ['Limits', 'i', -3, -1]],
+  },
+  {
+    name: 'sum-symbolic-ub',
+    src: ['Sum', 'i', ['Limits', 'i', 1, 'x']],
+    points: [[5], [10], [1], [0]],
+  },
+  {
+    name: 'sum-large',
+    src: ['Sum', ['Divide', 1, ['Power', 'i', 2]], ['Limits', 'i', 1, 200]],
+  },
   { name: 'prod-i', src: ['Product', 'i', ['Limits', 'i', 1, 6]] },
-  { name: 'prod-frac', src: ['Product', ['Divide', 'i', ['Add', 'i', 1]], ['Limits', 'i', 1, 10]] },
-  { name: 'sum-2d-body', src: ['Sum', ['Power', 'x', 'i'], ['Limits', 'i', 0, 4]], points: [[0.5], [2], [-1], [1]] },
+  {
+    name: 'prod-frac',
+    src: ['Product', ['Divide', 'i', ['Add', 'i', 1]], ['Limits', 'i', 1, 10]],
+  },
+  {
+    name: 'sum-2d-body',
+    src: ['Sum', ['Power', 'x', 'i'], ['Limits', 'i', 0, 4]],
+    points: [[0.5], [2], [-1], [1]],
+  },
   // latex-parsed forms
   { name: 'latex-poly', src: L('3x^2 - 2x + 1') },
   { name: 'latex-rational-fn', src: L('\\frac{x^2-1}{x-1}') },
@@ -245,11 +613,7 @@ function agree(a: number, b: number, tol = TOL): boolean {
 
 // Cases whose expression is genuinely complex-valued for ALL sampled points, so
 // a real-target compile fail-close (throw) is the CORRECT behavior (D6).
-function isComplexOnly(
-  expr: any,
-  vars: string[],
-  points: number[][]
-): boolean {
+function isComplexOnly(expr: any, vars: string[], points: number[][]): boolean {
   const sample = points.slice(0, 6);
   if (sample.length === 0) return false;
   return sample.every((pt) => {
@@ -257,6 +621,20 @@ function isComplexOnly(
     return !interpIsFiniteReal(w);
   });
 }
+
+// The cases that the compiler declines, with the cause. A decline falls back
+// to the interpreter, which the contract allows (AGENTS.md): such a case
+// passes when it declines and is checked when it compiles. A decline of any
+// other case is a failure, as is a value that differs.
+const KNOWN_DECLINES = new Map<string, string>([
+  // README of `compilation/ir/`: a library constant whose value is not a
+  // number declines.
+  ['golden', 'GoldenRatio, a library constant whose value is not a number'],
+  ['first-tuple', 'First has no row'],
+  ['second-tuple', 'Second has no row'],
+  ['mean-const', 'Mean has no row'],
+  ['median-const', 'Median has no row'],
+]);
 
 // Previously: a Sum with a negative index and a Negate summand unrolled to
 // invalid JS (`--3`). Fixed (CO-P2-23a): the base compiler now separates a
@@ -272,7 +650,11 @@ const KNOWN_COMPILE_BUG = new Set<string>([]);
 // compiled is NaN on a finite-real interp value are skipped for these cases.
 const KNOWN_REAL_BRANCH_GAP = new Set(['pow-2-3']);
 
-function interpNumeric(expr: any, vars: string[], pt: number[]): { re: number; im: number } {
+function interpNumeric(
+  expr: any,
+  vars: string[],
+  pt: number[]
+): { re: number; im: number } {
   const sub: Record<string, any> = {};
   vars.forEach((v, i) => (sub[v] = ce.number(pt[i])));
   let r: any;
@@ -288,7 +670,8 @@ function interpNumeric(expr: any, vars: string[], pt: number[]): { re: number; i
 function normRun(out: any): { re: number; im: number } {
   if (typeof out === 'number') return { re: out, im: 0 };
   if (typeof out === 'boolean') return { re: out ? 1 : 0, im: 0 };
-  if (out && typeof out === 'object' && 're' in out) return { re: out.re, im: out.im };
+  if (out && typeof out === 'object' && 're' in out)
+    return { re: out.re, im: out.im };
   return { re: NaN, im: NaN };
 }
 
@@ -312,7 +695,14 @@ describeNightly('NIGHTLY compiled-JS vs interpreter parity', () => {
         compiled = compile(expr, { fallback: false });
       } catch (e) {
         // Correct fail-close on a complex-only expression, or a documented bug.
-        if (isComplexOnly(expr, vars, pts) || KNOWN_COMPILE_BUG.has(c.name)) return;
+        if (isComplexOnly(expr, vars, pts) || KNOWN_COMPILE_BUG.has(c.name))
+          return;
+        if (
+          KNOWN_DECLINES.has(c.name) &&
+          e instanceof CompileDeclineError &&
+          e.diagnostic.code === 'outside-profile'
+        )
+          return;
         throw e;
       }
       expect(compiled).toBeTruthy();

@@ -77,8 +77,8 @@ library's everywhere. The standard handler of `PointList` is not such a handler
 (the identity of the function in the library table). Then a sub-expression that
 the slice would lower and that has no free name, no name bound by the walk, no
 effectful operation and no loop is evaluated once with `N()` and becomes a
-literal (`Mod(1, 1/10)` is exactly 0). A closed `SinIntegral(3)` is not folded,
-because `SinIntegral` is not in the slice. A sub-expression whose static type is
+literal (`Mod(1, 1/10)` is exactly 0). A closed `Median(List(1, 2, 4))` is not
+folded, because `Median` is not in the slice. A sub-expression whose static type is
 `error` declines (`Sin(Tuple(w))` of a vector `w`, `2·Tuple(L, L)`). A throw of
 `N()` means "not folded": the node is lowered as written, except a
 `CancellationError`, which propagates. A row that depends on an engine setting
@@ -238,7 +238,19 @@ hyperbolic functions, ...) are rows whose operation the JavaScript code calls by
 name from `REAL_FUNCTIONS` (`_SYS.ir`), which the fold of the row calls too.
 Each gives the interpreter's real value within the precision of a double (`Zeta`
 below about -171 is a known limitation, `docs/COMPILATION-MODEL.md`); a pole is
-±∞ and a value that is not real is NaN (`Root(-4, 2)`, `Arcsin(2)`).
+±∞ and a value that is not real is NaN (`Root(-4, 2)`, `Arcsin(2)`). So are
+the library's special functions and steps (`Heaviside`, `Remainder`, `Beta`,
+the Bessel, Airy, elliptic, hypergeometric and zeta families, `LambertW`,
+`Fibonacci`, `IsPrime`, ...): a pole where the interpreter gives `~oo` is +∞
+(`Digamma(0)`). An order or a branch that the library types `integer` is on the
+integer lane: `BesselJ(ν, x)` of a real `ν` declines (the kernels are real for
+an integer order only). A head of two forms has a row per arity (`AGM(x)` and
+`AGM(a, b)`, `EllipticE(m)` and `EllipticE(φ, m)`; `rowOfHead()` takes the
+count of operands). A row whose value of real operands can be complex
+(`CosIntegral(-1)`, `EllipticK(2)`) has `leaves`: in `mode: 'complex'` it takes
+its complex signature, the interpreter's continued kernel
+(`InverseHaversine`, `EllipticK`, `EllipticE(m)`, `Hypergeometric2F1`,
+`HurwitzZeta`, `LerchPhi`, `PolyLog`, `LambertW(x)`), and the others decline.
 `Log(x, 10)` is the row `Log`, a real `Log(x, 2)` the operation `log2` (both
 exact at a power of the base, as the interpreter: `Floor(Log(1000, 10))` is 3),
 and `Log(x, b)` of another base `Ln(x) / Ln(b)`. On GLSL the inverse
@@ -256,7 +268,15 @@ radicand for an odd integer index (`Root(-8, 3)` is -2), NaN for another index
 of a negative radicand, where JavaScript gives the real root of an odd
 denominator (`Root(-8, 2.5)` is 2.297...), as for `pow`. `Factorial` of an
 integer is the helper `_gpu_ir_factorial` (a loop of 33 passes, +∞ for a
-negative operand and over 34); of a real it declines (the Gamma function). `GCD`
+negative operand and over 34); of a real it is `_gpu_ir_gamma(x + 1)`. The
+special functions with a GLSL form (`Erf`, `Gamma`, `GammaLn`, `Zeta`, `Beta`,
+`Digamma`, `Trigamma`, `ErfInv`, `BesselJ` of an integer order, the inverse
+reciprocal trigonometric and hyperbolic functions, `Haversine`, ...) are helpers
+`_gpu_ir_*` ported from the earlier GPU target, within single-float precision of
+the interpreter; their reflections and phases use `_gpu_ir_sincospi` and
+`_gpu_ir_log1p`, since a renderer's `sin`, `cos` and `log` near 1 can be wrong
+by 1e-4 (SwiftShader). The others decline on GLSL (`PolyGamma`: the earlier
+helper is NaN where its terms cancel). `GCD`
 of integers (`GCD(Round(a), Round(b))`) is `_gpu_ir_gcd` on `int`s. `Hypot` is
 `length(vec2(x, y))`; `Arsinh` is `sign(x)·asinh(|x|)` (the builtin is wrong for
 a large negative argument); `Sinh`, `Cosh`, `Tanh`, `Arctan` and the reciprocal
@@ -751,9 +771,10 @@ is printed as `_IA.integrateClosed(() => closed, f, a, b, n)`: the library gives
 the closed form when its scan of the integrand finds no pole, gap or unbounded
 stretch (`∫ dt/t²` from −1 to 1 closes to −2 and is `singular`), and with an
 infinite bound, and the enclosure otherwise. A closed form that the lowering
-declines (`SinIntegral`, `FresnelS`: no row), that is not real, or that holds a
-loop or a call (a function lowered in a discarded region would stay defined) is
-not lowered, and one that the mode does not print is removed before `admits()`
+declines (an operator with no row), that is not real, or that holds a loop or a
+call (a function lowered in a discarded region would stay defined) is not
+lowered, and one that the mode does not print (`SinIntegral`, `FresnelS`: no
+interval kernel) is removed before `admits()`
 (`dropClosedForms()`): the enclosure, of the same `n`, stands alone. The reads
 of `vars` entries in a closed form are not counted as effects (in the mode they
 read the inputs object). An integral that is not pure (`e.isPure`: a draw in a
@@ -1646,7 +1667,7 @@ NaN, and so is the quadrature; `∫ dt/t` between inputs `a` and `b` has none);
 `∫₋₁¹ dt/t²` is its value `+∞`, where the quadrature is NaN. A node that is not
 pure for the engine keeps the quadrature: a draw, which the engine would read
 once at compile time, and an integrand that holds an integral. A closed form
-that does not lower (`SinIntegral`: no row), that is not real, or that holds a
+that does not lower (an operator with no row), that is not real, or that holds a
 loop or a call is not used (`closedRegion()`). The closed form is computed in
 doubles: `∫ t dt` from `a` = 1e8 to `b` = 1e8 + 1 is `b²/2 − a²/2`, 100000000
 for 100000000.5; and it is NaN at a bound where the integrand has an integrable

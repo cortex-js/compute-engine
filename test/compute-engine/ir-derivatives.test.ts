@@ -222,10 +222,12 @@ describe('IR profile, batch G22: derivatives (CE-1354)', () => {
     check(['Sum', ['D', ['w', 'x'], 'x'], ['Limits', 'a', 1, 3]]);
   });
 
-  test('a derivative whose closed form holds a head outside the slice: a decline with its cause', () => {
-    expect(failure(() => js(['Apply', ['Derivative', 'Gamma'], 'x']))).toMatch(
-      /Digamma\(x\): the operator Digamma is not supported by the compiler/
-    );
+  test('a derivative whose closed form holds a head outside the target: a decline with its cause', () => {
+    // `Gamma(x)·Digamma(x)`: the interval mode has no `Digamma`.
+    expect(
+      failure(() => interval(['Apply', ['Derivative', 'Gamma'], 'x']))
+    ).toMatch(/Digamma \(the operation digamma\) on interval-js/);
+    check(['Apply', ['Derivative', 'Gamma'], 'x']);
   });
 
   test('under an angular unit other than radians: a decline', () => {
@@ -600,11 +602,12 @@ describe('IR profile, batch G22: the review’s fixes', () => {
     );
   });
 
-  test('D(Gamma(x), x): Digamma is not supported by the compiler, on JavaScript and interval-js', () => {
-    for (const to of ['javascript', 'interval-js'])
-      expect(fails(['D', ['Gamma', 'x'], 'x'], { to })).toMatch(
-        /Digamma\(x\): the operator Digamma is not supported by the compiler/
-      );
+  test('D(Gamma(x), x): Digamma compiles on JavaScript, not on interval-js', () => {
+    const [v, want] = run(['D', ['Gamma', 'x'], 'x'], {}, { x: 0.7 });
+    expect(agree(v, want)).toBe(true);
+    expect(fails(['D', ['Gamma', 'x'], 'x'], { to: 'interval-js' })).toMatch(
+      /Digamma \(the operation digamma\) on interval-js/
+    );
   });
 
   test('Apply(Derivative(ft), x) of a typed parameter: the literal of the derivative keeps the type, a decline', () => {

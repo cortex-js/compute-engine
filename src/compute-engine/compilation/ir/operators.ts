@@ -37,6 +37,7 @@ import {
   type V,
 } from './ir.js';
 import { rangeCount } from '../../numerics/range-count.js';
+import { binomial } from '../../numerics/special-functions.js';
 // The functions that the runtime `_SYS.ir` holds (`javascript-runtime.ts`),
 // which the folds compute.
 import {
@@ -60,7 +61,7 @@ export type Effect = 'pure' | 'may-fail' | 'effectful';
  * - `chain`: two or more operands, the conjunction of the operation on each
  *   pair of neighbours (`a < b < c`).
  */
-export type Arity = 0 | 1 | 2 | 3 | 'variadic' | 'chain';
+export type Arity = 0 | 1 | 2 | 3 | 4 | 'variadic' | 'chain';
 
 /** An operand: a scalar of a sub-lane of the lane (each element of a list,
  *  when the row threads), or a whole list (`list`). */
@@ -259,15 +260,70 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('GammaLn',      1,          [[[R], R, 'gammaln']],         { fold: F.gammaln }),
   // An integer operand first: GLSL spells `factorial.int` only.
   row('Factorial',    1,          [[[I], I, 'factorial.int'], [[R], R, 'factorial']], { fold: F.factorial }),
-  // Rows of the integer lane only: the bigint mode spells them.
-  row('Binomial',     2,          [[[I, I], I, 'binomial']],     list),
-  row('Choose',       2,          [[[I, I], I, 'binomial']],     list),
-  row('GCD',          'variadic', [[[I], I, 'gcd']],             { ...list, fold: F.gcd }),
-  row('LCM',          'variadic', [[[I], I, 'lcm']],             list),
+  // An integer signature first: the bigint mode spells it. Of reals, the
+  // interpreter's extension (`Binomial(2.5, 1.5)`, `GCD(7.5, 2)` is 0.5).
+  row('Binomial',     2,          [[[I, I], I, 'binomial'], [[R, R], R, 'rbinomial']], { ...list, fold: binomial }),
+  row('Choose',       2,          [[[I, I], I, 'binomial'], [[R, R], R, 'rbinomial']], { ...list, fold: binomial }),
+  row('GCD',          'variadic', [[[I], I, 'gcd'], [[R], R, 'rgcd']], { ...list, fold: F.gcd }),
+  row('LCM',          'variadic', [[[I], I, 'lcm'], [[R], R, 'rlcm']], { ...list, fold: F.lcm }),
   row('Factorial2',   1,          [[[R], R, 'factorial2']],      { fold: F.factorial2 }),
   row('Zeta',         1,          [[[R], R, 'zeta']],            { fold: F.zeta }),
   // `Chop(x, tol)`; `Chop(x)` takes the engine's tolerance (`lower.ts`).
   row('Chop',         2,          [[[R, R], R, 'chop']],         { fold: F.chop }),
+  // The special functions and steps of the library: of real operands, the
+  // interpreter's kernels (`REAL_FUNCTIONS`); an order or a branch that the
+  // library types `integer` is on the integer lane. A head of two forms has
+  // a row per arity (`rowOfHead()`). `domain`: the value of real operands
+  // can be complex, where the real function is NaN; in `mode: 'complex'`
+  // such a row takes its complex signature (the interpreter's continued
+  // kernel, `COMPLEX_FUNCTIONS`), and declines when it has none.
+  row('Heaviside',    1,          [[[R], R, 'heaviside']],       { fold: F.heaviside }),
+  row('Remainder',    2,          [[[I, I], I, 'remainder.int'], [[R, R], R, 'remainder']], { fold: F.remainder }),
+  row('Smoothstep',   3,          [[[R, R, R], R, 'smoothstep']], { fold: F.smoothstep }),
+  row('InverseHaversine', 1,      rc('invhav', 1),               { fold: F.invhav, ...inverse, ...domain }),
+  row('ErfInv',       1,          [[[R], R, 'erfinv']],          { fold: F.erfinv }),
+  row('Erfi',         1,          [[[R], R, 'erfi']],            { fold: F.erfi }),
+  row('Beta',         2,          [[[R, R], R, 'beta']],         { fold: F.beta }),
+  row('BetaRegularized', 3,       [[[R, R, R], R, 'betareg']],   { fold: F.betareg }),
+  row('GammaRegularized', 2,      [[[R, R], R, 'gammareg']],     { fold: F.gammareg }),
+  row('Digamma',      1,          [[[R], R, 'digamma']],         { fold: F.digamma }),
+  row('Trigamma',     1,          [[[R], R, 'trigamma']],        { fold: F.trigamma }),
+  row('PolyGamma',    2,          [[[I, R], R, 'polygamma']],    { fold: F.polygamma, ...domain }),
+  row('AiryAi',       1,          [[[R], R, 'airyai']],          { fold: F.airyai }),
+  row('AiryBi',       1,          [[[R], R, 'airybi']],          { fold: F.airybi }),
+  row('AiryAiPrime',  1,          [[[R], R, 'airyaiprime']],     { fold: F.airyaiprime }),
+  row('AiryBiPrime',  1,          [[[R], R, 'airybiprime']],     { fold: F.airybiprime }),
+  // Of an integer order only: the kernels are NaN at another order.
+  row('BesselJ',      2,          [[[I, R], R, 'besselj']],      { fold: F.besselj }),
+  row('BesselY',      2,          [[[I, R], R, 'bessely']],      { fold: F.bessely, ...domain }),
+  row('BesselI',      2,          [[[I, R], R, 'besseli']],      { fold: F.besseli }),
+  row('BesselK',      2,          [[[I, R], R, 'besselk']],      { fold: F.besselk, ...domain }),
+  row('SinIntegral',  1,          [[[R], R, 'sinint']],          { fold: F.sinint }),
+  row('CosIntegral',  1,          [[[R], R, 'cosint']],          { fold: F.cosint, ...domain }),
+  row('ExpIntegralEi', 1,         [[[R], R, 'expint']],          { fold: F.expint }),
+  row('LogIntegral',  1,          [[[R], R, 'logint']],          { fold: F.logint }),
+  row('AGM',          1,          [[[R], R, 'agm1']],            { fold: F.agm1, ...domain }),
+  row('AGM',          2,          [[[R, R], R, 'agm']],          { fold: F.agm, ...domain }),
+  row('EllipticK',    1,          rc('elliptick', 1),            { fold: F.elliptick, ...domain }),
+  row('EllipticE',    1,          rc('elliptice', 1),            { fold: F.elliptice, ...domain }),
+  row('EllipticE',    2,          [[[R, R], R, 'ellipticeinc']], { fold: F.ellipticeinc, ...domain }),
+  row('EllipticF',    2,          [[[R, R], R, 'ellipticf']],    { fold: F.ellipticf, ...domain }),
+  row('EllipticPi',   2,          [[[R, R], R, 'ellipticpi']],   { fold: F.ellipticpi, ...domain }),
+  row('EllipticPi',   3,          [[[R, R, R], R, 'ellipticpiinc']], { fold: F.ellipticpiinc, ...domain }),
+  row('Hypergeometric1F1', 3,     [[[R, R, R], R, 'hyp1f1']],    { fold: F.hyp1f1 }),
+  row('Hypergeometric2F1', 4,     rc('hyp2f1', 4),               { fold: F.hyp2f1, ...domain }),
+  row('HurwitzZeta',  2,          rc('hurwitzzeta', 2),          { fold: F.hurwitzzeta, ...domain }),
+  row('LerchPhi',     3,          rc('lerchphi', 3),             { fold: F.lerchphi, ...domain }),
+  row('PolyLog',      2,          rc('polylog', 2),              { fold: F.polylog, ...domain }),
+  row('DirichletEta', 1,          [[[R], R, 'dirichleteta']],    { fold: F.dirichleteta }),
+  row('DirichletBeta', 1,         [[[R], R, 'dirichletbeta']],   { fold: F.dirichletbeta }),
+  row('StieltjesGamma', 1,        [[[I], R, 'stieltjes']],       { fold: F.stieltjes }),
+  row('StieltjesGamma', 2,        [[[I, R], R, 'stieltjesa']],   { fold: F.stieltjesa, ...domain }),
+  row('ClausenCl',    2,          [[[I, R], R, 'clausen']],      { fold: F.clausen }),
+  row('LambertW',     1,          rc('lambertw', 1),             { fold: F.lambertw, ...domain }),
+  row('LambertW',     2,          [[[R, I], R, 'lambertwk']],    { fold: F.lambertwk, ...domain }),
+  row('Fibonacci',    1,          [[[I], I, 'fibonacci.int'], [[R], R, 'fibonacci']], { fold: F.fibonacci }),
+  row('IsPrime',      1,          [[[R], B, 'isprime']],         { fold: F.isprime }),
   // `Max` of a list is its largest element: a reduction, not threaded.
   row('Max',          'variadic', arith('max', 1),               { fold: Math.max, ...list }),
   row('Min',          'variadic', arith('min', 1),               { fold: Math.min, ...list }),
@@ -463,11 +519,19 @@ export const SETTINGS: Record<
     ce.roundingTies === 'away-from-zero',
 });
 
+/** The row of `head`: with `n`, its row of `n` operands when it has one
+ *  (`AGM(x)` and `AGM(a, b)`), else its first row. */
 export function rowOfHead(
   rows: readonly OperatorRow[],
-  head: string
+  head: string,
+  n?: number
 ): OperatorRow | undefined {
-  return rows.find((r) => r.head === head);
+  return (
+    (n === undefined
+      ? undefined
+      : rows.find((r) => r.head === head && r.arity === n)) ??
+    rows.find((r) => r.head === head)
+  );
 }
 
 /** The row and the signature of each IR operation, by table: the first

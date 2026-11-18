@@ -154,6 +154,33 @@ export const GLSL: Syntax = deepFreeze({
     'acos': `(abs($0) <= 1.0 ? acos($0) : ${NAN})`,
     'acosh': `($0 >= 1.0 ? acosh($0) : ${NAN})`,
     'atanh': `(abs($0) < 1.0 ? atanh($0) : ${NAN})`,
+    // The reciprocal inverse functions, as `REAL_FUNCTIONS` computes them:
+    // `Arccot` in (0, π), with no cancellation of `π/2 - atan(x)` for a
+    // large positive `x`; a pole is ±∞, a value that is not real NaN.
+    'acot': '($0 > 0.0 ? atan(1.0 / $0) : 1.5707964 - atan($0))',
+    // \`acos\` of SwiftShader is wrong by 5e-5 (\`acos(0.5)\`): arccos y is
+    // atan(√((1 - y)(1 + y)), y).
+    'asec': {
+      text: `(abs($0) >= 1.0 ? _gpu_ir_acos(1.0 / $0) : ${NAN})`,
+      helpers: ['_gpu_ir_acos'],
+    },
+    'acsc': `(abs($0) >= 1.0 ? asin(1.0 / $0) : ${NAN})`,
+    'acoth': {
+      text: '_gpu_ir_acoth($0)',
+      helpers: ['_gpu_ir_acoth'],
+    },
+    'asech': {
+      text: '_gpu_ir_asech($0)',
+      helpers: ['_gpu_ir_log1p', '_gpu_ir_asech'],
+    },
+    'acsch': {
+      text: '_gpu_ir_acsch($0)',
+      helpers: ['_gpu_ir_log1p', '_gpu_ir_acsch'],
+    },
+    'hav': {
+      text: '_gpu_ir_hav($0)',
+      helpers: ['_gpu_ir_sincospi', '_gpu_ir_hav'],
+    },
     // `Arctan2(y, x)`; the interpreter's value at (0, 0) is 0.
     'atan2': '($0 == 0.0 && $1 == 0.0 ? 0.0 : atan($0, $1))',
     'hypot': 'length(vec2($0, $1))',
@@ -165,6 +192,88 @@ export const GLSL: Syntax = deepFreeze({
       helpers: ['_gpu_ir_factorial'],
     },
     'gcd': { text: '_gpu_ir_gcd($0, $1)', helpers: ['_gpu_ir_gcd'] },
+    'lcm': {
+      text: '_gpu_ir_lcm($0, $1)',
+      helpers: ['_gpu_ir_gcd', '_gpu_ir_lcm'],
+    },
+    'binomial': {
+      text: '_gpu_ir_binomial($0, $1)',
+      helpers: ['_gpu_ir_binomial'],
+    },
+    // `n!` of a real: the product at an integer, `Γ(x + 1)` elsewhere.
+    'factorial': {
+      text: '(($0) == floor($0) ? _gpu_ir_factorial($0) : _gpu_ir_gamma(($0) + 1.0))',
+      helpers: ['_gpu_ir_factorial', '_gpu_ir_sincospi', '_gpu_ir_gamma'],
+    },
+    'factorial2': {
+      text: '_gpu_ir_factorial2($0)',
+      helpers: ['_gpu_ir_factorial2'],
+    },
+    'gamma': {
+      text: '_gpu_ir_gamma($0)',
+      helpers: ['_gpu_ir_sincospi', '_gpu_ir_gamma'],
+    },
+    'gammaln': {
+      text: '_gpu_ir_gammaln($0)',
+      helpers: ['_gpu_ir_sincospi', '_gpu_ir_gammaln'],
+    },
+    'erf': {
+      text: '_gpu_ir_erf($0)',
+      helpers: ['_gpu_ir_erfc_pos', '_gpu_ir_erf'],
+    },
+    'erfc': {
+      text: '_gpu_ir_erfc($0)',
+      helpers: ['_gpu_ir_erfc_pos', '_gpu_ir_erf', '_gpu_ir_erfc'],
+    },
+    'zeta': {
+      text: '_gpu_ir_zeta($0)',
+      helpers: [
+        '_gpu_ir_sincospi',
+        '_gpu_ir_gamma',
+        '_gpu_ir_gammaln',
+        '_gpu_ir_zeta',
+      ],
+    },
+    'heaviside': {
+      text: '_gpu_ir_heaviside($0)',
+      helpers: ['_gpu_ir_heaviside'],
+    },
+    'remainder.int': {
+      text: '_gpu_ir_iremainder($0, $1)',
+      helpers: ['_gpu_ir_iremainder'],
+    },
+    'remainder': {
+      text: '_gpu_ir_remainder($0, $1)',
+      helpers: ['_gpu_ir_fmod', '_gpu_ir_remainder'],
+    },
+    'smoothstep': {
+      text: '_gpu_ir_smoothstep($0, $1, $2)',
+      helpers: ['_gpu_ir_smoothstep'],
+    },
+    // InverseHaversine: 2 arcsin √x, real on [0, 1].
+    'invhav': `($0 >= 0.0 && $0 <= 1.0 ? 2.0 * asin(sqrt($0)) : ${NAN})`,
+    'erfinv': { text: '_gpu_ir_erfinv($0)', helpers: ['_gpu_ir_erfinv'] },
+    'beta': {
+      text: '_gpu_ir_beta($0, $1)',
+      helpers: [
+        '_gpu_ir_sincospi',
+        '_gpu_ir_gamma',
+        '_gpu_ir_gammaln',
+        '_gpu_ir_beta',
+      ],
+    },
+    'besselj': {
+      text: '_gpu_ir_besselj($0, $1)',
+      helpers: ['_gpu_ir_sincospi', '_gpu_ir_besselj'],
+    },
+    'digamma': {
+      text: '_gpu_ir_digamma($0)',
+      helpers: ['_gpu_ir_sincospi', '_gpu_ir_digamma'],
+    },
+    'trigamma': {
+      text: '_gpu_ir_trigamma($0)',
+      helpers: ['_gpu_ir_sincospi', '_gpu_ir_trigamma'],
+    },
     // Below 0.5 its Taylor polynomial (error 2e-11): a renderer's `sin` is
     // wrong by 3e-5 there (`Sinc(1e-6)` was 1.03, `Sinc(1e-30)` 0).
     'sinc':
@@ -353,6 +462,442 @@ export const GLSL: Syntax = deepFreeze({
   int x = abs(int(a)), y = abs(int(b));
   for (int i = 0; i < 64 && y != 0; i++) { int t = x % y; x = y; y = t; }
   return float(x);
+}`,
+    // The least common multiple of two integers; 0 when one is 0.
+    _gpu_ir_lcm: `float _gpu_ir_lcm(float a, float b) {
+  if (a == 0.0 || b == 0.0) return 0.0;
+  return abs(a) / _gpu_ir_gcd(a, b) * abs(b);
+}`,
+    // `C(n, k)` of integers, as `binomial()` of the runtime: a negative `k`
+    // or `n` is reflected to `C(m, j)` with a sign, then the product
+    // `C(n - j + i, i)` for i = 1..j, each quotient an integer (rounded to
+    // it below 2^24, where a GLSL division need not be exact). From j = 131
+    // the value is over the largest float.
+    _gpu_ir_binomial: `float _gpu_ir_binomial(float n, float k) {
+  float s = 1.0;
+  if (k < 0.0) {
+    if (n >= 0.0 || n < k) return 0.0;
+    s = mod(n - k, 2.0) == 0.0 ? 1.0 : -1.0;
+    float m = -k - 1.0;
+    k = min(-n - 1.0, n - k);
+    n = m;
+  } else if (n < 0.0) {
+    s = mod(k, 2.0) == 0.0 ? 1.0 : -1.0;
+    float m = k - n - 1.0;
+    k = min(k, -n - 1.0);
+    n = m;
+  }
+  if (k > n) return 0.0;
+  float j = min(k, n - k);
+  if (j > 130.0) return s * uintBitsToFloat(0x7f800000u);
+  float r = 1.0;
+  for (int i = 1; i <= 130; i++) {
+    if (float(i) > j) break;
+    float p = r * (n - j + float(i));
+    r = p < 16777216.0 ? floor(p / float(i) + 0.5) : p / float(i);
+  }
+  return s * r;
+}`,
+    // n!! of a real, as `factorial2` of the runtime: NaN for a non-integer,
+    // +∞ at a negative even integer (a pole), ±1/(m - 2)!! for a negative
+    // odd -m, and +∞ from 57!! (over the largest float).
+    _gpu_ir_factorial2: `float _gpu_ir_factorial2(float n) {
+  if (n != floor(n)) return ${NAN};
+  if (n < 0.0) {
+    if (mod(n, 2.0) == 0.0) return uintBitsToFloat(0x7f800000u);
+    float m = -n;
+    float r = mod((m - 1.0) * 0.5, 2.0) == 0.0 ? 1.0 : -1.0;
+    for (int k = 3; k < 200; k += 2) {
+      if (float(k) > m - 2.0 || r == 0.0) break;
+      r /= float(k);
+    }
+    return r;
+  }
+  if (n > 128.0) return uintBitsToFloat(0x7f800000u);
+  float r = 1.0;
+  for (int k = 0; k < 64; k++) {
+    float v = n - 2.0 * float(k);
+    if (v <= 1.0) break;
+    r *= v;
+  }
+  return r;
+}`,
+    // Γ(x): +∞ at a pole (a non-positive integer); the product (x - 1)! at a
+    // positive integer; for x >= 0.5 the Lanczos sum (g = 7, n = 9) at the
+    // fraction of x in [1, 2), times the product of the steps up to x; for
+    // x < 0.5 the reflection π / (sin(πx) Γ(1 - x)), the sine taken at the
+    // exact distance of x to the nearest integer.
+    _gpu_ir_gamma: `float _gpu_ir_gamma(float z) {
+  if (z <= 0.0 && z == floor(z)) return uintBitsToFloat(0x7f800000u);
+  if (z > 35.5) return uintBitsToFloat(0x7f800000u);
+  float x = z < 0.5 ? 1.0 - z : z;
+  float g;
+  if (x == floor(x)) {
+    g = 1.0;
+    for (int i = 2; i < 36; i++) if (float(i) < x) g *= float(i);
+  } else {
+    float w = fract(x);
+    float q = 1.0;
+    for (int i = 1; i < 36; i++) if (float(i) + w < x) q *= float(i) + w;
+    float a = 0.99999999999980993 + 676.5203681218851 / (w + 1.0) - 1259.1392167224028 / (w + 2.0) + 771.32342877765313 / (w + 3.0) - 176.61502916214059 / (w + 4.0) + 12.507343278686905 / (w + 5.0) - 0.13857109526572012 / (w + 6.0) + 9.9843695780195716e-6 / (w + 7.0) + 1.5056327351493116e-7 / (w + 8.0);
+    float t = w + 7.5;
+    g = 2.5066282746310002 * pow(t, w + 0.5) * exp(-t) * a * q;
+    // The sum is Γ(w + 1): below 1, x is w.
+    if (x < 1.0) g /= x;
+  }
+  if (z >= 0.5) return g;
+  return 3.14159265 / (_gpu_ir_sincospi(z).x * g);
+}`,
+    // ln|Γ(x)|: +∞ at a pole; for x > 0 the Stirling series at x + n >= 8,
+    // less the logarithm of the product x (x + 1) ... (x + n - 1); for
+    // x < 0 the reflection ln π - ln|sin(πx)| - ln Γ(1 - x).
+    _gpu_ir_gammaln: `float _gpu_ir_gammaln(float z) {
+  if (z <= 0.0 && z == floor(z)) return uintBitsToFloat(0x7f800000u);
+  float x = z < 0.0 ? 1.0 - z : z;
+  float p = 1.0;
+  for (int i = 0; i < 8; i++) {
+    if (x >= 8.0) break;
+    p *= x;
+    x += 1.0;
+  }
+  float x2 = 1.0 / (x * x);
+  float r = (x - 0.5) * log(x) - x + 0.91893853320467274 + (1.0 / 12.0 - x2 * (1.0 / 360.0 - x2 * (1.0 / 1260.0 - x2 / 1680.0))) / x - log(p);
+  if (z > 0.0) return r;
+  return 1.1447298858494002 - log(abs(_gpu_ir_sincospi(z).x)) - r;
+}`,
+    // erfc(y) for y >= 0, to a relative error of about 1.2e-7 (the
+    // Chebyshev fit `erfcc` of Numerical Recipes); e^{-y²} is the product
+    // of e^{-h²}, h = y rounded down to 1/16 (h² exact), and e^{-(y-h)(y+h)},
+    // so the rounding of y² is not lost; 0 from y = 10 (below the smallest
+    // float).
+    _gpu_ir_erfc_pos: `float _gpu_ir_erfc_pos(float y) {
+  if (y >= 10.0) return 0.0;
+  float t = 1.0 / (1.0 + 0.5 * y);
+  float p = -1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277))))))));
+  float h = floor(y * 16.0) / 16.0;
+  return t * exp(-h * h) * exp(p - (y - h) * (y + h));
+}`,
+    // erf(x): its Taylor polynomial below 0.5, 1 - erfc(|x|) above, odd.
+    _gpu_ir_erf: `float _gpu_ir_erf(float x) {
+  float y = abs(x);
+  if (y < 0.5) {
+    float s = x * x;
+    return 1.1283791670955126 * x * (1.0 - s * (1.0 / 3.0 - s * (0.1 - s * (1.0 / 42.0 - s * (1.0 / 216.0 - s / 1320.0)))));
+  }
+  float r = 1.0 - _gpu_ir_erfc_pos(y);
+  return x < 0.0 ? -r : r;
+}`,
+    _gpu_ir_erfc: `float _gpu_ir_erfc(float x) {
+  if (abs(x) < 0.5) return 1.0 - _gpu_ir_erf(x);
+  return x > 0.0 ? _gpu_ir_erfc_pos(x) : 2.0 - _gpu_ir_erfc_pos(-x);
+}`,
+    // ζ(s) of a real s: +∞ at the pole s = 1, 0 at a negative even integer;
+    // for s >= 1/2 the Euler-Maclaurin sum with N = 10 and six Bernoulli
+    // terms; below, the reflection 2 (2π)^(s-1) sin(πs/2) Γ(1 - s) ζ(1 - s).
+    _gpu_ir_zeta: `float _gpu_ir_zeta(float s) {
+  if (s == 1.0) return uintBitsToFloat(0x7f800000u);
+  if (s == 0.0) return -0.5;
+  if (s < 0.0 && mod(s, 2.0) == 0.0) return 0.0;
+  float t = s < 0.5 ? 1.0 - s : s;
+  float sum = 0.0;
+  for (int k = 1; k < 10; k++) sum += pow(float(k), -t);
+  float nt = pow(10.0, -t);
+  sum += 10.0 * nt / (t - 1.0) + 0.5 * nt;
+  float b[6] = float[6](1.0 / 12.0, -1.0 / 720.0, 1.0 / 30240.0, -1.0 / 1209600.0, 1.0 / 47900160.0, -691.0 / 1307674368000.0);
+  float c = t * nt * 0.1;
+  for (int k = 0; k < 6; k++) {
+    sum += b[k] * c;
+    float m = t + float(2 * k);
+    c *= (m + 1.0) * (m + 2.0) * 0.01;
+  }
+  if (s >= 0.5) return sum;
+  float sn = _gpu_ir_sincospi(0.5 * s).x;
+  // (2π)^(s-1) Γ(1 - s), in log form where Γ(1 - s) overflows.
+  float m = t > 34.0 ? exp(_gpu_ir_gammaln(t) + (s - 1.0) * 1.8378771) : pow(6.2831853, s - 1.0) * _gpu_ir_gamma(t);
+  return 2.0 * sn * m * sum;
+}`,
+    // arcoth x = artanh(1/x) for |x| > 1, ±∞ at ±1, NaN between: the odd
+    // series of artanh below 0.1 (the builtin is a quotient of logarithms
+    // that loses the digits of a small operand), the logarithm above.
+    _gpu_ir_acoth: `float _gpu_ir_acoth(float x) {
+  float a = abs(x);
+  if (!(a >= 1.0)) return ${NAN};
+  float r;
+  if (a == 1.0) r = uintBitsToFloat(0x7f800000u);
+  else {
+    float u = 1.0 / a;
+    if (u < 0.1) {
+      float u2 = u * u;
+      r = u * (1.0 + u2 * (1.0 / 3.0 + u2 * (0.2 + u2 * (1.0 / 7.0 + u2 * (1.0 / 9.0 + u2 * (1.0 / 11.0 + u2 / 13.0))))));
+    } else r = 0.5 * log((a + 1.0) / (a - 1.0));
+  }
+  return x < 0.0 ? -r : r;
+}`,
+    // arsech x = log1p(√((1 - x)(1 + x))) - ln x for 0 < x <= 1, +∞ at 0,
+    // NaN outside.
+    _gpu_ir_asech: `float _gpu_ir_asech(float x) {
+  if (!(x >= 0.0 && x <= 1.0)) return ${NAN};
+  if (x == 0.0) return uintBitsToFloat(0x7f800000u);
+  return _gpu_ir_log1p(sqrt((1.0 - x) * (1.0 + x))) - log(x);
+}`,
+    // arcsch x = arsinh(1/x), odd, +∞ at 0: log1p(v) with
+    // v = u + u²/(1 + √(1 + u²)), u = 1/|x|; ln 2 - ln|x| below 1e-10.
+    _gpu_ir_acsch: `float _gpu_ir_acsch(float x) {
+  if (x == 0.0) return uintBitsToFloat(0x7f800000u);
+  float a = abs(x);
+  float r;
+  if (a < 1e-10) r = 0.69314718 - log(a);
+  else {
+    float u = 1.0 / a;
+    r = _gpu_ir_log1p(u + u * u / (1.0 + sqrt(1.0 + u * u)));
+  }
+  return x < 0.0 ? -r : r;
+}`,
+    // H(x): 0 below 0, 1/2 at 0, 1 above; a NaN is returned as it is, tested
+    // by its bits (a compiler may remove `isnan(x)` or `x != x`; ANGLE
+    // Metal gave 0.5 for `0.5 + 0.0 * x` of a NaN, CE-520).
+    _gpu_ir_heaviside: `float _gpu_ir_heaviside(float x) {
+  if ((floatBitsToUint(x) & 0x7FFFFFFFu) > 0x7F800000u) return x;
+  if (x < 0.0) return 0.0;
+  if (x > 0.0) return 1.0;
+  return 0.5;
+}`,
+    // The remainder of a / b with the quotient rounded to the nearest
+    // integer, a tie toward +∞ (the interpreter's `Remainder`), from the
+    // remainder of the truncated quotient r: |r| - |b| where 2|r| > |b|,
+    // and at a tie where r / b > 0. On `int`s (`%` of a negative operand is
+    // undefined in GLSL ES 3.00), exact within 2^24; NaN for b = 0.
+    _gpu_ir_iremainder: `float _gpu_ir_iremainder(float a, float b) {
+  if (b == 0.0) return ${NAN};
+  int ia = int(a), ib = abs(int(b));
+  int r = abs(ia) % ib;
+  if (ia < 0) r = -r;
+  int h = 2 * abs(r);
+  if (h > ib || (h == ib && (r > 0) == (b > 0.0))) r -= r > 0 ? ib : -ib;
+  return float(r);
+}`,
+    // The same of reals, the truncated remainder from `_gpu_ir_fmod`.
+    _gpu_ir_remainder: `float _gpu_ir_remainder(float a, float b) {
+  if (b == 0.0) return ${NAN};
+  float ib = abs(b);
+  float r = _gpu_ir_fmod(abs(a), ib);
+  if (a < 0.0) r = -r;
+  float h = 2.0 * abs(r);
+  if (h > ib || (h == ib && (r > 0.0) == (b > 0.0))) r -= r > 0.0 ? ib : -ib;
+  return r;
+}`,
+    // smoothstep(e0, e1, x) of the interpreter: t²(3 - 2t), t the clamped
+    // (x - e0)/(e1 - e0); the step at x = e0 when e0 = e1; NaN for a NaN
+    // operand (tested by its bits: the builtin gives 0 on Apple GPUs, CE-520).
+    _gpu_ir_smoothstep: `float _gpu_ir_smoothstep(float e0, float e1, float x) {
+  if ((floatBitsToUint(e0) & 0x7FFFFFFFu) > 0x7F800000u || (floatBitsToUint(e1) & 0x7FFFFFFFu) > 0x7F800000u || (floatBitsToUint(x) & 0x7FFFFFFFu) > 0x7F800000u) return ${NAN};
+  if (e0 == e1) return x < e0 ? 0.0 : 1.0;
+  float t = clamp((x - e0) / (e1 - e0), 0.0, 1.0);
+  return t * t * (3.0 - 2.0 * t);
+}`,
+    // erf⁻¹(x) for |x| < 1 (Giles, "Approximating the erfinv function",
+    // the single-precision fit); ±∞ at ±1, NaN outside.
+    _gpu_ir_erfinv: `float _gpu_ir_erfinv(float x) {
+  if (abs(x) == 1.0) return x * uintBitsToFloat(0x7f800000u);
+  if (!(abs(x) < 1.0)) return ${NAN};
+  float w = -log((1.0 - x) * (1.0 + x));
+  float p;
+  if (w < 5.0) {
+    w = w - 2.5;
+    p = 2.81022636e-08;
+    p = 3.43273939e-07 + p * w;
+    p = -3.5233877e-06 + p * w;
+    p = -4.39150654e-06 + p * w;
+    p = 0.00021858087 + p * w;
+    p = -0.00125372503 + p * w;
+    p = -0.00417768164 + p * w;
+    p = 0.246640727 + p * w;
+    p = 1.50140941 + p * w;
+  } else {
+    w = sqrt(w) - 3.0;
+    p = -0.000200214257;
+    p = 0.000100950558 + p * w;
+    p = 0.00134934322 + p * w;
+    p = -0.00367342844 + p * w;
+    p = 0.00573950773 + p * w;
+    p = -0.0076224613 + p * w;
+    p = 0.00943887047 + p * w;
+    p = 1.00167406 + p * w;
+    p = 2.83297682 + p * w;
+  }
+  return p * x;
+}`,
+    // B(a, b) = Γ(a) Γ(b) / Γ(a + b); in log form for a, b > 0 with
+    // a + b > 30 (an error of about 2e-7 per unit of |ln B| there); for
+    // integers -n <= 0 < m, the finite value of the cancelling poles
+    // (-1/n) Π k/(k - n) when n >= m, a pole (NaN, as the runtime) when
+    // n < m.
+    _gpu_ir_beta: `float _gpu_ir_beta(float a, float b) {
+  if (a == floor(a) && b == floor(b) && (a <= 0.0) != (b <= 0.0)) {
+    float n = -min(a, b), m = max(a, b);
+    if (n < m) return ${NAN};
+    if (m <= 100.0) {
+      float r = -1.0 / n;
+      for (int k = 1; k < 100; k++) {
+        if (float(k) >= m) break;
+        r *= float(k) / (float(k) - n);
+      }
+      return r;
+    }
+  }
+  if (a > 0.0 && b > 0.0 && a + b > 30.0)
+    return exp(_gpu_ir_gammaln(a) + _gpu_ir_gammaln(b) - _gpu_ir_gammaln(a + b));
+  return _gpu_ir_gamma(a) * _gpu_ir_gamma(b) / _gpu_ir_gamma(a + b);
+}`,
+    // ψ(x) and ψ₁(x) of a real x (the deleted GPU target's
+    // helpers, measured there against the double kernels): +∞ at a pole (a
+    // non-positive integer), NaN at -∞. ψ: the reflection for x < 0, the
+    // recurrence up to 6, the asymptotic series to B₈; ψ₁ the same way.
+    _gpu_ir_digamma: `float _gpu_ir_digamma(float x) {
+  const float PI = 3.14159265358979;
+  if (x <= 0.0 && x == floor(x))
+    return x >= -3.4028234663852886e38 ? uintBitsToFloat(0x7f800000u) : ${NAN};
+  float result = 0.0;
+  float z = x;
+  if (x < 0.0) {
+    float r = x - floor(x + 0.5);
+    vec2 sc = _gpu_ir_sincospi(x);
+    result = -PI * sc.y / sc.x;
+    z = 1.0 - x;
+  }
+  for (int k = 0; k < 6; k++) {
+    if (z >= 6.0) break;
+    result -= 1.0 / z;
+    z += 1.0;
+  }
+  float z2 = 1.0 / (z * z);
+  return result + (log(z) - 0.5 / z -
+    z2 * (1.0 / 12.0 - z2 * (1.0 / 120.0 - z2 * (1.0 / 252.0 - z2 / 240.0))));
+}`,
+    _gpu_ir_trigamma: `float _gpu_ir_trigamma(float x) {
+  const float PI = 3.14159265358979;
+  if (x <= 0.0 && x == floor(x))
+    return x >= -3.4028234663852886e38 ? uintBitsToFloat(0x7f800000u) : ${NAN};
+  float result = 0.0;
+  float sgn = 1.0;
+  float z = x;
+  if (x < 0.0) {
+    float sr = _gpu_ir_sincospi(x).x;
+    result = PI * PI / (sr * sr);
+    sgn = -1.0;
+    z = 1.0 - x;
+  }
+  float t = 0.0;
+  for (int k = 0; k < 6; k++) {
+    if (z >= 6.0) break;
+    t += 1.0 / (z * z);
+    z += 1.0;
+  }
+  float z2 = 1.0 / (z * z);
+  t += 1.0 / z + 0.5 * z2 +
+    z2 / z * (1.0 / 6.0 - z2 * (1.0 / 30.0 - z2 * (1.0 / 42.0 - z2 / 30.0)));
+  return result + sgn * t;
+}`,
+    // J_n(x) of an integer order: the power series only for x² < 4(n + 1),
+    // where its terms do not cancel in single precision; Hankel's
+    // asymptotic expansion for x > 25 + n²/2, or where the recurrence would
+    // need more than 400 steps; Miller's backward recurrence between
+    // (normalized by J₀ + 2 Σ J₂ₖ = 1, rescaled to stay in range);
+    // J₋ₙ = (-1)ⁿ Jₙ and Jₙ(-x) = (-1)ⁿ Jₙ(x). The deleted GPU target took
+    // the series up to x < 5 + n, which is wrong by up to 175% near there
+    // in single precision (J₂₅(29.9)).
+    _gpu_ir_besselj: `float _gpu_ir_besselj(float order, float x) {
+  int n = int(order);
+  if (x == 0.0) return n == 0 ? 1.0 : 0.0;
+  float sgn = 1.0;
+  if (n < 0) {
+    n = -n;
+    if (n % 2 != 0) sgn = -1.0;
+  }
+  if (x < 0.0) {
+    x = -x;
+    if (n % 2 != 0) sgn = -sgn;
+  }
+  int M = max(n + 20, int(ceil(x)) + 30);
+  if (M % 2 != 0) M += 1;
+  if (x > 25.0 + float(n * n) / 2.0 || M > 400) {
+    float mu = 4.0 * float(n) * float(n);
+    float P = 1.0, Q = 0.0, ak = 1.0, kf = 1.0;
+    for (int k = 1; k <= 12; k++) {
+      float c = float(2 * k - 1);
+      ak *= mu - c * c;
+      kf *= float(k);
+      float contrib = ak / (kf * pow(8.0 * x, float(k)));
+      if (k % 2 == 1) {
+        if (((k - 1) / 2) % 2 == 0) Q += contrib;
+        else Q -= contrib;
+      } else {
+        if ((k / 2) % 2 == 1) P -= contrib;
+        else P += contrib;
+      }
+      if (abs(contrib) < 1e-7) break;
+    }
+    vec2 sc = _gpu_ir_sincospi(x * 0.31830988618379067 - (float(n) / 2.0 + 0.25));
+    return sgn * sqrt(2.0 / (3.14159265358979 * x)) * (P * sc.y - Q * sc.x);
+  }
+  if (x * x < 4.0 * float(n + 1)) {
+    float negQ = -(x * x) / 4.0;
+    float term = 1.0;
+    for (int i = 1; i <= n; i++) term /= float(i);
+    float s = term;
+    for (int k = 1; k <= 60; k++) {
+      term *= negQ / (float(k) * float(n + k));
+      s += term;
+      if (abs(term) < abs(s) * 1e-7) break;
+    }
+    return sgn * s * pow(x / 2.0, float(n));
+  }
+  float jp1 = 0.0;
+  float jk = 1.0;
+  float jn = M == n ? 1.0 : 0.0;
+  float norm = 2.0;
+  for (int i = 0; i < 400; i++) {
+    int k = M - i;
+    if (k < 1) break;
+    float jm1 = (2.0 * float(k) / x) * jk - jp1;
+    jp1 = jk;
+    jk = jm1;
+    if (k - 1 == n) jn = jk;
+    if (k - 1 == 0) norm += jk;
+    else if ((k - 1) % 2 == 0) norm += 2.0 * jk;
+    if (abs(jk) > 1e15) {
+      jk *= 1e-15; jp1 *= 1e-15; jn *= 1e-15; norm *= 1e-15;
+    }
+  }
+  return sgn * jn / norm;
+}`,
+    // hav x = sin²(x/2).
+    _gpu_ir_hav: `float _gpu_ir_hav(float x) {
+  float s = _gpu_ir_sincospi(x * 0.15915494309189535).x;
+  return s * s;
+}`,
+    // (sin πu, cos πu) of a finite u: the Taylor polynomials at the exact
+    // distance f of u to the nearest integer k (|πf| <= π/2, an error below
+    // 1e-9), the signs of k's parity. The builtins of a renderer are exact
+    // to an absolute 1e-4 only (SwiftShader: \`sin(1.25)\`), and the product
+    // π·x loses the fraction of a large x.
+    _gpu_ir_sincospi: `vec2 _gpu_ir_sincospi(float u) {
+  float k = floor(u + 0.5);
+  float t = 3.14159265358979 * (u - k);
+  float t2 = t * t;
+  float s = t * (1.0 - t2 / 6.0 * (1.0 - t2 / 20.0 * (1.0 - t2 / 42.0 * (1.0 - t2 / 72.0 * (1.0 - t2 / 110.0 * (1.0 - t2 / 156.0))))));
+  float c = 1.0 - t2 / 2.0 * (1.0 - t2 / 12.0 * (1.0 - t2 / 30.0 * (1.0 - t2 / 56.0 * (1.0 - t2 / 90.0 * (1.0 - t2 / 132.0 * (1.0 - t2 / 182.0))))));
+  return mod(k, 2.0) == 0.0 ? vec2(s, c) : -vec2(s, c);
+}`,
+    // ln(1 + v) for v >= 0: its series below 0.1 (the builtin \`log\` is
+    // exact to an absolute 1e-7 only, so ln of 1 + v loses a small v).
+    _gpu_ir_log1p: `float _gpu_ir_log1p(float v) {
+  if (v >= 0.1) return log(1.0 + v);
+  return v * (1.0 - v * (0.5 - v * (1.0 / 3.0 - v * (0.25 - v * (0.2 - v * (1.0 / 6.0 - v * (1.0 / 7.0 - v * 0.125)))))));
+}`,
+    // arccos y = atan(√((1 - y)(1 + y)), y) for |y| <= 1.
+    _gpu_ir_acos: `float _gpu_ir_acos(float y) {
+  return atan(sqrt((1.0 - y) * (1.0 + y)), y);
 }`,
     // The Fresnel integrals: the rational approximations of the kernels
     // `fresnelC` and `fresnelS` (Cephes). GLSL has no conversion between

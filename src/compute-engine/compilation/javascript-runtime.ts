@@ -7163,9 +7163,130 @@ export const REAL_FUNCTIONS = Object.freeze({
   coth: (x: number): number => 1 / Math.tanh(x),
   fract: (x: number): number => x - Math.floor(x),
   hav: (x: number): number => Math.sin(x / 2) ** 2,
-  // The interpreter's `GCD` (`GCD(-12, 18)` is 6).
+  // The interpreter's `GCD` (`GCD(-12, 18)` is 6) and `LCM`, also of reals
+  // that are not integers (`realGcd`, `realLcm`).
   gcd: (a: number, b: number): number => gcd(a, b),
+  lcm: (a: number, b: number): number => lcm(a, b),
+  // The library's special functions and steps, by the kernels of the
+  // interpreter. Where the interpreter's value of real operands is not real
+  // (`CosIntegral(-1)`, `EllipticK(2)`), NaN.
+  heaviside: (x: number): number => SYS_HELPERS.heaviside(x),
+  remainder: ieeeRemainder,
+  smoothstep: (e0: number, e1: number, x: number): number =>
+    SYS_HELPERS.smoothstep(e0, e1, x),
+  // `InverseHaversine(x)` is `2·Arcsin(√x)`.
+  invhav: (x: number): number => 2 * Math.asin(Math.sqrt(x)),
+  erfinv: (x: number): number => erfInv(x),
+  erfi: (x: number): number => erfi(x),
+  beta: (a: number, b: number): number => beta(a, b),
+  // `BetaRegularized(x, a, b)` and `GammaRegularized(a, z)`, in the order of
+  // the library's operands.
+  betareg: (x: number, a: number, b: number): number =>
+    betaRegularized(x, a, b),
+  gammareg: (a: number, z: number): number => gammaQ(a, z),
+  // A pole is +∞ (the interpreter's `~oo`).
+  digamma: (x: number): number => SYS_HELPERS.digamma(x),
+  trigamma: (x: number): number => SYS_HELPERS.trigamma(x),
+  polygamma: (n: number, x: number): number => SYS_HELPERS.polygamma(n, x),
+  airyai: (x: number): number => airyAi(x),
+  airybi: (x: number): number => airyBi(x),
+  airyaiprime: (x: number): number => airyAiPrime(x),
+  airybiprime: (x: number): number => airyBiPrime(x),
+  // Of an integer order `n` (the rows take no other). `Y₀(0)` is -∞ and
+  // `K₀(0)` is +∞; at another order the pole is unsigned (NaN).
+  besselj: (n: number, x: number): number => besselJ(n, x),
+  bessely: (n: number, x: number): number =>
+    n === 0 && x === 0 ? -Infinity : besselY(n, x),
+  besseli: (n: number, x: number): number => besselI(n, x),
+  besselk: (n: number, x: number): number =>
+    n === 0 && x === 0 ? Infinity : besselK(n, x),
+  sinint: (x: number): number => sinIntegral(x),
+  // `Ci(x)` of a negative `x` is `Ci(-x) + iπ`: the kernel gives its real
+  // part there.
+  cosint: (x: number): number => (x < 0 ? NaN : cosIntegral(x)),
+  expint: (x: number): number => expIntegralEi(x),
+  logint: (x: number): number => logIntegral(x),
+  agm: realAgm,
+  // `AGM(x)` is `AGM(1, x)`.
+  agm1: (x: number): number => realAgm(1, x),
+  elliptick: (m: number): number => ellipticK(m),
+  elliptice: (m: number): number => ellipticE(m),
+  // The incomplete `EllipticE(φ, m)`, `EllipticF(φ, m)` and
+  // `EllipticPi(n, φ, m)`; the complete `EllipticPi(n, m)`.
+  ellipticeinc: (phi: number, m: number): number => ellipticEIncomplete(phi, m),
+  ellipticf: (phi: number, m: number): number => ellipticF(phi, m),
+  ellipticpi: (n: number, m: number): number => ellipticPiComplete(n, m),
+  ellipticpiinc: (n: number, phi: number, m: number): number =>
+    ellipticPiIncomplete(n, phi, m),
+  hyp1f1: (a: number, b: number, z: number): number =>
+    hypergeometric1F1(a, b, z),
+  hyp2f1: (a: number, b: number, c: number, z: number): number =>
+    hypergeometric2F1(a, b, c, z),
+  hurwitzzeta: (s: number, a: number): number => hurwitzZeta(s, a),
+  lerchphi: (z: number, s: number, a: number): number => lerchPhiReal(z, s, a),
+  polylog: (s: number, z: number): number => polylogOrderReal(s, z),
+  dirichleteta: (s: number): number => dirichletEtaReal(s),
+  dirichletbeta: (s: number): number => dirichletBetaReal(s),
+  // `StieltjesGamma(n)` and `StieltjesGamma(n, a)`, of an integer order.
+  stieltjes: (n: number): number => stieltjesGammaReal(n),
+  stieltjesa: (n: number, a: number): number => stieltjesGammaReal(n, a),
+  clausen: (n: number, x: number): number => clausen(n, x),
+  // The principal branch, and the branch `k` (an integer).
+  lambertw: (x: number): number => lambertW(x),
+  lambertwk: (x: number, k: number): number => lambertW(x, k),
+  fibonacci: realFibonacci,
+  // A double of 2^53 or more is even: not a prime. An infinite operand
+  // throws (the interpreter gives a type error).
+  isprime: (n: number): boolean =>
+    Number.isFinite(n) && Math.abs(n) > Number.MAX_SAFE_INTEGER
+      ? false
+      : isPrimeRuntime(n),
 });
+
+/**
+ * The interpreter's `Remainder(x, y)`: `x - y·n` for the integer `n`
+ * nearest to `x / y`, a tie rounded toward +∞. Exact for every pair of
+ * doubles: the remainder `x % y` is exact, and a correction by `|y|` of a
+ * value between `|y|/2` and `|y|` is exact. NaN for a divisor that is 0 or
+ * not finite, as the interpreter's.
+ */
+function ieeeRemainder(x: number, y: number): number {
+  if (!Number.isFinite(y)) return NaN;
+  const r = x % y;
+  const h = Math.abs(y) / 2;
+  return Math.abs(r) > h || (Math.abs(r) === h && r / y > 0)
+    ? r - Math.sign(r) * Math.abs(y)
+    : r;
+}
+
+/**
+ * The interpreter's real `AGM(a, b)`: 0 when an operand is 0, `-AGM(-a, -b)`
+ * of two negative operands, NaN (a complex value) of operands of opposite
+ * signs.
+ */
+function realAgm(a: number, b: number): number {
+  if (Number.isNaN(a) || Number.isNaN(b)) return NaN;
+  if (a === 0 || b === 0) return 0;
+  return a < 0 && b < 0 ? -agm(-a, -b) : agm(a, b);
+}
+
+/**
+ * The Fibonacci number `F(n)` as a double: NaN for an `n` that is not an
+ * integer, ±∞ beyond `|n| = 1476` (`F(1477)` is above the largest double),
+ * `F(-n) = (-1)^(n+1)·F(n)`. Exact up to `|n| = 78`; above, within about
+ * 1e-15 relative.
+ */
+function realFibonacci(n: number): number {
+  if (!Number.isInteger(n)) return NaN;
+  const m = Math.abs(n);
+  let f = Infinity;
+  if (m <= 1476) {
+    let [a, b] = [0, 1];
+    for (let i = 0; i < m; i++) [a, b] = [b, a + b];
+    f = a;
+  }
+  return n < 0 && m % 2 === 0 ? -f : f;
+}
 
 // prettier-ignore
 const IR_KERNELS = ['cneg', 'csqrt', 'cexp', 'cln', 'clog10', 'csin', 'ccos', 'ctan', 'ccot', 'csec', 'ccsc',
@@ -7225,6 +7346,17 @@ export const COMPLEX_FUNCTIONS = Object.freeze({
     typeof SYS_HELPERS,
     (typeof IR_KERNELS)[number]
   >),
+  // The special functions continued into the complex plane, the
+  // interpreter's kernels (`continuedKernel`).
+  cinvhav: (z: Cx): Cx => SYS_HELPERS.cinvhav(z),
+  churwitzzeta: (s: Cx, a: Cx): Cx => SYS_HELPERS.churwitzZeta(s, a),
+  clerchphi: (z: Cx, s: Cx, a: Cx): Cx => SYS_HELPERS.clerchPhi(z, s, a),
+  cpolylog: (s: Cx, z: Cx): Cx => SYS_HELPERS.cpolyLog(s, z),
+  celliptick: (m: Cx): Cx => SYS_HELPERS.cellipticK(m),
+  celliptice: (m: Cx): Cx => SYS_HELPERS.cellipticE(m),
+  chyp2f1: (a: Cx, b: Cx, c: Cx, z: Cx): Cx =>
+    SYS_HELPERS.chypergeometric2F1(a, b, c, z),
+  clambertw: (z: Cx): Cx => SYS_HELPERS.clambertW(z),
   cre: (z: Cx): number => z.re,
   cim: (z: Cx): number => z.im,
   ceq: (a: Cx, b: Cx): boolean => a.re === b.re && a.im === b.im,

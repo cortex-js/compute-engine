@@ -1333,11 +1333,12 @@ describe('IR profile on GLSL: declines', () => {
   });
 
   test('an internal error of the pipeline is a compile-error, also with fallback', () => {
-    // A spelling whose helper list is not a list: the printer throws.
+    // A spelling whose helper list is not a list: the printer throws. The
+    // head has no row of the library.
     const broken = {
       rows: [
         {
-          head: 'ErfInv',
+          head: 'Median',
           arity: 1 as const,
           signatures: [[['real'], 'real', 'broken']] as never,
           threads: false,
@@ -1347,10 +1348,10 @@ describe('IR profile on GLSL: declines', () => {
       spellings: { broken: { text: 'x', helpers: 1 as never } },
     };
     _withIrProfileTestExtension(broken, () => {
-      expect(declined(['ErfInv', 'x'])?.code).toBe('compile-error');
+      expect(declined(['Median', 'x'])?.code).toBe('compile-error');
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
       try {
-        const r = compile(ce.box(['ErfInv', 'x']), {
+        const r = compile(ce.box(['Median', 'x']), {
           to: 'glsl',
           profile: 'ir',
         });
@@ -1635,11 +1636,8 @@ describe('IR profile, batch G6: GLSL', () => {
     const r = g6(['Arcsin', ['Sin', ['Multiply', 3, 'x']]], 'glsl');
     expect(r.code.match(/\bsin\(/g)).toHaveLength(1);
   });
-  test('declined: the factorial of a real, a coordinate of a list', () => {
-    for (const json of [
-      ['Factorial', 'x'],
-      ['PointX', ['List', 'x', 'y']],
-    ])
+  test('declined: a coordinate of a list', () => {
+    for (const json of [['PointX', ['List', 'x', 'y']]])
       expect([json, thrown(() => g6(json, 'glsl'))?.code]).toEqual([
         json,
         'outside-profile',

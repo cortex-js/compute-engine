@@ -1279,14 +1279,14 @@ describe('the interval mode: batch 4, results', () => {
       expect(got.kind).toBe('interval');
       agreesWithInterpreter(got, [head, 'x', 'y'], [point]);
     }
-    // The JavaScript target keeps the integer signature.
-    expect(() =>
+    // The JavaScript target calls the interpreter's kernel of reals.
+    expect(
       compile(ce.box(['Binomial', 'x', 'y'] as never), {
         to: 'javascript',
         profile: 'ir',
         fallback: false,
-      } as never)
-    ).toThrow(CompileDeclineError);
+      } as never).code
+    ).toContain('_SYS.binomial(_.x, _.y)');
   });
 });
 

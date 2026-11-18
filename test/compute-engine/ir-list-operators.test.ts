@@ -268,15 +268,14 @@ describe('IR profile, batch G17: Choose', () => {
     check(['Binomial', 'n', 'm'], points);
   });
 
-  test('real operands and GLSL decline', () => {
-    expect(failure(() => js(['Choose', 'x', 'y']))).toMatch(
-      /Choose of real, real/
-    );
-    expect(failure(() => js(['Binomial', 'x', 'y']))).toMatch(
-      /Binomial of real, real/
-    );
-    expect(failure(() => glsl(['Choose', 'N', ['Floor', 'x']]))).toMatch(
-      /the operation binomial/
+  test('real operands: the interpreter extension on JavaScript; GLSL declines', () => {
+    // prettier-ignore
+    const points = [[5, 2], [2.5, 1.5], [-2.5, 2], [0.5, -1], [7, 0]]
+      .map(([x, y]) => ({ x, y }));
+    check(['Choose', 'x', 'y'], points);
+    check(['Binomial', 'x', 'y'], points);
+    expect(failure(() => glsl(['Choose', 'x', 'y']))).toMatch(
+      /the operation rbinomial/
     );
   });
 });

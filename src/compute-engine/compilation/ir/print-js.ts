@@ -147,6 +147,17 @@ const builds = (z: Ints, count: Wrap): Syntax['regions'] => {
   };
 };
 
+/** The operations of a row on another lane than the function that they
+ *  call: the integer lane of a function of `REAL_FUNCTIONS` (the bigint mode
+ *  spells it with its own helper), the real lane of an integer row. */
+const OTHER_LANES = {
+  'remainder.int': '_SYS.ir.remainder($0, $1)',
+  'fibonacci.int': '_SYS.ir.fibonacci($0)',
+  'rbinomial': '_SYS.binomial($0, $1)',
+  'rgcd': '_SYS.ir.gcd($0, $1)',
+  'rlcm': '_SYS.ir.lcm($0, $1)',
+};
+
 export const JS: Syntax = deepFreeze({
   ops: {
     ...ARITHMETIC,
@@ -200,9 +211,13 @@ export const JS: Syntax = deepFreeze({
     // The functions of `REAL_FUNCTIONS` and `COMPLEX_FUNCTIONS`, by name.
     ...Object.fromEntries(
       Object.entries({ ...REAL_FUNCTIONS, ...COMPLEX_FUNCTIONS }).map(
-        ([f, g]) => [f, `_SYS.ir.${f}(${g.length === 2 ? '$0, $1' : '$0'})`]
+        ([f, g]) => [
+          f,
+          `_SYS.ir.${f}(${Array.from({ length: g.length }, (_, k) => `$${k}`).join(', ')})`,
+        ]
       )
     ),
+    ...OTHER_LANES,
   },
   regions: {
     ...builds(NUMBERS, (out) => `${out}.length`),
@@ -301,6 +316,8 @@ export const JS_BIGINT: Syntax = deepFreeze({
     'binomial': '_SYS.bbinomial($0, $1)',
     'gcd': '_SYS.bgcd($0, $1)',
     'lcm': '_SYS.blcm($0, $1)',
+    'remainder.int': '_SYS.bremainder($0, $1)',
+    'fibonacci.int': '_SYS.bfibonacci($0)',
     ...COMPARISONS,
     'eq': JS.ops.eq,
     'ne': JS.ops.ne,

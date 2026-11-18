@@ -155,14 +155,11 @@ describe('GammaRegularized compiled, against mpmath', () => {
   for (const [label, rows] of compiledCases) {
     for (const [a, z, ref] of rows) {
       test(`${label}: Q(${a}, ${z}) = ${ref} (compiled)`, () => {
-        // The pipeline declines GammaRegularized, and `run` is the
-        // interpreter. Near a pole of Γ the interpreter's value is within
-        // 1e-10 of mpmath (8.2e-11 at a = −1.000001), not 1e-12.
+        // The compiled code calls the machine kernel `gammaQ`: within
+        // 2.7e-13 of mpmath at these points. The interpreter's `.N()` is
+        // the bignum kernel, within 1e-10 near a pole of Γ.
         const v = fn.run!({ a, z }) as number;
-        expect(v).toBe(ce.box(['GammaRegularized', a, z]).N().re);
-        expect(rel(v, ref)).toBeLessThan(
-          label === 'an order near a pole of Γ' ? 1e-10 : 1e-12
-        );
+        expect(rel(v, ref)).toBeLessThan(1e-12);
       });
     }
   }

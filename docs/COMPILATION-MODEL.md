@@ -361,6 +361,11 @@ interpreter's value. A line is removed when the case declines or is fixed.
   interpreter gives `[3.3489…, 4.6413…, 5.1639…]`: the interpreter reads the
   lazy `Map` at the kept positions only, and the code builds the whole list
   first.
+- `glsl` (crafted: a negative operand beside a large one), `x: real`,
+  `y: real`: `Beta(x, y)` takes the logarithm of Γ only when both operands
+  are positive; otherwise it divides Γ values, which overflow single
+  precision: `Beta(-0.5, 35.2)` is `-Infinity` and `Beta(-0.5, 40)` is
+  `NaN`, where the interpreter gives `-20.8068` and `-22.2090`.
 
 ## `parallel for` and `runAsync()`
 

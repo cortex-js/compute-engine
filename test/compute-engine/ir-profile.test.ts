@@ -25,7 +25,6 @@ import {
 } from '../../src/compute-engine/compilation/ir';
 import { ALL_PASSES } from '../../src/compute-engine/compilation/ir/passes';
 import { rangeCount } from '../../src/compute-engine/numerics/range-count';
-import { sinIntegral } from '../../src/compute-engine/numerics/special-functions';
 import {
   agrees,
   interpret,
@@ -207,21 +206,22 @@ describe('the option selects the IR compiler', () => {
 
 describe('a decline', () => {
   test('falls back to the interpreter with the diagnostic', () => {
-    const r = quiet(() => compile(box(['SinIntegral', 'x']), IR));
+    const r = quiet(() => compile(box(['HarmonicNumber', 'x']), IR));
     expect(r.success).toBe(false);
     expect(r.diagnostic).toMatchObject({
       code: 'outside-profile',
       kind: 'capability',
-      operator: 'SinIntegral',
-      value: 'SinIntegral(x)',
+      operator: 'HarmonicNumber',
+      value: 'HarmonicNumber(x)',
     });
-    expect(r.run!({ x: 3 })).toBeCloseTo(sinIntegral(3), 12);
+    // The interpreter's `HarmonicNumber(3)`, 11/6.
+    expect(r.run!({ x: 3 })).toBeCloseTo(11 / 6, 12);
   });
   test('with fallback: false is thrown', () => {
-    const o = outcome(box(['SinIntegral', 'x']));
+    const o = outcome(box(['HarmonicNumber', 'x']));
     expect('diagnostic' in o && o.diagnostic.code).toBe('outside-profile');
     expect('message' in o && o.message).toMatch(
-      /^Could not compile: SinIntegral\(x\)/
+      /^Could not compile: HarmonicNumber\(x\)/
     );
   });
 
@@ -480,7 +480,7 @@ describe('an internal error', () => {
       {
         rows: [
           {
-            head: 'SinIntegral',
+            head: 'HarmonicNumber',
             arity: 1,
             signatures: [[['real'], 'real', 'broken']],
             threads: false,
@@ -494,18 +494,15 @@ describe('an internal error', () => {
 
   test('is a compile-error and falls back', () => {
     const r = broken(() =>
-      quiet(() => compile(box(['SinIntegral', 'x']), IR))
+      quiet(() => compile(box(['HarmonicNumber', 'x']), IR))
     );
     expect(r.success).toBe(false);
     expect(r.diagnostic?.code).toBe('compile-error');
     expect(r.diagnostic?.message).toMatch(/internal error/);
-    expect(r.run!({ x: Math.PI / 2 })).toBeCloseTo(
-      sinIntegral(Math.PI / 2),
-      12
-    );
+    expect(r.run!({ x: 3 })).toBeCloseTo(11 / 6, 12);
   });
   test('with fallback: false is thrown as a compile-error', () => {
-    const o = broken(() => outcome(box(['SinIntegral', 'x'])));
+    const o = broken(() => outcome(box(['HarmonicNumber', 'x'])));
     expect('diagnostic' in o && o.diagnostic.code).toBe('compile-error');
   });
 });
@@ -551,12 +548,12 @@ describe('a row whose head is the name of an IR operation', () => {
 
 describe('a cancellation', () => {
   // A row whose fold is cancelled: `Length(L)` is the constant 3, so the
-  // `fold` pass folds `SinIntegral(3)` with the row.
+  // `fold` pass folds `HarmonicNumber(3)` with the row.
   test('propagates, with fallback', () => {
     const cancelled = {
       rows: [
         {
-          head: 'SinIntegral',
+          head: 'HarmonicNumber',
           arity: 1,
           signatures: [[['real'], 'real', 'si']],
           threads: false,
@@ -571,7 +568,7 @@ describe('a cancellation', () => {
     let error: unknown;
     try {
       _withIrProfileTestExtension(cancelled, () =>
-        quiet(() => compile(box(['SinIntegral', ['Length', 'L']]), IR))
+        quiet(() => compile(box(['HarmonicNumber', ['Length', 'L']]), IR))
       );
     } catch (e) {
       error = e;
@@ -818,7 +815,7 @@ describe('the compilations of the engine', () => {
     // A decline: no compiled function, the caller interprets.
     const declined = implicitCompile(
       engine,
-      engine.box(['Function', ['SinIntegral', 'u'], 'u']),
+      engine.box(['Function', ['HarmonicNumber', 'u'], 'u']),
       'nd'
     );
     expect(declined).toBeUndefined();

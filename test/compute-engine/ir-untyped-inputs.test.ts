@@ -175,13 +175,16 @@ describe('IR profile: an input with no type', () => {
 
   test('a decline of the lowering is reported, before or after the input with no type', () => {
     for (const json of [
-      ['List', 'w', ['SinIntegral', 'x']],
-      ['List', ['SinIntegral', 'x'], 'w'],
+      ['List', 'w', ['HarmonicNumber', 'x']],
+      ['List', ['HarmonicNumber', 'x'], 'w'],
     ])
       for (const to of ['javascript', 'glsl'])
         expect(
           compiled(json, { to, profile: 'ir', fallback: false }).diagnostic
-        ).toMatchObject({ code: 'outside-profile', operator: 'SinIntegral' });
+        ).toMatchObject({
+          code: 'outside-profile',
+          operator: 'HarmonicNumber',
+        });
   });
 
   // `unsupported` names the inputs with no type also when the program
