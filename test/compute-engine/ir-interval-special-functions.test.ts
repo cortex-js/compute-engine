@@ -584,6 +584,9 @@ describe('Heaviside and Remainder on interval-js', () => {
     expect(compiled(['Remainder', 'n', 'm']).code).toBe(
       '_IA.remainder(_.n, _.m)'
     );
+    expect(compiled(['Remainder', 'x', 'n']).code).toBe(
+      '_IA.remainder(_.x, _.n)'
+    );
   });
 
   test('Heaviside is 1/2 at 0, and a jump at 0 over a box that holds 0', () => {
@@ -684,5 +687,87 @@ describe('Heaviside and Remainder on interval-js', () => {
       }
     }
     expect(misses.slice(0, 5)).toEqual([]);
+  });
+
+  /** The exact value of a double, as a multiple of 2^-1074. */
+  const exact = (x: number): bigint => {
+    const v = new DataView(new ArrayBuffer(8));
+    v.setFloat64(0, x);
+    const bits = v.getBigUint64(0);
+    const e = Number((bits >> 52n) & 0x7ffn);
+    const f = bits & ((1n << 52n) - 1n);
+    const m = e === 0 ? f << 1n : (f | (1n << 52n)) << BigInt(e);
+    return bits >> 63n ? -m : m;
+  };
+
+  /** `a − b·round(a/b)` of two doubles in exact arithmetic (a multiple of
+   *  2^-1074), the quotient rounded to the nearest integer with a tie
+   *  toward +∞. */
+  const exactRealRemainder = (a: number, b: number): bigint => {
+    const [x, y] = [exact(a), exact(b)];
+    let [num, den] = [2n * x + y, 2n * y];
+    if (den < 0n) [num, den] = [-num, -den];
+    let q = num / den;
+    if (num % den !== 0n && num < 0n) q -= 1n;
+    return x - y * q;
+  };
+
+  test('Remainder of reals encloses the exact remainder (CE-1448)', () => {
+    const r = compiled(['Remainder', 'x', 0.7]);
+    const a = -19.599995613098145;
+    const v = r.run({ x: box(a) });
+    expect(v.kind).toBe('interval');
+    const want = exactRealRemainder(a, 0.7);
+    expect(exact(v.value!.lo) <= want && want <= exact(v.value!.hi)).toBe(true);
+    // A tie of the quotient rounds toward +∞: `Remainder(-0.35, 0.7)` is
+    // `-0.35`.
+    expect(r.run({ x: box(-0.35) })).toEqual({
+      kind: 'interval',
+      value: { lo: -0.35, hi: -0.35 },
+    });
+
+    let s = 4242;
+    const rnd = () => (s = (s * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const misses: string[] = [];
+    for (let i = 0; i < 20000; i++) {
+      const scale = [30, 1e6, 1e-3][i % 3];
+      const p = (rnd() - 0.5) * 2 * scale;
+      const q = (rnd() - 0.5) * 2 * [30, 1e6, 1e-3][(i >> 2) % 3] || 1;
+      const w = Math.abs(p) * [0, 1e-12, 1e-4][(i >> 4) % 3];
+      const k = IA.remainder(box(p, p + w), box(q)) as Result;
+      if (k.value === undefined) continue;
+      for (const t of [0, 0.5, 1]) {
+        const u = exactRealRemainder(p + t * w, q);
+        if (exact(k.value.lo) > u || u > exact(k.value.hi))
+          misses.push(`[${p}, ${p + w}] ${q} at ${p + t * w}`);
+      }
+    }
+    expect(misses.slice(0, 5)).toEqual([]);
+  });
+});
+
+describe('GammaLn on interval-js at +∞ (CE-1450)', () => {
+  const box = (lo: number, hi = lo) => ({ lo, hi });
+  test('the upper end is +∞, not NaN', () => {
+    expect(IA.gammaln(box(1, Infinity))).toMatchObject({
+      kind: 'interval',
+      value: { hi: Infinity },
+    });
+    expect(IA.gammaln(box(Infinity))).toEqual({
+      kind: 'interval',
+      value: { lo: Infinity, hi: Infinity },
+    });
+    const ce = engine(true);
+    const r = compile(
+      ce.parse('\\ln\\Gamma(1/x)') as never,
+      {
+        to: 'interval-js',
+        fallback: false,
+      } as never
+    ) as { run: (x: Record<string, unknown>) => Result };
+    expect(r.run({ x: box(0, 1) })).toMatchObject({
+      kind: 'partial',
+      value: { hi: Infinity },
+    });
   });
 });

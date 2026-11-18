@@ -344,9 +344,6 @@ describe('the interval mode: the declines', () => {
     // interpreter's `GCD(7.5, 2)` is 0.5.
     [['GCD', 'x', 'n'], /GCD \(the operation rgcd\)/],
     [['LCM', 'x', 'n'], /LCM \(the operation rlcm\)/],
-    // `_IA.remainder` misses the value of real operands by many ulps where
-    // `a - b·round(a/b)` cancels (`Remainder(-19.599995613098145, 0.7)`).
-    [['Remainder', 'x', 2], /Remainder \(the operation remainder\)/],
     // Integrals compile since batch 6 (`ir-interval-integrals.test.ts`),
     // a `Loop` with no early exit too (`ir-interval-lists.test.ts`).
   ])('%j', (json, cause) => {

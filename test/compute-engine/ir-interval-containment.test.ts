@@ -208,6 +208,9 @@ const CASES: Case[] = [
   C(['Heaviside', x], [0]), C(['Heaviside', ['Subtract', x, 1]], [1]),
   C(['Remainder', 'n', 'm']), C(['Remainder', 'n', 3]), C(['Remainder', 'n', -2]),
   C(['Remainder', ['Floor', x], 2], [1, -1, 3]), C(['Remainder', ['Floor', x], ['Floor', y]], [0, -1, 2]),
+  // Remainder of reals (CE-1448: `a - b·round(a/b)` cancels)
+  C(['Remainder', x, 0.7], [-19.599995613098145, 0.35, -0.35, 0]), C(['Remainder', x, y], [0, 1.5, -2]),
+  C(['Remainder', ['Sin', x], 0.25], [0.5]),
   // Tycho's Fourier series, on both engines
   FOURIER,
 ];
@@ -242,8 +245,12 @@ const TOLERANCE: Record<string, (m: Miss) => boolean> = {
 /** The programs whose reference is wrong: the interpreter's `Choose` of a
  *  double near 1 is wrong from the 15th digit (CE-1346), and the mode
  *  encloses the exact value. A miss is excused within 1e-5 of 1 and below
- *  1e-14 of the value only. */
+ *  1e-14 of the value only. The machine engine's `Remainder(x, 0.7)` at
+ *  `x = -0.35` (the quotient is exactly -1/2) rounds the tie away from +∞
+ *  and gives 0.35 (CE-1449); the mode gives the documented -0.35. */
 const INTERPRETER_DEFECTS: Record<string, (m: Miss) => boolean> = {
+  [`machine ${JSON.stringify(['Remainder', x, 0.7])}`]: (m) =>
+    m.point.x === -0.35 && m.v === 0.35,
   [JSON.stringify(['Choose', x, 2])]: (m) =>
     Math.abs(m.point.x - 1) < 1e-5 &&
     typeof m.v === 'number' &&

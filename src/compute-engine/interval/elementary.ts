@@ -22,8 +22,6 @@ import {
   sub as subOutward,
   mul as mulOutward,
   div,
-  subUnrounded,
-  mulUnrounded,
 } from './arithmetic.js';
 import {
   outward,
@@ -1379,16 +1377,17 @@ function remainderRaw(
       return ok({ lo: r + 0, hi: r + 0 });
     }
   }
-  // The UNROUNDED multiplication and subtraction, so that they are not each
-  // stepped outward before this routine's own export steps its answer. The
-  // quotient is the OUTWARD one: `round` of a quotient that rounded across a
-  // half-integer takes the wrong integer, which no later step covers, while
+  // Every step is the OUTWARD kernel. The quotient: `round` of a quotient
+  // that rounded across a half-integer takes the wrong integer, while
   // `round` of an enclosure of the quotient encloses the rounded quotient.
-  // `round` performs no rounding of its own, and it is the source of this
-  // routine's discontinuities, which the unrounded kernels still propagate.
-  return subUnrounded(
+  // The product and the difference: `a − b·q` cancels, so the rounding error
+  // of `b·q` is relative to `a`, not to the remainder, and no fixed count of
+  // ulps of the remainder covers it (`Remainder(-19.599995613098145, 0.7)`).
+  // `round` performs no rounding of its own; it is the source of this
+  // routine's discontinuities, which the kernels propagate.
+  return subOutward(
     a,
-    mulUnrounded(b, round(div(a, b), 'toward-positive-infinity'))
+    mulOutward(b, round(div(a, b), 'toward-positive-infinity'))
   );
 }
 
@@ -1530,6 +1529,8 @@ function gammaPointEnclosure(x: number): Interval {
  *  error of `Γ` becomes an absolute error of its logarithm, and the
  *  logarithm itself adds a relative error. */
 function gammalnPointEnclosure(x: number): Interval {
+  // `ln Γ` grows without bound; the scalar kernel gives NaN at +∞ itself.
+  if (x === Infinity) return { lo: Infinity, hi: Infinity };
   // `scalarGammaln` is defined for `x > 0` only. A negative `x` uses the
   // reflection formula `ln|Γ(x)| = ln π − ln|sin(πx)| − ln Γ(1 − x)`.
   const v =
@@ -2567,12 +2568,9 @@ export const mod = liftJump(
     )
   )
 );
-// `remainder` composes a division, a rounding, a multiplication and a
-// subtraction. The `round` is exact, the other three each round once, so three
-// ulps is the step for the whole chain.
-export const remainder = liftJump(
-  outwardUnlessExact(remainderRaw, exactIntegerGridPoint, 3)
-);
+// `remainder` composes the outward division, multiplication and subtraction
+// with an exact `round`, so its answer needs no step of its own.
+export const remainder = liftJump(remainderRaw);
 export const heaviside = liftJump(heavisideRaw);
 export const sign = liftJump(signRaw);
 export const gamma = liftJump(outward(gammaRaw));

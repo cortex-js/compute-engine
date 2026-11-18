@@ -62,8 +62,8 @@ const UNARY = ['sqrt', 'square', 'abs', 'exp', 'ln', 'log10', 'log2', 'sin',
 const BINARY: Record<string, string> = { add: 'add', sub: 'sub', mul: 'mul',
   div: 'div', mod: 'mod', max: 'max', min: 'min', emax: 'max', emin: 'min',
   hypot: 'hypot', atan2: 'atan2', binomial: 'binomial',
-  rbinomial: 'binomial', 'remainder.int': 'remainder', gcd: 'gcd',
-  lcm: 'lcm', lt: 'less', le: 'lessEqual', gt: 'greater',
+  rbinomial: 'binomial', 'remainder.int': 'remainder', remainder: 'remainder',
+  gcd: 'gcd', lcm: 'lcm', lt: 'less', le: 'lessEqual', gt: 'greater',
   ge: 'greaterEqual', eq: 'equal', ne: 'notEqual', and: 'and', or: 'or' };
 
 const text = (x: number) => (Object.is(x, -0) ? '-0' : String(x));

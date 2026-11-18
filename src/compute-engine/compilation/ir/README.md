@@ -678,13 +678,12 @@ time; another tolerance declines), `Heaviside` (`_IA.heaviside`, 1/2 at 0, a
 jump at 0), `Remainder` of integers (`remainder.int`, `_IA.remainder`, the
 quotient rounded to the nearest integer with a tie toward +∞, as the
 interpreter's; a jump located at the half-integer of the quotient `a/b`, not of
-`a`, as `Floor(2x)` locates its jump at an integer of `2x`; of reals it
-declines: the kernel's three-ulp step after `a - b·round(a/b)` does not cover
-the cancellation, and `Remainder(-19.599995613098145, 0.7)` misses by about
-10^6 ulps; an undeclared input beside an integer operand, `x` in
-`Remainder(x, 3)`, is inferred `integer` and takes the integer operation, so a
-box of reals that a host gives it is outside its type and the result is
-unspecified: a host that declares `x` as `real` gets the decline), `Binomial` and `Choose` (also of real operands,
+`a`, as `Floor(2x)` locates its jump at an integer of `2x`), `Remainder` of
+reals (`remainder`, the same kernel: the outward division, multiplication
+and subtraction around an exact rounding of the quotient; an undeclared input beside an integer
+operand, `x` in `Remainder(x, 3)`, is inferred `integer` and takes the
+integer operation, so a box of reals that a host gives it is outside its type
+and the result is unspecified: a host declares `x` as `real`), `Binomial` and `Choose` (also of real operands,
 `rbinomial`, `_IA.binomial`), `GCD` and `LCM` of integers (of reals they
 decline: `_IA.gcd` and `_IA.lcm` round their operands to integers, where the
 interpreter's `GCD(7.5, 2)` is 0.5), the comparisons,

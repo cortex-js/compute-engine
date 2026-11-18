@@ -163,6 +163,14 @@ interpreter's value. A line is removed when the case declines or is fixed.
   base 0 is a pole (`0^-1` is `~oo` in the interpreter). The enclosure holds
   every value; the neighbouring boxes are marked (`y = [0, 2]` with
   `x = [-1, -0.5]` is `partial`).
+- `interval-js` (crafted), an operand that is the point `∞` or `-∞`:
+  `x + y`, `x - y`, `x / y`, `x^y`, `Remainder(x, y)` and `LCM(x, y)` can
+  give an interval with one `NaN` end, where an operand box holds a point
+  with no value (`∞ − ∞`): `x = [-∞, -∞]` with `y = [-∞, ∞]` gives
+  `x + y = [-∞, NaN]`, and `Remainder(x, y)` at `x = [-∞, -∞]`,
+  `y = [-2, 0]` gives `[-∞, NaN]`. `Remainder(x, y)` at `x = [1, 2]`,
+  `y = [∞, ∞]` gives `[1, 2]`, where the interpreter gives `NaN`. From a
+  finite box no sub-expression reaches these.
 - `interval-js` (crafted), `x`, `y` of a box with an infinite end:
   `IsMissing(x*y)` at `x = [∞, ∞]`, `y = [0, 0]` gives `'false'` (the kernel
   of `mul` gives `[0, 0]`); the interpreter gives `True` (`∞·0` is `NaN`).

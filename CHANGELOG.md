@@ -227,6 +227,20 @@
 
 ### Resolved Issues
 
+- **The interval `Remainder` of two reals holds the remainder** (CE-1448).
+  `IntervalArithmetic.remainder` computed `a − b·round(a/b)` in plain
+  doubles and widened the answer by 3 ulps, which does not cover the
+  cancellation: `remainder(-19.599995613098145, 0.7)` gave a lower end
+  `4.386901853337119e-6`, above the exact `4.3869018542253e-6`; a pair whose
+  remainder is small next to `a` could miss. It now composes the outward
+  division, multiplication and subtraction around an exact rounding of the
+  quotient, and `Remainder` of reals compiles on `interval-js`.
+
+- **The interval log-gamma of a value that grows without bound has the upper
+  end `+∞`** (CE-1450). `IntervalArithmetic.gammaln({ lo: 1, hi: Infinity })`
+  and `ln Γ(1/x)` compiled to `interval-js` over `x = [0, 1]` gave an upper
+  end `NaN`.
+
 - **Two GLSL helpers no longer overflow or underflow on the way to a
   representable value.** `Binomial(128, 64)` compiled to GLSL gave `Infinity`
   (it is about 2.4e37), and `BesselJ(40, 10)` gave 0 (it is about 6e-21).
@@ -258,11 +272,11 @@
   real, `Factorial2`, `Zeta`, `Binomial` and `LCM` of integers, `Heaviside`,
   `Remainder`, `Smoothstep`, `InverseHaversine`, `ErfInv`, `Beta`, `Digamma`,
   `Trigamma` and `BesselJ` of an integer order. On `interval-js`, `Heaviside`
-  and `Remainder` of integers compile with the kernels of the interval
-  library: over `[-1, 1]`, `Heaviside(x)` is `singular` at 0 with the value
-  `[0, 1]`, and at the point 0 it is 1/2. `Remainder`, `GCD` and `LCM` of
-  reals decline there (the kernels are not sound for operands that are not
-  integers); the other special functions have no interval kernel and decline.
+  and `Remainder` compile with the kernels of the interval library: over
+  `[-1, 1]`, `Heaviside(x)` is `singular` at 0 with the value `[0, 1]`, and
+  at the point 0 it is 1/2. `GCD` and `LCM` of reals decline there (the
+  kernels round their operands to integers); the other special functions
+  have no interval kernel and decline.
   `compile(Equal(x))`
   declines on every target; it threw `internal error: Cannot read properties
   of undefined`.
