@@ -76,10 +76,6 @@
     (`Could not compile: Sort(L): the operator Sort is not supported by the
     compiler`).
 
-  The entry on `interval-js` above is superseded where it differs: the removed
-  options throw on `interval-js` too, and `ce.registerCompilationTarget()` no
-  longer exists.
-
 - **The `interval-js` target compiles with the interval mode of the IR
   pipeline, and `IntervalJavaScriptTarget` is removed.**
   `compile(expr, { to: 'interval-js' })` gives the same result shape as
@@ -90,11 +86,9 @@
   `static-type-error`, `unsettled-shape`, `unsupported-mode`, …): with
   `fallback: false` it throws a `CompileDeclineError`, and otherwise the
   result is `success: false` with a `run` that evaluates with the
-  interpreter and gives interval results. The options `functions`,
-  `operators`, `imports`, `preamble`, a `mode` other than `'strict'`
+  interpreter and gives interval results. A `mode` other than `'strict'`
   (`unsupported-mode`) and a `vars` entry that is not a read of the inputs
-  object decline; `strictTypes: true` declines an undeclared input, as on
-  `javascript`: with `fallback: false` it throws an `Error`, as there. The
+  object decline; the options removed from every target (above) throw. The
   value kind `enclosure` compiles in the mode as on the deleted target (an
   input `x: enclosure` is a `{ lo, hi }` record checked at entry, and an
   operation of the kind computes the doubles of `.N()`). It declines, with
@@ -104,9 +98,6 @@
   input or a result of the kind throws a `KindDeclineError`, whatever
   `fallback` says. A host function with a `compile` handler that returns
   text is not compiled in the mode, also beside an enclosure.
-  `ce.registerCompilationTarget('interval-js', …)` and
-  `ce.unregisterCompilationTarget('interval-js')` now throw, since
-  `compile()` routes this name itself.
 
   The interval mode compiles fewer programs than the deleted target did.
   `Sinc(x)`, `Chop(x)`, `\arg(x+iy)` (a complex value) and an `Integrate`
