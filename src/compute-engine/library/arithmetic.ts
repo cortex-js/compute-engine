@@ -40,11 +40,13 @@ import {
 } from '../boxed-expression/async-only-descendants.js';
 import { withCallableBinding } from '../boxed-expression/binders.js';
 import {
+  assignedVariableNames,
   bignumPreferred,
   boxBignumResult,
   numericFromExactValue,
   numericFromExactValueAsync,
   roundedToWorkingPrecision,
+  withValueShield,
 } from '../boxed-expression/utils.js';
 import {
   DEADLINE_STRIDE,
@@ -15521,7 +15523,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const product = runWithEvaluationEffects(
           ce,
           options.effects,
-          () => result?.evaluate({ numericApproximation: numeric }),
+          () => evaluateFoldOfValues(result, numeric),
           options._contextStack,
           options._precisionWindow
         );
@@ -15733,7 +15735,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const product = runWithEvaluationEffects(
           ce,
           options.effects,
-          () => result?.evaluate({ numericApproximation: numeric }),
+          () => evaluateFoldOfValues(result, numeric),
           options._contextStack,
           options._precisionWindow
         );
@@ -16837,6 +16839,25 @@ function addSumTerm(
   return acc;
 }
 
+/**
+ * The value of `fold`, the sum or the product of the evaluated terms of a
+ * `Sum` or a `Product`. It is evaluated to combine the terms
+ * (`3x + 1 + 2 + 3` is `3x + 6`), and the values of the symbols in it are
+ * hidden for this evaluation (`withValueShield()`): each term is a value
+ * already, and a symbol that is still in a term is not to be read. The value
+ * of `D(x^2, x)` is `2x` also when `x` has a value, because `D` hides the
+ * value of its variable; a second read of `x` here made
+ * `Sum(D(x^2, x), (i, 1, 2))` with `x = 5` the number `20`, not `4x`.
+ */
+function evaluateFoldOfValues(
+  fold: Expression,
+  numericApproximation: boolean | undefined
+): Expression {
+  return withValueShield(fold.engine, assignedVariableNames(fold), () =>
+    fold.evaluate({ numericApproximation })
+  );
+}
+
 /** The sum a `Sum` fold answers, evaluated on the route of the fold: see
  * `SumTerms`. */
 function finishSum(
@@ -16857,7 +16878,7 @@ function finishSum(
       : terms.length === 1
         ? terms[0]
         : ce.function('Add', terms);
-  const value = sum.evaluate({ numericApproximation });
+  const value = evaluateFoldOfValues(sum, numericApproximation);
   // The pole `~oo` is the symbol `ComplexInfinity`, as the running sum
   // answered before. At machine precision `N()` of an `Add` that holds it
   // answers the number `Complex(+oo, +oo)` instead, where `evaluate()`

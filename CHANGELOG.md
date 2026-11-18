@@ -2,6 +2,14 @@
 
 ### Resolved Issues
 
+- **A derivative in a sum or a product keeps its variable when the variable
+  has a value.** With `x = 5`, `\sum_{i=1}^{2}\frac{d}{dx}x^2` was `20`; it is
+  now `4x`, as the sum of two copies of `\frac{d}{dx}x^2`, which is `2x`. The
+  product `\prod_{i=1}^{2}\frac{d}{dx}x^2` is `4x^2` (it was `100`), and
+  `\sum_{i=1}^{2}\frac{\partial}{\partial x_i}x_i^2` with `x_1 = 5` is
+  `2x_1+2x_2` (it was `2x_2+10`). A symbol of the body still gives its
+  value: `\sum_{i=1}^{2} x` is `10`.
+
 - **A numeral that starts with `0b` or `0x` is read in the base it is given.**
   `"0b1"_{16}` was 1 and `"0bad"_{16}` was an `unexpected-digit` error,
   because the `0b` was read as a binary prefix; they are now 177 and 2989. `"0x10"_{10}` was 16; it is now an
