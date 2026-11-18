@@ -31,16 +31,24 @@ last expression:
 function f(x) { x + 1 }
 ```
 
-Parameters can carry a type annotation (`f(x: real) = …`), and the block
-form accepts a return-type annotation after the parameter list 
-(`function f(x) -> real { … }`). Parameter types are enforced when
-the function is called. Return types are retained in the function signature;
-the current runtime does not validate the inferred type of every returned
-value against that annotation.
+Parameters can carry a type annotation (`f(x: real) = …`), and a
+return-type annotation follows the parameter list
+(`function f(x) -> real { … }`). Both are checked when the function is
+called: an argument that is not of its parameter's type, or a returned value
+that is not of the return type, gives an `incompatible-type` error.
 
 ```epsil
 f(x: real) = x + 1
 ```
+
+```epsil
+function half(n: integer) -> integer { n / 2 }
+half(4)   // 2
+half(5)   // Error(ErrorCode("incompatible-type", "integer", "rational<2.5..2.5>"), 5/2)
+```
+
+A returned value whose type could still be the return type passes the
+check: with `function h(n) -> integer { n / 2 }`, `h(x)` gives `1/2 * x`.
 
 ### Default values {#default-values}
 

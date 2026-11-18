@@ -115,10 +115,18 @@ r                  // Error(ErrorCode("incompatible-type", "integer", "1.5"), â€
 At a parameter typed `real` or `number`, the body is applied to a name with no
 type and no value: with `function f(x: real) { x^2 }`, `f(x)` gives `x^2`.
 
-A **return** annotation (`-> real`) is a different kind of thing: it is
-recorded in the function's signature and shown by `about`, but the current
-runtime does not reject a returned value for disagreeing with it. Write it for
-the reader; don't rely on it as a check.
+A **return** annotation (`-> integer`) is recorded in the function's
+signature and shown by `about`. The value that a call returns is checked
+against it, and a value of another type is an `incompatible-type` error:
+
+```epsil
+function half(n: integer) -> integer { n / 2 }
+half(4)   // 2
+half(5)   // Error(ErrorCode("incompatible-type", "integer", "rational<2.5..2.5>"), 5/2)
+```
+
+A returned value whose type could still be the return type passes: with
+`function h(n) -> integer { n / 2 }`, `h(x)` gives `1/2 * x`.
 
 ### 2. To choose between clauses
 
