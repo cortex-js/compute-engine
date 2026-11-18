@@ -84,11 +84,24 @@ export function hullValues(a: unknown, b: unknown): unknown {
   // (`restrict` with `'maybe'`, what a restriction answers): an `interval` becomes
   // `partial`, a list is clipped element by element. Answering the other
   // side unchanged would claim a value over the whole cell.
+  // So does an enclosure of NaN (an absent value carried by an operation);
+  // one NaN end (`[NaN, ∞]`) gives no bound.
+  const nan = (x: unknown): BoolInterval => {
+    if (x === null || typeof x !== 'object' || Array.isArray(x)) return 'false';
+    if (!('kind' in x))
+      return 'lo' in x ? nanEnclosure(x as Interval) : 'false';
+    const r = x as IntervalResult;
+    return r.kind === 'interval' || r.kind === 'partial'
+      ? nanEnclosure(r.value)
+      : 'false';
+  };
+  if (nan(a) === 'maybe' || nan(b) === 'maybe') return { kind: 'entire' };
   const isEmpty = (x: unknown): boolean =>
-    x !== null &&
-    typeof x === 'object' &&
-    !Array.isArray(x) &&
-    (x as IntervalResult).kind === 'empty';
+    nan(x) === 'true' ||
+    (x !== null &&
+      typeof x === 'object' &&
+      !Array.isArray(x) &&
+      (x as IntervalResult).kind === 'empty');
   // `entire` (a value whose range is unknown, such as the hull of two lists
   // of different lengths below) hulled with anything is `entire`. It is read
   // first: beside an array it would otherwise be a mix of domains and give
@@ -570,9 +583,9 @@ export function restrict(
  * out-of-band collection read, a numeric absence handed in by the caller)
  * and the `empty` result (a restriction whose condition failed). A
  * `partial` result is a value that exists over only part of the cell, so the
- * answer there is `'maybe'`; a pole (`singular`) likewise. An array — a
- * collection value at a consuming position — is present, as is `entire` (a
- * value exists, its range is unknown).
+ * answer there is `'maybe'`; a pole (`singular`) likewise, and `entire` (no
+ * bound is known, also of its presence). An array — a collection value at a
+ * consuming position — reads its presence off its elements.
  *
  * The answer is a tri-state verdict, not a JavaScript boolean, so it composes
  * with every other condition of this target (`restrict`, `piecewise`, `and`).
@@ -595,15 +608,25 @@ export function isAbsent(v: unknown): BoolInterval {
   if ('kind' in v) {
     const r = v as IntervalResult;
     if (r.kind === 'empty') return 'true';
-    if (r.kind === 'entire') return 'false';
+    // A value whose range is unknown can be absent.
+    if (r.kind === 'entire') return 'maybe';
     // A NaN enclosure is the marker whatever wrapper carries it: an absent
     // value that flowed through a restriction comes out as a `partial` whose
     // value is the marker.
-    if (r.kind !== 'singular' && Number.isNaN(r.value.lo)) return 'true';
+    if (r.kind !== 'singular' && nanEnclosure(r.value) !== 'false')
+      return nanEnclosure(r.value);
     if (r.kind === 'partial' || r.kind === 'singular') return 'maybe';
     return 'false';
   }
-  return Number.isNaN((v as Interval).lo) ? 'true' : 'false';
+  return nanEnclosure(v as Interval);
+}
+
+/** `'true'` for the whole-NaN enclosure (the absent value, the NaN of
+ *  `∞ - ∞`), `'maybe'` for an enclosure with one NaN end (`[NaN, ∞]` of
+ *  `∞ + [-∞, ∞]`), `'false'` otherwise. */
+function nanEnclosure(x: Interval): BoolInterval {
+  const ends = Number(Number.isNaN(x.lo)) + Number(Number.isNaN(x.hi));
+  return ends === 2 ? 'true' : ends === 1 ? 'maybe' : 'false';
 }
 
 /**

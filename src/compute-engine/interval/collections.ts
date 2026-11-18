@@ -25,7 +25,7 @@
 
 import type { Interval, IntervalResult } from './types.js';
 import { rangeCount } from '../numerics/range-count.js';
-import { undecided } from './comparison.js';
+import { isAbsent, undecided } from './comparison.js';
 import {
   getValue,
   ok,
@@ -168,6 +168,27 @@ function atRaw(
     // A nested array (a point in a list of points) is a collection, and a
     // collection has no single interval band: report "cannot bound this".
     if (element === undefined) return { kind: 'entire' };
+    // An absent element (an unselected arm, a read out of range) adds no
+    // value to the hull, and marks the result as present over part of the
+    // box only, as an element that can be absent (`partial`) does. A jump
+    // (`singular`) or `entire` is not an absence: it stands as it is.
+    if (
+      element.kind !== 'interval' ||
+      Number.isNaN(element.value.lo) ||
+      Number.isNaN(element.value.hi)
+    ) {
+      const verdict = isAbsent(element);
+      if (verdict === 'true') {
+        anyAbsent = true;
+        continue;
+      }
+      if (
+        verdict === 'maybe' &&
+        element.kind !== 'singular' &&
+        element.kind !== 'entire'
+      )
+        anyAbsent = true;
+    }
     hull = hull === undefined ? element : unionResults(hull, element);
   }
 

@@ -15,7 +15,7 @@
  * - GLSL: the numeric forms, run in WebGL2 with the headless Chromium of
  *   `scripts/glsl-check/glsl-driver.ts` (skipped without the browser);
  *   `AssertPresent` of a value that can be absent declines.
- * - interval-js: declines (the operation `isnan` has no spelling there).
+ * - interval-js: `ir-interval-absence-discharge.test.ts`.
  */
 
 import { existsSync } from 'node:fs';
@@ -232,16 +232,6 @@ describe('the discharges in the bigint mode decline', () => {
       to: 'javascript',
       mode: 'bigint',
     });
-    expect(r.success).toBe(false);
-  });
-});
-
-describe('the discharges on interval-js decline', () => {
-  test.each([
-    ['IsMissing', ['IsMissing', 'x']],
-    ['Coalesce', ['Coalesce', 'Missing', 3]],
-  ])('%s', (_, json) => {
-    const r = compile(ce.box(json as never), { to: 'interval-js' });
     expect(r.success).toBe(false);
   });
 });

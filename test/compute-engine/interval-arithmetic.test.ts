@@ -1258,8 +1258,13 @@ describe('INTERVAL COLLECTIONS', () => {
       const coll = [ok({ lo: 0, hi: 1 }), { kind: 'empty' }, ok(point(5))];
       expectInterval(atCollection(coll, point(1)), 0, 1);
       expect(atCollection(coll, point(2)).kind).toBe('empty');
-      // `empty` contributes nothing to a hull (`unionResults`).
-      expectInterval(atCollection(coll, { lo: 1, hi: 2 }), 0, 1);
+      // An absent element contributes nothing to the hull, and the value is
+      // present over part of the index only.
+      expect(atCollection(coll, { lo: 1, hi: 2 })).toEqual({
+        kind: 'partial',
+        value: { lo: 0, hi: 1 },
+        domainClipped: 'both',
+      });
     });
 
     test('an empty/entire/singular index propagates', () => {

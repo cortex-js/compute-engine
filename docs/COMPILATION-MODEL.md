@@ -39,8 +39,18 @@ when it compiles. A difference that this list does not name is a defect.
   The discharges compile on `javascript` (`AssertPresent` of an absent
   value throws an `Error` whose message starts with `expected-present`) and
   on `glsl`, except `AssertPresent` of a value that can be absent, which
-  declines there; on `interval-js` they decline for an operand that can be
-  absent, and in `mode: 'bigint'` they decline. A discharge declines when
+  declines there; and on `interval-js`, where the test is a verdict over the
+  box: `'maybe'` where the operand is absent over part of it, where
+  `Coalesce` gives the hull of its operands, and `AssertPresent` of a value
+  absent over the whole box throws, which `run()` answers with `entire`. A
+  kernel gives the same `empty` at a pole (`1/x` at the box `[0, 0]`), so
+  `empty` is surely absent only for an operand that no kernel makes `empty`
+  where the interpreter has a value, and `'maybe'` for another:
+  `IsMissing(1/x)` at `[0, 0]` is `'maybe'` (the interpreter gives
+  `False`), `Coalesce(1/x, 0)` there is `entire` (the interpreter gives
+  `~oo`), `IsMissing(At(L, k) + 1)` out of range is `'true'`. An enclosure
+  of NaN is absent (`IsMissing(∞ - ∞)` is `True`), and `entire` can be. In
+  `mode: 'bigint'` they decline. A discharge declines when
   its operand is computed on the real lane and its static type admits a
   complex value: `Coalesce(Sqrt(x), 0)` with `x: real` declines, because
   the `NaN` of `Sqrt(-4)` there (the caveat "`NaN` for a complex value on
@@ -153,6 +163,9 @@ interpreter's value. A line is removed when the case declines or is fixed.
   base 0 is a pole (`0^-1` is `~oo` in the interpreter). The enclosure holds
   every value; the neighbouring boxes are marked (`y = [0, 2]` with
   `x = [-1, -0.5]` is `partial`).
+- `interval-js` (crafted), `x`, `y` of a box with an infinite end:
+  `IsMissing(x*y)` at `x = [∞, ∞]`, `y = [0, 0]` gives `'false'` (the kernel
+  of `mul` gives `[0, 0]`); the interpreter gives `True` (`∞·0` is `NaN`).
 - every target (crafted), `x: real`: a derivative or an
   integral whose body is reached through a user function, with a `compile`
   handler of `Sin` that returns `Cos(args[0])` and `g(u) = Sin(u)`:

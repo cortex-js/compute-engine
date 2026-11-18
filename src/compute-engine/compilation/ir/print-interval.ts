@@ -158,9 +158,32 @@ export const JS_INTERVAL: Syntax = Object.freeze({
     'at': '_IA.at($0, $1)',
     'rangecount': '_IA.rangeCount($0, $1, $2)',
     'rangestep': '($1 >= $0 ? 1 : -1)',
+    // The discharges (README, "The discharges"): the test is a verdict;
+    // `empty` is surely absent only where no kernel gives it for a pole
+    // (`absenceTests()`).
+    'isnan': '_IA.isAbsent($0)',
+    'isnan.weak': { text: '_absentWeak($0)', helpers: ['_absentWeak'] },
+    'unpole': { text: '_unpole($0)', helpers: ['_unpole'] },
+    'present': { text: '_present($0, $1)', helpers: ['_present'] },
+    'present.int': { text: '_present($0, $1)', helpers: ['_present'] },
     ...PLAIN_SPELLINGS,
     // The value kind `enclosure` (`lower-enclosure.ts`).
     ...ENCLOSURE_SPELLINGS,
+  },
+  helpers: {
+    ...JS.helpers,
+    // The test of a value whose `empty` can be a pole: `'maybe'` there.
+    _absentWeak:
+      "const _absentWeak = (x) => x !== null && typeof x === 'object' && x.kind === 'empty' ? 'maybe' : _IA.isAbsent(x);",
+    // An arm selected by such a test: `empty`, which can be a pole whose
+    // value no interval holds, is `entire`.
+    _unpole:
+      "const _unpole = (x) => Array.isArray(x) ? x.map(_unpole) : x !== null && typeof x === 'object' && x.kind === 'empty' ? { kind: 'entire' } : x;",
+    // `AssertPresent`: the error `expected-present` where the value is
+    // absent over the whole box (`run()` answers it with `entire`), the
+    // value, partial, where it is absent over part of it.
+    _present:
+      "const _present = (m, x) => { if (m === 'true') throw new Error('expected-present: AssertPresent of an absent value'); return x; };",
   },
   // A loop that fills an array, with no `Array.from()`.
   map: (lengths, body) => {
@@ -249,7 +272,114 @@ export const INTERVAL_ROWS: readonly OperatorRow[] = deepFreeze([
   ...['atleast', 'atmost'].map((op) => row(undefined, 2, arith(op, 2), list)),
   ...PLAIN_ROWS,
   ...ENCLOSURE_ROWS,
+  // The test of a value that a kernel can make `empty` (`absenceTests()`).
+  row(undefined, 1, [[[R], 'boolean', 'isnan.weak']], {}),
+  // An arm of an `if` that such a test selects (`absenceTests()`).
+  row(undefined, 1, [[[R], R, 'unpole']], {}),
 ]);
+
+/** The operations whose kernel gives `empty` only for an `empty` operand
+ *  (`absenceTests()`), with `.int` and `.num` forms: a pole (`div`, `pow`,
+ *  `ln`, `gamma`, `factorial`, `tan`, ...) or a domain (`sqrt`, `fract`
+ *  of `∞`) is not in it. */
+// prettier-ignore
+const ABSENCE_SAFE = new Set(['add', 'sub', 'mul', 'neg', 'abs', 'square',
+  'sin', 'cos', 'exp', 'sinh', 'cosh', 'tanh', 'atan', 'asinh', 'sign',
+  'floor', 'ceil', 'round', 'trunc', 'erf', 'erfc', 'sinc', 'max', 'min',
+  'emax', 'emin', 'hypot', 'atan2', 'atleast', 'atmost', 'at', 'elem',
+  'point', 'number', 'lt', 'le', 'gt', 'ge', 'eq', 'ne', 'and', 'or', 'not',
+  'isnan', 'isnan.weak']);
+
+/** `p` with each `isnan` whose operand a kernel can make `empty` where the
+ *  interpreter has a value (`1/x` at the box `[0, 0]`) written `isnan.weak`,
+ *  whose `empty` is `'maybe'`, and each value yielded by an `if` whose
+ *  condition reads such a test written `unpole`, whose `empty` is `entire`
+ *  (`Coalesce(1/x, 0)` at `[0, 0]` holds `0` and `~oo`); a copy (`p` is
+ *  unchanged). An operand reads `empty` as absent when it is made only of
+ *  inputs, constants that are booleans or numbers that are not infinite,
+ *  the producers of an absent value (`at`, the constant NaN, an `if` with
+ *  such arms and condition) and the operations of `ABSENCE_SAFE`, and
+ *  `div` by a nonzero constant (README, "The discharges"). */
+function absenceTests(p: Program): Program {
+  const weak = (q: Program): Instr[] => {
+    const { def } = useIndex(q);
+    const inputs = new Set(entryOf(q).body.params);
+    const memo = new Map<V, boolean>();
+    const finite = (v: V) => {
+      const i = def.get(v);
+      if (i?.k !== 'const') return false;
+      const x = i.value.value;
+      return (
+        (typeof x === 'number' && Number.isFinite(x) && x !== 0) ||
+        (typeof x === 'bigint' && x !== 0n)
+      );
+    };
+    const safe = (v: V): boolean => {
+      if (inputs.has(v)) return true;
+      if (memo.has(v)) return memo.get(v)!;
+      memo.set(v, false);
+      const i = def.get(v);
+      let r = false;
+      if (i?.k === 'const') {
+        const x = i.value.value;
+        r =
+          typeof x === 'boolean' ||
+          typeof x === 'bigint' ||
+          (typeof x === 'number' && (Number.isNaN(x) || Number.isFinite(x)));
+      } else if (i?.k === 'list') r = i.args.every(safe);
+      else if (i?.k === 'if') {
+        const k = i.outs.indexOf(v);
+        r = safe(i.cond) && safe(i.then.yields[k]) && safe(i.else.yields[k]);
+      } else if (i?.k === 'op') {
+        const op = i.op.replace(/\.(int|num)$/, '');
+        r =
+          (ABSENCE_SAFE.has(op) ||
+            ((op === 'div' || op === 'div.q') && finite(i.args[1]))) &&
+          i.args.every(safe);
+      }
+      memo.set(v, r);
+      return r;
+    };
+    const found: Instr[] = [];
+    const walk = (r: Region): void =>
+      r.body.forEach((i) => {
+        if (i.k === 'op' && i.op === 'isnan' && !safe(i.args[0])) found.push(i);
+        regionsOf(i).forEach(walk);
+      });
+    q.functions.forEach((f) => walk(f.body));
+    return found;
+  };
+  if (weak(p).length === 0) return p;
+  const q = {
+    ...p,
+    types: [...p.types],
+    functions: structuredClone(p.functions),
+  };
+  for (const i of weak(q)) if (i.k === 'op') i.op = 'isnan.weak';
+  const { def } = useIndex(q);
+  const reads = (v: V): boolean => {
+    const i = def.get(v);
+    return (
+      i?.k === 'op' &&
+      (i.op === 'isnan.weak' ||
+        (['and', 'or', 'not'].includes(i.op) && i.args.some(reads)))
+    );
+  };
+  const walk = (r: Region): void =>
+    r.body.forEach((i) => {
+      regionsOf(i).forEach(walk);
+      if (i.k !== 'if' || !reads(i.cond)) return;
+      for (const arm of [i.then, i.else])
+        arm.yields = arm.yields.map((y) => {
+          if (q.types[y].lane === 'boolean') return y;
+          const out = q.types.push(q.types[y]) - 1;
+          arm.body.push({ k: 'op', out, op: 'unpole', args: [y] });
+          return out;
+        });
+    });
+  q.functions.forEach((f) => walk(f.body));
+  return q;
+}
 
 /** The closed form of each `integrate` of `p` (its second region) that
  *  `admitted` refuses, removed: the enclosure stands alone. */
@@ -450,7 +580,7 @@ export function printInterval(
   // `precision`, the precision of the engine: the runtime has its own number
   // library (`CompilationResult.reconstructionDigits`).
   const pow = `_IA.powReal($0, $1, ${realPowerReconstructionDigits(precision)})`;
-  const q = subtractions(p);
+  const q = subtractions(absenceTests(p));
   const plan = computedOnce(q, rows);
   const printed = printProgram(
     q,

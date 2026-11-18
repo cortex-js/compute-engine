@@ -141,13 +141,23 @@
 
 ### Improvements
 
-- **`IsMissing`, `Coalesce` and `AssertPresent` compile on `javascript`, and
-  `IsMissing` and `Coalesce` on `glsl`.** They declined before. Each gives the
-  interpreter's value for an absent operand: `Coalesce(At(L, i), 0)` is `0` for
-  an index out of range, and `AssertPresent(At(L, i))` throws an `Error` whose
-  message starts with `expected-present` on `javascript`. `AssertPresent` of a
-  value that can be absent declines on `glsl`, the three decline on
-  `interval-js` for an operand that can be absent, and in `mode: 'bigint'`.
+- **`IsMissing`, `Coalesce` and `AssertPresent` compile on `javascript` and
+  `interval-js`, and `IsMissing` and `Coalesce` on `glsl`.** They declined
+  before. Each gives the interpreter's value for an absent operand:
+  `Coalesce(At(L, i), 0)` is `0` for an index out of range, and
+  `AssertPresent(At(L, i))` throws an `Error` whose message starts with
+  `expected-present` on `javascript`. On `interval-js` the test is a verdict
+  over the box: `IsMissing(At([1, 2, 3], k))` is `'false'` over `k = [1, 2]`,
+  `'true'` over `[4, 5]` and `'maybe'` over `[2, 4]`, where
+  `Coalesce(At([1, 2, 3], k), 0)` is the hull of the value and the fallback,
+  `partial` over `[0, 3]`; `AssertPresent` of a value absent over the whole box
+  gives `entire` (its error ends the run). A pole is not an absent value:
+  `IsMissing(1/x)` at the box `[0, 0]` is `'maybe'`. On `interval-js`, an
+  `At` that selects an absent element (`At([If(x > 0, x), 1], k)`) is
+  `partial` where it gave the other elements only, and `_IA.isAbsent` of
+  `entire` is `'maybe'` (it was `'false'`). `AssertPresent` of a
+  value that can be absent declines on `glsl`, and the three decline in
+  `mode: 'bigint'`.
   A discharge of a computed value on the real lane whose type admits a complex
   value declines (`Coalesce(Sqrt(x), 0)` with `x: real`: the `NaN` of
   `Sqrt(-4)` there is the interpreter's `2i`, not an absent value), as does a

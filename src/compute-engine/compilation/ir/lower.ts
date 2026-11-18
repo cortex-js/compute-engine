@@ -2588,7 +2588,8 @@ export function lower(
    *  a number (a complex number with a NaN part), a point whose
    *  coordinates are all NaN, `undefined` for a boolean on JavaScript. No
    *  compiled value of another kind is absent (a list, a colour, a boolean
-   *  on GLSL: each producer of one declines), so its test is `false`.
+   *  on GLSL or in the interval mode: each producer of one declines), so
+   *  its test is `false`.
    *  A NaN on the real lane is also a complex value of the interpreter
    *  (`Sqrt(x)` at `x = -4`), which is not absent: the test of an
    *  `operand` whose engine type admits a value that is not real declines,
@@ -2651,13 +2652,13 @@ export function lower(
     )!;
   };
 
-  /** `AssertPresent(v)`: `v`, or on JavaScript a throw where `v` is
-   *  absent (the interpreter gives the error `expected-present`); a value
-   *  that can be absent declines on the other targets. */
+  /** `AssertPresent(v)`: `v`, or on JavaScript and in the interval mode a
+   *  throw where `v` is absent (the interpreter gives the error
+   *  `expected-present`); a value that can be absent declines on GLSL. */
   const present = (e: Fn, v: V): V => {
     const m = absent(e, e.ops[0], v);
     if (b.constants.get(m) === false) return v;
-    if (!options.javascript)
+    if (!options.javascript && !interval)
       decline(e, 'AssertPresent of a value that can be absent');
     const t = type(v);
     if (t.shape.length === 0) return apply(e, ofOp('present'), [m, v]);

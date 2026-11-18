@@ -1435,9 +1435,38 @@ points `P`) decline. `AssertPresent(a)` is `a` when its test is the constant
 `false`; otherwise on JavaScript it is `present` (`present.int`, `cpresent`,
 `present.bool`; per coordinate of a point) of the test and `a`, a `may-fail`
 operation that throws an `Error` whose message starts with `expected-present`
-where the test is true (the interpreter gives that error), and on the other
-targets it declines. The interval mode has no spelling of `isnan`, so
-`IsMissing` and `Coalesce` of an operand that can be absent decline there.
+where the test is true (the interpreter gives that error), and on GLSL it
+declines.
+
+In the interval mode `isnan` is `_IA.isAbsent`, a verdict over the box:
+`'true'` for the `empty` result and for an enclosure of NaN (the absent value of
+the mode, the NaN of `∞ - ∞`), `'false'` for a present value, `'maybe'` for a
+`partial` or a `singular` result, for `entire` and for an enclosure with one NaN
+end. `_IA.at` leaves an absent element out of the hull of the elements that it
+selects and marks the result `partial`. A kernel gives `empty` at a pole too
+(`1/x`, `Gamma(x)` at the box `[0, 0]`), where the interpreter has a value, so
+`absenceTests()` of `print-interval.ts` writes `isnan.weak` (`_absentWeak`:
+`'maybe'` for `empty`) for an operand not made only of inputs, constants that
+are booleans or numbers that are not infinite, the producers (`at`, the
+constant NaN, an `if` of such arms and condition), the operations whose kernel
+gives `empty` only for an `empty` operand (`ABSENCE_SAFE`: `add`, `mul`, `sin`,
+`exp`, `max`, the comparisons, ...) and a `div` by a nonzero constant; each
+value that an `if` with such a test in its condition yields is `unpole`
+(`_unpole`: `entire` for `empty`, whose pole no bounded interval holds).
+`IsMissing(1/x)` at `[0, 0]` is `'maybe'` (the interpreter gives `False`),
+`Coalesce(1/x, 0)` there is `entire` (the interpreter gives `~oo`), and
+`IsMissing(At(L, k) + 1)` out of range is `'true'`. A boolean is never absent
+there (`If(c, x < 1)` with no else arm is `'false'` where `c` fails, as the
+interpreter's `False`; an `At` of a list of booleans that can be out of range
+declines), so its test is `false`.
+`IsMissing(At([1, 2, 3], k))` is `'false'` over `k = [1, 2]`, `'true'` over
+`[4, 5]` and `'maybe'` over `[2, 4]`. The `if` of `Coalesce` joins its arms
+where the verdict is `'maybe'` (`_IA.hull`): `Coalesce(At([1, 2, 3], k), 0)`
+over `[2, 4]` is `partial` over `[0, 3]` (the hull with `empty` keeps the mark
+`partial`, which `_IA.coalesce` would drop). `present` and `present.int` are
+`_present(m, x)` of the mode's own helper: an `Error` whose message starts with
+`expected-present` where the verdict is `'true'`, which `run()` answers with
+`entire`, and `x` otherwise, already `partial` where it is `'maybe'`.
 
 ## Effects
 
