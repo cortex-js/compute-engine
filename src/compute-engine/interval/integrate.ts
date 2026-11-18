@@ -359,7 +359,15 @@ function integrateRaw(
 }
 
 /** The enclosure itself — see {@link integrate}, which wraps it in the
- *  nested-budget accounting. `f` arrives already budget-wrapped. */
+ *  nested-budget accounting. `f` arrives already budget-wrapped.
+ *
+ *  `empty` says that the integral has no value for ANY choice of the bounds.
+ *  With bounds of some width, a piece where the integrand has no value can
+ *  lie in the range that only some choices reach: `∫₀ˣ √t dt` over
+ *  `x = [-0.77, 1.23]` has a value for every positive `x`. Then the answer
+ *  is `empty` only when the integrand has no value somewhere in the range
+ *  that EVERY choice integrates over, `[a₂, b₁]` (or `[b₂, a₁]` reversed);
+ *  otherwise it is `entire`, "cannot bound this". */
 function integrateCore(
   f: (t: Interval) => Interval | IntervalResult,
   a: Interval | IntervalResult,
@@ -373,6 +381,34 @@ function integrateCore(
   if (!isFiniteInterval(lower) || !isFiniteInterval(upper))
     return { kind: 'entire' };
 
+  const result = integrateBounds(f, lower, upper, n);
+  if (
+    'kind' in result &&
+    result.kind === 'empty' &&
+    (lower.hi > lower.lo || upper.hi > upper.lo)
+  ) {
+    const [p, q] =
+      lower.hi <= upper.lo
+        ? [lower.hi, upper.lo]
+        : upper.hi <= lower.lo
+          ? [upper.hi, lower.lo]
+          : [NaN, NaN];
+    if (!(p < q)) return { kind: 'entire' };
+    const common = bracket(f, p, q, INTERVAL_QUADRATURE_GUARD_SUBDIVISIONS);
+    return 'kind' in common && common.kind === 'empty'
+      ? common
+      : { kind: 'entire' };
+  }
+  return result;
+}
+
+/** {@link integrateCore} for finite bounds, before the reading of `empty`. */
+function integrateBounds(
+  f: (t: Interval) => Interval | IntervalResult,
+  lower: Interval,
+  upper: Interval,
+  n: number
+): IntervalResult {
   // The point-bound core ∫_{a₁}^{b₁}, oriented.
   const reversed = upper.lo < lower.lo;
   const core = reversed

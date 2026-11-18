@@ -84,16 +84,12 @@ const CASES: Case[] = [
   C(I(['Sin', ['Multiply', 't', 't']], 't', 0, 1)),
 ];
 
-/** The programs whose result is `empty` at a box where some bound has a
- *  value: the library answers `empty` when a piece of the partition from
- *  the lower ends of the bounds has no value (`interval/integrate.ts`,
- *  `propagatedKind()`), also where the upper bound of the box leaves that
- *  piece (CE-1347). */
+/** The programs whose result does not contain the interpreter's value at
+ *  some box: none since CE-1347 (an integral whose bounds reach a piece where
+ *  the integrand has no value only for some choices is `entire`, not
+ *  `empty`). */
 // prettier-ignore
-const NOT_CONTAINED: string[] = [
-  I(['Which', ['Less', 't', y], ['Sqrt', 't'], 'True', 0], 't', 0, x),
-  I(['Ln', 't'], 't', 1, x),
-].map((json) => JSON.stringify(json));
+const NOT_CONTAINED: string[] = [];
 
 // A seeded generator (mulberry32).
 function random(seed: number): () => number {

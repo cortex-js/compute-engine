@@ -78,6 +78,12 @@
 
 ### Resolved Issues
 
+- **An interval integral whose bound reaches past the domain of the
+  integrand is no longer `empty`.** On `interval-js`,
+  `Integrate(Sqrt(t), Limits(t, 0, x))` over `x = [-0.77, 1.23]` answered
+  `empty` ("no value anywhere") although it has a value for every positive
+  `x`; it is now `entire`. `empty` stays when the integrand has no value in
+  the range that every choice of the bounds covers.
 - **The interval `sinc` encloses its turning points.** The extrema of the
   cardinal sine were tabulated to 6 digits, so an interval that holds one
   missed the extremum: `sinc({ lo: 4, hi: 5 })` had the lower end
