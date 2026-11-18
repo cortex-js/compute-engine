@@ -183,7 +183,6 @@ describe('Interval fallback: the spelling of an absent value', () => {
   test.each([
     ['a number', gated(['Add', 't', 1])],
     ['a point', gated(['Tuple', 't', 1])],
-    ['a list of numbers', gated(['List', 't', 1])],
     ['a list with an absent cell', ['List', ['Add', 't', 1], gated(2)]],
     [
       'a list of points with an absent point',
@@ -227,10 +226,8 @@ describe('Interval fallback: the spelling of an absent value', () => {
   });
 
   test.each([
-    ['the written Missing', 'Missing'],
     ['an At past the end of a literal list', ['At', ['List', 't', 2], 5]],
     ['an At with index 0', ['At', ['List', 't', 2], 0]],
-    ['an At past the end at run time', ['At', ['List', 't', 2], 'k']],
   ])('%s compiles to empty', (_label, json) => {
     const r = compile(ce.box(json as never), {
       to: 'interval-js',

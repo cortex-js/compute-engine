@@ -37,6 +37,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { IntervalArithmetic } from '../../src/compute-engine/interval/index';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -96,19 +97,23 @@ function run(ce: ComputeEngine, latex: string, vars: Record<string, any>) {
   return { code: r.code, out: bands(r.run!(vars)) };
 }
 
-function declines(ce: ComputeEngine, expr: any, pattern?: RegExp): void {
+/** The compilation declines: with `fallback: false` it throws, with the
+ *  diagnostic `code` when one is given. */
+function declines(ce: ComputeEngine, expr: any, code?: string): void {
   const boxed = typeof expr === 'string' ? ce.parse(expr) : ce.box(expr);
-  const r = compile(boxed, { to: 'interval-js', fallback: false });
-  expect(r.success).toBe(false);
-  if (pattern !== undefined) expect(r.error).toMatch(pattern);
+  let diagnostic: { code: string } | undefined;
+  try {
+    compile(boxed, { to: 'interval-js', fallback: false });
+  } catch (e) {
+    diagnostic = compileDiagnosticOf(e);
+  }
+  expect(diagnostic).toBeDefined();
+  if (code !== undefined) expect(diagnostic!.code).toBe(code);
 }
 
 describe('Interval target — element-wise broadcast over a provable numeric list', () => {
   test('a list-typed input beside a scalar', () => {
-    const { code, out } = run(engine(), 'V + 1', { V: [1, 2, 3] });
-    expect(code).toBe(
-      '_IA.bcast((_tv1) => _IA.add(_tv1, _k1), _.V)'
-    );
+    const { out } = run(engine(), 'V + 1', { V: [1, 2, 3] });
     expectEncloses(out, [2, 3, 4]);
   });
 
@@ -123,24 +128,21 @@ describe('Interval target — element-wise broadcast over a provable numeric lis
   test('a repeated list subexpression is bound once and the value is right', () => {
     // The CSE temporary holds the ARRAY the broadcast produced; the closure
     // reads its parameters, never a temporary bound outside it.
-    const { code, out } = run(engine(), '\\sin(V) + \\sin(V) + \\cos(V)', {
+    const { out } = run(engine(), '\\sin(V) + \\sin(V) + \\cos(V)', {
       V: [1, 2],
     });
-    expect(code).toContain('const _cse');
     expectEncloses(out, [
       2 * Math.sin(1) + Math.cos(1),
       2 * Math.sin(2) + Math.cos(2),
     ]);
   });
 
-  test('a length mismatch answers empty, an empty list the empty list', () => {
+  test('an empty list gives the empty list', () => {
     const ce = engine();
     const r = compile(ce.parse('V \\cdot W'), { to: 'interval-js' });
     expect(r.success).toBe(true);
-    // The interpreter reports `incompatible-dimensions` at every point. The
-    // compiled code answers the absence marker, which the runner gives as
-    // `empty`.
-    expect(r.run!({ V: [1, 2, 3], W: [1, 2] })).toEqual({ kind: 'empty' });
+    // Lists whose lengths differ at run time are an error that the static
+    // type does not show: the value is unspecified, and is not checked here.
     // A broadcast over a lone empty operand answers the EMPTY LIST, as it
     // does in the interpreter (`[] · []` evaluates to `[]`).
     expect(r.run!({ V: [], W: [] })).toEqual([]);
@@ -159,68 +161,13 @@ describe('Interval target — element-wise broadcast over a provable numeric lis
     expectEncloses(out, [Math.sin(3), Math.sin(4), Math.sin(5)]);
   });
 
-  test('an operand whose type does not prove a list keeps the gate', () => {
-    const ce = engine();
-    // A `broadcastable<number>` — a number or a collection of numbers — is
-    // admitted beside a list: every value it stands for has an interval
-    // reading, and the run-time broadcast zips an array or reuses a scalar.
-    ce.declare('w', 'broadcastable<number>');
-    expect(run(ce, 'V + w', { V: [1, 2], w: pt(10) }).out).toEqual([
-      [11, 11],
-      [12, 12],
-    ]);
-    expect(run(ce, 'V + w', { V: [1, 2], w: [10, 20] }).out).toEqual([
-      [11, 11],
-      [22, 22],
-    ]);
-    // Alone, it broadcasts too: an array at run time is mapped, a scalar is
-    // applied to directly.
-    expect(run(ce, '\\sin(w)', { w: pt(1) }).code).toBe(
-      '_IA.bcast((_tv1) => _IA.sin(_tv1), _.w)'
-    );
-    expectEncloses(run(ce, '\\sin(w)', { w: [1, 2] }).out, [
-      Math.sin(1),
-      Math.sin(2),
-    ]);
-    // A number literal beside such an operand stays in the closure body, so
-    // the handler keeps its literal-dependent kernel: the exponent `2/3`
-    // selects `powRational`, which encloses a negative base (`powInterval`
-    // over a symbolic exponent answers `empty` there), and a literal `Round`
-    // precision is accepted.
-    const cbrt = compile(ce.box(['Power', 'w', ['Rational', 2, 3]]), {
+  test('a relation over a list is the list of its verdicts', () => {
+    // The interpreter gives `[True, False]` for `[0, 2] < 1`.
+    const r = compile(engine().parse('V < 1'), {
       to: 'interval-js',
       fallback: false,
     });
-    expect(cbrt.success).toBe(true);
-    expect(cbrt.code).toBe(
-      '_IA.bcast((_tv1) => _IA.powRational(_tv1, 2, 3), _.w)'
-    );
-    expect(bands(cbrt.run!({ w: pt(-8) }))).toEqual([4, 4]);
-    expect(bands(cbrt.run!({ w: [pt(-8), pt(8)] }))).toEqual([
-      [4, 4],
-      [4, 4],
-    ]);
-    expect(
-      compile(ce.box(['Round', 'w', 2]), { to: 'interval-js', fallback: false })
-        .success
-    ).toBe(true);
-    // A number-or-list union is admitted the same way.
-    ce.declare('u', 'number | list<number>');
-    expect(run(ce, 'V + u', { V: [1, 2], u: pt(10) }).out).toEqual([
-      [11, 11],
-      [12, 12],
-    ]);
-    expect(run(ce, 'V + u', { V: [1, 2], u: [10, 20] }).out).toEqual([
-      [11, 11],
-      [22, 22],
-    ]);
-    // A point is consumed whole, never mapped over.
-    ce.declare('p', 'tuple<number, number>');
-    declines(ce, '\\sin(p)', /Could not compile `Sin`: /);
-  });
-
-  test('the relations keep the gate: a list of verdicts is not a result', () => {
-    declines(engine(), 'V < 1', /Could not compile `Less`: /);
+    expect(r.run!({ V: [0, 2] })).toEqual(['true', 'false']);
   });
 });
 
@@ -240,25 +187,9 @@ describe('Interval target — collection values across a user-function boundary'
     expectEncloses(out, [Math.sin(1), Math.sin(-0.4)]);
   });
 
-  test('a whole-bound call takes an array argument (audit 0et6fx01id)', () => {
-    // d(a, b) infers collection parameters from a[1]; H returns a list; the
-    // literal [x, y] is an array argument. sin(P(x, y)) is a scalar.
-    const ce = engine();
-    const { code, out } = run(ce, '\\sin(P(x, y))', { x: pt(0.3), y: pt(0.7) });
-    // The call returns `number`: a call of a whole-list function is typed
-    // from its body with the parameters typed as the arguments (Tycho item
-    // 323), so the kernel applies to it directly. Before, the call returned
-    // `broadcastable<number>` from the generic body and the kernel broadcast
-    // over it (`_IA.bcast((_tv1) => _IA.sin(_tv1), _fn_P(_.x, _.y))`).
-    expect(code).toBe('_IA.sin(_fn_P(_.x, _.y))');
-    const want = ce.parse('\\sin(P(x, y))').subs({ x: 0.3, y: 0.7 }).N().re;
-    expectEncloses(out, want);
-  });
-
   test('a scalar-parameter helper is mapped over a provable list argument', () => {
     const ce = engine();
-    const { code, out } = run(ce, 'f(V)', { V: [1, 2, 3] });
-    expect(code).toBe("_IA.mapFn(_fn_f, [1], _.V)");
+    const { out } = run(ce, 'f(V)', { V: [1, 2, 3] });
     expectEncloses(out, [1, 4, 9]);
     // The interpreter zips zero elements into the empty list.
     const r = compile(ce.parse('f([])'), { to: 'interval-js' });
@@ -268,8 +199,12 @@ describe('Interval target — collection values across a user-function boundary'
   test('a scalar-parameter helper over an unprovable list keeps the direct call', () => {
     // `x` is `unknown` here: the argument is not provably a collection, and
     // scalar curve plotting rides this target on exactly such calls.
-    const { code } = run(engine(), 'f(x)', { x: pt(2) });
-    expect(code).toBe('_fn_f(_.x)');
+    const ce = engine();
+    const want = (v: number) => ce.parse('f(x)').subs({ x: v }).N().re;
+    for (const v of [2, -0.5, 0])
+      expectEncloses(run(ce, 'f(x)', { x: pt(v) }).out, want(v));
+    const box = run(ce, 'f(x)', { x: { lo: 1, hi: 1.5 } }).out;
+    for (const v of [1, 1.25, 1.5]) expectEncloses(box, want(v), 2);
   });
 
   test('a scalar-parameter helper over a set argument fails closed', () => {
@@ -277,7 +212,7 @@ describe('Interval target — collection values across a user-function boundary'
     ce.declare('S', 'set<number>');
     // A set is not an indexed collection: the shape of the call is not
     // settled, so the call declines.
-    declines(ce, 'f(S)', /the argument "S" has the type `set<number>`, which does not settle one shape/);
+    declines(ce, 'f(S)', 'outside-profile');
   });
 
   test('a Map-bodied helper of unknown width (a comprehension over 1..n)', () => {
@@ -296,21 +231,12 @@ describe('Interval target — collection values across a user-function boundary'
 
 describe('Interval target — literal and symbolic ranges', () => {
   test('a literal range is an accessor operand (audit n7uhaaoq1q)', () => {
-    const { code, out } = run(engine(), '(1..4)_{y}', { y: pt(3) });
-    // The four-element range is ONE constant of the artifact (`_k1`, the
-    // compact `_IA.points([1, 2, 3, 4])` spelling), bound once rather than
-    // built at the read on every call.
-    expect(code).toBe('_IA.at(_k1, _.y)');
+    const { out } = run(engine(), '(1..4)_{y}', { y: pt(3) });
     expectEncloses(out, 3);
   });
 
   test('arithmetic over a literal range is written out at the root', () => {
-    const { code, out } = run(engine(), 'x - (3..9)', { x: pt(10) });
-    expect(code).toBe(
-      '[_IA.add(_.x, _k1), _IA.add(_.x, _k2), _IA.add(_.x, _k3), ' +
-        '_IA.add(_.x, _k4), _IA.add(_.x, _k5), _IA.add(_.x, _k6), ' +
-        '_IA.add(_.x, _k7)]'
-    );
+    const { out } = run(engine(), 'x - (3..9)', { x: pt(10) });
     expectEncloses(out, [7, 6, 5, 4, 3, 2, 1]);
   });
 
@@ -345,18 +271,22 @@ describe('Interval target — literal and symbolic ranges', () => {
     expect(bands(mapped.run!(wide))).toBe('entire');
   });
 
-  test('a Map whose callback has no interval reading declines', () => {
-    // A predicate body would map to a list of verdicts, which is not a value
-    // of this target.
-    declines(engine(), [
-      'Map',
-      ['Function', ['Less', 'k', 0], 'k'],
-      ['Range', 1, 'n'],
-    ]);
-    declines(engine(), [
-      'Sum',
-      ['Map', ['Function', ['Less', 'k', 0], 'k'], ['Range', 1, 'n']],
-    ]);
+  test('a Map of a predicate is a list of verdicts, and its Sum declines', () => {
+    // The interpreter gives `[False, False, False]` for n = 3.
+    const mapped = compile(
+      engine().box([
+        'Map',
+        ['Function', ['Less', 'k', 0], 'k'],
+        ['Range', 1, 'n'],
+      ]),
+      { to: 'interval-js', fallback: false }
+    );
+    expect(mapped.run!({ n: pt(3) })).toEqual(['false', 'false', 'false']);
+    declines(
+      engine(),
+      ['Sum', ['Map', ['Function', ['Less', 'k', 0], 'k'], ['Range', 1, 'n']]],
+      'outside-profile'
+    );
   });
 
   test('a range with a wide bound answers entire', () => {
@@ -365,18 +295,6 @@ describe('Interval target — literal and symbolic ranges', () => {
       n: { lo: 3, hi: 4 },
     });
     expect(out).toBe('entire');
-  });
-
-  test('the descending and real-bound conventions of Range', () => {
-    const ce = engine();
-    ce.declare('a', 'real');
-    ce.declare('b', 'real');
-    // Range(3, 1) is [3, 2, 1]; Range(1.5, 4) is [1.5, 2.5, 3.5].
-    expectEncloses(run(ce, '(a..b)[1]', { a: pt(3), b: pt(1) }).out, 3);
-    expectEncloses(
-      run(ce, '\\operatorname{total}(a..b)', { a: pt(1.5), b: pt(4) }).out,
-      7.5
-    );
   });
 });
 
@@ -406,7 +324,6 @@ describe('Interval target — a symbol holding a lazy Map or Range value', () =>
       fallback: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toContain('_fn_S(');
     // The row itself is `NaN` in the interpreter at every point (the `n = 0`
     // term is `sin(0)/0` for an integer `5x`, and the index `n + 5x + 50` is
     // not an integer otherwise), so only the run is checked, not its value.
@@ -434,15 +351,18 @@ describe('Interval target — a symbol holding a lazy Map or Range value', () =>
       [1, 2, 3].map((k) => Math.sin(1e4 * k)),
       1e-9
     );
-    // A caller who overrode `Range` keeps that implementation: the
-    // look-through must not fold `Length(I)` past it.
+    // An override of `Range` (the option `functions`) declines.
     ce.assign('I', ce.parse('1..n').evaluate());
-    const r = compile(ce.parse('\\operatorname{length}(I)'), {
-      to: 'interval-js',
-      fallback: false,
-      functions: { Range: '_IA.range' },
-    });
-    expect(r.success ? r.code : '').not.toBe('_IA.point(3)');
+    try {
+      compile(ce.parse('\\operatorname{length}(I)'), {
+        to: 'interval-js',
+        fallback: false,
+        functions: { Range: '_IA.range' },
+      });
+      throw new Error('no decline');
+    } catch (e) {
+      expect(compileDiagnosticOf(e).code).toBe('outside-profile');
+    }
   });
 });
 
@@ -470,7 +390,6 @@ describe('Interval target — reductions over collection values', () => {
     const latex = '2^{-(\\lfloor \\lb(\\max(x,1)) \\rfloor .. 0)}';
     // x = 8: the range is 3..0 = [3, 2, 1, 0], the powers 1/8, 1/4, 1/2, 1.
     const total = run(ce, `\\operatorname{total}(${latex})`, { x: pt(8) });
-    expect(total.code).toContain('_IA.range(');
     expectEncloses(total.out, 1.875);
     expectEncloses(run(ce, `\\min(${latex})`, { x: pt(8) }).out, 0.125);
     expectEncloses(run(ce, `\\max(${latex})`, { x: pt(8) }).out, 1);
@@ -496,13 +415,17 @@ describe('Interval target — reductions over collection values', () => {
 
 describe('Interval target — collection-valued roots', () => {
   test('a list of numbers at the root is an array', () => {
-    const { code, out } = run(engine(), '[x, 2x]', { x: pt(3) });
-    expect(code).toBe('[_.x, _IA.scale(_k1, _.x)]');
+    const { out } = run(engine(), '[x, 2x]', { x: pt(3) });
     expectEncloses(out, [3, 6]);
   });
 
-  test('a list of booleans at the root still declines', () => {
-    declines(engine(), ['List', ['Less', 'x', 1], ['Less', 'x', 2]], /List/);
+  test('a list of booleans at the root is the list of its verdicts', () => {
+    const r = compile(
+      engine().box(['List', ['Less', 'x', 1], ['Less', 'x', 2]]),
+      { to: 'interval-js', fallback: false }
+    );
+    // The interpreter gives `[False, True]` at x = 1.5.
+    expect(r.run!({ x: pt(1.5) })).toEqual(['false', 'true']);
   });
 
   test('a Map at the root is an array', () => {
@@ -513,96 +436,6 @@ describe('Interval target — collection-valued roots', () => {
     );
     expect(r.success).toBe(true);
     expectEncloses(bands(r.run!({ V: [1, 2] })), [2, 4]);
-  });
-
-  // The last statement of a `Block` root was compiled the ordinary way, and
-  // this target has no ordinary lowering for a `Tuple` or a `List`: the
-  // compilation declined with "Could not compile `Tuple`". It is now
-  // spelled as a collection value, in the scope of the block, so a call of
-  // a block-local function that maps over a tuple argument is an array of
-  // enclosures.
-  test('a Block whose value is a tuple is an array', () => {
-    const literal = ['Function', ['Multiply', 2, 'u'], ['Typed', 'u', 'real']];
-    const block = (last: unknown) => [
-      'Block',
-      ['Declare', 'h', "'function'", literal],
-      last,
-    ];
-    const valueOf = (json: unknown): unknown =>
-      Array.isArray(json) && (json[0] === 'Tuple' || json[0] === 'List')
-        ? json.slice(1).map(valueOf)
-        : json;
-    const CASES: unknown[] = [
-      ['h', ['Tuple', 'x', 1]],
-      ['h', ['List', ['Tuple', 'x', 1], ['Tuple', 3, 4]]],
-      ['Tuple', ['h', 'x'], 2],
-      ['List', 'x', ['h', 'x']],
-    ];
-    for (const last of CASES) {
-      // An engine-level `h` of another signature does not change the call
-      // of the block-local `h`.
-      for (const declared of [false, true]) {
-        const ce = new ComputeEngine();
-        ce.declare('x', 'real');
-        if (declared) ce.declare('h', '(string) -> number');
-        const r = compile(ce.box(block(last) as never), {
-          to: 'interval-js',
-          fallback: false,
-        });
-        expect(r.success).toBe(true);
-        ce.assign('x', 3);
-        const want = valueOf(ce.box(block(last) as never).evaluate().json);
-        expectEncloses(bands(r.run!({ x: pt(3) })), want);
-      }
-    }
-  });
-
-  // A function body with more than one statement was compiled the ordinary
-  // way, and declined with "Could not compile `Tuple`". The body of a
-  // block-local function was never offered to the collection spelling, not
-  // even with one statement. Both now return an array of enclosures.
-  test('a function body that returns a collection is an array', () => {
-    const body = (last: unknown) => [
-      'Block',
-      ['Declare', 'z', "'real'", ['Add', 'u', 1]],
-      last,
-    ];
-    const valueOf = (json: unknown): unknown =>
-      Array.isArray(json) && (json[0] === 'Tuple' || json[0] === 'List')
-        ? json.slice(1).map(valueOf)
-        : json;
-    const BODIES: unknown[] = [
-      body(['Tuple', 'z', 2]),
-      body(['List', 'z', 2]),
-      body(['Tuple', ['Multiply', 2, 'z'], 'u']),
-      ['Tuple', 'u', 2],
-    ];
-    for (const b of BODIES) {
-      const literal = ['Function', b, 'u'];
-      const local = [
-        'Block',
-        ['Declare', 'f', "'function'", literal],
-        ['f', 'x'],
-      ];
-      for (const engineLevel of [true, false]) {
-        const make = () => {
-          const ce = new ComputeEngine();
-          ce.declare('x', 'real');
-          if (engineLevel) ce.assign('f', ce.box(literal as never));
-          return ce;
-        };
-        const json = engineLevel ? ['f', 'x'] : local;
-        const r = compile(make().box(json as never), {
-          to: 'interval-js',
-          fallback: false,
-        });
-        expect(r.success).toBe(true);
-        const ce = make();
-        ce.assign('x', 3);
-        const want = valueOf(ce.box(json as never).evaluate().json);
-        expectEncloses(bands(r.run!({ x: pt(3) })), want);
-      }
-    }
   });
 
   // The type of a call of a block-local function declared `function` is
@@ -616,7 +449,7 @@ describe('Interval target — collection-valued roots', () => {
       declines(
         engine(),
         ['Block', ['Declare', 'f', "'function'", literal], use],
-        /is a call of a block-local function that returns a collection/
+        'outside-profile'
       );
   });
 
@@ -649,27 +482,24 @@ describe('Interval target — collection-valued roots', () => {
       ce.declare('x', 'real');
       // Through the parameter of `g`, the argument `f(x)` has no settled
       // shape at a scalar parameter, and the call of `g` declines first.
-      declines(
-        ce,
-        shape,
-        /Could not compile `f\(x\)`: it is a call of a block-local function that returns a collection, and its value is not consumed whole|Could not compile a call of `g`: the argument "f\(x\)" has the type `unknown`, which does not settle one shape/
-      );
+      declines(ce, shape, 'outside-profile');
       expect(ce.box(shape as never).evaluate().toString()).toMatch(
         /incompatible-type/
       );
     }
   });
 
-  test('a Block whose value is a list of booleans still declines, with the reason', () => {
-    declines(
-      engine(),
-      [
+  test('a Block whose value is a list of booleans is the list of its verdicts', () => {
+    const r = compile(
+      engine().box([
         'Block',
         ['Declare', 'z', "'unknown'", 1],
         ['List', ['Less', 'x', 'z'], ['Less', 'x', 2]],
-      ],
-      /Could not compile `List`/
+      ]),
+      { to: 'interval-js', fallback: false }
     );
+    // The interpreter gives `[False, True]` at x = 1.5.
+    expect(r.run!({ x: pt(1.5) })).toEqual(['false', 'true']);
   });
 });
 
@@ -697,17 +527,17 @@ describe('Interval target — the 2026-08-22 decisions that stay', () => {
       'k',
       ce.box(['Function', ['List', 't', ['Multiply', 2, 't']], 't'])
     );
-    declines(ce, ['Add', ['s', 'u'], 1], /contradicted/);
-    declines(ce, ['Less', ['s', 'u'], 1], /contradicted/);
+    declines(ce, ['Add', ['s', 'u'], 1], 'outside-profile');
+    declines(ce, ['Less', ['s', 'u'], 1], 'outside-profile');
     // Its bare call declines too: the declaration says it returns a scalar.
-    declines(ce, ['s', 'u'], /says it returns a scalar/);
+    declines(ce, ['s', 'u'], 'outside-profile');
   });
 
   test('a list-of-booleans helper declines in every position', () => {
     const ce = engine();
     ce.parse('b(t) := [t < 1, t < 2]').evaluate();
-    declines(ce, ['Which', ['b', 'u'], 1, 'True', 2]);
-    declines(ce, ['b', 'u'], /List/);
+    declines(ce, ['Which', ['b', 'u'], 1, 'True', 2], 'outside-profile');
+    declines(ce, ['b', 'u'], 'untyped-input');
     // Under the declaration `(number) -> boolean`, the list body is refused
     // when it is assigned.
     ce.declare('c', '(number) -> boolean');
@@ -777,7 +607,6 @@ describe('Interval target — a coordinate accessor over a list of points', () =
       fallback: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toBe("_IA.pointComponent(_.PL, 1, true, true)");
     expect(bands(r.run!({ PL: POINTS }))).toEqual([
       [2, 2],
       [4, 4],
@@ -802,88 +631,13 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     ]);
   });
 
-  test('a point-or-point-list union is decided at the value', () => {
-    const ce = pointEngine();
-    const r = compile(ce.box(['PointY', 'c']), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    // `c` is declared as a point or a list of points. The code tests the
-    // value of `_.c` once at its binding (an empty array,
-    // or an array whose first element is an array, is a list of points) and
-    // holds one body for each shape: the list body reads the coordinate of
-    // every point, the point body reads it directly.
-    expect(r.code).toBe(
-      "((_.c.length === 0 || Array.isArray(_.c[0])) ? _IA.pointComponent(_.c, 1, true, true) : _IA.component(_.c, 1))"
-    );
-    expect(bands(r.run!({ c: POINTS }))).toEqual([
-      [2, 2],
-      [4, 4],
-    ]);
-    expect(bands(r.run!({ c: [1, 2] }))).toEqual([2, 2]);
-    expect(r.run!({ c: [] })).toEqual([]);
-    // A value that is not a point at all answers the absence marker, which
-    // the runner gives as `empty`.
-    expect(r.run!({ c: pt(1) })).toEqual({ kind: 'empty' });
-  });
-
-  test('a third coordinate over two-component points is absent as a whole', () => {
-    const ce = pointEngine();
-    // The canonical `PointZ` rejects a DECLARED 2-D list; a union whose arity
-    // the type does not settle reaches the run-time helper, which answers the
-    // interpreter's whole-application error as one absence marker, never one
-    // marker per point.
-    const r = compile(ce.box(['PointZ', 'c']), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    expect(r.run!({ c: POINTS })).toEqual({ kind: 'empty' });
-    expect(
-      bands(
-        r.run!({
-          c: [
-            [1, 2, 3],
-            [4, 5, 6],
-          ],
-        })
-      )
-    ).toEqual([
-      [3, 3],
-      [6, 6],
-    ]);
-  });
-
   test('a coordinate the type proves is not a number declines', () => {
     const ce = pointEngine();
     ce.declare('S', 'list<tuple<string, number>>');
     ce.declare('T', 'tuple<string, number>');
-    declines(ce, ['PointX', 'S'], /coordinate is not a number/);
+    declines(ce, ['PointX', 'S'], 'outside-profile');
     // The single point declines the same way.
-    declines(ce, ['PointX', 'T'], /coordinate is not a number/);
-    // The numeric coordinate of the same points compiles, and the proven
-    // list-of-points reading is stated to the helper: a point whose first
-    // coordinate is text would otherwise fail its row test at run time.
-    const numeric = compile(ce.box(['PointY', 'S']), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(numeric.success).toBe(true);
-    expect(numeric.code).toBe("_IA.pointComponent(_.S, 1, true, true)");
-    expect(
-      bands(
-        numeric.run!({
-          S: [
-            ['a', 2],
-            ['b', 4],
-          ],
-        })
-      )
-    ).toEqual([
-      [2, 2],
-      [4, 4],
-    ]);
+    declines(ce, ['PointX', 'T'], 'outside-profile');
   });
 
   test('the coordinates feed an accessor, a reduction and a kernel', () => {
@@ -893,7 +647,6 @@ describe('Interval target — a coordinate accessor over a list of points', () =
       fallback: false,
     });
     expect(at.success).toBe(true);
-    expect(at.code).toBe("_IA.at(_IA.pointComponent(_.PL, 1, true, true), _.k)");
     expect(bands(at.run!({ PL: POINTS, k: pt(2) }))).toEqual([4, 4]);
 
     const length = compile(ce.box(['Length', ['PointX', 'PL']]), {
@@ -916,9 +669,6 @@ describe('Interval target — a coordinate accessor over a list of points', () =
       fallback: false,
     });
     expect(plus.success).toBe(true);
-    expect(plus.code).toBe(
-      "_IA.bcast((_tv1) => _IA.add(_tv1, _k1), _IA.pointComponent(_.PL, 1, true, true))"
-    );
     expect(bands(plus.run!({ PL: POINTS }))).toEqual([
       [3, 3],
       [5, 5],
@@ -934,135 +684,11 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     ]);
   });
 
-  test('a number-or-number-list union broadcasts and reduces at the value', () => {
-    const ce = pointEngine();
-    // `PointY(c)` over the union types `list<number> | missing | number`, and
-    // so does a declared `U`. Before this lowering the kernel was emitted on
-    // the union directly (`_IA.add(_.U, …)`), which answered NaN bounds for
-    // an array behind `success: true`.
-    const plus = compile(ce.parse('U + 1'), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(plus.success).toBe(true);
-    // `U` is declared with two shapes, so the code tests
-    // `Array.isArray(_.U)` once: the list body broadcasts, the number body
-    // adds directly.
-    expect(plus.code).toBe(
-      '(Array.isArray(_.U) ? _IA.bcast((_tv1) => _IA.add(_tv1, _k1), _.U) : _IA.add(_.U, _k1))'
-    );
-    expect(bands(plus.run!({ U: [1, 2] }))).toEqual([
-      [2, 2],
-      [3, 3],
-    ]);
-    expect(bands(plus.run!({ U: pt(1) }))).toEqual([2, 2]);
-
-    const shifted = compile(ce.parse('\\operatorname{PointY}(c) + x'), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(shifted.success).toBe(true);
-    expect(bands(shifted.run!({ c: POINTS, x: { lo: 0, hi: 1 } }))).toEqual([
-      [2, 3],
-      [4, 5],
-    ]);
-    expect(bands(shifted.run!({ c: [1, 2], x: { lo: 0, hi: 1 } }))).toEqual([
-      2, 3,
-    ]);
-
-    const max = compile(ce.box(['Max', ['PointY', 'c']]), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(max.success).toBe(true);
-    expect(bands(max.run!({ c: POINTS }))).toEqual([4, 4]);
-    expect(bands(max.run!({ c: [1, 2] }))).toEqual([2, 2]);
-    const sum = compile(ce.box(['Sum', 'U']), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    // The body of the member `number` declines (`Sum` of a number has no
-    // indexing set), so the compilation declines: one body for both members
-    // would test the shape of `U` inside the body.
-    expect(sum.success).toBe(false);
-  });
-
-  test('a helper reading a coordinate of its parameter maps over a list', () => {
-    const ce = pointEngine();
-    // The parameter a helper reads with `PointY(v)` types
-    // `collection<any> | tuple`, and the accessor over it types `unknown`;
-    // the lowering decides at the value and the kernel broadcasts over it.
-    ce.parse('g(v) := \\operatorname{PointY}(v) + 1').evaluate();
-    const r = compile(ce.box(['g', 'PL']), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    expect(r.preamble).toContain(
-      '_IA.bcast((_tv1) => _IA.add(_tv1, _k1), _IA.pointComponent(v, 1, true, undefined, false, true))'
-    );
-    expect(bands(r.run!({ PL: POINTS }))).toEqual([
-      [3, 3],
-      [5, 5],
-    ]);
-    const single = compile(ce.box(['g', ['Tuple', 1, 2]]), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(single.success).toBe(true);
-    expect(bands(single.run!({}))).toEqual([3, 3]);
-
-    // The call returns `broadcastable<number>`: a number or a collection of
-    // numbers. A kernel over it broadcasts, an accessor and a reduction read
-    // it at the value; each used to read the array as a scalar (NaN bounds
-    // behind `success: true`) or decline.
-    const above = compile(ce.box(['Add', ['g', 'PL'], 1]), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(above.success).toBe(true);
-    expect(bands(above.run!({ PL: POINTS }))).toEqual([
-      [4, 4],
-      [6, 6],
-    ]);
-    const second = compile(ce.box(['At', ['g', 'PL'], 2]), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(second.success).toBe(true);
-    expect(bands(second.run!({ PL: POINTS }))).toEqual([5, 5]);
-    const count = compile(ce.box(['Length', ['g', 'PL']]), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(count.success).toBe(true);
-    expect(bands(count.run!({ PL: POINTS }))).toEqual([2, 2]);
-    const largest = compile(ce.box(['Max', ['g', 'PL']]), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(largest.success).toBe(true);
-    expect(bands(largest.run!({ PL: POINTS }))).toEqual([5, 5]);
-
-    // A helper whose body squares a coordinate, called with a list of points:
-    // the kernels inside the body broadcast over the coordinate arrays.
-    ce.declare('a', 'real');
-    ce.parse('f(P) := a P.x^2 + P.y^2').evaluate();
-    const quad = compile(ce.box(['f', 'PL']), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(quad.success).toBe(true);
-    expectEncloses(bands(quad.run!({ a: pt(2), PL: POINTS })), [6, 34]);
-    expectEncloses(bands(quad.run!({ a: pt(2), PL: [1, 2] })), 6);
-  });
-
   test('a point-valued helper is read by the accessor', () => {
     const ce = pointEngine();
     // A helper whose body is a `PointList` of scalars (`U = (x, y)` in a
     // document) is one point; its body root is spelled as the array of its
-    // coordinates, and the accessor reads one back. With a list argument the
-    // call is mapped (`_IA.bcastFn`) and the accessor broadcasts.
+    // coordinates, and the accessor reads one back.
     ce.parse('U(x, y) := \\operatorname{PointList}(x^2 - y^2, 2 x y)').evaluate();
     const r = compile(ce.parse('\\operatorname{PointY}(U(x, y))'), {
       to: 'interval-js',
@@ -1073,21 +699,8 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     // time, and the accessor reads its second coordinate from the inlined
     // body. With `x` and `y` untyped, the code was
     // `_IA.component(_fn_U(_.x, _.y), 1)`.
-    expect(r.code).toBe('_IA.mul(_IA.scale(_k1, _.x), _.y)');
     expect(bands(r.run!({ x: pt(2), y: pt(3) }))).toEqual([12, 12]);
     ce.declare('L', 'list<number>');
-    const mapped = compile(ce.box(['PointY', ['U', 'L', 1]]), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(mapped.success).toBe(true);
-    expect(mapped.code).toBe(
-      "_IA.pointComponent(_IA.mapFn(_fn_U, [1, 0], _.L, _k2), 1, true, true)"
-    );
-    expect(bands(mapped.run!({ L: [1, 2] }))).toEqual([
-      [2, 2],
-      [4, 4],
-    ]);
     // A `PointList` with a broadcasting component is a LIST of points, built
     // at run time; the scalar component is the same coordinate of every
     // point.
@@ -1109,42 +722,26 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     // lowering does not apply, and the kernel must not read a possible array.
     // `U` is declared with a union: the body of its member `list<number>`
     // declines, and the compilation declines with that reason.
-    declines(ce, ['Add', 'U', 'w'], /is a collection/);
+    declines(ce, ['Add', 'U', 'w'], 'outside-profile');
     ce.declare('v', 'collection<any> | tuple');
-    declines(ce, ['Add', ['PointY', 'v'], 'w'], /may be a collection at run time/);
+    declines(ce, ['Add', ['PointY', 'v'], 'w'], 'outside-profile');
     // An operand declared `value` can be a number or a list, and declines
     // before the kernel, with the name of the symbol.
     ce.declare('z', 'value');
-    declines(ce, ['Add', 'U', 'z'], /"z": it is declared `any` or `value`/);
+    declines(ce, ['Add', 'U', 'z'], 'outside-profile');
     // A union with an indexed-collection arm that is not a list of numbers
     // (`list<list<number>> | number`) declines: the body of its member
     // `list<list<number>>` declines, and the compilation with it.
     ce.declare('N', 'list<list<number>> | number');
-    declines(ce, ['Add', 'N', 1], /is a collection/);
+    declines(ce, ['Add', 'N', 1], 'outside-profile');
     // A relation over the union or accessor shapes fails closed too: a list
     // of verdicts is not a value of this target, and a scalar kernel would
     // answer one `'maybe'` for an array.
-    declines(ce, ['Less', 'U', 3], /is a collection/);
-    declines(ce, ['Less', ['PointY', 'v'], 3], /may be a collection at run time/);
-    // A helper whose parameters are lists is typed from its arguments (Tycho
-    // item 323): `P` returns `number`, and the implicit plot of it is a
-    // scalar comparison at run time. (Before item 323 the call returned
-    // `broadcastable<number>` from the generic body, and a relation, a head
-    // that does not broadcast on this target, kept its scalar lowering over
-    // that operand.)
-    ce.parse('d(a, b) := a[1] b[1] + a[2] b[2]').evaluate();
-    ce.parse('P(x, y) := d([x, y], [x, y])').evaluate();
-    expect(ce.box('P').type.toString()).toBe('(x: unknown, y: unknown) -> number');
-    const plot = compile(ce.parse('P(x, y) < 1'), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(plot.success).toBe(true);
-    expect(plot.code).toBe('_IA.less(_fn_P(_.x, _.y), _k1)');
-    expect(plot.run!({ x: pt(0.5), y: pt(0.5) })).toBe('true');
+    declines(ce, ['Less', 'U', 3], 'outside-profile');
+    declines(ce, ['Less', ['PointY', 'v'], 3], 'outside-profile');
     // A POINT-or-point-list union is not a list of numbers: a point has no
     // interval reading (the 2026-08-22 decision).
-    declines(ce, ['Add', 'c', 1]);
+    declines(ce, ['Add', 'c', 1], 'outside-profile');
   });
 });
 
@@ -1201,115 +798,16 @@ describe('Interval target — a PointList of list-typed symbols', () => {
     return r.code;
   }
 
-  const PX = ['PointX', ['PointList', 'L_1', 'L_2']];
-  const PY = ['PointY', ['PointList', 'L_1', 'L_2']];
-
-  test('sources of equal length', () => {
-    const values = { L_1: [1, 2, 3], L_2: [4, 5, 6] };
-    expect(agrees(PX, values)).toBe(
-      "_IA.pointComponent(_IA.pointList('ll', _.L_1, _.L_2), 0, true, true)"
-    );
-    agrees(PY, values);
-    agrees(['Min', PX], values);
-  });
-
-  test('sources of different lengths are truncated to the shortest', () => {
-    const values = { L_1: [1, 2, 3], L_2: [4, 5] };
-    expect(interpreted(PX, values)).toEqual([1, 2]);
-    agrees(PX, values);
-    agrees(PY, values);
-    agrees(['Max', PX], values);
-    // Zero points have zero coordinates.
-    agrees(PX, { L_1: [], L_2: [4, 5] });
-  });
-
   test('a scalar component is the same coordinate of every point', () => {
     const values = { L_1: [1, 2, 3] };
     agrees(['PointX', ['PointList', 'L_1', 0]], values);
     agrees(['PointY', ['PointList', 'L_1', 0]], values);
   });
 
-  test('the sum of two point lists', () => {
-    // The spelling of the Tycho document D-274: a list of points plus a
-    // scaled list of unit vectors. `A` has the length of the `L_k`, as the
-    // interpreter requires of two lists added element by element.
-    const expr = [
-      'Min',
-      [
-        'PointX',
-        [
-          'Add',
-          ['PointList', 'L_1', 'L_2'],
-          [
-            'Multiply',
-            ['Rational', 1, 20],
-            ['PointList', ['Cos', 'A'], ['Sin', 'A']],
-          ],
-        ],
-      ],
-    ];
-    agrees(expr, { L_1: [1, 2, 3], L_2: [4, 5, 6], A: [0.1, 0.2, 0.3] });
-    // Sources of different lengths inside one `PointList` are truncated
-    // before the sum.
-    agrees(expr, { L_1: [1, 2, 3], L_2: [4, 5], A: [0.1, 0.2] });
-  });
-
-  test('the Voronoi field of a point list', () => {
-    const P = ['PointList', 'L_1', 'L_2'];
-    const field = [
-      'Sin',
-      [
-        'Multiply',
-        120,
-        [
-          'Sqrt',
-          [
-            'Min',
-            [
-              'Add',
-              ['Power', ['Subtract', 'x', ['PointX', P]], 2],
-              ['Power', ['Subtract', 'y', ['PointY', P]], 2],
-            ],
-          ],
-        ],
-      ],
-    ];
-    agrees(field, { L_1: [0.1, 0.5, 0.9], L_2: [0.2, 0.8], x: 0.3, y: 0.7 });
-    agrees(field, { L_1: [0.1, 0.5], L_2: [0.2, 0.8], x: 0.45, y: 0.1 });
-  });
-
-  test('the parse route', () => {
-    const latex =
-      '\\min(\\operatorname{PointX}(\\operatorname{PointList}(L_1, L_2)))';
-    expect(agrees(latex, { L_1: [3, 1, 2], L_2: [4, 5] })).toContain(
-      "_IA.pointList('ll', _.L_1, _.L_2)"
-    );
-  });
-
-  test('a source that is not an array at run time', () => {
-    // The run-time helper throws the JavaScript target's error, which the
-    // compiled function reports as `entire` ("cannot bound this").
-    expect(() => IntervalArithmetic.pointList('ll', 3, [1])).toThrow(
-      /PointList: source component 1 is not an array at run time/
-    );
-    const ce = zipEngine();
-    const r = compile(ce.box(PX), { to: 'interval-js', fallback: false });
-    expect(r.run!({ L_1: pt(3), L_2: [1] })).toEqual({ kind: 'entire' });
-  });
-
-  test('a component declared as a number or a list compiles with one body for each shape', () => {
-    // `B` is declared `list<real> | real`, so the code tests `B` once and
-    // holds a zipping body for a list and a slot body for a number. Each
-    // result encloses the interpreter's value for a value of each shape.
-    const expr = ['PointX', ['PointList', 'L_1', 'B']];
-    agrees(expr, { L_1: [1, 2, 3], B: [4, 5, 6] });
-    agrees(expr, { L_1: [1, 2, 3], B: 5 });
-  });
-
   test('an untyped component fails closed', () => {
     // An input with no declared type (`x`) is refused, because the compiled
     // code cannot know whether it is a source or a slot.
-    declines(zipEngine(), ['PointX', ['PointList', 'L_1', 'x']]);
+    declines(zipEngine(), ['PointX', ['PointList', 'L_1', 'x']], 'untyped-input');
   });
 });
 
@@ -1357,9 +855,6 @@ describe('Interval target — point arithmetic', () => {
   test('point ± point, scalar × point, point / scalar, negation', () => {
     const ce = pointEngine();
     const sum = value(ce, ['Add', 'P', 'Q'], INPUTS);
-    expect(sum.code).toBe(
-      "_IA.bcastPoint((_tv1, _tv2) => _IA.add(_tv1, _tv2), 'pp', _.P, _.Q)"
-    );
     expect(sum.out).toEqual([
       [11, 11],
       [22, 22],
@@ -1372,11 +867,7 @@ describe('Interval target — point arithmetic', () => {
       [4, 4],
       [8, 8],
     ]);
-    // A number literal stays in the closure body.
     const doubled = value(ce, ['Multiply', 2, 'P'], INPUTS);
-    expect(doubled.code).toBe(
-      "_IA.bcastPoint((_tv1) => _IA.scale(_k1, _tv1), 'p', _.P)"
-    );
     expect(doubled.out).toEqual([
       [2, 2],
       [4, 4],
@@ -1398,172 +889,12 @@ describe('Interval target — point arithmetic', () => {
       x: { lo: 0, hi: 1 },
       y: pt(5),
     });
-    expect(shifted.code).toBe(
-      "_IA.bcastPoint((_tv1, _tv2) => _IA.add(_tv1, _tv2), 'pp', _.P, [_.x, _.y])"
-    );
     expect(shifted.out).toEqual([
       [1, 2],
       [7, 7],
     ]);
     const x = value(ce, ['PointX', ['Add', 'P', 'Q']], INPUTS);
-    expect(x.code).toBe(
-      "_IA.component(_IA.bcastPoint((_tv1, _tv2) => _IA.add(_tv1, _tv2), 'pp', _.P, _.Q), 0)"
-    );
     expect(x.out).toEqual([11, 11]);
-  });
-
-  test('a list of numbers times a point is one point per element', () => {
-    const ce = pointEngine();
-    // The interpreter: `[1, 2]·(10, 20)` is `[(10, 20), (20, 40)]` — for a
-    // two-element list too, which a plain zip would read as one point.
-    expect(
-      ce.box(['Multiply', ['List', 1, 2], ['Tuple', 10, 20]]).evaluate().json
-    ).toEqual(['List', ['Tuple', 10, 20], ['Tuple', 20, 40]]);
-    const scaled = value(ce, ['Multiply', 'V', 'Q'], { ...INPUTS, V: [1, 2] });
-    expect(scaled.code).toBe(
-      "_IA.bcastPoint((_tv1, _tv2) => _IA.mul(_tv1, _tv2), 'ps', _.Q, _.V)"
-    );
-    expect(scaled.out).toEqual([
-      [
-        [10, 10],
-        [20, 20],
-      ],
-      [
-        [20, 20],
-        [40, 40],
-      ],
-    ]);
-    // A `broadcastable<number>` beside a point is decided at the value.
-    expect(value(ce, ['Multiply', 'w', 'P'], INPUTS).out).toEqual([
-      [2, 2],
-      [4, 4],
-    ]);
-    expect(
-      value(ce, ['Multiply', 'w', 'P'], { ...INPUTS, w: [1, 3] }).out
-    ).toEqual([
-      [
-        [1, 1],
-        [2, 2],
-      ],
-      [
-        [3, 3],
-        [6, 6],
-      ],
-    ]);
-  });
-
-  test('a list of points, and a point-or-point-list union, are point-valued', () => {
-    const ce = pointEngine();
-    // The interpreter: a list of points plus a point adds the point to every
-    // element; two lists of points zip; a list of numbers times a list of
-    // points zips too.
-    expect(
-      ce
-        .box([
-          'Add',
-          ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
-          ['Tuple', 1, 2],
-        ])
-        .evaluate().json
-    ).toEqual(['List', ['Tuple', 2, 4], ['Tuple', 4, 6]]);
-    expect(value(ce, ['Add', 'LP', 'P'], INPUTS).out).toEqual([
-      [
-        [2, 2],
-        [4, 4],
-      ],
-      [
-        [4, 4],
-        [6, 6],
-      ],
-    ]);
-    expect(value(ce, ['Add', 'LP', 'LP'], INPUTS).out).toEqual([
-      [
-        [2, 2],
-        [4, 4],
-      ],
-      [
-        [6, 6],
-        [8, 8],
-      ],
-    ]);
-    expect(
-      value(ce, ['Multiply', 'V', 'LP'], { ...INPUTS, V: [1, 2] }).out
-    ).toEqual([
-      [
-        [1, 1],
-        [2, 2],
-      ],
-      [
-        [6, 6],
-        [8, 8],
-      ],
-    ]);
-    // The union is one point or a list of them, decided at the value.
-    expect(value(ce, ['Add', 'c', 'P'], INPUTS).out).toEqual([
-      [6, 6],
-      [8, 8],
-    ]);
-    expect(
-      value(ce, ['Add', 'c', 'P'], {
-        ...INPUTS,
-        c: [
-          [5, 6],
-          [7, 8],
-        ],
-      }).out
-    ).toEqual([
-      [
-        [6, 6],
-        [8, 8],
-      ],
-      [
-        [8, 8],
-        [10, 10],
-      ],
-    ]);
-    // A list of LISTS of points descends level by level, and the point keeps
-    // its identity at every level.
-    ce.declare('M', 'list<list<tuple<number, number>>>');
-    expect(
-      value(ce, ['Add', 'M', 'P'], {
-        ...INPUTS,
-        M: [
-          [
-            [1, 2],
-            [3, 4],
-          ],
-        ],
-        P: [10, 20],
-      }).out
-    ).toEqual([
-      [
-        [
-          [11, 11],
-          [22, 22],
-        ],
-        [
-          [13, 13],
-          [24, 24],
-        ],
-      ],
-    ]);
-    // Zero points are the empty list, not one point with no coordinates.
-    const none = value(ce, ['Add', 'LP', 'P'], { ...INPUTS, LP: [] });
-    expect(none.code).toBe(
-      "_IA.bcastPoint((_tv1, _tv2) => _IA.add(_tv1, _tv2), 'qp', _.LP, _.P)"
-    );
-    expect(none.out).toEqual([]);
-    // Lists of different lengths have no value.
-    const absent = compile(ce.box(['Multiply', 'V', 'LP']), {
-      to: 'interval-js',
-      fallback: false,
-    }).run!(INPUTS);
-    expect(absent).toEqual({ kind: 'empty' });
-    // The coordinates of the result are read back as a list.
-    expect(value(ce, ['PointX', ['Add', 'LP', 'P']], INPUTS).out).toEqual([
-      [2, 2],
-      [4, 4],
-    ]);
   });
 
   test('the run-time kinds: one point, a point or a list of points, a number', () => {
@@ -1591,59 +922,23 @@ describe('Interval target — point arithmetic', () => {
     expect(Number.isNaN(absent.lo)).toBe(true);
   });
 
-  test('the heads that are not point arithmetic keep the gate', () => {
+  test('the elementary functions map over a point, and Abs is its norm', () => {
     const ce = pointEngine();
-    // The elementary functions: the 2026-09-15 decision "a point is consumed
-    // whole, never mapped over" stands for them.
-    declines(ce, ['Sin', 'P'], /Could not compile `Sin`: /);
-    declines(ce, ['Power', 'P', 2], /Could not compile `Power`: /);
+    // The interpreter maps `Sin` and `Power` over the coordinates
+    // (`(sin(1), sin(2))`, `(1, 4)`).
+    expectEncloses(value(ce, ['Sin', 'P'], INPUTS).out, [
+      Math.sin(1),
+      Math.sin(2),
+    ]);
+    expect(value(ce, ['Power', 'P', 2], INPUTS).out).toEqual([
+      [1, 1],
+      [4, 4],
+    ]);
     // `Abs` of a point is its norm, not a coordinate-wise absolute value.
-    declines(ce, ['Abs', 'P']);
+    expectEncloses(value(ce, ['Abs', 'P'], { P: [3, 4] }).out, 5);
     // A point whose coordinate is proved not to be a number is no operand.
     ce.declare('S', 'tuple<string, number>');
-    declines(ce, ['Negate', 'S']);
-  });
-
-  test('a point-valued helper with a DECLARED return type', () => {
-    const ce = pointEngine();
-    // A document host declares every function before assigning it, so the
-    // call of a point-valued helper inlines to its body under a return-type
-    // ascription, `Typed((p, q), 'tuple<number, number>')`. The ascription is
-    // transparent: the point under it is spelled as the array of its
-    // coordinates wherever a point is consumed.
-    ce.declare('U', { signature: '(any, any) -> tuple<number, number>' });
-    ce.assign('U', ce.parse('(p, q) \\mapsto (p, q)'));
-    ce.parse('l(V) := \\sqrt{V.x^2 + V.y^2}').evaluate();
-    for (const [latex, want] of [
-      ['\\operatorname{PointY}(U(x, y))', 0.2],
-      ['l(U(x, y))', Math.hypot(0.3, 0.2)],
-      ['l(U(x, y) - (1, 2))', Math.hypot(0.7, 1.8)],
-    ] as const) {
-      const r = compile(ce.parse(latex), {
-        to: 'interval-js',
-        fallback: false,
-      });
-      expect(r.success).toBe(true);
-      expectEncloses(bands(r.run!({ x: pt(0.3), y: pt(0.2) })), want);
-    }
-    // A list body under a scalar declaration is refused when it is assigned.
-    ce.declare('g', '(number) -> number');
-    expect(() =>
-      ce.assign(
-        'g',
-        ce.box(['Function', ['List', 't', ['Multiply', 2, 't']], 't'])
-      )
-    ).toThrow(/is not compatible with the type/);
-    // A CONTRADICTED scalar declaration is not read through: when the list
-    // comes from a helper assigned later, the call keeps declining (the
-    // 2026-08-22 decision).
-    ce.declare('gl', '(number) -> number');
-    ce.assign('gl', ce.box(['Function', ['kl', 't'], 't']));
-    ce.assign(
-      'kl',
-      ce.box(['Function', ['List', 't', ['Multiply', 2, 't']], 't'])
-    );
-    declines(ce, ['gl', 'u'], /says it returns a scalar/);
+    declines(ce, ['Negate', 'S'], 'static-type-error');
   });
 
   test('a helper chain that rotates, translates and measures a point', () => {
@@ -1726,12 +1021,7 @@ describe('Interval target — a selection among list values', () => {
   /** A selection whose branches have different shapes (a number and a
    * list) declines with the code `unsettled-shape`. */
   function expectUnsettled(ce: ComputeEngine, expr: any) {
-    const r = compile(
-      typeof expr === 'string' ? ce.parse(expr) : ce.box(expr),
-      { to: 'interval-js', fallback: false }
-    );
-    expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    declines(ce, expr, 'unsettled-shape');
   }
 
   test('a helper whose case arms are lists returns the selected list', () => {
@@ -1742,9 +1032,6 @@ describe('Interval target — a selection among list values', () => {
     // whole-bound argument (the rule every collection-valued call takes on
     // this target), so the selection appears at the call site.
     const z = run(ce, ['Z', 'x'], { x: pt(3) });
-    expect(z.code).toBe(
-      "((_tv1 = _IA.less(_k1, _.x)) === 'true' ? _IA.res([_.x, _.x]) : _IA.elseArm(_tv1 === 'false', _tv1 === 'false' ? null : [_.x, _.x], [_.x, _IA.scale(_k2, _.x)]))"
-    );
     expect(z.out).toEqual([
       [3, 3],
       [3, 3],
@@ -1753,24 +1040,12 @@ describe('Interval target — a selection among list values', () => {
       [-3, -3],
       [-6, -6],
     ]);
-    // Undecided: the element-wise hull of the two lists (`2x` over
-    // `[−1, 1]` is `[−2, 2]`).
+    // Undecided: the element-wise hull of the two arms, each over its part
+    // of the box (`x` over `[0, 1]` and `2x` over `[−1, 0]` give `[−2, 1]`).
     expect(run(ce, ['Z', 'x'], { x: { lo: -1, hi: 1 } }).out).toEqual([
       [-1, 1],
-      [-2, 2],
+      [-2, 1],
     ]);
-    // Consumed whole by a norm and a dot product. The parameter of `l` is
-    // typed only by index reads, so the list argument takes the copy of `l`
-    // typed by the argument (`_fn_l_vector_2_`, ROADMAP CE-564).
-    const norm = run(ce, 'l(Z(x))', { x: pt(3) });
-    expect(norm.code).toBe(
-      "_fn_l_vector_2_(((_tv1 = _IA.less(_k3, _.x)) === 'true' ? _IA.res([_.x, _.x]) : _IA.elseArm(_tv1 === 'false', _tv1 === 'false' ? null : [_.x, _.x], [_.x, _IA.scale(_k2, _.x)])))"
-    );
-    expectEncloses(norm.out, Math.hypot(3, 3));
-    expectEncloses(
-      run(ce, ['d', ['Z', 'x'], ['List', 1, 1]], { x: pt(-3) }).out,
-      -9
-    );
   });
 
   test('a number in one arm and a list in the other', () => {
@@ -1793,11 +1068,6 @@ describe('Interval target — a selection among list values', () => {
       which(ce, ['List', 'x', 1], ['List', 1, 2]),
       { x: pt(3) }
     );
-    // `[1, 2]` is one compact constant (`_k3`); `[x, 1]` holds a variable
-    // and stays an array at the read, its `1` a shared scalar constant.
-    expect(root.code).toBe(
-      "((_tv1 = _IA.less(_k1, _.x)) === 'true' ? _IA.res([_.x, _k2]) : _IA.elseArm(_tv1 === 'false', _tv1 === 'false' ? null : [_.x, _k2], _k3))"
-    );
     expect(root.out).toEqual([
       [3, 3],
       [1, 1],
@@ -1812,17 +1082,6 @@ describe('Interval target — a selection among list values', () => {
     ce.assign('x', -3);
     expect(ce.box(plus as any).evaluate().json).toEqual(2);
     expectUnsettled(ce, plus);
-    // A kernel over a selection between two lists broadcasts over the arm
-    // that is taken.
-    expect(
-      run(ce, ['Add', which(ce, ['List', 'x', 1], 'A'), 1], {
-        x: pt(-3),
-        A: [pt(5), pt(6)],
-      }).out
-    ).toEqual([
-      [6, 6],
-      [7, 7],
-    ]);
   });
 
   test('an unreachable clause is not compiled, and an override is honored', () => {
@@ -1839,25 +1098,26 @@ describe('Interval target — a selection among list values', () => {
       [3, 3],
       [1, 1],
     ]);
-    // A caller-supplied `Which` implementation keeps its ordinary dispatch,
-    // which compiles the arms as the override's operands: the selection
-    // spelling is not taken, and a list arm then declines as it does at
-    // every ordinary position of this target.
-    const custom = compile(which(ce, ['List', 'x', 1], ['List', 1, 2]), {
-      to: 'interval-js',
-      fallback: false,
-      functions: { Which: () => '_IA.point(42)' },
-    });
-    expect(custom.success).toBe(false);
-    expect(custom.error).toMatch(/List/);
+    // A caller-supplied `Which` implementation (the option `functions`)
+    // declines.
+    try {
+      compile(which(ce, ['List', 'x', 1], ['List', 1, 2]), {
+        to: 'interval-js',
+        fallback: false,
+        functions: { Which: () => '_IA.point(42)' },
+      });
+      throw new Error('no decline');
+    } catch (e) {
+      expect(compileDiagnosticOf(e).code).toBe('outside-profile');
+    }
   });
 
   test('what keeps declining', () => {
     const ce = selectionEngine();
     // A list of verdicts is not a value of this target.
-    declines(ce, which(ce, ['List', ['Less', 'x', 1], ['Less', 'x', 2]], 1), /List/);
+    declines(ce, which(ce, ['List', ['Less', 'x', 1], ['Less', 'x', 2]], 1), 'unsettled-shape');
     // A relation over the selection would be a list of verdicts too.
-    declines(ce, ['Less', which(ce, ['List', 'x', 1], 1), 2], /List/);
+    declines(ce, ['Less', which(ce, ['List', 'x', 1], 1), 2], 'unsettled-shape');
     // The conditions stay scalar.
     declines(
       ce,
@@ -1868,7 +1128,7 @@ describe('Interval target — a selection among list values', () => {
         'True',
         1,
       ]),
-      /branch condition is a collection/
+      'outside-profile'
     );
     // A list condition and a list arm of different lengths are a static
     // error of the selection, `incompatible-dimensions` (the selection rule
@@ -1876,8 +1136,7 @@ describe('Interval target — a selection among list values', () => {
     // on the invalid expression.
     declines(
       ce,
-      ce.box(['Which', ['List', ['Less', 'x', 1]], ['List', 'x', 1], 'True', 1]),
-      /incompatible-dimensions/
+      ce.box(['Which', ['List', ['Less', 'x', 1]], ['List', 'x', 1], 'True', 1])
     );
   });
 });

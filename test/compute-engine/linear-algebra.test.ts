@@ -5,6 +5,7 @@ import { isTensor } from '../../src/compute-engine/boxed-expression/type-guards'
 import { packTensor } from '../../src/compute-engine/boxed-expression/tensor-view';
 import { makeTensor } from '../../src/compute-engine/tensor/tensors';
 import { getSupertype } from '../../src/compute-engine/tensor/tensor-fields';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 import { isSubtype } from '../../src/common/type/subtype';
 
 const v2_n: Expression = ['List', 7, 11];
@@ -5050,8 +5051,21 @@ describe('Norm — the string order "Infinity" compiles as the symbol order', ()
         expect(message(to, { str: 'Infinity' })).toMatch(pattern);
         continue;
       }
-      expect(symbol).toMatch(/only the default L2 norm compiles/);
-      expect(message(to, { str: 'Infinity' })).toBe(symbol);
+      // On interval-js both spellings decline with the same code, at the
+      // `Norm`.
+      for (const order of ['PositiveInfinity', { str: 'Infinity' }]) {
+        let diagnostic: { code: string; operator?: string } | undefined;
+        try {
+          compile(eng.box(['Norm', ['Tuple', 'x', 'y'], order]), {
+            to,
+            fallback: false,
+          });
+        } catch (err) {
+          diagnostic = compileDiagnosticOf(err);
+        }
+        expect(diagnostic?.code).toBe('outside-profile');
+        expect(diagnostic?.operator).toBe('Norm');
+      }
     }
   });
 });

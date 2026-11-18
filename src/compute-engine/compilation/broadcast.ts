@@ -1348,8 +1348,8 @@ export function encodeIntervalResult(
 
 /**
  * Evaluate a compiled `interval-js` body over a batch. `call` runs the body
- * on a vars object of `{ lo, hi }` enclosures (the raw call of
- * `ComputeEngineIntervalFunction`); the loop reuses one enclosure object per
+ * on a vars object of `{ lo, hi }` enclosures (the raw call of the compiled
+ * code, `interval-runtime.ts`); the loop reuses one enclosure object per
  * variable and copies each answer out before the next cell overwrites it.
  * `lists` gives the shared lists of the batch and their conversion.
  */

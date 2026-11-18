@@ -4,7 +4,22 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
+import type { CompileDiagnostic } from '../../src/compute-engine/compilation/types';
+
+/** `compile()` to `interval-js`, called as a target's `compile()` is. */
+const intervalCompile = (expr: any, options: Record<string, unknown> = {}) =>
+  compile(expr, { ...options, to: 'interval-js' } as any) as any;
+
+/** The diagnostic of the decline that `f` throws. */
+function declineOf(f: () => unknown): CompileDiagnostic {
+  try {
+    f();
+  } catch (e) {
+    return compileDiagnosticOf(e);
+  }
+  throw new Error('the compilation did not decline');
+}
 
 describe('COMPILE', () => {
   describe('Expressions', () => {
@@ -622,7 +637,6 @@ describe('COMPILE', () => {
         'List',
         'Conjugate',
       ]),
-      'interval-javascript': new Set(['If']),
     };
 
     const targets: Array<
@@ -630,7 +644,6 @@ describe('COMPILE', () => {
     > = [
       ['javascript', new JavaScriptTarget()],
       ['glsl', new GLSLTarget()],
-      ['interval-javascript', new IntervalJavaScriptTarget()],
     ];
 
     for (const [name, target] of targets) {
@@ -748,7 +761,6 @@ describe('COMPILE', () => {
     > = [
       ['javascript', new JavaScriptTarget()],
       ['glsl', new GLSLTarget()],
-      ['interval-javascript', new IntervalJavaScriptTarget()],
     ];
 
     for (const [name, target] of targets) {
@@ -768,7 +780,6 @@ describe('COMPILE', () => {
         const expectedMissing: Record<string, string[]> = {
           'javascript': [],
           'glsl': [],
-          'interval-javascript': [],
         };
 
         expect(missing.sort()).toEqual((expectedMissing[name] ?? []).sort());
@@ -2180,29 +2191,19 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     });
   });
 
-  // The interval-js target reports an operator with no interval kernel as a
-  // non-throwing `success: false` (from `compileToIntervalTarget`), so the
-  // `compile()` wrapper's throwing `catch` never saw it — `fallback: true`
-  // returned a bare failure with no `run`. And when a fallback WAS built, its
-  // interpreter-backed `run` returned plain numbers, breaking the interval
-  // contract (`.lo`/`.hi` were `undefined`).
-  describe('interval-js target.compile() fallback contract', () => {
+  // A decline on interval-js with `fallback: true` gives `success: false`
+  // with an error and an interpreter-backed `run` that answers interval
+  // results.
+  describe('interval-js fallback contract', () => {
     // GammaRegularized has no `_IA` kernel; the argument is fully numeric so
-    // the interpreter can still evaluate it. Q(1, 0.5) = e^{-0.5}.
-    const expected = Math.exp(-0.5);
-
-    it('without fallback returns a bare success:false (no run)', () => {
-      const iv = new IntervalJavaScriptTarget();
-      const r = iv.compile(ce.box(['GammaRegularized', 1, 0.5]));
-      expect(r.success).toBe(false);
-      expect(r.run).toBeUndefined();
-    });
+    // the interpreter can still evaluate it. Q(1, 0.5) = e^{-0.5}, which no
+    // double is: the fallback answers `entire`. `Fibonacci` has no kernel
+    // either, and its value at an integer is exactly a double: a point.
 
     it('with fallback:true returns success:false WITH an error and interval-shaped run', () => {
-      const iv = new IntervalJavaScriptTarget();
-      let r: ReturnType<IntervalJavaScriptTarget['compile']> | undefined;
+      let r: any;
       expect(() => {
-        r = iv.compile(ce.box(['GammaRegularized', 1, 0.5]), {
+        r = intervalCompile(ce.box(['GammaRegularized', 1, 0.5]), {
           fallback: true,
         });
       }).not.toThrow();
@@ -2211,30 +2212,19 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
       expect(r!.error!.length).toBeGreaterThan(0);
       expect(typeof r!.run).toBe('function');
 
-      // A present number is the interval result of a point, as a computed
-      // number of the compiled code is.
-      const out = r!.run!() as {
-        kind: string;
-        value: { lo: number; hi: number };
-      };
-      expect(out.kind).toBe('interval');
-      expect(out.value.lo).toBeCloseTo(expected, 10);
-      expect(out.value.hi).toBeCloseTo(expected, 10);
+      // No double is e^{-0.5}, so no point holds the value.
+      expect(r!.run!()).toEqual({ kind: 'entire' });
     });
 
     it('the fallback run honors interval-shaped inputs (collapses to midpoint)', () => {
-      const iv = new IntervalJavaScriptTarget();
-      const r = iv.compile(ce.box(['GammaRegularized', 1, 'x']), {
+      const r = intervalCompile(ce.box(['Fibonacci', 'x']), {
         fallback: true,
       });
       expect(r.success).toBe(false);
       // A point interval and a bare number produce the same degenerate result.
-      type Result = { value: { lo: number; hi: number } };
-      const viaInterval = r.run!({ x: { lo: 0.5, hi: 0.5 } }) as Result;
-      const viaNumber = r.run!({ x: 0.5 }) as Result;
-      expect(viaInterval.value.lo).toBeCloseTo(expected, 10);
-      expect(viaInterval.value.hi).toBeCloseTo(expected, 10);
-      expect(viaNumber.value.lo).toBeCloseTo(expected, 10);
+      const point = { kind: 'interval', value: { lo: 55, hi: 55 } };
+      expect(r.run!({ x: { lo: 10, hi: 10 } })).toEqual(point);
+      expect(r.run!({ x: 10 })).toEqual(point);
     });
   });
 
@@ -3666,8 +3656,7 @@ describe('COMPILE user-defined function calls', () => {
   it('compiles a user function on the interval-js target', () => {
     const e = new ComputeEngine();
     e.parse('f(x) \\coloneq e^{-x^2/2}').evaluate();
-    const iv = new IntervalJavaScriptTarget();
-    const r = iv.compile(e.box(['f', 2])) as unknown as {
+    const r = intervalCompile(e.box(['f', 2])) as unknown as {
       success: boolean;
       run: (x: number) => { value: { lo: number; hi: number } };
     };
@@ -5933,11 +5922,10 @@ describe('COMPILE Apply maps a tuple at a parameter declared as a scalar (a numb
         const js = new JavaScriptTarget().compile(expr).run!(
           TUPLE_VALUES as never
         );
-        const interval = new IntervalJavaScriptTarget().compile(expr);
+        const interval = intervalCompile(expr);
         // The length of `P` is not known at compile time, which the interval
         // and shader targets require.
         if (arg !== 'P') {
-          expect(interval.success).toBe(true);
           // The GLSL fragment refuses `Apply` of a function literal.
           expect(() => new GLSLTarget().compile(expr)).toThrow(
             /`Apply` is in the GLSL fragment only as the application of a derivative/
@@ -6138,9 +6126,8 @@ describe('COMPILE a call of a named function maps a tuple at a parameter declare
         const js = new JavaScriptTarget().compile(expr).run!(
           TUPLE_VALUES as never
         );
-        const interval = new IntervalJavaScriptTarget().compile(expr);
+        const interval = intervalCompile(expr);
         if (arg !== 'P') {
-          expect(interval.success).toBe(true);
           for (const target of [new GLSLTarget()])
             // The GLSL fragment refuses a point at a parameter declared
             // `real`, by the signature of `k` or by the literal.
@@ -6188,9 +6175,6 @@ describe('COMPILE the tuple-call rewrites keep the meaning of evaluate()', () =>
       ['h', ['Tuple', 5, 6]],
     ]);
     expect(expr.evaluate().json).toBe(15);
-    const interval = new IntervalJavaScriptTarget().compile(expr);
-    expect(interval.success).toBe(true);
-    expect(intervalMidpoints(interval.run!({} as never))).toBe(15);
     expect(new JavaScriptTarget().compile(expr).run!({} as never)).toBe(15);
   });
 
@@ -6405,7 +6389,7 @@ describe('COMPILE a `Return` as the last statement of a block', () => {
     ],
   ] as [string, MathJsonExpression, number][])('%s', (_, json, want) => {
     const ce = engine();
-    for (const to of ['javascript', 'interval-js'] as const) {
+    for (const to of ['javascript'] as const) {
       const r = compile(ce.box(json), { to, fallback: false });
       expect(r.success).toBe(true);
       const value = r.run!({ x: 3 } as never);
@@ -6470,11 +6454,6 @@ describe('COMPILE a `Return` in a tail position gives its value, on every statem
   const interpreted = (body: MathJsonExpression, y: number): unknown =>
     new ComputeEngine().box(['Apply', ['Function', body, 'y'], y]).evaluate()
       .json;
-  const midpoint = (v: unknown): number => {
-    const x = v as { lo?: number; hi?: number; value?: unknown };
-    if (x.value !== undefined) return midpoint(x.value);
-    return ((x.lo ?? NaN) + (x.hi ?? NaN)) / 2;
-  };
 
   test.each([...BODIES, ['an early return', EARLY]] as [
     string,
@@ -6489,28 +6468,15 @@ describe('COMPILE a `Return` in a tail position gives its value, on every statem
       expect(r.run!({ y } as never)).toBe(interpreted(body, y));
   });
 
-  test.each(BODIES)('interval-js: %s', (_, body) => {
-    const r = compile(engine().box(body), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    for (const y of SAMPLES)
-      expect(midpoint(r.run!({ y } as never))).toBe(interpreted(body, y));
-  });
-
   // The interval target has no correct statement form for a conditional
   // (the condition of a statement `if` reads an interval as a boolean), so
   // an early return declines there, with the reason.
   test('interval-js declines an early return in a branch', () => {
-    const r = compile(engine().box(EARLY), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(
-      /Could not compile `If`: a branch returns early \(`Return`\) from a statement that is not the last one of the block/
+    const diagnostic = declineOf(() =>
+      compile(engine().box(EARLY), { to: 'interval-js', fallback: false })
     );
+    expect(diagnostic.code).toBe('outside-profile');
+    expect(diagnostic.operator).toBe('Return');
   });
 
   // A `Return` in an operand of an expression is not in a tail position.
@@ -6527,12 +6493,11 @@ describe('COMPILE a `Return` in a tail position gives its value, on every statem
     expect(() =>
       compile(engine().box(operand), { to: 'javascript', fallback: false })
     ).toThrow(reason);
-    const interval = compile(engine().box(operand), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(interval.success).toBe(false);
-    expect(interval.error).toMatch(reason);
+    const interval = declineOf(() =>
+      compile(engine().box(operand), { to: 'interval-js', fallback: false })
+    );
+    expect(interval.code).toBe('outside-profile');
+    expect(interval.operator).toBe('Return');
   });
 });
 
@@ -6553,11 +6518,6 @@ describe('COMPILE a call of a block local or a parameter with a library name', (
     const ce = new ComputeEngine();
     ce.assign('x', 3);
     return ce.box(json).evaluate().json;
-  };
-  const midpoint = (v: unknown): number => {
-    const x = v as { lo?: number; hi?: number; value?: unknown };
-    if (x.value !== undefined) return midpoint(x.value);
-    return ((x.lo ?? NaN) + (x.hi ?? NaN)) / 2;
   };
 
   describe.each(['Ln', 'Sin', 'Sqrt'])('%s', (name) => {
@@ -6590,12 +6550,6 @@ describe('COMPILE a call of a block local or a parameter with a library name', (
           fallback: false,
         });
         expect(js.run!({ x: 3 } as never)).toBe(4);
-        const interval = compile(engine().box(json), {
-          to: 'interval-js',
-          fallback: false,
-        });
-        expect(interval.success).toBe(true);
-        expect(midpoint(interval.run!({ x: 3 } as never))).toBe(4);
       }
       // The GPU targets have no function values.
       expect(() =>
@@ -6619,12 +6573,12 @@ describe('COMPILE a call of a block local or a parameter with a library name', (
             ? /`Apply` is in the GLSL fragment only as the application of a derivative/
             : reason
         );
-      const interval = compile(engine().box(param), {
-        to: 'interval-js',
-        fallback: false,
-      });
-      expect(interval.success).toBe(false);
-      expect(interval.error).toMatch(reason);
+      // The interval mode declines the function value of the argument.
+      const interval = declineOf(() =>
+        compile(engine().box(param), { to: 'interval-js', fallback: false })
+      );
+      expect(interval.code).toBe('outside-profile');
+      expect(interval.operator).toBe('Function');
     });
 
     // With no `Declare`, the block writes the global binding, and the

@@ -12,11 +12,17 @@ const UNSAFE = '\\sum_{k=9007199254740992}^{9007199254740994} \\sin(x+k)';
 
 const ALL_TARGETS = ['javascript', 'glsl', 'interval-js'] as const;
 
-/** Compile with no fallback. Answer `success`, and the reason on a decline. */
+/** Compile with no fallback. Answer `success`, and the reason and the code
+ *  on a decline. */
 function tryCompile(
   latex: string,
   to: string
-): { success: boolean; reason: string; run?: (v: object) => unknown } {
+): {
+  success: boolean;
+  reason: string;
+  code?: string;
+  run?: (v: object) => unknown;
+} {
   try {
     const result = compile(ce.parse(latex), { to, fallback: false } as any);
     return {
@@ -25,13 +31,23 @@ function tryCompile(
       run: (result as any).run,
     };
   } catch (e) {
-    return { success: false, reason: (e as Error).message };
+    return {
+      success: false,
+      reason: (e as Error).message,
+      code: (e as { diagnostic?: { code?: string } }).diagnostic?.code,
+    };
   }
 }
 
 function expectOutOfRange(latex: string, to: string): void {
   const result = tryCompile(latex, to);
   expect(result.success).toBe(false);
+  // The interval mode of the IR pipeline declines such a bound with the
+  // generic code of its profile.
+  if (to === 'interval-js') {
+    expect(result.code).toBe('outside-profile');
+    return;
+  }
   // The GLSL fragment refuses a bound outside the loop counter before any
   // code is written, with its own message.
   expect(result.reason).toMatch(

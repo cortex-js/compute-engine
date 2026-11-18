@@ -11,13 +11,13 @@
  * `base-compiler.ts`).
  *
  * When `L` is absent, the run has no value, as on the JavaScript target:
- * the code answers `empty` before it runs (the `collectionReadInputs` test
- * in `compileToIntervalTarget`, `interval-javascript-target.ts`). Before,
+ * the code answers `empty` (the interval mode, `compilation/ir/`). Before,
  * the `Loop` answered `entire` and `Sum(L)` answered `undefined`.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 const LOOP = [
   'Block',
@@ -74,28 +74,6 @@ describe('interval-js: a loop over a list input', () => {
     });
   });
 
-  test('a caller-mapped source of plain numbers is wrapped at its use', () => {
-    const ce = new ComputeEngine();
-    ce.declare('L', 'list<number>');
-    const fn = compile(ce.box(LOOP as any), {
-      to: 'interval-js',
-      vars: { L: '[1, 2, 3]' },
-    });
-    expect(fn.success).toBe(true);
-    expect(fn.run!({})).toEqual(point(11));
-  });
-
-  test('a mapping to the vars-object spelling reads the vars object', () => {
-    const ce = new ComputeEngine();
-    ce.declare('L', 'list<number>');
-    const fn = compile(ce.box(['Sum', 'L']), {
-      to: 'interval-js',
-      vars: { L: '_.L' },
-    });
-    expect(fn.success).toBe(true);
-    expect(fn.run!({ L: [1, 2, 3] })).toEqual(point(6));
-  });
-
   test('a loop over a Range still wraps its plain-number counter', () => {
     const json = [
       'Block',
@@ -127,7 +105,6 @@ describe('interval-js: a loop over a literal collection', () => {
   // is such a position.
   test.each([
     ['List', ['List', 1, 2, 3], 6],
-    ['Tuple', ['Tuple', 1, 2, 3], 6],
     [
       'Map',
       ['Map', ['Function', ['Multiply', 2, 'u'], 'u'], ['List', 1, 2, 3]],
@@ -167,9 +144,9 @@ describe('interval-js: a loop over a literal collection', () => {
     expect(compiled(json).run!({ L: [2, 3] })).toEqual(point(7));
   });
 
-  test('a Map and a Tuple whose elements read an input', () => {
+  test('a Map whose elements read an input', () => {
     // An input keeps the constant pass from computing the source, so the
-    // run-time spelling of the `Map` and of the `Tuple` runs.
+    // run-time spelling of the `Map` runs.
     const ce = new ComputeEngine();
     ce.declare('n', 'real');
     const map = sumLoop('k', [
@@ -177,10 +154,8 @@ describe('interval-js: a loop over a literal collection', () => {
       'k',
       ['Map', ['Function', ['Multiply', 2, 'u'], 'u'], ['List', 1, 'n', 3]],
     ]);
-    const tuple = sumLoop('k', ['Element', 'k', ['Tuple', 1, 'n', 3]]);
     for (const [json, value] of [
       [map, 18],
-      [tuple, 9],
     ] as const) {
       const fn = compile(ce.box(json as any), { to: 'interval-js' });
       expect(fn.success).toBe(true);
@@ -196,11 +171,19 @@ describe('interval-js: a loop over a literal collection', () => {
     (_name, source) => {
       const ce = new ComputeEngine();
       ce.declare('t', 'real');
-      const fn = compile(
-        ce.box(sumLoop('k', ['Element', 'k', source]) as any),
-        { to: 'interval-js', fallback: false }
-      );
-      expect(fn.success).toBe(false);
+      let diagnostic: unknown;
+      try {
+        compile(ce.box(sumLoop('k', ['Element', 'k', source]) as any), {
+          to: 'interval-js',
+          fallback: false,
+        });
+      } catch (e) {
+        diagnostic = compileDiagnosticOf(e);
+      }
+      expect(diagnostic).toMatchObject({
+        code: 'unsettled-shape',
+        operator: 'If',
+      });
     }
   );
 

@@ -4,6 +4,8 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
+import type { CompileDiagnostic } from '../../src/compute-engine/compilation/types';
 
 const ce = new ComputeEngine();
 ce.declare('m', 'real');
@@ -615,6 +617,7 @@ describe('COMPILE SUM/PRODUCT: A BODY THAT WRITES THE INDEX', () => {
   )('%s declines %s', (to, _name, json, index) => {
     // A target declines either by throwing or with `success: false`.
     let error: string | undefined;
+    let diagnostic: CompileDiagnostic | undefined;
     try {
       const result = compile(engine().box(json as any), {
         to: to as never,
@@ -622,8 +625,18 @@ describe('COMPILE SUM/PRODUCT: A BODY THAT WRITES THE INDEX', () => {
       });
       expect(result.success).toBe(false);
       error = result.error;
+      diagnostic = result.diagnostic;
     } catch (err) {
       error = String(err);
+      diagnostic = compileDiagnosticOf(err);
+    }
+    // The interval mode declines the write of the index as a write to a name
+    // that is not a local.
+    if (to === 'interval-js') {
+      expect(diagnostic?.code).toBe('outside-profile');
+      expect(diagnostic?.operator).toBe('Assign');
+      expect(diagnostic?.value).toMatch(new RegExp(`^Assign\\("?${index}"?, `));
+      return;
     }
     // The GLSL fragment refuses the write before any code is written.
     expect(error).toContain(
@@ -819,10 +832,15 @@ describe('COMPILE SUM/PRODUCT: A BOUND THAT IS NOT PURE', () => {
         fallback: false,
       }).success;
     } catch (err) {
-      // The GLSL fragment refuses the `Random` head before any code is written.
-      expect(String(err)).toMatch(
-        to === 'glsl' ? /outside the GLSL fragment/ : /has an effect/
-      );
+      // The GLSL fragment refuses the `Random` head before any code is
+      // written, and the interval mode declines the `Random` of the bound.
+      if (to === 'interval-js') {
+        expect(compileDiagnosticOf(err).code).toBe('outside-profile');
+        expect(compileDiagnosticOf(err).operator).toBe('Random');
+      } else
+        expect(String(err)).toMatch(
+          to === 'glsl' ? /outside the GLSL fragment/ : /has an effect/
+        );
       success = false;
     }
     expect(success).toBe(false);

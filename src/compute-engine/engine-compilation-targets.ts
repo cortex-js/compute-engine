@@ -6,7 +6,6 @@ import {
 } from './engine-extension-contracts.js';
 
 import { JavaScriptTarget } from './compilation/javascript-target.js';
-import { IntervalJavaScriptTarget } from './compilation/interval-javascript-target.js';
 
 /**
  * The compilation targets that every engine resolves, as factories so that
@@ -38,7 +37,6 @@ import { IntervalJavaScriptTarget } from './compilation/interval-javascript-targ
  */
 const DEFAULT_TARGETS = new Map<string, () => LanguageTarget<Expression>>([
   ['javascript', () => new JavaScriptTarget()],
-  ['interval-js', () => new IntervalJavaScriptTarget()],
 ]);
 
 /**

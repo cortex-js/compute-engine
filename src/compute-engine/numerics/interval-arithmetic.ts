@@ -472,11 +472,6 @@ function sumExact(a: number, b: number, r: number): boolean {
  * Knuth's TwoSum computes the rounding error of a double addition exactly
  * for every finite pair of operands, subnormals included, so a zero error
  * term is a proof of exactness rather than a heuristic.
- *
- * Also read by the compile-time constant fold of the interval-js target
- * (`compilation/interval-javascript-target.ts`), which widens a folded
- * endpoint by one ulp unless the operation that produced it is provably
- * exact.
  */
 export function exactSum(a: number, b: number): boolean {
   const s = a + b;

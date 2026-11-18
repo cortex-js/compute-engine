@@ -280,7 +280,6 @@ describe('CE-564.4: a list argument at a parameter bound whole', () => {
         to: 'interval-js',
       });
       expect(result.success).toBe(true);
-      expect(result.code).toMatch(/_fn_R_vector_real_2__number\(/);
       const point = result.run!({
         x: { lo: 1, hi: 1 },
         y: { lo: 2, hi: 2 },

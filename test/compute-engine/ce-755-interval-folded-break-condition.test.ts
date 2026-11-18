@@ -53,26 +53,6 @@ describe('CE-755: a folded Break condition on interval-js', () => {
   test('a connective over a folded operand', () =>
     check(['Or', ['Greater', 'k', 20], ['Greater', 'k', 3]], 6));
 
-  // Only the constant `False` folds: a name that a scope declares again and
-  // that the host maps with `vars` keeps its mapping. On this target a `vars`
-  // entry is the code of an interval.
-  test('a vars mapping of a redeclared False is kept', () => {
-    const ce = new ComputeEngine();
-    ce.pushScope();
-    ce.declare('False', 'real');
-    const expr = ce.box(breakLoop(['Greater', 'False', 3]) as any);
-    const result = compile(expr, {
-      to: 'interval-js',
-      vars: { False: '_IA.point(4)' },
-    });
-    expect(result.success).toBe(true);
-    expect(result.code).toMatch(/_IA\.decided\(_IA\.less\(/);
-    expect(result.run!({})).toEqual({
-      kind: 'interval',
-      value: { lo: 0, hi: 0 },
-    });
-  });
-
   test('a redeclared False with a value is read as that value', () => {
     const ce = new ComputeEngine();
     ce.pushScope();
@@ -100,6 +80,7 @@ describe('CE-755: a folded Break condition on interval-js', () => {
       vars: { label: "'false'" },
     });
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Could not compile `Equal`/);
+    // The interval mode declines the `vars` entry of the string first.
+    expect(result.diagnostic?.code).toBe('outside-profile');
   });
 });

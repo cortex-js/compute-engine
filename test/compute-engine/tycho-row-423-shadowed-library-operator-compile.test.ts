@@ -253,11 +253,6 @@ describe('the library Gamma where no user function shadows it', () => {
     const js = compiled(expr, 'javascript');
     expect(js.warnings).toEqual([]);
     expect(js.result.run({ x: 0.5 })).toBeCloseTo(SQRT_PI, 12);
-    const interval = compiled(expr, 'interval-js');
-    expect(interval.warnings).toEqual([]);
-    const [lo, hi] = intervalValue(interval.result.run({ x: 0.5 }));
-    expect(lo).toBeLessThanOrEqual(SQRT_PI);
-    expect(hi).toBeGreaterThanOrEqual(SQRT_PI);
   });
 
   test('after the scope of the user function ends', () => {
@@ -425,7 +420,7 @@ describe('the parts of the compiler that read a head by its name', () => {
     ce.pushScope();
     ce.declare('Gamma', 'function');
     ce.assign('Gamma', ce.parse('x\\mapsto x+100'));
-    for (const to of ['javascript', 'interval-js']) {
+    for (const to of ['javascript']) {
       const { result } = compiled(early, to);
       expect(result.success).toBe(true);
     }

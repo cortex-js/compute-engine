@@ -23,6 +23,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
+import type { CompileDiagnostic } from '../../src/compute-engine/compilation/types';
 
 // `0·Random()` gives the body an effect (a random draw) and adds nothing to
 // its value, which stays exact.
@@ -87,17 +89,26 @@ const TARGETS = ['javascript', 'interval-js', 'glsl'] as const;
 /**
  * Expect every target to decline `json` with `message`. A target declines by
  * throwing, or with a result whose `success` is false and whose `error` is
- * the reason.
+ * the reason. The interval mode declines `Apply` with the code
+ * `outside-profile`.
  */
 function expectDeclines(json: MathJsonExpression, message: RegExp): void {
   for (const to of TARGETS) {
     let reason: string | undefined;
+    let diagnostic: CompileDiagnostic | undefined;
     try {
       const r = compile(engine().box(json), { to, fallback: false });
       expect(r.success).toBe(false);
       reason = (r as { error?: string }).error;
+      diagnostic = r.diagnostic;
     } catch (e) {
       reason = (e as Error).message;
+      diagnostic = compileDiagnosticOf(e);
+    }
+    if (to === 'interval-js') {
+      expect(diagnostic?.code).toBe('outside-profile');
+      expect(diagnostic?.operator).toBe('Apply');
+      continue;
     }
     // The GLSL fragment refuses the form before the emitter runs.
     expect(reason).toMatch(to === 'glsl' ? /GLSL fragment/ : message);
@@ -247,7 +258,8 @@ describe('PARTIAL APPLICATION — compiled code declines', () => {
       fallback: true,
     });
     expect(result.success).toBe(false);
-    expect((result as { error?: string }).error).toMatch(REFUSAL);
+    expect(result.diagnostic?.code).toBe('outside-profile');
+    expect(result.diagnostic?.operator).toBe('Apply');
   });
 
   test('the interpreter still curries the declined forms', () => {

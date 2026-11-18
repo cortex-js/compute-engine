@@ -8,6 +8,7 @@
  * assign it, or the body can declare a local with a value and read the local.
  */
 import { ComputeEngine, compile } from '../../src/compute-engine';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 const range = ['Element', 'i', ['Range', 1, 3]];
 
@@ -47,11 +48,14 @@ describe('INTERVAL-JS: AN INPUT THAT THE BODY ASSIGNS', () => {
     test(name, () => {
       const ce = new ComputeEngine();
       ce.declare('u', 'real');
-      const c = compile(ce.box(src), {
-        to: 'interval-js',
-        fallback: false,
-      }) as any;
-      expect(c.success).toBe(false);
-      expect(c.error).toMatch(DECLINE);
+      let diagnostic;
+      try {
+        compile(ce.box(src), { to: 'interval-js', fallback: false });
+      } catch (e) {
+        diagnostic = compileDiagnosticOf(e);
+      }
+      // The interval mode writes only its locals.
+      expect(diagnostic?.code).toBe('outside-profile');
+      expect(diagnostic?.operator).toBe('Assign');
     });
 });

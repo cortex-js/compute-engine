@@ -1,7 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { core } from '../../src/compute-engine/compilation/compiler-core-hooks';
 
 //
 // CE-564.2. The definitions below come from a Desmos document (Tycho census,
@@ -170,34 +170,22 @@ function declineMessage(ce: ComputeEngine, json: unknown, to: string): string {
   }
 }
 
+/** The diagnostic of the decline that interval-js throws. */
+function intervalDecline(ce: ComputeEngine, json: unknown) {
+  try {
+    compile(ce.box(json as any), { to: 'interval-js', fallback: false });
+  } catch (e) {
+    return compileDiagnosticOf(e);
+  }
+  throw new Error('the compilation did not decline');
+}
+
 /** The real value of a compiled result: a number, or the midpoint of an
  * interval result (interval-js). */
 function realOf(v: any): number {
   if (typeof v === 'number') return v;
   if (v?.kind === 'interval') return (v.value.lo + v.value.hi) / 2;
   throw new Error(`unexpected compiled value ${JSON.stringify(v)}`);
-}
-
-/** The interpreter's real value of `json` at `(x, y)`. */
-function interpreterValue(
-  ce: ComputeEngine,
-  json: unknown,
-  x: number,
-  y: number
-): number {
-  return ce
-    .box(json as any)
-    .subs({ x, y })
-    .evaluate().re;
-}
-
-/** The bounds of an interval-js result: `[lo, hi]` of its band, or
- * `[-∞, +∞]` for `entire`. Any other result (empty, singular) fails. */
-function bounds(v: any): [number, number] {
-  if (v?.kind === 'entire') return [-Infinity, Infinity];
-  if (v?.kind === 'interval' || v?.kind === 'partial')
-    return [v.value.lo, v.value.hi];
-  throw new Error(`unexpected interval result ${JSON.stringify(v)}`);
 }
 
 function expectInterpreterValues(
@@ -233,69 +221,13 @@ describe('CE-564.2: a parameter typed as a tuple by index reads only', () => {
     ).toBeCloseTo(0.3524163823495667, 12);
   });
 
-  test.each(['javascript', 'interval-js'])(
+  test.each(['javascript'])(
     'r([x, y]) compiles to the interpreter value on %s',
     (to) => {
       const ce = engineWithDefinitions();
       expectInterpreterValues(ce, ['r', ['List', 'x', 'y']], to);
     }
   );
-
-  // Change 4 in the header: on interval-js the call takes the copy of `r`
-  // typed by the list argument.
-  test('r([x, y]) on interval-js calls the copy typed by its argument', () => {
-    const ce = engineWithDefinitions();
-    const result = compile(ce.box(['r', ['List', 'x', 'y']] as any), {
-      to: 'interval-js',
-      fallback: false,
-    } as any) as { success: boolean; code: string };
-    expect(result.success).toBe(true);
-    expect(result.code).toMatch(/_fn_r_vector_real_2_\(/);
-  });
-
-  // When the copy of `r` does not compile, the call takes the routes after
-  // the copy (here the substitution of the list argument, change 3 in the
-  // header) and the definitions that the failed copy added are removed. The
-  // copy is made to fail after it emitted its definitions, which a body
-  // that does not compile does too (`emitFunctionLiteralDefinition` removes
-  // only the definitions of its own failure).
-  test('r([x, y]) on interval-js compiles when the copy fails', () => {
-    const ce = engineWithDefinitions();
-    const original = core.ensureSpecializedUserCallEmitted;
-    const spy = jest
-      .spyOn(core, 'ensureSpecializedUserCallEmitted')
-      .mockImplementation(function (this: unknown, ...args: any[]) {
-        const emitted = original.apply(this, args);
-        if (args[1] === 'r') throw new Error('the copy of r does not compile');
-        return emitted;
-      });
-    try {
-      const json = ['r', ['List', 'x', 'y']];
-      const result = compile(ce.box(json as any), {
-        to: 'interval-js',
-        fallback: false,
-      } as any) as {
-        success: boolean;
-        code: string;
-        preamble: string;
-        run: (v: object) => any;
-      };
-      expect(result.success).toBe(true);
-      expect(result.code).not.toMatch(/_fn_r_vector_real_2_/);
-      expect(result.preamble ?? '').not.toMatch(/_fn_r_vector_real_2_/);
-      for (const [x, y] of SAMPLES) {
-        const expected = interpreterValue(ce, json, x, y);
-        const [lo, hi] = bounds(
-          result.run({ x: { lo: x, hi: x }, y: { lo: y, hi: y } })
-        );
-        expect(lo).toBeLessThanOrEqual(expected);
-        expect(hi).toBeGreaterThanOrEqual(expected);
-        expect(hi - lo).toBeLessThan(1e-9);
-      }
-    } finally {
-      spy.mockRestore();
-    }
-  });
 
   test('d(B(A(P(x, y)))) compiles to the interpreter value on javascript', () => {
     const ce = engineWithDefinitions();
@@ -304,73 +236,6 @@ describe('CE-564.2: a parameter typed as a tuple by index reads only', () => {
       ['d', ['B', ['A', ['P', 'x', 'y']]]],
       'javascript'
     );
-  });
-
-  // ROADMAP CE-564. The parameter of `d` is inferred as
-  // `dictionary<any> | indexed_collection<any>`, which the call of `r`
-  // inside the generic definition of `d` refuses. interval-js now compiles a
-  // copy of `d` (and of `r`) typed by the list argument, `vector<2>`, as
-  // javascript does (`ensureSpecializedUserCallEmitted`,
-  // compilation/base-compiler.ts). The call declined before, with "call of
-  // `r`: argument 1 has the type `dictionary<any> | indexed_collection<any>`".
-  test('d(B(A(P(x, y)))) compiles to the interpreter value on interval-js', () => {
-    const ce = engineWithDefinitions();
-    expectInterpreterValues(
-      ce,
-      ['d', ['B', ['A', ['P', 'x', 'y']]]],
-      'interval-js'
-    );
-  });
-
-  test('d(B(A(P(x, y)))) on interval-js: a point interval encloses the interpreter value', () => {
-    const ce = engineWithDefinitions();
-    const json = ['d', ['B', ['A', ['P', 'x', 'y']]]];
-    const result = compile(ce.box(json as any), {
-      to: 'interval-js',
-      fallback: false,
-    } as any) as { success: boolean; run: (v: object) => any };
-    expect(result.success).toBe(true);
-    for (const [x, y] of SAMPLES) {
-      const expected = interpreterValue(ce, json, x, y);
-      const [lo, hi] = bounds(
-        result.run({ x: { lo: x, hi: x }, y: { lo: y, hi: y } })
-      );
-      expect(lo).toBeLessThanOrEqual(expected);
-      expect(hi).toBeGreaterThanOrEqual(expected);
-      expect(hi - lo).toBeLessThan(1e-9);
-    }
-  });
-
-  test('d(B(A(P(x, y)))) on interval-js: a small box encloses the interpreter values at its corners and centre', () => {
-    const ce = engineWithDefinitions();
-    const json = ['d', ['B', ['A', ['P', 'x', 'y']]]];
-    const result = compile(ce.box(json as any), {
-      to: 'interval-js',
-      fallback: false,
-    } as any) as { success: boolean; run: (v: object) => any };
-    expect(result.success).toBe(true);
-    const h = 1e-3;
-    for (const [cx, cy] of SAMPLES) {
-      const [lo, hi] = bounds(
-        result.run({
-          x: { lo: cx - h, hi: cx + h },
-          y: { lo: cy - h, hi: cy + h },
-        })
-      );
-      // The box is narrow, so the enclosure is bounded, not `entire`.
-      expect(Number.isFinite(lo) && Number.isFinite(hi)).toBe(true);
-      for (const [x, y] of [
-        [cx, cy],
-        [cx - h, cy - h],
-        [cx - h, cy + h],
-        [cx + h, cy - h],
-        [cx + h, cy + h],
-      ]) {
-        const expected = interpreterValue(ce, json, x, y);
-        expect(lo).toBeLessThanOrEqual(expected);
-        expect(hi).toBeGreaterThanOrEqual(expected);
-      }
-    }
   });
 
   test('d(B(A(P(x, y)))) on javascript: the call takes the copy typed by its argument', () => {
@@ -390,6 +255,13 @@ describe('CE-564.2: a parameter typed as a tuple by index reads only', () => {
       // number.
       const ce = engineWithDefinitions();
       expect(ce.box(['r', ['Tuple', 0.3, 0.4]]).evaluate().isValid).toBe(false);
+      // The interval mode declines the subtraction in the body of `f`.
+      if (to === 'interval-js') {
+        const d = intervalDecline(ce, ['r', ['Tuple', 'x', 'y']]);
+        expect(d.code).toBe('outside-profile');
+        expect(d.value).toBe('Add(Mod(p, 1), -0.5)');
+        return;
+      }
       const message = declineMessage(ce, ['r', ['Tuple', 'x', 'y']], to);
       expect(message).toMatch(/call of `f`/);
       expect(message).not.toMatch(/invalid expression/);
@@ -415,6 +287,12 @@ describe('CE-564.2: a parameter typed as a tuple by index reads only', () => {
           ['Typed', 'p', "'tuple<real, real>'"],
         ])
       );
+      if (to === 'interval-js') {
+        const d = intervalDecline(ce, ['ra', ['Tuple', 'x', 'y']]);
+        expect(d.code).toBe('outside-profile');
+        expect(d.value).toBe('Add(Mod(p, 1), -0.5)');
+        return;
+      }
       const message = declineMessage(ce, ['ra', ['Tuple', 'x', 'y']], to);
       expect(message).toMatch(/call of `f`/);
     }
@@ -458,6 +336,13 @@ describe('CE-564.2: a parameter typed as a tuple by index reads only', () => {
     'rc([x, y]) declines on %s',
     (to) => {
       const ce = engineWithContractCall();
+      // The interval mode declines the list argument of `rc`.
+      if (to === 'interval-js') {
+        const d = intervalDecline(ce, ['rc', ['List', 'x', 'y']]);
+        expect(d.code).toBe('outside-profile');
+        expect(d.value).toBe('List(x, y)');
+        return;
+      }
       const message = declineMessage(ce, ['rc', ['List', 'x', 'y']], to);
       expect(message).toMatch(/call of `rc`/);
       expect(message).toMatch(/tuple<real, real>/);

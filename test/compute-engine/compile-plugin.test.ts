@@ -138,9 +138,6 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
       const glslTarget = ce._getCompilationTarget('glsl');
       expect(glslTarget).toBeDefined();
 
-      // Interval targets should be registered
-      const intervalJSTarget = ce._getCompilationTarget('interval-js');
-      expect(intervalJSTarget).toBeDefined();
     });
 
     it('should list all default targets', () => {

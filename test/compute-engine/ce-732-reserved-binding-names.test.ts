@@ -22,6 +22,7 @@
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 const R = "'real'";
 const I = "'integer'";
@@ -652,13 +653,20 @@ describe('CE-732: a binding with a reserved name, interval-js target', () => {
         ['Block', ['Assign', k, ['Add', k, 1]], k],
         ['Limits', k, 1, 'n'],
       ];
-      const result = compile(ce.box(expr as never), {
-        to: 'interval-js',
-        constantFold: false,
-        fallback: false,
-      } as never);
-      expect(result.success).toBe(false);
-      expect(result.error).toContain(`the body writes the index \`${k}\``);
+      let diagnostic: unknown;
+      try {
+        compile(ce.box(expr as never), {
+          to: 'interval-js',
+          constantFold: false,
+          fallback: false,
+        } as never);
+      } catch (e) {
+        diagnostic = compileDiagnosticOf(e);
+      }
+      expect(diagnostic).toMatchObject({
+        code: 'outside-profile',
+        operator: 'Assign',
+      });
     }
   );
 

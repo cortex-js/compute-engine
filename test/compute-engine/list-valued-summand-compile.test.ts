@@ -373,9 +373,9 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
       expect((r as any).diagnostic?.code).toBe('outside-fragment');
       return;
     }
-    expect((r as any).error).toMatch(
-      /collection-valued body has no compiled form/
-    );
+    // The interval mode has no list-valued summand.
+    expect((r as any).diagnostic?.code).toBe('outside-profile');
+    expect((r as any).diagnostic?.operator).toBe('a');
   });
 
   test.each(NON_JS)('%s declines the `A(t)` wrapper form', (to) => {
@@ -391,10 +391,7 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
     // The GLSL fragment refuses the untyped `t` first.
     if (to === 'glsl')
       expect((r as any).diagnostic?.code).toBe('outside-fragment');
-    else
-      expect((r as any).error).toMatch(
-        /collection-valued body has no compiled form/
-      );
+    else expect((r as any).diagnostic?.code).toBe('outside-profile');
   });
 
   test('JavaScript is unaffected — it still takes the element-wise fold', () => {
@@ -413,7 +410,7 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
 
   // The item-121 exemptions must survive on every target: the refinement adds
   // POSITIVE collection evidence, it does not narrow "absence of evidence".
-  test.each(['javascript', ...NON_JS] as const)(
+  test.each(['javascript', 'glsl'] as const)(
     '%s still compiles a boolean big-op body (the counting idiom)',
     (to) => {
       const ce = new ComputeEngine();
@@ -538,6 +535,12 @@ describe('a declaration contradicted by its body is refused, or declines everywh
         expect((r as any).diagnostic?.code).toBe('outside-fragment');
         continue;
       }
+      // The interval mode has no body of `a` whose result has no stated type.
+      if (to === 'interval-js') {
+        expect((r as any).diagnostic?.code).toBe('outside-profile');
+        expect((r as any).diagnostic?.operator).toBe('Function');
+        continue;
+      }
       // The message names both halves and suggests the fix.
       expect((r as any).error).toMatch(CONTRADICTED);
       expect((r as any).error).toMatch(/'a'/);
@@ -619,9 +622,9 @@ describe('a declaration contradicted by its body is refused, or declines everywh
         expect((r as any).error).not.toMatch(CONTRADICTED);
         return;
       }
-      expect((r as any).error).toMatch(
-        /collection-valued body has no compiled form/
-      );
+      // The interval mode has no list-valued summand.
+      expect((r as any).diagnostic?.code).toBe('outside-profile');
+      expect((r as any).diagnostic?.operator).toBe('a');
       expect((r as any).error).not.toMatch(CONTRADICTED);
     }
   );
@@ -687,9 +690,9 @@ describe('a declaration contradicted by its body is refused, or declines everywh
         expect((r as any).error).not.toMatch(CONTRADICTED);
         return;
       }
-      expect((r as any).error).toMatch(
-        /collection-valued body has no compiled form/
-      );
+      // The interval mode has no list-valued summand.
+      expect((r as any).diagnostic?.code).toBe('outside-profile');
+      expect((r as any).diagnostic?.operator).toBe('a');
       expect((r as any).error).not.toMatch(CONTRADICTED);
     }
   );
@@ -798,6 +801,12 @@ describe('a contradicted scalar declaration is refused, or declines in every sca
         fallback: true,
       } as any);
       expect([to, r?.success ?? false]).toEqual([to, false]);
+      // The interval mode has no body of `a` whose result has no stated type.
+      if (to === 'interval-js') {
+        expect((r as any).diagnostic?.code).toBe('outside-profile');
+        expect((r as any).diagnostic?.operator).toBe('Function');
+        continue;
+      }
       // The GLSL fragment refuses the body before the emitter runs, with its
       // own message.
       expect((r as any).error).toMatch(
@@ -1365,6 +1374,12 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
       fallback: true,
     } as any);
     expect(r?.success ?? false).toBe(false);
+    // The interval mode has no body of `a` whose result has no stated type.
+    if (to === 'interval-js') {
+      expect((r as any).diagnostic?.code).toBe('outside-profile');
+      expect((r as any).diagnostic?.operator).toBe('Function');
+      return;
+    }
     // The GLSL fragment refuses the body before the emitter runs, with its
     // own message.
     expect((r as any).error).toMatch(
@@ -1382,6 +1397,11 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
     // The GLSL fragment refuses the Sum before the emitter runs.
     if (to === 'glsl') {
       expect((r as any).diagnostic?.code).toBe('outside-fragment');
+      return;
+    }
+    if (to === 'interval-js') {
+      expect((r as any).diagnostic?.code).toBe('outside-profile');
+      expect((r as any).diagnostic?.operator).toBe('Function');
       return;
     }
     expect((r as any).error).toMatch(
@@ -1596,6 +1616,11 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
             expect((r as any).diagnostic?.code).toBe('outside-fragment');
             continue;
           }
+          // The interval mode has no list body of `h` in a scalar position.
+          if (to === 'interval-js') {
+            expect((r as any).diagnostic?.code).toBe('outside-profile');
+            continue;
+          }
           expect((r as any).error).toMatch(CONTRADICTED_CONDITION);
           expect((r as any).error).toMatch(/'b'/);
           expect((r as any).error).toMatch(/-> list<number>/);
@@ -1604,9 +1629,7 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
 
       // On glsl the definition check speaks first, because its
       // element-wise `Which` does not call `assertScalarCondition`. The
-      // interval target checks each `Which` condition with
-      // `assertScalarCondition`, and gives the condition message like the
-      // JavaScript target.
+      // interval mode has no list body of `h` in a scalar position.
       test.each(ALL_TARGETS)('%s declines `Which(b(u), 1, True, 2)`', (to) => {
         const r = compile(withLaterBody(body).box(WHICH('b')), {
           to,
@@ -1617,6 +1640,8 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
         // The GLSL fragment refuses the condition before the emitter runs.
         if (to === 'glsl')
           expect((r as any).diagnostic?.code).toBe('outside-fragment');
+        else if (to === 'interval-js')
+          expect((r as any).diagnostic?.code).toBe('outside-profile');
         else expect(error).toMatch(CONTRADICTED_CONDITION);
       });
 
@@ -1630,6 +1655,10 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
           // The GLSL fragment refuses the operand before the emitter runs.
           if (to === 'glsl') {
             expect((r as any).diagnostic?.code).toBe('outside-fragment');
+            continue;
+          }
+          if (to === 'interval-js') {
+            expect((r as any).diagnostic?.code).toBe('outside-profile');
             continue;
           }
           expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);

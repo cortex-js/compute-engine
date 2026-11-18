@@ -9,6 +9,7 @@
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 function setup(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -32,11 +33,14 @@ describe('a call of a function that the enclosing block assigns', () => {
 
   test('interval-js declines', () => {
     const ce = setup();
-    const r = compile(ce.box(SRC as any), {
-      to: 'interval-js',
-      fallback: false,
-    }) as any;
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(DECLINE);
+    let diagnostic;
+    try {
+      compile(ce.box(SRC as any), { to: 'interval-js', fallback: false });
+    } catch (e) {
+      diagnostic = compileDiagnosticOf(e);
+    }
+    // The interval mode writes only its locals.
+    expect(diagnostic?.code).toBe('outside-profile');
+    expect(diagnostic?.operator).toBe('Assign');
   });
 });

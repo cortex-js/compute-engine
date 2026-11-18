@@ -7,9 +7,7 @@
  * interpreter's value at points of the box is inside the result, element by
  * element for a list; a list result whose length is not one number is
  * `entire`. An end may miss by at most 2 ulps; the checks that need that
- * slack are counted. The comparison with the existing interval target: the
- * same kind and bounds within 4 ulps or tighter, element by element; the
- * programs for which some box differs are pinned in `EXCEPTIONS`.
+ * slack are counted.
  *
  * Then the result contract with list inputs and results, the declines of
  * the batch, and robustness. The `Loop` statement (over a `Range` or a list,
@@ -178,8 +176,7 @@ const CASES: Case[] = [
   // `Apply` of a literal of one untyped parameter over a flat list (the
   // interpreter maps it; the path of `Map`), read by a reduction, by `At`,
   // with a condition that is undecided over the box, and Tycho's witness of
-  // CE-1344 with its `Map` control. The existing target declines `Apply`
-  // over a list, so only the `Map` control is compared with it.
+  // CE-1344 with its `Map` control.
   C(['Apply', K(['Multiply', 'k', x]), 'L']), C(['Apply', K(['Sin', 'k']), 'V']),
   C(['Apply', K(['Multiply', 'k', x]), ['List', 1, 2, 3]]),
   C(['Sum', ['Apply', K(['Power', 'k', 2]), 'L']]),
@@ -214,16 +211,6 @@ const CASES: Case[] = [
   C(['At', ['vv', x, y], 2]), C(['Sum', ['Multiply', ['vv', x, y], ['List', 0.64, 0.768]]]),
   C(['At', ['HH', x], 1]), C(['Sum', ['HH', x]]),
   C(['Sum', ['Power', ['RR', ['Add', ['vv', x, y], ['List', -0.57, 2.8]], y], 2]]),
-];
-
-/** The programs whose result differs from the existing target's at some
- *  box: another kind, or a bound wider by more than 4 ulps. */
-// prettier-ignore
-const EXCEPTIONS: string[] = [
-  // An `If` in a pass of a `Loop` whose condition the box does not decide:
-  // the mode joins the values of both arms (a hull); the existing target
-  // answers `entire`.
-  JSON.stringify(LOOP_IF), JSON.stringify(LOOP_IF_NO_ELSE),
 ];
 
 // A seeded generator (mulberry32).
@@ -337,7 +324,6 @@ const step = (x: number, n: number, f: (x: number) => number) => {
 let checks = 0;
 let slack = 0;
 const SAMPLES: string[] = [];
-const differences = new Map<string, string>();
 
 /** The failures of `got` against the interpreter's value `v`. */
 function contains(got: unknown, v: Value, label: string, at: string): string[] {
@@ -368,27 +354,6 @@ function contains(got: unknown, v: Value, label: string, at: string): string[] {
   return [`${at}: ${JSON.stringify(got)}, interpreter ${v}`];
 }
 
-/** The same verdict, or the same kind and bounds within 4 ulps of the
- *  existing result or inside it, element by element. */
-function sameOrTighter(got: unknown, was: unknown): boolean {
-  if (Array.isArray(got) || Array.isArray(was))
-    return (
-      Array.isArray(got) &&
-      Array.isArray(was) &&
-      got.length === was.length &&
-      got.every((g, k) => sameOrTighter(g, was[k]))
-    );
-  if (typeof got === 'string' || typeof was === 'string') return got === was;
-  const [a, b] = [got as Kinded, was as Kinded];
-  if (a.kind !== b.kind) return false;
-  if (a.value === undefined || b.value === undefined)
-    return a.value === b.value;
-  return (
-    a.value.lo >= step(b.value.lo, 4, nextDown) &&
-    a.value.hi <= step(b.value.hi, 4, nextUp)
-  );
-}
-
 type Compiled = {
   success: boolean;
   code: string;
@@ -407,7 +372,6 @@ describe('the interval mode, lists: containment', () => {
   test.each(CASES.map((c) => [JSON.stringify(c.json), c]))('%s', (label, c) => {
     const expr = ce.box(c.json as never);
     const r = mode(c.json);
-    const old = compile(expr, { to: 'interval-js' }) as unknown as Compiled;
     const rnd = random(label.length * 7919 + 17);
     const failures: string[] = [];
     for (const b of boxes(expr, c.centres ?? [], rnd)) {
@@ -415,13 +379,6 @@ describe('the interval mode, lists: containment', () => {
       for (const point of pointsOf(b, rnd))
         failures.push(
           ...contains(got, interpret(expr, point), label, JSON.stringify(point))
-        );
-      if (!old.success || differences.has(label)) continue;
-      const was = old.run(b);
-      if (!sameOrTighter(got, was))
-        differences.set(
-          label,
-          `${JSON.stringify(b)}: mode ${JSON.stringify(got)}, existing ${JSON.stringify(was)}`
         );
     }
     expect(failures.slice(0, 5)).toEqual([]);
@@ -432,11 +389,6 @@ describe('the interval mode, lists: containment', () => {
       `${checks} containment checks, ${slack} within the 2-ulp slack\n${SAMPLES.join('\n')}`
     );
     expect(checks).toBeGreaterThan(5_000);
-  });
-
-  test('the programs that differ from the existing target', () => {
-    console.log([...differences].map(([k, v]) => `${k}\n  ${v}`).join('\n'));
-    expect([...differences.keys()].sort()).toEqual([...EXCEPTIONS].sort());
   });
 });
 
@@ -556,11 +508,6 @@ describe('the interval mode, Loop: the contract', () => {
       fallback: false,
       iterationBudget,
     } as never) as unknown as Compiled & { preamblePerCall?: string };
-  const existing = (json: Json, iterationBudget?: number) =>
-    compile(ce.box(json as never), {
-      to: 'interval-js',
-      iterationBudget,
-    } as never) as unknown as Compiled;
   /** The result of `f()`, or the name of the error that it throws. */
   const outcome = (f: () => unknown) => {
     try {
@@ -579,21 +526,19 @@ describe('the interval mode, Loop: the contract', () => {
     expect(r.run({ x: 1, n: 0 })).toEqual({ kind: 'interval', value: { lo: 0, hi: 0 } });
   });
 
-  test('the undecided If of a pass: the hull of both arms, the existing target entire', () => {
+  test('the undecided If of a pass: the hull of both arms', () => {
     const box = { x: { lo: -1, hi: 0.5 } };
     // At x = -1 the value is -3, at x = 0.5 it is 3.
     expect(budgeted(LOOP_IF).run(box)).toEqual({ kind: 'interval', value: { lo: -3, hi: 3 } });
-    expect(existing(LOOP_IF).run(box)).toEqual({ kind: 'entire' });
   });
 
-  test('a pass of a Loop counts one pass of the iterationBudget, as on the existing target', () => {
+  test('a pass of a Loop counts one pass of the iterationBudget', () => {
     const json = upTo('n');
     const r = budgeted(json, 5);
     expect(r.code).toContain('_IA.countLoopPass(5);');
     expect(r.preamblePerCall).toBe('_IA.resetLoopPasses();');
     for (const n of [5, 6, 5]) {
       const got = outcome(() => r.run({ x: 1, n }));
-      expect(got).toEqual(outcome(() => existing(json, 5).run({ x: 1, n })));
       // The count starts again at each call.
       expect(got).toEqual(n === 5 ? { kind: 'interval', value: { lo: 5, hi: 5 } } : 'CancellationError');
     }
@@ -624,7 +569,6 @@ describe('the interval mode, Loop: the contract', () => {
     const json = loopOf(['Loop', ['Loop', addTo(x), ['Element', 'j', ['Range', 1, 2]]], ['Element', 'k', ['Range', 1, 3]]]);
     expect(budgeted(json, 9).run({ x: 1 })).toEqual({ kind: 'interval', value: { lo: 6, hi: 6 } });
     expect(outcome(() => budgeted(json, 8).run({ x: 1 }))).toBe('CancellationError');
-    expect(outcome(() => existing(json, 8).run({ x: 1 }))).toBe('CancellationError');
   });
 
   test('a call computed once counts its passes apart from the calls', () => {
@@ -633,8 +577,6 @@ describe('the interval mode, Loop: the contract', () => {
     const r = budgeted(json, 12);
     expect(r.preamblePerCall).toContain('_IA.resetLoopPasses();');
     for (let k = 0; k < 2; k++) expect((r.run({ x: 1 }) as Kinded).kind).toBe('interval');
-    // The existing target counts the 16 passes of each call.
-    expect(outcome(() => existing(json, 12).run({ x: 1 }))).toBe('CancellationError');
     // Over the budget alone, the value computed once throws at every call.
     const over = budgeted(json, 7);
     for (let k = 0; k < 2; k++) expect(outcome(() => over.run({ x: 1 }))).toBe('CancellationError');

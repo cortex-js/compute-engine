@@ -316,13 +316,21 @@ describe('non-JavaScript targets keep the fail-closed refusal', () => {
     test(`${to} fails closed on the declare form`, () => {
       const r = compile(declareBlock(tupleSymbolEngine()), { to });
       expect(r?.success).toBe(false);
-      expect(r?.error).toMatch(/destructuring declaration/);
+      // The interval mode has no destructuring declaration.
+      if (to === 'interval-js') {
+        expect(r?.diagnostic?.code).toBe('outside-profile');
+        expect(r?.diagnostic?.operator).toBe('Declare');
+      } else expect(r?.error).toMatch(/destructuring declaration/);
     });
 
     test(`${to} fails closed on the assign form`, () => {
       const r = compile(assignBlock(tupleSymbolEngine()), { to });
       expect(r?.success).toBe(false);
-      expect(r?.error).toMatch(/destructuring assignment/);
+      // The interval mode has no destructuring assignment.
+      if (to === 'interval-js') {
+        expect(r?.diagnostic?.code).toBe('outside-profile');
+        expect(r?.diagnostic?.operator).toBe('Assign');
+      } else expect(r?.error).toMatch(/destructuring assignment/);
     });
   }
 

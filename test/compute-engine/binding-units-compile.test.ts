@@ -131,7 +131,6 @@ describe('BINDING UNITS: THE BOUNDS OF A COMPILED INTEGRAL', () => {
     expect(searches(ce, 'javascript')).toBe(1);
     // The search timed out and is recorded: the next compilations make no
     // search, and the bound `x` is still a number.
-    expect(searches(ce, 'interval-js')).toBe(0);
     expect(searches(ce, 'javascript')).toBe(0);
   });
 

@@ -756,13 +756,20 @@ describe('IR profile, batch G28: what a handler is given', () => {
 
 describe('Existing compilers, batch G28: an expression result', () => {
   test('the index rewrite and the Which rewrite give the values of the profile', () => {
-    for (const to of ['javascript', 'interval-js'] as const) {
+    {
       const ce = engine();
       attach(ce, 'At', floorIndex(ce));
-      const a = existing(ce, ['At', L3, 'i'], to);
-      const b = ir(ce, ['At', L3, 'i'], to);
+      const a = existing(ce, ['At', L3, 'i']);
+      const b = ir(ce, ['At', L3, 'i']);
       for (const i of POINTS)
         expect(a.run!({ i } as never)).toEqual(b.run!({ i } as never));
+      // The interval mode contains the interpreter's value of the rewritten
+      // form.
+      const box = ir(ce, ['At', L3, 'i'], 'interval-js');
+      for (const i of POINTS) {
+        const v = interpreted(ce, floored(L3, 'i'), { i }) as number;
+        expect([i, contains(box.run!({ i } as never), v)]).toEqual([i, true]);
+      }
     }
     const ce = engine();
     attach(ce, 'Which', (args) =>

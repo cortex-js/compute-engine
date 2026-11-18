@@ -236,7 +236,7 @@ describe('PARAMETER DEFAULTS: A DEFAULT FILLS ONLY AN ARGUMENT THAT THE CALL LEA
     expect(r.success).toBe(true);
     expect(r.run!({ u: 2 })).toEqual([3, 6]);
   });
-  test.each(['interval-js', 'glsl'] as const)(
+  test.each(['glsl'] as const)(
     'a defaulted call is completed on %s, with no decline',
     (to) => {
       const r = compiled(ce, ['Add', ['g'], 'u'], { to });
@@ -437,13 +437,6 @@ describe('PARAMETER DEFAULTS: A CONSTANT SYMBOL DEFAULT (GITHUB ISSUE #490)', ()
     const r = compiled(ce, ['Map', 'gm', ['List', 'u', 2]]);
     expect(r.success).toBe(true);
     expect(r.run!({ u: 3 })).toEqual([6, 4]);
-    // The other targets compile the `Apply` of the literal; GLSL declines the
-    // call of `gm`, for a reason that is not the default (GLSL has no type for
-    // the parameter `mode`).
-    for (const to of ['interval-js'] as const)
-      expect(compiled(ce, ['Apply', modeLiteral, 'u'], { to }).success).toBe(
-        true
-      );
     // The GLSL fragment refuses the function literal: its parameter `mode` has
     // no declared type.
     const g = compiled(ce, ['Apply', modeLiteral, 'u'], { to: 'glsl' });

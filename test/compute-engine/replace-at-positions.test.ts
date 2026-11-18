@@ -18,6 +18,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
 import { parseType } from '../../src/common/type/parse';
 import { signatureParamType } from '../../src/compute-engine/compilation/compile-assignment-checks';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 type Json = unknown;
 
@@ -768,11 +769,18 @@ describe('the other targets decline a form with more than one position', () => {
   );
 
   test('interval-js', () => {
-    const r = compile(ce.box(json as never), {
-      to: 'interval-js',
-      fallback: false,
-    } as never);
-    expect(r.success).toBe(false);
+    // The interval mode has no `ReplaceAt`.
+    let diagnostic;
+    try {
+      compile(ce.box(json as never), {
+        to: 'interval-js',
+        fallback: false,
+      } as never);
+    } catch (e) {
+      diagnostic = compileDiagnosticOf(e);
+    }
+    expect(diagnostic?.code).toBe('outside-profile');
+    expect(diagnostic?.operator).toBe('ReplaceAt');
   });
 
   test('the JavaScript `bigint` mode', () => {

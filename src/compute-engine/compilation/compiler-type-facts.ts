@@ -54,9 +54,9 @@ import { core } from './compiler-core-hooks.js';
  * `enclosure` arm at any level (`enclosure`, `real | enclosure`,
  * `list<enclosure>`). On `interval-js` such an expression is compiled with
  * the kind lowering of the enclosure, which checks the host value of the
- * symbol and declines a collection of enclosures. The `interval-js` target
- * also reads it to refuse the interpreter fallback for an enclosure input
- * (`holdsEnclosureInputOrResult()`, `interval-javascript-target.ts`).
+ * symbol and declines a collection of enclosures. `compile()` also reads it
+ * to refuse the interpreter fallback of `interval-js` for an enclosure input
+ * (`holdsEnclosureInputOrResult()`, `interval-fallback.ts`).
  */
 export function hasEnclosureSymbol(expr: Expression): boolean {
   const kinds = kindTypeNames(expr.engine);

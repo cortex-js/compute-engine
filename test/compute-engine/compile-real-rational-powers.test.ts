@@ -212,17 +212,16 @@ describe('a decimal exponent or root index read as an odd-denominator rational',
   });
 
   test.each([
-    ['x^{\\frac{1}{2.2}}', '_IA.powRational(_.x, 5, 11)'],
-    ['\\sqrt[2.2]{x}', '_IA.powRational(_.x, 5, 11)'],
-    ['\\sqrt[2.5]{x}', '_IA.powRational(_.x, 2, 5)'],
-    ['x^{0.6}', '_IA.powRational(_.x, 3, 5)'],
-    ['x^{0.4}', '_IA.powRational(_.x, 2, 5)'],
-  ])('interval-js: %s encloses the real root', (latex, code) => {
+    ['x^{\\frac{1}{2.2}}'],
+    ['\\sqrt[2.2]{x}'],
+    ['\\sqrt[2.5]{x}'],
+    ['x^{0.6}'],
+    ['x^{0.4}'],
+  ])('interval-js: %s encloses the real root', (latex) => {
     const ce = realEngine();
     const expr = ce.parse(latex);
     const result = compile(expr, { to: 'interval-js' });
     expect(result.success).toBe(true);
-    expect(result.code).toContain(code);
     const out = result.run!({ x: { lo: -1.1, hi: -0.9 } }) as {
       kind: string;
       value: { lo: number; hi: number };
@@ -263,7 +262,6 @@ describe('a decimal exponent or root index read as an odd-denominator rational',
     expect(js.code).toBe('Math.pow(Math.abs(_.x), 0.4)');
     close(js.run!({ x: -8 }), want);
     const ia = compile(expr, { to: 'interval-js' });
-    expect(ia.code).toContain('_IA.powRational(_.x, 2, 5)');
     const out = ia.run!({ x: { lo: -8.1, hi: -7.9 } }) as {
       kind: string;
       value: { lo: number; hi: number };
@@ -292,34 +290,18 @@ describe('a decimal exponent or root index read as an odd-denominator rational',
   // `0.45454545454545453`), and `1/2.2000000000000006` is not the double of
   // `5/11` either. (Tycho ledger row 406.)
   test.each([
-    [
-      'x^{0.4545454545454545}',
-      '_IA.powRealBranch(_.x, 0.4545454545454545, true)',
-    ],
-    [
-      'x^{0.6000000000000001}',
-      '_IA.powRealBranch(_.x, 0.6000000000000001, true)',
-    ],
-    [
-      'x^{-0.4545454545454545}',
-      '_IA.powRealBranch(_.x, -0.4545454545454545, true)',
-    ],
-    [
-      'x^{0.4000000000000001}',
-      '_IA.powRealBranch(_.x, 0.4000000000000001, false)',
-    ],
-    [
-      '\\sqrt[2.2000000000000006]{x}',
-      '_IA.powRealBranch(_.x, 0.4545454545454544, true)',
-    ],
+    ['x^{0.4545454545454545}'],
+    ['x^{0.6000000000000001}'],
+    ['x^{-0.4545454545454545}'],
+    ['x^{0.4000000000000001}'],
+    ['\\sqrt[2.2000000000000006]{x}'],
   ])(
     'interval-js: %s, an exponent that is not the double of its rational, encloses the real root',
-    (latex, code) => {
+    (latex) => {
       const ce = realEngine();
       const expr = ce.parse(latex);
       const result = compile(expr, { to: 'interval-js' });
       expect(result.success).toBe(true);
-      expect(result.code).toBe(code);
       const js = compile(expr, { constantFold: false });
       for (const [lo, hi] of [
         [-1.1, -0.9],
@@ -350,12 +332,30 @@ describe('a decimal exponent or root index read as an odd-denominator rational',
     }
   );
 
-  test('interval-js: an exponent that is the double of its rational keeps `powRational`', () => {
+  test('interval-js: an exponent that is the double of its rational encloses the real root', () => {
     const ce = realEngine();
-    const code = (exp: number) =>
-      compile(ce.box(['Power', 'x', exp]), { to: 'interval-js' }).code;
-    expect(code(0.6)).toBe('_IA.powRational(_.x, 3, 5)');
-    expect(code(0.45454545454545453)).toBe('_IA.powRational(_.x, 5, 11)');
+    for (const exp of [0.6, 0.45454545454545453]) {
+      const expr = ce.box(['Power', 'x', exp]);
+      const result = compile(expr, { to: 'interval-js' });
+      expect(result.success).toBe(true);
+      for (const [lo, hi] of [
+        [-32, -32],
+        [-1, -1],
+        [2, 2],
+        [-1.1, -0.9],
+      ]) {
+        const out = result.run!({ x: { lo, hi } }) as {
+          kind: string;
+          value: { lo: number; hi: number };
+        };
+        expect(out.kind).toBe('interval');
+        for (const x of [lo, (lo + hi) / 2, hi]) {
+          const want = expr.subs({ x: ce.number(x) }).N().re;
+          expect(out.value.lo).toBeLessThanOrEqual(want);
+          expect(out.value.hi).toBeGreaterThanOrEqual(want);
+        }
+      }
+    }
   });
 
   // The constant fold reads the emitted code and accepts it only when what
@@ -389,24 +389,13 @@ describe('a decimal exponent or root index read as an odd-denominator rational',
     expect(code('x^{0.5}', { mode: 'complex' })).toContain('_SYS.cpow(');
     expect(code('x^{0.3}', { mode: 'complex' })).toContain('_SYS.cpow(');
     expect(code('x^{0.3}', { mode: 'strict' })).toBe('Math.pow(_.x, 0.3)');
-    expect(code('x^{0.5}', { to: 'interval-js' })).toBe('_IA.sqrt(_.x)');
-    expect(code('x^{0.3}', { to: 'interval-js' })).toBe('_IA.pow(_.x, 0.3)');
     expect(code('x^{0.3}', { to: 'glsl' })).toBe('pow(x, 0.3)');
     // `2.4` reads as `12/5`, so `1/2.4` is `5/12`: an even denominator, the
     // principal complex value for a negative radicand.
     expect(code('\\sqrt[2.4]{x}')).toBe('Math.pow(_.x, 0.4166666666666667)');
-    expect(code('\\sqrt[2.4]{x}', { to: 'interval-js' })).toBe(
-      '_IA.pow(_.x, 0.4166666666666667)'
-    );
-    // `1.5` reads as `3/2`, so `1/1.5` is `2/3`: an odd denominator and an
-    // even numerator, the positive real root.
-    expect(code('\\sqrt[1.5]{x}', { to: 'interval-js' })).toBe(
-      '_IA.powRational(_.x, 2, 3)'
-    );
     // A provably non-negative base keeps the plain power.
     ce.declare('t', 'real');
     ce.assume(ce.parse('t \\ge 0'));
     expect(code('t^{0.6}')).toBe('Math.pow(_.t, 0.6)');
-    expect(code('t^{0.6}', { to: 'interval-js' })).toBe('_IA.pow(_.t, 0.6)');
   });
 });

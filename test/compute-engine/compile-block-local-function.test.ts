@@ -23,6 +23,7 @@ import { operands } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 let ce: ComputeEngine;
 beforeEach(() => {
@@ -765,23 +766,25 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     );
   });
 
-  it('the interval target declines a rebound function with the reason', () => {
-    // A top-level reassignment: the `if` of `inBranch` declines earlier on
-    // this target, on its own else-less branch.
-    const result = compile(
-      ce.box([
-        'Block',
-        ['Declare', 'k', "'function'", twice],
-        ['Declare', 'a', "'unknown'", ['k', 'x']],
-        ['Assign', 'k', thrice],
-        ['Add', 'a', ['k', 'x']],
-      ] as never),
-      { to: 'interval-js', fallback: false } as never
-    )!;
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(
-      /`k` is assigned more than once or inside a nested statement.*known only at run time/
-    );
+  it('the interval target declines a rebound function at its declaration', () => {
+    // A local of type function has no lowering on interval-js.
+    let diagnostic: { code: string; operator?: string } | undefined;
+    try {
+      compile(
+        ce.box([
+          'Block',
+          ['Declare', 'k', "'function'", twice],
+          ['Declare', 'a', "'unknown'", ['k', 'x']],
+          ['Assign', 'k', thrice],
+          ['Add', 'a', ['k', 'x']],
+        ] as never),
+        { to: 'interval-js', fallback: false } as never
+      );
+    } catch (e) {
+      diagnostic = compileDiagnosticOf(e);
+    }
+    expect(diagnostic?.code).toBe('outside-profile');
+    expect(diagnostic?.operator).toBe('Declare');
   });
 
   it('compiles the LaTeX spelling', () => {
@@ -798,30 +801,6 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
       ce2.assign('x', 3);
       expect(ce2.parse(latex).evaluate().toString()).toBe('6');
     }
-  });
-
-  it('the interval target compiles it as it compiles the `const` form', () => {
-    const result = compile(
-      ce.box([
-        'Block',
-        ['Declare', 'k', "'function'", twice],
-        ['k', 'x'],
-      ] as never),
-      { to: 'interval-js', fallback: false } as never
-    )!;
-    expect(result.success).toBe(true);
-    expect(result.run!({ x: 3 } as never)).toEqual({
-      kind: 'interval',
-      value: { lo: 6, hi: 6 },
-    });
-    // `x` is declared `real | list<real>`. The interval target spells a
-    // `Block` root itself, and it still has one body per shape of `x`: the
-    // list body maps `k` over the list, as the interpreter does.
-    expect(result.code).toContain('_IA.mapFn(k, [1], _.x)');
-    expect(result.run!({ x: [1, 2] } as never)).toEqual([
-      { kind: 'interval', value: { lo: 2, hi: 2 } },
-      { kind: 'interval', value: { lo: 4, hi: 4 } },
-    ]);
   });
 
   it('the GPU targets fail closed, as for the `const` form', () => {

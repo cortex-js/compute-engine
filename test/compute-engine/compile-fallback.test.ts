@@ -12,6 +12,10 @@
 import { engine as ce } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import {
+  compileDiagnosticOf,
+  isCompileDeclineError,
+} from '../../src/compute-engine/compilation/diagnostics';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 // Using an unregistered target deterministically forces the fallback path,
@@ -317,12 +321,17 @@ describe('Compilation fallback — interval-js declines still provide `run`', ()
   });
 
   test('fallback: false surfaces the raw decline (no interpreter run)', () => {
-    // The interval target's primary failure class reports `success: false`
-    // without throwing; opting out of the fallback surfaces that raw shape.
+    // Opting out of the fallback throws the decline of the interval mode.
     const e = ce.parse('\\sum_{i=1}^{\\infty} 2^{-i}');
-    const r = compile(e, { to: 'interval-js', fallback: false });
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/not a finite number/);
+    let error: unknown;
+    try {
+      compile(e, { to: 'interval-js', fallback: false });
+    } catch (err) {
+      error = err;
+    }
+    expect(isCompileDeclineError(error)).toBe(true);
+    expect(compileDiagnosticOf(error).code).toBe('outside-profile');
+    expect(compileDiagnosticOf(error).value).toBe('+oo');
   });
 });
 

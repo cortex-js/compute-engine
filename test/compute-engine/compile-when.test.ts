@@ -2,6 +2,12 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
+/** `compile()` to `interval-js`, with the call shape of a target's `compile()`. */
+const INTERVAL_JS = {
+  compile: (expr: any, options: Record<string, unknown> = {}) =>
+    compile(expr, { ...options, to: 'interval-js' } as any) as any,
+};
+
 const ce = new ComputeEngine();
 ce.declare('x', 'number');
 const glsl = new GLSLTarget();
@@ -95,14 +101,7 @@ describe('COMPILE single-branch If (restriction)', () => {
   // (Tycho 0.72.0 restriction-brace probe, issue 1: an input interval
   // entirely outside the condition returned a normal interval result.)
   describe('interval-js target', () => {
-    const target = ce._getCompilationTarget('interval-js')!;
-
-    it('compiles a restriction to _IA.restrict, not a bare ternary', () => {
-      const expr = ce.parse('\\sin(x)\\{x>0\\}');
-      const result = target.compile(expr);
-      expect(result.success).toBe(true);
-      expect(result.code).toContain('_IA.restrict(');
-    });
+    const target = INTERVAL_JS;
 
     it('masks an input interval entirely outside the condition', () => {
       const expr = ce.parse('\\sin(x)\\{x>0\\}');

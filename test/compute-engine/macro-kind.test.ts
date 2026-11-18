@@ -1212,10 +1212,6 @@ describe('compiled code (section 4)', () => {
   test.each([
     ['javascript', 'const _cse1 = Math.sin((_.x * _.x) + (_.y * _.y))'],
     ['glsl', 'float _cse1 = _gpu_sin((x * x) + (y * y));'],
-    [
-      'interval-js',
-      'const _cse1 = _IA.sin(_IA.add(_IA.square(_.x), _IA.square(_.y)))',
-    ],
   ])('a body written three times is one shared local on %s', (to, fragment) => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
@@ -1228,6 +1224,37 @@ describe('compiled code (section 4)', () => {
     expect(c.success).toBe(true);
     expect(c.code).toContain(fragment);
     expect(c.code.match(/_cse1 =|_cse1 in/g)?.length).toBe(1);
+  });
+
+  test('a body written three times encloses the interpreter value on interval-js', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
+    ce.declare('A', { macro: ['Sin', X2_Y2] });
+    const expr = ce.box(['Add', ['Multiply', 'x', 'A'], ['Divide', 1, 'A'], 'A']);
+    const c = compile(expr, { to: 'interval-js' }) as J;
+    expect(c.success).toBe(true);
+    const encloses = (
+      got: { value: { lo: number; hi: number } },
+      x: number,
+      y: number
+    ) => {
+      const expected = expr.subs({ x, y }).N().re;
+      expect(got.value.lo).toBeLessThanOrEqual(expected);
+      expect(got.value.hi).toBeGreaterThanOrEqual(expected);
+    };
+    for (const [x, y] of [
+      [1, 0.5],
+      [0.3, 1.2],
+    ])
+      encloses(c.run({ x: { lo: x, hi: x }, y: { lo: y, hi: y } }), x, y);
+    const box = c.run({ x: { lo: 1, hi: 1.05 }, y: { lo: 0.5, hi: 0.55 } });
+    for (const [x, y] of [
+      [1, 0.5],
+      [1.02, 0.53],
+      [1.05, 0.55],
+    ])
+      encloses(box, x, y);
   });
 });
 

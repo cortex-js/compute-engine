@@ -195,6 +195,6 @@ describe('element-wise Sum/Product: unchanged behavior elsewhere', () => {
       { to: 'interval-js' } as any
     )!;
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/collection-valued body has no compiled form/);
+    expect(r.diagnostic?.code).toBe('outside-profile');
   });
 });

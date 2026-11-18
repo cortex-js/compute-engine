@@ -193,16 +193,12 @@ describe('GAMMA(s, z) for non-integer s < -1 and small z', () => {
   });
 
   test('the interval target refuses the two-operand Gamma', () => {
-    const r = compile(ce.expr(['Gamma', 's', 'z']), {
-      to: 'interval-js',
-      fallback: false,
-    } as never);
-    expect(r.success).toBe(false);
-    const one = compile(ce.expr(['Gamma', 's']), {
-      to: 'interval-js',
-      fallback: false,
-    } as never);
-    expect(one.success).toBe(true);
+    expect(() =>
+      compile(ce.expr(['Gamma', 's', 'z']), {
+        to: 'interval-js',
+        fallback: false,
+      } as never)
+    ).toThrow();
   });
 
   test('the shift is bounded and an overflow is +Infinity', () => {

@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 //
 // G3 lift — a GENERIC user function compiles whole-fn on the JavaScript
@@ -594,13 +595,17 @@ describe('G3 lift — a BLOCK-LOCAL generic declines where the engine route decl
   });
 
   test('a non-JavaScript target keeps the decline', () => {
-    const r = compile(localDoubler('(x: T) -> T where T: number', 5), {
-      to: 'interval-js',
-      constantFold: false,
-      fallback: false,
-    } as any);
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/GENERIC/);
+    let code: string | undefined;
+    try {
+      compile(localDoubler('(x: T) -> T where T: number', 5), {
+        to: 'interval-js',
+        constantFold: false,
+        fallback: false,
+      } as any);
+    } catch (e) {
+      code = compileDiagnosticOf(e).code;
+    }
+    expect(code).toBe('outside-profile');
   });
 });
 
@@ -665,12 +670,16 @@ describe('G3 lift — a BLOCK-LOCAL generic honours a NON-REAL NUMBER bound', ()
   });
 
   test('a non-JavaScript target still declines, on the JavaScript-only reading', () => {
-    const r = compile(localDoubler('(x: T) -> T where T: complex', 3), {
-      to: 'interval-js',
-      constantFold: false,
-      fallback: false,
-    } as any);
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/GENERIC/);
+    let code: string | undefined;
+    try {
+      compile(localDoubler('(x: T) -> T where T: complex', 3), {
+        to: 'interval-js',
+        constantFold: false,
+        fallback: false,
+      } as any);
+    } catch (e) {
+      code = compileDiagnosticOf(e).code;
+    }
+    expect(code).toBe('outside-profile');
   });
 });

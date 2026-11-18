@@ -12737,9 +12737,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // value — an all-scalar `PointList` at the root is the array of its
       // coordinate intervals, and a `PointList` with a list component
       // (`PointList(L_1, L_2)`) is the list of points that `_IA.pointList`
-      // builds at run time. See `literalRootPointOps` and
-      // `compileIntervalCollectionValue` in
-      // `compilation/interval-javascript-target.ts`.
+      // builds at run time (`compilation/ir/lower.ts`).
       //
       // On `glsl`, decline by fall-through to the target table
       // (`PointList` in `glsl-target.ts`). A shader point is

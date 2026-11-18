@@ -22,6 +22,7 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 const ce = new ComputeEngine();
 ce.declare('x', 'real');
@@ -38,9 +39,11 @@ function compileTo(json: unknown, to: string) {
   try {
     return compile(ce.box(json as any), { to: to as any, fallback: false });
   } catch (e) {
-    return { success: false, error: (e as Error).message } as ReturnType<
-      typeof compile
-    >;
+    return {
+      success: false,
+      error: (e as Error).message,
+      diagnostic: compileDiagnosticOf(e),
+    } as ReturnType<typeof compile>;
   }
 }
 
@@ -237,7 +240,11 @@ describe('A Loop with a Return and a Break', () => {
     for (const to of ['javascript', 'interval-js']) {
       const r = compileTo(json, to);
       expect([to, r.success]).toEqual([to, false]);
-      expect(r.error).toMatch(NOTHING);
+      // On interval-js the value of a Loop declines as outside the profile.
+      if (to === 'interval-js') {
+        expect(r.diagnostic?.code).toBe('outside-profile');
+        expect(r.diagnostic?.operator).toBe('Loop');
+      } else expect(r.error).toMatch(NOTHING);
     }
   });
 });

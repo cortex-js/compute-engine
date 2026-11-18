@@ -1,10 +1,7 @@
 /**
- * The `interval-js` code of a rounding function with a step. It is shared by
- * the operator table of the `interval-js` target
- * (`compilation/interval-javascript-target.ts`) and by the compiled form of
- * the value kind `enclosure` (`enclosure-compile.ts`), which must emit the
- * same kernel for the same form. It is in `library/` because `library/`
- * must not import from `compilation/`.
+ * The `interval-js` code of a rounding function with a step, read by the
+ * compiled form of the value kind `enclosure` (`enclosure-compile.ts`). It is
+ * in `library/` because `library/` must not import from `compilation/`.
  */
 
 import type { Expression } from '../global-types.js';

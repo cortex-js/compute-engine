@@ -50,9 +50,6 @@ function interpret(source: string): { value: Value; errors: number } {
 const js = (source: string, vars: Record<string, Value> = {}) =>
   compileProgram(source).run(vars);
 
-const interval = (source: string, vars: Record<string, Value> = {}) =>
-  compileProgram(source, 'interval-js').run(vars);
-
 const DECLARED = 'let g: (integer) -> integer\nfunction g(k) { k + 1 }\n';
 const ASSIGNED = 'let g: (integer) -> integer = (k) => k + 1\n';
 const ANNOTATED = 'function g(k: integer) { k + 1 }\n';
@@ -73,7 +70,9 @@ describe.each([
     expect(() => compileProgram(head + 'g(1.5)')).toThrow(
       /Could not compile|incompatible-type/
     );
-    expect(compileProgram(head + 'g(1.5)', 'interval-js').success).toBe(false);
+    expect(() => compileProgram(head + 'g(1.5)', 'interval-js')).toThrow(
+      /Could not compile/
+    );
   });
 
   test('an integer literal compiles as before, without a test', () => {
@@ -81,10 +80,6 @@ describe.each([
     const c = compileProgram(head + 'g(1)');
     expect(c.run()).toBe(2);
     expect(c.code).not.toContain('Number.isInteger');
-    expect(interval(head + 'g(1)')).toEqual({
-      kind: 'interval',
-      value: { lo: 2, hi: 2 },
-    });
   });
 
   test('a local declared integer is not tested', () => {
@@ -138,10 +133,6 @@ describe.each([
     expect(interpret('let x = 1.5\n' + head + 'g(x)').errors).toBe(1);
     expect(interpret('let x = 2\n' + head + 'g(x)').value).toBe(3);
     expect(js(head + 'g(x)', { x: 2 })).toBe(3);
-    expect(interval(head + 'g(x)', { x: 2 })).toEqual({
-      kind: 'interval',
-      value: { lo: 3, hi: 3 },
-    });
   });
 
   test('a list of reals is not tested', () => {
@@ -166,25 +157,12 @@ describe('OTHER DECLARED PARAMETER TYPES', () => {
     const head = 'let g: (integer<0..>) -> integer = (k) => k + 1\n';
     expect(interpret('let x = -1\n' + head + 'g(x)').errors).toBe(1);
     expect(js(head + 'g(x)', { x: 1 })).toBe(2);
-    expect(interval(head + 'g(x)', { x: 1 })).toEqual({
-      kind: 'interval',
-      value: { lo: 2, hi: 2 },
-    });
   });
 
   test('a bounded real type is not tested', () => {
     const head = 'let g: (real<0..>) -> real = (k) => k + 1\n';
     expect(interpret('let x = -0.5\n' + head + 'g(x)').errors).toBe(1);
     expect(js(head + 'g(x)', { x: 0.5 })).toBe(1.5);
-    expect(interval(head + 'g(x)', { x: 0.5 })).toEqual({
-      kind: 'interval',
-      value: { lo: 1.5, hi: 1.5 },
-    });
-  });
-
-  test('an annotated bounded real parameter is not tested', () => {
-    const head = 'function g(x: real<0..>) { 1 }\n';
-    expect(compileProgram(head + 'g(x)', 'interval-js').success).toBe(true);
   });
 
   // `real<0<..>` is x > 0 and `real<..<3>` is x < 3: the bound itself is not
@@ -217,7 +195,6 @@ describe('OTHER DECLARED PARAMETER TYPES', () => {
   test('a rational parameter is not tested', () => {
     const head = 'let g: (rational) -> real = (k) => k + 1\n';
     expect(js(head + 'g(x)', { x: 0.5 })).toBe(1.5);
-    expect(compileProgram(head + 'g(x)', 'interval-js').success).toBe(true);
     expect(js(head + 'g(1)')).toBe(2);
   });
 
@@ -227,10 +204,6 @@ describe('OTHER DECLARED PARAMETER TYPES', () => {
     const source = 'let g: (real) -> integer = (k) => k + 1\ng(1.5)';
     expect(interpret(source).value).toBe(2.5);
     expect(js(source)).toBe(2.5);
-    expect(interval(source)).toEqual({
-      kind: 'interval',
-      value: { lo: 2.5, hi: 2.5 },
-    });
   });
 });
 

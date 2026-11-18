@@ -160,10 +160,6 @@ describe('COMPILE Loop (interval-js)', () => {
     ]);
     const result = compile(expr, { to: 'interval-js' })!;
     expect(result.success).toBe(true);
-    // Loop counter should be raw numbers, not _IA.point()
-    expect(result.code).toContain('for (let i = 1; i <= 5; i++)');
-    // Body should wrap index as interval
-    expect(result.code).toContain('_IA.point(i)');
     // sum 1..5 = 15
     const out = result.run!() as any;
     const val = out.kind === 'interval' ? out.value : out;
@@ -471,8 +467,6 @@ describe('COMPILE Loop comprehension under interval-js', () => {
     ]);
     const result = compile(expr, { to: 'interval-js' })!;
     expect(result.success).toBe(true);
-    expect(result.code).toContain('_IA.point(x)');
-    expect(result.code).toContain('_IA.point(y)');
     const out = result.run!() as any[];
     expect(out.length).toBe(4);
     // Every entry should be an interval (not a raw number).

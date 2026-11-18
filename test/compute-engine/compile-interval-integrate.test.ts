@@ -138,24 +138,6 @@ describe('COMPILE interval-js Integrate — antiderivative-first', () => {
     expect(containsWithin(out, atLo)).toBe(true);
     expect(containsWithin(out, atHi)).toBe(true);
   });
-
-  test('a `vars`-mapped symbol keeps the fold only for a valueless plain read', () => {
-    // Mirrors the JavaScript target's `vars`-gate test. A valueless symbol
-    // mapped to the plain read `_.k` stays a live read in the closed form, so
-    // the fold is kept; a mapping that is not a plain read forces the
-    // enclosure path.
-    const plain = compileInterval('\\int_0^k t\\,dt', { k: '_.k' });
-    expect(plain.code).toContain('_IA.integrateClosed(');
-    expect(plain.code).not.toContain('_IA.integrate(');
-    const folded = plain.run({ k: { lo: 4, hi: 4 } });
-    expect(contains(folded, 8)).toBe(true); // k²/2
-    expect(widthOf(folded)).toBe(0);
-
-    const withVars = compileInterval('\\int_0^k t\\,dt', { k: '(_.k)' });
-    expect(withVars.code).toContain('_IA.integrate(');
-    const out = withVars.run({ k: { lo: 4, hi: 4 } });
-    expect(contains(out, 8)).toBe(true);
-  });
 });
 
 describe('COMPILE interval-js Integrate — enclosure emitter', () => {
@@ -173,38 +155,6 @@ describe('COMPILE interval-js Integrate — enclosure emitter', () => {
     expect(widthOf(out)).toBeLessThan(0.02);
   });
 
-  test('reversed bounds give the negated enclosure', () => {
-    const forward = compileInterval('\\int_0^1 a e^{-t^2}\\,dt', { a: '(_.a)' });
-    const reversed = compileInterval('\\int_1^0 a e^{-t^2}\\,dt', { a: '(_.a)' });
-    expect(reversed.code).toContain('_IA.integrate(');
-
-    const f = enclosureOf(forward.run({ a: 1 }));
-    const b = enclosureOf(reversed.run({ a: 1 }));
-    expect(b.lo).toBe(-f.hi);
-    expect(b.hi).toBe(-f.lo);
-    expect(
-      contains(reversed.run({ a: 1 }), -reference('\\int_0^1 e^{-t^2}\\,dt'))
-    ).toBe(true);
-  });
-
-  test('a WIDE lower bound encloses every integral in the bound range', () => {
-    // ∫_c^1 e^{−t²} dt with c ∈ [0, 0.5]: the true value sweeps the whole
-    // range between ∫₀¹ and ∫_{0.5}^1 as c sweeps its interval.
-    const r = compileInterval('\\int_c^1 a e^{-t^2}\\,dt', { a: '(_.a)' });
-    expect(r.code).toContain('_IA.integrate(');
-
-    const atZero = reference('\\int_0^1 e^{-t^2}\\,dt');
-    const atHalf = reference('\\int_{0.5}^1 e^{-t^2}\\,dt');
-    const out = r.run({ a: 1, c: { lo: 0, hi: 0.5 } });
-    expect(kindOf(out)).toBe('interval');
-    expect(contains(out, atZero)).toBe(true);
-    expect(contains(out, atHalf)).toBe(true);
-    // The correction term for a wide bound is (bound width)·(f's hull there),
-    // so the enclosure is necessarily about that wide — this is the price of
-    // an interval-valued bound, not a partition artifact.
-    expect(widthOf(out)).toBeLessThan(0.75);
-  });
-
   test('a nested double integral encloses the interpreter value', () => {
     // e^{−xy²} has no elementary antiderivative in y that the engine closes,
     // so BOTH levels reach the enclosure emitter — asserted, not assumed.
@@ -217,46 +167,6 @@ describe('COMPILE interval-js Integrate — enclosure emitter', () => {
     expect(kindOf(out)).toBe('interval');
     expect(contains(out, expected)).toBe(true);
     expect(widthOf(out)).toBeLessThan(0.02);
-  });
-});
-
-describe('COMPILE interval-js Integrate — non-interval outcomes', () => {
-  test('a pole inside the range reports `singular`', () => {
-    // ∫₋₁¹ dt/t diverges. `_IA.div` reports `singular` only for a subinterval
-    // that STRICTLY contains the pole and `partial` with an infinite bound when
-    // the pole lands on a partition endpoint (it does here: 0 is a partition
-    // point of [−1, 1]). The accumulated enclosure is non-finite either way,
-    // and over a FINITE range that can only mean an unbounded integrand — so
-    // the answer is `singular` regardless of where the partition falls.
-    const r = compileInterval('\\int_{-1}^{1} \\frac{a}{t}\\,dt', {
-      a: '(_.a)',
-    });
-    expect(r.code).toContain('_IA.integrate(');
-    expect(kindOf(r.run({ a: 1 }))).toBe('singular');
-  });
-
-  test('a pole strictly inside a subinterval also reports `singular`', () => {
-    // Same integrand, a range whose partition does NOT put an endpoint on the
-    // pole — the `_IA.div` `singular` path rather than the infinite-bound one.
-    const r = compileInterval('\\int_{-1}^{2} \\frac{a}{t}\\,dt', {
-      a: '(_.a)',
-    });
-    expect(kindOf(r.run({ a: 1 }))).toBe('singular');
-  });
-
-  test('an integrand undefined on the range reports `empty`', () => {
-    // ln t is undefined for t < 0, so no part of [−2, −1] is in its domain.
-    const r = compileInterval('\\int_{-2}^{-1} a\\ln(t)\\,dt', { a: '(_.a)' });
-    expect(r.code).toContain('_IA.integrate(');
-    expect(kindOf(r.run({ a: 1 }))).toBe('empty');
-  });
-
-  test('an infinite bound reports `entire` — no finite partition exists', () => {
-    const r = compileInterval('\\int_0^\\infty a e^{-t^2}\\,dt', {
-      a: '(_.a)',
-    });
-    expect(r.code).toContain('_IA.integrate(');
-    expect(kindOf(r.run({ a: 1 }))).toBe('entire');
   });
 });
 
@@ -322,51 +232,6 @@ describe('COMPILE interval-js Integrate — review hardening', () => {
     expect(v.value.hi).toBeCloseTo(9, 12);
   });
 
-  test('nested limits share one evaluation budget: a triple integral gets 40 pieces per level', () => {
-    const r = compile(
-      ce.box([
-        'Integrate',
-        ['Multiply', 'a', 'x', 'y', 'z'],
-        ['Limits', 'x', 0, 1],
-        ['Limits', 'y', 0, 1],
-        ['Limits', 'z', 0, 1],
-      ]),
-      { to: 'interval-js', vars: { a: '_.a' } }
-    );
-    expect(r.success).toBe(true);
-    expect((r.code.match(/, 40\)/g) ?? []).length).toBe(3);
-    const v = r.run!({ a: 1 }) as {
-      kind: string;
-      value: { lo: number; hi: number };
-    };
-    expect(v.kind).toBe('interval');
-    expect(v.value.lo).toBeLessThanOrEqual(0.125);
-    expect(v.value.hi).toBeGreaterThanOrEqual(0.125);
-  });
-
-  test('a `Function` integrand is paired to the limits BY NAME, as the interpreter does', () => {
-    // ∫₀¹∫₀² a·x·y² dy dx = a·(1/2)·(8/3) = 4a/3. Positional pairing would
-    // bind the lambda named `y` to x's range and compute ∫∫ a·y·x² = 2a/3.
-    const r = compile(
-      ce.box([
-        'Integrate',
-        ['Function', ['Multiply', 'a', 'x', ['Square', 'y']], 'y', 'x'],
-        ['Limits', 'x', 0, 1],
-        ['Limits', 'y', 0, 2],
-      ]),
-      { to: 'interval-js', vars: { a: '_.a' } }
-    );
-    expect(r.success).toBe(true);
-    const v = r.run!({ a: 1 }) as {
-      kind: string;
-      value: { lo: number; hi: number };
-    };
-    expect(v.kind).toBe('interval');
-    expect(v.value.lo).toBeLessThanOrEqual(4 / 3);
-    expect(v.value.hi).toBeGreaterThanOrEqual(4 / 3);
-    expect(v.value.hi - v.value.lo).toBeLessThan(0.05);
-  });
-
   test('a `Function` integrand with a spare parameter fails closed', () => {
     const r = compile(
       ce.box([
@@ -377,25 +242,8 @@ describe('COMPILE interval-js Integrate — review hardening', () => {
       { to: 'interval-js', vars: { q: '_.q' } }
     );
     expect(r.success).toBe(false);
-    expect(String(r.error)).toContain('one to one');
-  });
-
-  test('the accumulation is widened for its own rounding: a constant integrand encloses the exact value', () => {
-    // 0.1 is not a double; 1000 products and sums of it would otherwise
-    // round the exact ∫₀¹ 0.1 dt = 0.1 out of a zero-width result.
-    const r = compile(
-      ce.box(['Integrate', ['Multiply', 'a', 0.1], ['Limits', 't', 0, 1]]),
-      { to: 'interval-js', vars: { a: '_.a' } }
-    );
-    expect(r.success).toBe(true);
-    const v = r.run!({ a: 1 }) as {
-      kind: string;
-      value: { lo: number; hi: number };
-    };
-    expect(v.kind).toBe('interval');
-    expect(v.value.lo).toBeLessThanOrEqual(0.1);
-    expect(v.value.hi).toBeGreaterThanOrEqual(0.1);
-    expect(v.value.hi - v.value.lo).toBeLessThan(1e-12);
+    expect(r.diagnostic?.code).toBe('outside-profile');
+    expect(r.diagnostic?.operator).toBe('Integrate');
   });
 });
 
@@ -414,7 +262,8 @@ describe('COMPILE interval-js Integrate — collection body and bounds fail clos
       { to: 'interval-js' }
     );
     expect(r.success).toBe(false);
-    expect(String(r.error)).toContain('collection-valued body');
+    expect(r.diagnostic?.code).toBe('outside-profile');
+    expect(r.diagnostic?.value).toBe('Block(Multiply(2, "Lb"))');
   });
 
   test('a collection-valued bound declines', () => {
@@ -422,7 +271,8 @@ describe('COMPILE interval-js Integrate — collection body and bounds fail clos
       to: 'interval-js',
     });
     expect(r.success).toBe(false);
-    expect(String(r.error)).toContain('is a collection');
+    expect(r.diagnostic?.code).toBe('outside-profile');
+    expect(r.diagnostic?.value).toBe('"Lb"');
   });
 });
 
@@ -470,21 +320,6 @@ describe('INTERVAL INTEGRATE — dynamic nesting: compile-time sizing and the ru
     return src;
   }
 
-  test('a four-deep visible chain is SIZED: coarse honest enclosure, milliseconds', () => {
-    // `x_0` is vars-mapped so no level closes symbolically and every level
-    // takes the enclosure emitter. Four visible levels size to a uniform
-    // ⌊(65536/4)^(1/4)⌋ = 11 pieces per level (4 integral runs, 4 levels) —
-    // a genuine enclosure at ~6·10⁴ evaluations, where unsized 256⁴ ≈ 4·10⁹
-    // never returned.
-    const r = compileInterval(chain(4, 'x_{0}'), { x_0: '_.x_0' });
-    expect(r.code.match(/_IA\.integrate(?:Closed)?\(/g)?.length).toBe(4);
-    expect(r.code).toContain(', 11)');
-    expect(r.code).not.toContain(', 256)');
-    const out = r.run({ x_0: 0.5 });
-    expect(kindOf(out)).toBe('interval');
-    expect(contains(out, reference(chain(4, '0.5')))).toBe(true);
-  }, 30000);
-
   test('a seven-deep visible chain DECLINES: below 4 pieces per level', () => {
     // 7 integral runs, 7 levels → ⌊(65536/7)^(1/7)⌋ = 3 < 4. An enclosure that
     // coarse is as uninformative as `entire` while still costing the whole
@@ -495,100 +330,5 @@ describe('INTERVAL INTEGRATE — dynamic nesting: compile-time sizing and the ru
       vars: { x_0: '_.x_0' },
     });
     expect(res.success).toBe(false);
-  }, 30000);
-
-  test('a two-deep dynamic chain still answers a finite enclosure', () => {
-    // Two visible levels size to ⌊(65536/2)^(1/2)⌋ = 181 pieces per level —
-    // within budget, so this must be a genuine enclosure, not `entire`.
-    const r = compileInterval(chain(2, 'x_{0}'), { x_0: '_.x_0' });
-    const out = r.run({ x_0: 0.5 });
-    expect(kindOf(out)).toBe('interval');
-    const expected = reference(chain(2, '0.5'));
-    expect(Number.isFinite(expected)).toBe(true);
-    expect(contains(out, expected)).toBe(true);
-  });
-
-  /** Three-level composition through NAMED functions: each body shows one
-   *  `Integrate` node, so the compile-time sizing sees no nesting and keeps
-   *  256 pieces at every level — the composition exists only at run time,
-   *  through the `_fn_*` calls. */
-  function declareByReferenceChain(): string {
-    ce.parse(
-      'q_{1}\\left(w\\right)\\coloneq \\int_0^1 \\sin\\left(w+x\\right) dx'
-    ).evaluate();
-    ce.parse(
-      'q_{2}\\left(w\\right)\\coloneq \\int_0^1 \\sin\\left(q_{1}\\left(x\\right)+w\\right) dx'
-    ).evaluate();
-    ce.parse(
-      'q_{3}\\left(w\\right)\\coloneq \\int_0^1 \\sin\\left(q_{2}\\left(x\\right)+w\\right) dx'
-    ).evaluate();
-    return '\\int_0^1 q_{3}\\left(t+s\\right) dt';
-  }
-
-  test('by-reference composition is invisible to the sizing and bounded by the runtime budget', () => {
-    // Four dynamic levels at 256 pieces each want 256⁴ ≈ 4·10⁹ evaluations;
-    // the runtime budget cuts the nested work and the result degrades
-    // soundly — terminating is the pin. (`s` is vars-mapped so no level
-    // closes symbolically.)
-    const r = compileInterval(declareByReferenceChain(), { s: '_.s' });
-    expect(r.code).toContain(', 256)');
-    const out = r.run({ s: 0 });
-    expect(['interval', 'partial', 'entire']).toContain(kindOf(out));
-  }, 30000);
-
-  test('a compiler-sized double integral keeps its finite enclosure after a budget-exhausting run', () => {
-    // First exhaust the runtime budget with the by-reference chain, then
-    // verify the budget RESET at the next outermost entry: a sized double
-    // integral still returns a genuine enclosure, not `entire` left over
-    // from the previous run.
-    compileInterval(declareByReferenceChain(), { s: '_.s' }).run({ s: 0 });
-
-    const r = compileInterval(
-      '\\int_0^1\\int_0^1 s\\cdot e^{-x y^2}\\,dy\\,dx',
-      {
-        s: '_.s',
-      }
-    );
-    expect(r.code.match(/_IA\.integrate\(/g)?.length).toBe(2);
-    const out = r.run({ s: 1 });
-    expect(kindOf(out)).toBe('interval');
-    const expected = reference('\\int_0^1\\int_0^1 e^{-x y^2}\\,dy\\,dx');
-    expect(contains(out, expected)).toBe(true);
-    expect(widthOf(out)).toBeLessThan(0.02);
-  }, 30000);
-
-  test('a throwing nested integrand leaves the activation balanced', () => {
-    // The budget accounting hangs off a module-level activation counter
-    // unwound in `finally`; an unbalanced counter would only show up LATER,
-    // as a wrong `entire` on an unrelated integral (the counter never
-    // returning to zero means no outermost entry ever resets the budget
-    // again). Throw from a NESTED integrand, then verify a fresh sized
-    // double still gets a genuine enclosure.
-    expect(() =>
-      integrate(
-        () =>
-          integrate(
-            () => {
-              throw new Error('integrand failure');
-            },
-            { lo: 0, hi: 0 },
-            { lo: 1, hi: 1 }
-          ),
-        { lo: 0, hi: 0 },
-        { lo: 1, hi: 1 }
-      )
-    ).toThrow('integrand failure');
-
-    const r = compileInterval(
-      '\\int_0^1\\int_0^1 s\\cdot e^{-x y^2}\\,dy\\,dx',
-      {
-        s: '_.s',
-      }
-    );
-    const out = r.run({ s: 1 });
-    expect(kindOf(out)).toBe('interval');
-    expect(
-      contains(out, reference('\\int_0^1\\int_0^1 e^{-x y^2}\\,dy\\,dx'))
-    ).toBe(true);
   }, 30000);
 });

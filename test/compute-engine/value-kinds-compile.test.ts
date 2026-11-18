@@ -19,6 +19,7 @@ import type {
   Expression,
 } from '../../src/compute-engine';
 import { createJavaScriptRuntime } from '../../src/compute-engine/compilation/javascript-runtime';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 import {
   declareMyMod,
   declareUserMeasurement,
@@ -204,14 +205,18 @@ describe('VALUE KINDS: COMPILE CONTRACT', () => {
 
   test('a target the contract does not answer for declines', () => {
     const ce = engineWithG({ type: gf8Contract(), value: gValue });
-    const result = compile(ce.box(['Add', 'g', ['G', 2]]), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(result.success).toBe(false);
-    expect(String(result.error)).toContain(
-      "holds a value of the kind type 'gf8' to target 'interval-javascript'"
-    );
+    let diagnostic: { code: string; value?: string } | undefined;
+    try {
+      compile(ce.box(['Add', 'g', ['G', 2]]), {
+        to: 'interval-js',
+        fallback: false,
+      });
+    } catch (e) {
+      diagnostic = compileDiagnosticOf(e);
+    }
+    // The input `g` of the kind type `gf8` declines.
+    expect(diagnostic?.code).toBe('outside-profile');
+    expect(diagnostic?.value).toBe('g');
   });
 
   test('a kind with only `compile.value` declines', () => {

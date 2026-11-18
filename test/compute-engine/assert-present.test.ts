@@ -200,19 +200,6 @@ describe('AssertPresent — compiled (JavaScript)', () => {
     expect(String(later.code)).toContain('Number.isNaN');
   });
 
-  test('the interval target raises too: the assertion is not removed', () => {
-    ce.declare('x', 'number');
-    const r = compile(ce.box(['AssertPresent', 'x']), { to: 'interval-js' });
-    expect(r.success).toBe(true);
-    expect(String(r.code)).toContain('expected-present');
-    // `run()` turns every thrown error into `{ kind: 'entire' }` by design
-    // (`interval-runtime.ts`); the raw call shows the raise itself.
-    const raw = (r.run as unknown as { rawCall: (v: unknown) => unknown })
-      .rawCall;
-    expect(() => raw({ x: { lo: NaN, hi: NaN } })).toThrow(/expected-present/);
-    expect(r.run({ x: NaN })).toEqual({ kind: 'entire' });
-  });
-
   test('an operand that may be Nothing is declined', () => {
     ce.declare('w', 'integer | nothing');
     const r = compile(ce.box(['AssertPresent', 'w']), { to: 'javascript' });

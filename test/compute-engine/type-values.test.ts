@@ -6,6 +6,13 @@ import {
   isValueForm,
 } from '../../src/compute-engine/library/type-value-utils';
 import type { Expression } from '../../src/compute-engine/global-types';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
+
+/** `compile()` to `interval-js`, with the call shape of a target's `compile()`. */
+const INTERVAL_JS = {
+  compile: (expr: any, options: Record<string, unknown> = {}) =>
+    compile(expr, { ...options, to: 'interval-js' } as any) as any,
+};
 
 // First-class type values, phase 1: the `type` primitive, the `TypeFrom`
 // container (which SETTLES to its reduced canonical text at construction),
@@ -352,13 +359,13 @@ describe('compile fail-closed (plan §3.3)', () => {
   });
 
   test('interval-js fails closed through its success-flag contract', () => {
-    const target = (ce as any)._getCompilationTarget('interval-js');
+    const target = INTERVAL_JS;
     const value = ce.box(['TypeFrom', { str: 'integer' }]).evaluate();
     const r1 = target.compile(value);
     expect(r1.success).toBe(false);
     expect(String(r1.error)).toMatch(/could not compile/i);
     const eng = new ComputeEngine();
-    const t2 = (eng as any)._getCompilationTarget('interval-js');
+    const t2 = INTERVAL_JS;
     const r2 = t2.compile(nonConstantSubtype(eng));
     expect(r2.success).toBe(false);
     expect(String(r2.error)).toMatch(/could not compile/i);
@@ -628,7 +635,7 @@ describe('compile fail-closed: the phase-2 operators', () => {
     const js = (eng as any)._getCompilationTarget('javascript').compile(mt);
     expect(js.success).toBe(true);
     expect(js.code).toContain('Number.isInteger(');
-    const r = (eng as any)._getCompilationTarget('interval-js').compile(mt);
+    const r = INTERVAL_JS.compile(mt);
     expect(r.success).toBe(false);
     const untestable = eng.box(['MatchesType', 'gx', { str: 'list<integer>' }]);
     expect(() =>
@@ -646,7 +653,7 @@ describe('compile fail-closed: the phase-2 operators', () => {
     expect(() =>
       (eng as any)._getCompilationTarget('glsl').compile(cf)
     ).toThrow(/outside the GLSL fragment/);
-    const rc = (eng as any)._getCompilationTarget('interval-js').compile(cf);
+    const rc = INTERVAL_JS.compile(cf);
     expect(rc.success).toBe(false);
   });
 });

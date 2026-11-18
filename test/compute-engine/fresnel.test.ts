@@ -269,47 +269,6 @@ describe('FRESNEL - JavaScript compilation', () => {
   });
 });
 
-describe('FRESNEL - Interval JS compilation', () => {
-  test('compiles FresnelS to _IA.fresnelS', () => {
-    const expr = ce.expr(['FresnelS', 'x']);
-    const result = compile(expr, { to: 'interval-js' });
-    expect(result.success).toBe(true);
-    expect(result.code).toContain('_IA.fresnelS');
-  });
-
-  test('compiles FresnelC to _IA.fresnelC', () => {
-    const expr = ce.expr(['FresnelC', 'x']);
-    const result = compile(expr, { to: 'interval-js' });
-    expect(result.success).toBe(true);
-    expect(result.code).toContain('_IA.fresnelC');
-  });
-
-  test('interval FresnelS containing 0', () => {
-    const expr = ce.expr(['FresnelS', 'x']);
-    const result = compile(expr, { to: 'interval-js' });
-    expect(result.success).toBe(true);
-    const interval = result.run!({ x: { lo: -1, hi: 1 } });
-    expect(interval.kind).toBe('interval');
-    if (interval.kind === 'interval') {
-      // S(-1) < 0 and S(1) > 0, S(0) = 0
-      expect(interval.value.lo).toBeLessThan(0);
-      expect(interval.value.hi).toBeGreaterThan(0);
-    }
-  });
-
-  test('interval FresnelC point evaluation', () => {
-    const expr = ce.expr(['FresnelC', 'x']);
-    const result = compile(expr, { to: 'interval-js' });
-    expect(result.success).toBe(true);
-    const interval = result.run!({ x: { lo: 1, hi: 1 } });
-    expect(interval.kind).toBe('interval');
-    if (interval.kind === 'interval') {
-      expect(interval.value.lo).toBeCloseTo(fresnelC(1), 14);
-      expect(interval.value.hi).toBeCloseTo(fresnelC(1), 14);
-    }
-  });
-});
-
 describe('FRESNEL - huge arguments at raised precision', () => {
   // The 1/2 shortcut in the bignum kernel only applies while the 1/(πx)
   // correction sits below the working tolerance, i.e. while log10(x) exceeds

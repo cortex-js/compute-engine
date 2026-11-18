@@ -108,7 +108,6 @@ describe('COMPILE Which', () => {
       const result = compile(expr, { to: 'interval-js' })!;
       expect(result.success).toBe(true);
       expect(result.code).toContain("=== 'true' ?");
-      expect(result.code).not.toContain('() =>');
 
       // Test execution with point intervals
       // piecewise returns IntervalResult: {kind: 'interval', value: {lo, hi}}
@@ -135,13 +134,18 @@ describe('COMPILE Which', () => {
       ]);
       const result = compile(expr, { to: 'interval-js' })!;
       expect(result.success).toBe(true);
-      // One nested conditional per condition, each with its own tri-state
-      // temporary. The temporaries are counted rather than the occurrences:
-      // the lowering writes each arm twice — once in the branch that selects
-      // it, once in the hull an undecided condition takes — so the inner
-      // conditional's text appears twice inside the outer one.
-      const conditionals = new Set(result.code.match(/_tv\d+ =/g) ?? []);
-      expect(conditionals.size).toBe(2); // Two conditions, one default
+      // Each point selects one branch; a box across 0 is the hull of the
+      // three branches.
+      const valueAt = (x: unknown) => {
+        const r = result.run!({ x }) as any;
+        return r.kind === 'interval' ? r.value : r;
+      };
+      expect(valueAt(-2)).toEqual({ lo: -1, hi: -1 });
+      expect(valueAt(0)).toEqual({ lo: 0, hi: 0 });
+      expect(valueAt(3)).toEqual({ lo: 1, hi: 1 });
+      const box = valueAt({ lo: -1, hi: 1 });
+      expect(box.lo).toBeLessThanOrEqual(-1);
+      expect(box.hi).toBeGreaterThanOrEqual(1);
     });
 
     it('should compile Which nested inside Add', () => {

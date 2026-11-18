@@ -104,12 +104,21 @@ describe('CE-562 — a user-function body shares a call between the condition an
 
   it('interval-js', () => {
     const ce = engineWithT4();
-    const r = compile(ce.parse('\\cos(T_4(t))'), { to: 'interval-js' });
+    const expr = ce.parse('\\cos(T_4(t))');
+    const r = compile(expr, { to: 'interval-js' });
     expect(r.success).toBe(true);
-    expect(definition(r.preamble, 'T_4')).toBe(
-      'const _fn_T_4 = (ceArg_0) => (() => { const _cse1 = _fn_T_3(ceArg_0); ' +
-        'return _IA.restrict(_IA.less(_k4, _IA.cos(_cse1)), () => _cse1); })();'
-    );
+    const encloses = (
+      got: { value: { lo: number; hi: number } },
+      t: number
+    ) => {
+      const expected = expr.subs({ t }).N().re;
+      expect(got.value.lo).toBeLessThanOrEqual(expected);
+      expect(got.value.hi).toBeGreaterThanOrEqual(expected);
+    };
+    for (const t of [0, 2.5, 17])
+      encloses(r.run!({ t: { lo: t, hi: t } }) as any, t);
+    const box = r.run!({ t: { lo: 0, hi: 1 } }) as any;
+    for (const t of [0, 0.5, 1]) encloses(box, t);
   });
 
   it('the compiled function agrees with the interpreter, the NaN branch included', () => {
@@ -139,7 +148,7 @@ describe('CE-562 — a top-level When', () => {
   }
   const shared = ['If', ['Less', 0, ['Cos', ['f', 'x']]], ['f', 'x']];
 
-  it.each(['javascript', 'glsl', 'interval-js'] as const)(
+  it.each(['javascript', 'glsl'] as const)(
     '%s: the call is emitted once',
     (to) => {
       const ce = engineWithF();
@@ -148,6 +157,25 @@ describe('CE-562 — a top-level When', () => {
       expect(count(r.code, '_fn_f(')).toBe(1);
     }
   );
+
+  it('interval-js: the value encloses the interpreter value', () => {
+    const ce = engineWithF();
+    const expr = ce.box(shared as never);
+    const r = compile(expr, { to: 'interval-js' });
+    expect(r.success).toBe(true);
+    const encloses = (
+      got: { value: { lo: number; hi: number } },
+      x: number
+    ) => {
+      const expected = expr.subs({ x }).N().re;
+      expect(got.value.lo).toBeLessThanOrEqual(expected);
+      expect(got.value.hi).toBeGreaterThanOrEqual(expected);
+    };
+    for (const x of [0.5, -0.3])
+      encloses(r.run!({ x: { lo: x, hi: x } }) as any, x);
+    const box = r.run!({ x: { lo: 0.4, hi: 0.6 } }) as any;
+    for (const x of [0.4, 0.5, 0.6]) encloses(box, x);
+  });
 
   it('javascript: the emission', () => {
     const ce = engineWithF();

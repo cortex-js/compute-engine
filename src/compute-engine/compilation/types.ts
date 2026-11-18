@@ -1071,10 +1071,9 @@ export interface CompileTarget<Expr = unknown> {
   /**
    * Per-level subdivision count chosen by the OUTERMOST `Integrate` lowering
    * of the interval target for every integral in its subtree — see the
-   * sizing model in `compileIntervalIntegrate`
-   * (`interval-javascript-target.ts`). The outermost node measures its whole
-   * subtree (how many `Integrate` nodes, how deeply they nest inside each
-   * other's integrands) and picks one uniform count that keeps the total
+   * sizing model in `interval-quadrature.ts`. The outermost node measures
+   * its whole subtree (how many `Integrate` nodes, how deeply they nest
+   * inside each other's integrands) and picks one uniform count that keeps the total
    * work inside the evaluation budget; inner lowerings must USE this count
    * rather than re-measure their own smaller subtree, which would pick a
    * larger count and break the product bound. Set only on the targets the
@@ -2245,19 +2244,6 @@ export type IntervalInput =
   number | Interval | boolean | BoolInterval | IntervalInput[];
 
 /**
- * The `interval-js` target, typed concretely: its compiled `run` accepts
- * {@link IntervalInput} variables and returns an {@link IntervalValue}.
- * Returned by `_getCompilationTarget("interval-js")` so callers get this
- * without a cast.
- */
-export type IntervalJsCompilationTarget<Expr = unknown> = LanguageTarget<
-  Expr,
-  'interval-js',
-  IntervalValue,
-  IntervalInput
->;
-
-/**
  * The `javascript` target, typed concretely: its compiled `run` accepts
  * `number | boolean | string | ComplexResult | RunnerListInput` variables
  * (plain reals, booleans, strings, complex domain-coloring inputs, or a
@@ -2954,9 +2940,7 @@ export type CompiledValue =
  * a boolean or an array of them. Folding them into
  * {@link CompiledValue} would force every ordinary caller to narrow past
  * interval shapes that a `javascript` runner can never return, so the default
- * selects on the target name instead. This mirrors the concrete typing
- * `_getCompilationTarget('interval-js')` already provides
- * ({@link IntervalJsCompilationTarget}).
+ * selects on the target name instead.
  */
 export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
   ? IntervalValue

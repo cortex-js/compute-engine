@@ -2,7 +2,10 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
+
+/** `compile()` to `interval-js`, called as a target's `compile()` is. */
+const intervalCompile = (expr: any, options: Record<string, unknown> = {}) =>
+  compile(expr, { ...options, to: 'interval-js' } as any) as any;
 
 /**
  * `PointList` as a COMPILED VALUE
@@ -728,27 +731,15 @@ describe('PointList — GPU construction and the other targets are unchanged', (
 
   it('interval-js builds the zipped list of points at run time', () => {
     const ce = zipEngine();
-    const r = new IntervalJavaScriptTarget().compile(
+    const r = intervalCompile(
       ce.box(['PointList', -6, 'n'])
     );
     expect(r.success).toBe(true);
-    expect(r.code).toBe("_IA.pointList('sl', _k1, _.n)");
-  });
-
-  it('interval-js: a component declared `number | list<number>` gives the interpreter value for each member', () => {
-    // The input `U` is declared with a union of shapes, so the code tests
-    // its shape once at the input and compiles one body per member: a
-    // scalar component (`'sl'`) and a list component (`'ll'`).
-    const ce = zipEngine();
-    const expr = ['PointList', 'U', 'n'];
-    const r = new IntervalJavaScriptTarget().compile(ce.box(expr as any));
-    expect(r.success).toBe(true);
     const point = (v: any): unknown =>
       Array.isArray(v) ? v.map(point) : v.value.lo === v.value.hi ? v.value.lo : v;
-    for (const U of [3, [5, 6]])
-      expect(point(r.run!({ U, n: [1, 2] } as any))).toEqual(
-        interpret(expr, { U, n: [1, 2] })
-      );
+    expect(point(r.run!({ n: [1, 2] } as any))).toEqual(
+      interpret(['PointList', -6, 'n'], { n: [1, 2] })
+    );
   });
 });
 

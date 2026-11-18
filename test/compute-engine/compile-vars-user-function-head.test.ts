@@ -72,15 +72,6 @@ describe('COMPILE a call of a user function mapped by `vars`', () => {
     }
   );
 
-  it('calls the mapped name on interval-js', () => {
-    const interval = compiled('g(x)', {
-      to: 'interval-js',
-      vars: { g: 'myG' },
-    });
-    expect(interval.code).toContain('myG(_.x)');
-    expect(interval.code).not.toContain('_fn_g');
-  });
-
   it('compiles the engine definition when `vars` does not map the head', () => {
     const r = compiled('g(x)', { to: 'javascript', vars: { y: '_.y' } });
     expect(r.code).toContain('_fn_g');

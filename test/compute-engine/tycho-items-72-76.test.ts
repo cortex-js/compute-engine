@@ -21,6 +21,13 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { engine as ce } from '../utils';
 import type { Expression } from '../../src/compute-engine/global-types';
 import { explicitBroadcastPointNorm } from '../../src/compute-engine/compilation/base-compiler';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
+
+/** `compile()` to `interval-js`, with the call shape of a target's `compile()`. */
+const INTERVAL_JS = {
+  compile: (expr: any, options: Record<string, unknown> = {}) =>
+    compile(expr, { ...options, to: 'interval-js' } as any) as any,
+};
 
 ce.declare('x', 'real | signed_infinity | nan');
 ce.declare('y', 'real | signed_infinity | nan');
@@ -107,23 +114,8 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
     expect(v).toEqual(5);
   });
 
-  test('Norm compiles on the interval-js target (2-D and 3-D)', () => {
-    const target = ce._getCompilationTarget('interval-js');
-    const r2 = target.compile(ce.parse('\\left\\Vert (x-1,y)\\right\\Vert'));
-    expect(r2.success).toBe(true);
-    const v2 = r2.run?.({ x: 4, y: 4 }) as any;
-    expect(v2.value.lo).toBeCloseTo(5, 10);
-    expect(v2.value.hi).toBeCloseTo(5, 10);
-
-    const r3 = target.compile(ce.parse('\\left\\Vert (x,y,z)\\right\\Vert'));
-    expect(r3.success).toBe(true);
-    const v3 = r3.run?.({ x: 1, y: 2, z: 2 }) as any;
-    expect(v3.value.lo).toBeCloseTo(3, 10);
-    expect(v3.value.hi).toBeCloseTo(3, 10);
-  });
-
   test('|(x,y)| compiles on the interval-js target', () => {
-    const target = ce._getCompilationTarget('interval-js');
+    const target = INTERVAL_JS;
     const r = target.compile(ce.parse('\\left|(x-1,y)\\right|'));
     expect(r.success).toBe(true);
     const v = r.run?.({ x: 4, y: 4 }) as any;
@@ -290,8 +282,7 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
       expect.closeTo(Math.sqrt(10), 12),
       expect.closeTo(Math.sqrt(13), 12),
     ]);
-    const iv = ce
-      ._getCompilationTarget('interval-js')
+    const iv = INTERVAL_JS
       .compile(expr, { constantFold: false });
     expect(iv.success).toBe(true);
     const enclosures = iv.run!({}) as {

@@ -2,15 +2,13 @@
  * The interval mode of the IR pipeline (`compile(expr, { to: 'interval-js',
  * profile: 'ir' })`), batch 6: integrals.
  *
- * An integral is `_IA.integrate(f, a, b, n)`, the enclosure of the existing
- * interval target, with its count of pieces `n` (`intervalQuadratureSize()`),
- * or with a closed form `_IA.integrateClosed(() => closed, f, a, b, n)`, as
- * on the existing target.
+ * An integral is `_IA.integrate(f, a, b, n)`, the enclosure of the interval
+ * library, with its count of pieces `n` (`intervalQuadratureSize()`), or
+ * with a closed form `_IA.integrateClosed(() => closed, f, a, b, n)`.
  *
  * Containment, as in `ir-interval-lists.test.ts`: at seeded random boxes,
  * the interpreter's value at points of the box is inside the result; an
- * end may miss by at most 2 ulps. The comparison with the existing interval
- * target: the same kind and bounds within 4 ulps or tighter.
+ * end may miss by at most 2 ulps.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -53,7 +51,7 @@ const CASES: Case[] = [
   C(I(['Sqrt', ['Add', ['Power', 't', 2], 1]], 't', x, ['Add', x, y])),
   C(I(['Sin', 't'], 't', x, 0)),
   C(I(['Sin', 't'], 't', x, x)),
-  // An infinite bound: the existing target's closed form.
+  // An infinite bound: a closed form.
   C(I(['Exp', ['Multiply', ['Rational', -1, 2], ['Power', 't', 2]]], 't', 'NegativeInfinity', x)),
   // A user function in the integrand, an integral in a user function.
   C(I(['g', 't'], 't', 0, x)),
@@ -86,20 +84,11 @@ const CASES: Case[] = [
   C(I(['Sin', ['Multiply', 't', 't']], 't', 0, 1)),
 ];
 
-/** The programs whose result differs from the existing target's at some
- *  box, with the reason: another kind, or a bound wider by more than 4
- *  ulps. */
-// prettier-ignore
-// Empty since the IR has a row for FresnelS (CE-1168): the closed form of
-// the integral of sin(t^2) is a constant of `N()` marked inexact, as on the
-// existing target.
-const EXCEPTIONS: Record<string, string> = {};
-
 /** The programs whose result is `empty` at a box where some bound has a
  *  value: the library answers `empty` when a piece of the partition from
  *  the lower ends of the bounds has no value (`interval/integrate.ts`,
  *  `propagatedKind()`), also where the upper bound of the box leaves that
- *  piece; the existing target gives the same (CE-1347). */
+ *  piece (CE-1347). */
 // prettier-ignore
 const NOT_CONTAINED: string[] = [
   I(['Which', ['Less', 't', y], ['Sqrt', 't'], 'True', 0], 't', 0, x),
@@ -173,10 +162,11 @@ const EXACT = new Set<string>();
  *  1e-8 of the value (counted as skipped). */
 function interpret(
   expr: Expression,
-  point: Record<string, number>
+  point: Record<string, number>,
+  engine: ComputeEngine = ce
 ): { v: number; err: number } | undefined {
   const sub = Object.fromEntries(
-    Object.entries(point).map(([k, v]) => [k, ce.box(exact(v) as never)])
+    Object.entries(point).map(([k, v]) => [k, engine.box(exact(v) as never)])
   );
   const n = expr.subs(sub).N();
   const err = n.operator === 'Measurement' ? Math.abs(n.ops![1].re) : 0;
@@ -202,7 +192,6 @@ let skipped = 0;
  *  largest relative error that one of them used. */
 let byError = 0;
 let largestError = 0;
-const differences = new Map<string, string>();
 
 /** A value of the interpreter with an error (at most 1e-8 of it) is
  *  contained when the result meets the range of the error. */
@@ -232,17 +221,6 @@ function contains(
   return [`${at}: ${JSON.stringify(got)}, interpreter ${v}`];
 }
 
-function sameOrTighter(got: unknown, was: unknown): boolean {
-  const [a, b] = [got as Kinded, was as Kinded];
-  if (a.kind !== b.kind) return false;
-  if (a.value === undefined || b.value === undefined)
-    return a.value === b.value;
-  return (
-    a.value.lo >= step(b.value.lo, 4, nextDown) &&
-    a.value.hi <= step(b.value.hi, 4, nextUp)
-  );
-}
-
 type Compiled = {
   success: boolean;
   code: string;
@@ -257,11 +235,6 @@ const mode = (json: Json, options: object = {}) =>
     fallback: false,
     ...options,
   } as never) as unknown as Compiled;
-const existing = (json: Json) =>
-  compile(ce.box(json as never), {
-    to: 'interval-js',
-    fallback: false,
-  } as never) as unknown as Compiled;
 
 describe('the interval mode, integrals: containment', () => {
   test.each(CASES.map((c) => [JSON.stringify(c.json), c]))('%s', (label, c) => {
@@ -269,7 +242,6 @@ describe('the interval mode, integrals: containment', () => {
     const ref = reference(expr);
     if (ref !== expr) EXACT.add(label);
     const r = mode(c.json);
-    const old = compile(expr, { to: 'interval-js' }) as unknown as Compiled;
     const rnd = random(label.length * 7919 + 17);
     const failures: string[] = [];
     for (const b of boxes(expr, c.centres ?? [], rnd)) {
@@ -284,13 +256,6 @@ describe('the interval mode, integrals: containment', () => {
             ...contains(got, interpret(expr, point), `${JSON.stringify(point)} (quadrature)`)
           );
       }
-      if (!old.success || differences.has(label)) continue;
-      const was = old.run(b);
-      if (!sameOrTighter(got, was))
-        differences.set(
-          label,
-          `${JSON.stringify(b)}: mode ${JSON.stringify(got)}, existing ${JSON.stringify(was)}`
-        );
     }
     if (NOT_CONTAINED.includes(label)) {
       // Only the documented failure, and at least one until CE-1347 is
@@ -307,11 +272,6 @@ describe('the interval mode, integrals: containment', () => {
         `${slack} within the 2-ulp slack; exact references: ${EXACT.size}\n${[...EXACT].join('\n')}`
     );
     expect(checks).toBeGreaterThan(1_000);
-  });
-
-  test('the programs that differ from the existing target', () => {
-    console.log([...differences].map(([k, v]) => `${k}\n  ${v}`).join('\n'));
-    expect([...differences.keys()].sort()).toEqual(Object.keys(EXCEPTIONS).sort());
   });
 });
 
@@ -360,8 +320,12 @@ describe('the interval mode, integrals: the code', () => {
     const r = mode(json);
     expect(r.code).not.toMatch(/integrateClosed/);
     expect(r.code).toMatch(/_IA\.integrate\([^]*, 256\);/);
-    const box = { x: { lo: 0.5, hi: 2 } };
-    expect(r.run(box)).toEqual(existing(json).run(box));
+    const got = r.run({ x: { lo: 0.5, hi: 2 } });
+    for (const x of [0.5, 1.25, 2]) {
+      const want = interpret(ce.box(json as never), { x });
+      expect(want).toBeDefined();
+      expect(contains(got, want, `x = ${x}`)).toEqual([]);
+    }
   });
 
   test('a closed form that the mode cannot print is dropped and the enclosure stands alone', () => {
@@ -382,15 +346,13 @@ describe('the interval mode, integrals: the code', () => {
       const expr = machine.box(json as never);
       const options = { to: 'interval-js', fallback: false };
       const r = compile(expr, { ...options, profile: 'ir' } as never) as unknown as Compiled;
-      const old = compile(expr, options as never) as unknown as Compiled;
       expect(r.success).toBe(true);
       expect(`${r.preambleOnce}\n${r.code}`).not.toMatch(/integrateClosed|zeta/i);
       expect(r.code).toMatch(/_IA\.integrate\(/);
-      // The enclosure over an infinite range is `entire`, as on the existing
-      // target: it contains 2ζ(3) = 2.4041138063191885.
+      // The enclosure over an infinite range is `entire`: it contains
+      // 2ζ(3) = 2.4041138063191885.
       const got = r.run({});
       expect(got).toEqual({ kind: 'entire' });
-      expect(got).toEqual(old.run({}));
       const v = Number(machine.box(['Multiply', 2, ['Zeta', 3]] as never).N().re);
       expect(contains(got, { v, err: 0 }, '2ζ(3)')).toEqual([]);
     } finally {
@@ -404,13 +366,17 @@ describe('the interval mode, integrals: the code', () => {
     const r = mode(json, vars);
     expect(r.code).toMatch(/integrateClosed/);
     expect(r.code).toMatch(/_\.a/);
-    const old = compile(ce.box(json as never), {
-      to: 'interval-js',
-      fallback: false,
-      ...vars,
-    } as never) as unknown as Compiled;
-    for (const a of [2, { lo: 1, hi: 3 }])
-      expect(r.run({ a })).toEqual(old.run({ a }));
+    for (const [a, points] of [
+      [2, [2]],
+      [{ lo: 1, hi: 3 }, [1, 2, 3]],
+    ] as const) {
+      const got = r.run({ a });
+      for (const v of points) {
+        const want = interpret(ce.box(json as never), { a: v });
+        expect(want).toBeDefined();
+        expect(contains(got, want, `a = ${v}`)).toEqual([]);
+      }
+    }
   });
 
   test('an indefinite integral is its closed form, or declines', () => {
@@ -425,10 +391,7 @@ describe('the interval mode, integrals: the code', () => {
   test('an indefinite integral over an undeclared name is its closed form, as that form written directly', () => {
     // The engine infers the type `number` for a name used in arithmetic,
     // so `w^3/3` of an undeclared `w` compiles; the closed form of the
-    // integral of `w^2` is that expression, and `w` is its input. The
-    // existing target refuses the integral (`untyped-input`): its walk
-    // sees `w` as bound by the integral. The shadow measure counts this as
-    // a program that the existing target declines and the mode admits.
+    // integral of `w^2` is that expression, and `w` is its input.
     const options = { to: 'interval-js', profile: 'ir', fallback: false };
     const integral = ['Integrate', ['Power', 'w', 2], ['Limits', 'w', 'Nothing', 'Nothing']];
     const direct = compile(
@@ -445,17 +408,11 @@ describe('the interval mode, integrals: the code', () => {
       expect(v.value!.lo).toBeLessThanOrEqual(8 / 3);
       expect(v.value!.hi).toBeGreaterThanOrEqual(8 / 3);
     }
-    const old = compile(new ComputeEngine().box(integral as never), {
-      to: 'interval-js',
-    } as never) as unknown as { success: boolean; diagnostic?: { code: string } };
-    expect(old.success).toBe(false);
-    expect(old.diagnostic?.code).toBe('untyped-input');
   });
 
   test('the closed form -2 of a divergent integral is refused by the scan', () => {
     const json = I(['Power', 't', -2], 't', -1, 1);
     expect(mode(json).code).toMatch(/integrateClosed/);
-    expect(mode(json).run({})).toEqual(existing(json).run({}));
     expect(mode(json).run({})).toEqual({ kind: 'singular' });
   });
 
@@ -465,7 +422,7 @@ describe('the interval mode, integrals: the code', () => {
     expect(code.match(/, 181\);/g)?.length).toBe(2);
   });
 
-  test('the count of the existing target, through a function call', () => {
+  test('the count through a function call', () => {
     // An integral in a user function has the count of its own subtree.
     const r = mode(I(['G', 't'], 't', 0, x));
     expect(r.code).toMatch(/, 256\);/);
@@ -504,7 +461,6 @@ describe('the interval mode, integrals: review round 1', () => {
     const json = I(['Sin', 't'], 't', 0, x);
     const expr = deg.box(json as never);
     const r = compile(expr, { to: 'interval-js', profile: 'ir', fallback: false } as never) as unknown as Compiled;
-    const old = compile(expr, { to: 'interval-js', fallback: false } as never) as unknown as Compiled;
     expect(r.code).not.toMatch(/integrateClosed/);
     for (const [lo, hi] of [[90, 90], [89, 91], [80, 100]]) {
       const got = r.run({ x: { lo, hi } }) as Kinded;
@@ -514,16 +470,16 @@ describe('the interval mode, integrals: review round 1', () => {
         expect(got.value!.lo).toBeLessThanOrEqual(value + 1e-12);
         expect(got.value!.hi).toBeGreaterThanOrEqual(value - 1e-12);
       }
-      // The existing target's closed form is tighter.
-      const was = old.run({ x: { lo, hi } }) as Kinded;
-      expect(got.value!.hi - got.value!.lo).toBeGreaterThan(was.value!.hi - was.value!.lo);
     }
-    // With no closed form, the integrand is scaled once: the existing
-    // target's enclosure.
+    // With no closed form, the integrand is scaled once.
     const none = deg.box(I(['Sin', ['Sin', 't']], 't', 0, x) as never);
     const a = compile(none, { to: 'interval-js', profile: 'ir', fallback: false } as never) as unknown as Compiled;
-    const b = compile(none, { to: 'interval-js', fallback: false } as never) as unknown as Compiled;
-    expect(a.run({ x: { lo: 89, hi: 91 } })).toEqual(b.run({ x: { lo: 89, hi: 91 } }));
+    const got = a.run({ x: { lo: 89, hi: 91 } });
+    for (const v of [89, 90, 91]) {
+      const want = interpret(none, { x: v }, deg);
+      expect(want).toBeDefined();
+      expect(contains(got, want, `x = ${v}`)).toEqual([]);
+    }
   });
 
   test('in degrees an indefinite integral declines, with its own reason', () => {
@@ -535,11 +491,6 @@ describe('the interval mode, integrals: review round 1', () => {
     expect(() =>
       compile(expr, { to: 'interval-js', profile: 'ir', fallback: false } as never)
     ).toThrow(/an angular unit other than radians/);
-    // The existing target compiles it, so the fallback has a result.
-    const old = compile(expr, { to: 'interval-js', fallback: false } as never) as unknown as Compiled;
-    const r = compile(expr, { to: 'interval-js', profile: 'ir' } as never) as unknown as Compiled;
-    expect(r.success).toBe(true);
-    expect(r.run({ x: { lo: 80, hi: 100 } })).toEqual(old.run({ x: { lo: 80, hi: 100 } }));
   });
 
   test('NIntegrate is a level in the mode only: the existing target keeps its count', () => {
@@ -626,11 +577,10 @@ describe('the interval mode, integrals: results', () => {
     const r = mode(I(['Sin', ['Sin', 't']], 't', 0, x));
     for (const v of [Infinity, -Infinity, NaN, { lo: NaN, hi: 1 }, { lo: 0, hi: Infinity }])
       expect(r.run({ x: v })).toEqual({ kind: 'entire' });
-    // A closed form with an infinite bound is the closed form, as on the
-    // existing target: the scan has no range to read.
+    // A closed form with an infinite bound is the closed form: the scan has
+    // no range to read.
     const json = I(['Exp', ['Negate', ['Power', 't', 2]]], 't', 'NegativeInfinity', x);
     const g = mode(json).run({ x: 0 }) as Kinded;
-    expect(sameOrTighter(g, existing(json).run({ x: 0 }))).toBe(true);
     expect(g.value!.lo).toBeLessThanOrEqual(Math.sqrt(Math.PI) / 2);
     expect(g.value!.hi).toBeGreaterThanOrEqual(Math.sqrt(Math.PI) / 2);
   });
@@ -645,10 +595,9 @@ describe('the interval mode, integrals: declines', () => {
     return json;
   };
 
-  test('an integral of fewer than 4 pieces declines, with the reason of the existing target', () => {
+  test('an integral of fewer than 4 pieces declines, with its reason', () => {
     const reason = /an honest interval enclosure — this integral's subtree reaches 9 integral runs nested 9 levels deep/;
     expect(() => mode(chain(9))).toThrow(reason);
-    expect((existing(chain(9)) as unknown as { error: string }).error).toMatch(reason);
     // Six levels have 4 pieces each.
     expect(mode(chain(6)).code.match(/, 4\);/g)?.length).toBe(6);
   });
@@ -744,6 +693,5 @@ describe('the interval mode, integrals: batch 19', () => {
     expect(r.code.indexOf('_IA.gamma(')).toBeGreaterThan(r.code.indexOf('_IA.integrate('));
     const box = { x: { lo: 0, hi: 1 }, y: { lo: 1, hi: 2 } };
     expect(r.run(box)).toEqual({ kind: 'entire' });
-    expect(r.run(box)).toEqual(existing(json).run(box));
   });
 });

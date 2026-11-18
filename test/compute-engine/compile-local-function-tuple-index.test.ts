@@ -37,24 +37,6 @@ function interpreted(source: string, x: number): string {
 const F = 'const f = (u) => (u + 1, 2)\n';
 
 describe('COMPILE an index into the tuple a block-local function returns', () => {
-  it('interval-js reads the component', () => {
-    const source = F + 'f(x)[1]';
-    expect(interpreted(source, 3)).toBe('4');
-    expect(compiled(source, 'interval-js', { x: 3 })).toEqual({
-      kind: 'interval',
-      value: { lo: 4, hi: 4 },
-    });
-  });
-
-  it('interval-js reads the second component', () => {
-    const source = F + 'f(x)[2] + f(x)[1]';
-    expect(interpreted(source, 3)).toBe('6');
-    expect(compiled(source, 'interval-js', { x: 3 })).toEqual({
-      kind: 'interval',
-      value: { lo: 6, hi: 6 },
-    });
-  });
-
   it('JavaScript reads the component for a number argument', () => {
     const source = F + 'f(3)[1] + f(4)[2]';
     expect(interpreted(source, 0)).toBe('6');

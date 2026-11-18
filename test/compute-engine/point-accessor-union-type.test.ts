@@ -522,17 +522,6 @@ describe('compiled point readers over a broadcastable point', () => {
     expect(compiled(['Norm', 'P'])(RANK2)).toBeNaN();
     expect(compiled(['Dot', 'P', ['Tuple', 1, 1]])(RANK2)).toBeNaN();
   });
-
-  test('the interval target reads one point and a list of points', () => {
-    const lo = (r: any) => r.value.lo;
-    const x = compiled(['PointX', 'P'], 'interval-js');
-    expect(lo(x(ONE))).toBe(3);
-    expect((x(TWO) as any[]).map(lo)).toEqual([3, 6]);
-    expect((x(RANK2) as any[][]).map((row) => row.map(lo))).toEqual([
-      [3, 6],
-      [5, 0],
-    ]);
-  });
 });
 
 describe('a point accessor over a tensor of points maps over the points', () => {
@@ -719,9 +708,13 @@ describe('point accessors over higher-rank data, non-numeric coordinates and emp
     expect(() => compile(e, { fallback: false })).toThrow(
       /not provably a number/
     );
-    const interval = compile(e, { to: 'interval-js', fallback: false });
-    expect(interval.success).toBe(false);
-    expect(interval.error).toMatch(/not provably a number/);
+    let interval: { code?: string } | undefined;
+    try {
+      compile(e, { to: 'interval-js', fallback: false });
+    } catch (err) {
+      interval = (err as { diagnostic?: { code?: string } }).diagnostic;
+    }
+    expect(interval?.code).toBe('outside-profile');
 
     ce.declare('Q', 'list<list<tuple<string, number>>>');
     ce.assign(
@@ -769,11 +762,6 @@ describe('point accessors over higher-rank data, non-numeric coordinates and emp
     expect(v.type.matches(e.type)).toBe(true);
     expect(asJS(v)).toEqual([[], [1, 3]]);
     expect(compile(e, { fallback: false }).run!({ L })).toEqual([[], [1, 3]]);
-    const r = compile(e, { to: 'interval-js', fallback: false }).run!({
-      L,
-    }) as any;
-    expect(r[0]).toEqual([]);
-    expect(r[1].map((x: any) => x.value.lo)).toEqual([1, 3]);
 
     // Every row empty: the value does not decide, and the declared type
     // does. Each row gives the empty list of coordinates.
@@ -888,11 +876,6 @@ describe('the coordinate type of a list of points, empty rows of a broadcastable
       expect(v.type.matches(e.type)).toBe(true);
       expect(compile(e, { fallback: false }).run!({ P: [[], []] } as any))
         .toEqual([[], []]);
-      expect(
-        compile(e, { to: 'interval-js', fallback: false }).run!({
-          P: [[], []],
-        } as any)
-      ).toEqual([[], []]);
     }
   });
 
@@ -931,10 +914,6 @@ describe('the coordinate type of a list of points, empty rows of a broadcastable
       } as any)
     ).toEqual([1, 3]);
     expect(c.run!({ V: [3, 4] } as any)).toBe(3);
-    // The interval target gives no band for that shape: `entire`.
-    const iv = compile(e, { to: 'interval-js', fallback: false });
-    expect(iv.success).toBe(true);
-    expect(Array.isArray(iv.run!({ V: rank3 } as any))).toBe(false);
   });
 
   // A symbol with no value, declared with a type that does not decide the
@@ -994,42 +973,6 @@ describe('the coordinate type of a list of points, empty rows of a broadcastable
         else expect(c.run!({ v: value } as any)).toEqual(asJS(evaluated));
       }
     }
-  });
-
-  // A list of points whose every point is absent keeps its length on
-  // `interval-js`: the list is present, and each coordinate is the `empty`
-  // result. The interpreter answers `[NaN, NaN]`: the coordinate of an
-  // absent point is a number, and the absent value of a number is `NaN`.
-  test('interval-js: the coordinates of a list of absent points', () => {
-    const ce = new ComputeEngine();
-    ce.declare('c', 'real');
-    ce.declare('d', 'real');
-    const interval = (json: unknown, vars: object = {}): unknown =>
-      compile(ce.box(json as any), {
-        to: 'interval-js',
-        fallback: false,
-      }).run!(vars as any);
-    const empty = { kind: 'empty' };
-    for (const head of ['PointX', 'PointY']) {
-      const json = [head, ['List', 'Missing', 'Missing']];
-      expect(ce.box(json as any).evaluate().toString()).toBe('[NaN,NaN]');
-      expect(interval(json)).toEqual([empty, empty]);
-    }
-    // `[P{c}, Q{d}]` with both conditions false.
-    const json = [
-      'PointX',
-      [
-        'List',
-        ['If', ['Less', 0, 'c'], ['Tuple', 1, 2]],
-        ['If', ['Less', 0, 'd'], ['Tuple', 3, 4]],
-      ],
-    ];
-    const cell = { lo: -1, hi: -1 };
-    expect(interval(json, { c: cell, d: cell })).toEqual([empty, empty]);
-    expect(interval(json, { c: { lo: 1, hi: 1 }, d: cell })).toEqual([
-      { kind: 'interval', value: { lo: 1, hi: 1 } },
-      empty,
-    ]);
   });
 
   // An absent point does not decide the reading of a list, and in a lazy

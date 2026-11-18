@@ -189,21 +189,27 @@ describe('other targets are unaffected', () => {
   // onto a JS runtime helper. The non-shader targets keep their own lowering
   // (no `_SYS`).
 
-  // The interval-js row used to pin `_IA.less(_.xs, _IA.point(3))` — a
-  // comparison over a JS array at run time, which answered `'maybe'` behind
-  // `success: true` where the interpreter broadcasts. The interval kernels
-  // now fail closed on a provably collection-valued operand (the interval
-  // domain has no element-wise convention); the engine-level compile()
-  // surfaces that as a fallback result. Still no `_SYS`.
-  test('interval-js fails closed on a collection-valued comparison operand', () => {
+  // The interval mode compares each element of a list operand, as the
+  // interpreter broadcasts. Still no `_SYS`.
+  test('interval-js compares each element of a collection-valued comparison operand', () => {
     const ce = new ComputeEngine();
     ce.declare('xs', 'list<real>');
     const r = compile(ce.box(['Less', 'xs', 3] as any), {
       to: 'interval-js',
+      fallback: false,
     } as any)!;
-    expect(r.success).toBe(false);
-    expect(String(r.error)).toContain('is a collection');
+    expect(r.success).toBe(true);
     expect(r.code ?? '').not.toContain('_SYS');
+    for (const xs of [[1, 5, 2], [4], []]) {
+      ce.assign('xs', ce.box(['List', ...xs]));
+      const want = ce
+        .box(['Less', 'xs', 3])
+        .evaluate()
+        .ops!.map((v) => (v.symbol === 'True' ? 'true' : 'false'));
+      expect(r.run!({ xs } as any)).toEqual(want);
+    }
+    // An element interval that straddles 3 is undecided.
+    expect(r.run!({ xs: [{ lo: 2, hi: 4 }] } as any)).toEqual(['maybe']);
   });
 
   // The GLSL row used to pin `xs < 3.0` — invalid shader source (`vec` vs

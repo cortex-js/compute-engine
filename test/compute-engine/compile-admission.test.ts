@@ -81,17 +81,11 @@ describe('An input with no type is refused (R1)', () => {
     const ce = engine();
     const e = ce.box(['Add', ['If', ['Greater', 'x', 0], 'M', 0], 'x']);
     expect(ce.box('M').type.toString()).toBe('unknown');
-    if (to === 'interval-js') {
-      // This target returns its decline as a `success: false` result.
-      const r = compile(e, { to, fallback: false });
-      expect(r.success).toBe(false);
-      expect(r.error).toMatch(/the input `M` has no type/);
-    } else
-      expect(() => compile(e, { to, fallback: false })).toThrow(
-        to === 'glsl'
-          ? /has no type in the GLSL fragment/
-          : /the input `M` has no type/
-      );
+    expect(() => compile(e, { to, fallback: false })).toThrow(
+      to === 'glsl'
+        ? /has no type in the GLSL fragment/
+        : /the input `M` has no type/
+    );
   });
 
   test.each(TARGETS)(
@@ -162,7 +156,9 @@ describe('An input with no type is refused (R1)', () => {
     );
     expect(ce.box('u').type.toString()).toBe('unknown');
     expect(r.success).toBe(false);
-    expect(r.unsupported).toContain('u');
+    // The interval mode declines at the `Assign` first, and does not list the
+    // untyped name (CE-1432).
+    if (to !== 'interval-js') expect(r.unsupported).toContain('u');
   });
 
   // When the expression also declines for another reason, that reason is
@@ -183,7 +179,14 @@ describe('An input with no type is refused (R1)', () => {
       const undeclared = compile(new ComputeEngine().parse('\\int x^2 dx'), {
         to,
       });
-      expect(undeclared.diagnostic?.code).toBe('untyped-input');
+      // The profile `ir` reads an undeclared input with the type that its
+      // use infers (`number`), as it reads `x^2`.
+      if (to === 'interval-js')
+        expect(undeclared.freeSymbolTypes?.x).toMatchObject({
+          type: 'number',
+          provenance: 'inferred',
+        });
+      else expect(undeclared.diagnostic?.code).toBe('untyped-input');
     }
   );
 
@@ -441,14 +444,12 @@ describe('A value with no settled shape declines (R3)', () => {
 
   // The admission checks decline after the code was generated, so a target
   // whose code generation declines for a more specific reason reports that
-  // reason: a shader array in an arithmetic operation or in a selection, a
-  // list operand on the interval target,
+  // reason: a shader array in an arithmetic operation or in a selection,
   // and on the shader targets a read of the input `L`, whose type
   // `list<real>` has no static length, so no shader can declare it.
   const OWN_REASON = new Set([
     'If(x > 0, [1, 2], 3) + 1 glsl',
     'If(x > 0, (1, 2), [(1, 2), (3, 4)]) glsl',
-    'If(x > 0, L, x) interval-js',
     'If(x > 0, L, x) glsl',
   ]);
 
@@ -714,13 +715,8 @@ describe('A branch that the code drops is not checked', () => {
       { to }
     );
     expect(r.success).toBe(false);
-    // The interval target cannot read the list, a more specific reason.
     expect(r.diagnostic?.code).toBe(
-      to === 'interval-js'
-        ? 'compile-error'
-        : to === 'glsl'
-          ? 'outside-fragment'
-          : 'unsettled-shape'
+      to === 'glsl' ? 'outside-fragment' : 'unsettled-shape'
     );
   });
 
@@ -876,14 +872,16 @@ describe('The values of a body with an early Return have one shape (R3)', () => 
       } else if (to === 'glsl')
         expect(r.diagnostic?.code).toBe('outside-fragment');
       else
-        expect(r.diagnostic?.code).toMatch(/^(unsettled-shape|compile-error)$/);
+        // The interval mode has no `Return`, a missing capability.
+        expect(r.diagnostic?.code).toBe('outside-profile');
     });
   });
 
   test.each(TARGETS)('a root block with an early Return on %s', (to) => {
     // At the root, `Return(3z)` ends the compiled code with a number, and
     // the last value is a list. The shader targets have no statement form
-    // for this `Return`, a more specific reason.
+    // for this `Return`, and the interval mode has no `Return`, a more
+    // specific reason.
     const ce = engine();
     const r = compile(
       ce.box([
@@ -900,7 +898,11 @@ describe('The values of a body with an early Return have one shape (R3)', () => 
     );
     expect(r.success).toBe(false);
     expect(r.diagnostic?.code).toBe(
-      to === 'glsl' ? 'outside-fragment' : 'unsettled-shape'
+      to === 'glsl'
+        ? 'outside-fragment'
+        : to === 'interval-js'
+          ? 'outside-profile'
+          : 'unsettled-shape'
     );
   });
 
@@ -914,8 +916,13 @@ describe('The values of a body with an early Return have one shape (R3)', () => 
       { to }
     );
     expect(r.success).toBe(false);
+    // The interval mode has no Loop as a value.
     expect(r.diagnostic?.code).toBe(
-      to === 'glsl' ? 'outside-fragment' : 'unsettled-shape'
+      to === 'glsl'
+        ? 'outside-fragment'
+        : to === 'interval-js'
+          ? 'outside-profile'
+          : 'unsettled-shape'
     );
   });
 
@@ -1272,9 +1279,12 @@ describe('The admission checks of round 2 of the review', () => {
       ];
       const r = compile(ce.box(json), { to });
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(
-        to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
-      );
+      if (to === 'interval-js')
+        expect(r.diagnostic?.code).toBe('static-type-error');
+      else
+        expect(r.error).toMatch(
+          to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
+        );
     }
   );
 
@@ -1318,7 +1328,7 @@ describe('The admission checks of round 2 of the review', () => {
   // The variable of an indefinite integral is the outer input `x`, which
   // the walk sees as bound. `x` also occurs in a branch that the code
   // drops, and it stays refused.
-  test.each(['javascript', 'interval-js'])(
+  test.each(['javascript'])(
     'the variable of an indefinite integral is an input on %s',
     (to) => {
       const ce = new ComputeEngine();
@@ -1339,6 +1349,37 @@ describe('The admission checks of round 2 of the review', () => {
       expect(r.unsupported).toContain('x');
     }
   );
+
+  // The interval mode reads the closed form `x^3/3`, whose input `x` has the
+  // type `number` that its use infers: it compiles, and encloses the value
+  // of the interpreter.
+  test('the variable of an indefinite integral is an input on interval-js, of the inferred type', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Add',
+      ['If', ['Less', 2, 3], 0, 'x'],
+      ['Integrate', ['Power', 'x', 2], ['Limits', 'x', 'Nothing', 'Nothing']],
+    ]);
+    const r = compile(expr, { to: 'interval-js', fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.freeSymbols).toEqual(['x']);
+    for (const x of [-1.5, 0, 2]) {
+      const want = expr.subs({ x: ce.number(x) }).N().re;
+      const got = r.run!({ x: { lo: x, hi: x } }) as {
+        value: { lo: number; hi: number };
+      };
+      expect(got.value.lo).toBeLessThanOrEqual(want);
+      expect(got.value.hi).toBeGreaterThanOrEqual(want);
+    }
+    const box = r.run!({ x: { lo: 1, hi: 2 } }) as {
+      value: { lo: number; hi: number };
+    };
+    for (const x of [1, 1.5, 2]) {
+      const want = expr.subs({ x: ce.number(x) }).N().re;
+      expect(box.value.lo).toBeLessThanOrEqual(want);
+      expect(box.value.hi).toBeGreaterThanOrEqual(want);
+    }
+  });
 
   // An input mapped through `vars` that occurs only in a dropped branch is
   // not read, as without the mapping.
@@ -1381,9 +1422,12 @@ describe('The admission checks of round 2 of the review', () => {
       for (const to of TARGETS) {
         const r = compile(engine().box(json), { to });
         expect(r.success).toBe(false);
-        expect(r.error).toMatch(
-          to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
-        );
+        if (to === 'interval-js')
+          expect(r.diagnostic?.code).toBe('static-type-error');
+        else
+          expect(r.error).toMatch(
+            to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
+          );
       }
       const declared = engine();
       declared.declare('p', 'list<real>');

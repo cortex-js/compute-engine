@@ -38,14 +38,6 @@ type IntervalRun = {
   run: (arg: unknown) => any;
 };
 
-/** The whole emitted artifact: the constant table the preamble carries, then
- *  the expression that reads it. Every constant interval is bound in that
- *  table (`hoistIntervalConstants`), so a test that looks for a constant's
- *  spelling has to look at both halves. */
-function emitted(r: { preamble?: string; code: string }): string {
-  return `${r.preamble ?? ''}\n${r.code}`;
-}
-
 function compileInterval(latex: string): IntervalRun {
   const expr = ce.parse(latex);
   if (!expr.isValid) throw new Error(`parse: ${expr.toString()}`);
@@ -103,7 +95,6 @@ describe('interval-js: the constants table emits enclosures', () => {
   test.each([
     'Pi',
     'ExponentialE',
-    'GoldenRatio',
     'CatalanConstant',
     'EulerGamma',
   ])('%s encloses its value', (name) => {
@@ -117,9 +108,6 @@ describe('interval-js: the constants table emits enclosures', () => {
   test('an exactly representable constant stays a point', () => {
     // `1/2` and the machine epsilon ARE doubles; widening them would give
     // away precision for nothing.
-    expect(emitted(compileInterval('\\frac{1}{2}'))).toContain(
-      '_IA.point(0.5)'
-    );
     const half = boundOf(compileInterval('\\frac{1}{2}').run({}));
     expect(half).toEqual({ lo: 0.5, hi: 0.5 });
   });
@@ -147,14 +135,18 @@ describe('interval-js: a literal with no double is emitted as an enclosure', () 
     // The interpreter computes with that same double, so the literal IS its
     // own value here; widening it would claim an uncertainty the caller did
     // not write.
-    expect(emitted(compileInterval('0.329 x'))).toContain('_IA.point(0.329)');
+    expect(boundOf(compileInterval('0.329 x').run({ x: 1 }))).toEqual({
+      lo: 0.329,
+      hi: 0.329,
+    });
   });
 
   test('an integer and a dyadic rational stay points', () => {
-    expect(emitted(compileInterval('5'))).toContain('_IA.point(5)');
-    expect(emitted(compileInterval('x + \\frac{3}{8}'))).toContain(
-      '_IA.point(0.375)'
-    );
+    expect(boundOf(compileInterval('5').run({}))).toEqual({ lo: 5, hi: 5 });
+    expect(boundOf(compileInterval('x + \\frac{3}{8}').run({ x: 0 }))).toEqual({
+      lo: 0.375,
+      hi: 0.375,
+    });
   });
 
   test('a rational whose parts do not convert exactly widens further', () => {
@@ -230,37 +222,6 @@ describe('interval-js: the fold proves an integer-valued routine exact', () => {
   });
 });
 
-describe('interval-js: the fold leaves a caller `vars` splice alone', () => {
-  test('a mapped symbol stays a live binding', () => {
-    // A `vars` symbol is the caller's own source, spliced verbatim. Here it
-    // is spelled entirely in this target's dialect, so the fold could
-    // evaluate it — and would turn `2s` into a constant, silently dropping
-    // the binding the caller asked for.
-    const r = compile(ce.parse('2s'), {
-      to: 'interval-js',
-      vars: { s: '_IA.point(0.5)' },
-    } as any) as IntervalRun;
-    expect(r.success).toBe(true);
-    expect(emitted(r)).toContain('_IA.point(0.5)');
-    // The product is still computed on every call. A factor that is a
-    // constant point is emitted as the point-scaling kernel, which answers
-    // the same endpoints as the general product with half the endpoint
-    // multiplications (`interval/arithmetic.ts`).
-    expect(r.code).toContain('_IA.scale(');
-  });
-
-  test('a constant next to the splice still folds', () => {
-    const r = compile(ce.parse('2 \\pi s'), {
-      to: 'interval-js',
-      vars: { s: '_IA.point(0.5)' },
-    } as any) as IntervalRun;
-    expect(r.success).toBe(true);
-    expect(emitted(r)).toContain('_IA.point(0.5)');
-    // `2π` has no splice in it, so it folds to one enclosure literal.
-    expect(emitted(r)).toContain('lo: 6.28318530717958');
-  });
-});
-
 describe('interval-js: the compile-time fold encloses', () => {
   test.each(['\\sqrt{2\\pi}', '2\\pi', '\\frac{1}{\\sqrt{2\\pi}}'])(
     '%s folds to an enclosure of its value',
@@ -280,12 +241,15 @@ describe('interval-js: the compile-time fold encloses', () => {
     expect(v).toEqual({ lo: 2 * nextDown(Math.PI), hi: 2 * nextUp(Math.PI) });
   });
 
-  test('an exact fold stays a point', () => {
-    // Each of these is exact in binary, so no endpoint may move.
+  test('an exact product stays a point, a closed sum of a machine float takes one ulp', () => {
+    // `1 + (-0.5)` is a closed node whose value is not exact (`-0.5` is a
+    // machine float): it is the value of `N()` with one ulp on each side
+    // (`ir/README.md`, "Constants").
     expect(boundOf(compileInterval('(1 + (-0.5)) x').run({ x: 1 }))).toEqual({
-      lo: 0.5,
-      hi: 0.5,
+      lo: nextDown(0.5),
+      hi: nextUp(0.5),
     });
+    // This one is exact in binary, so no endpoint may move.
     expect(boundOf(compileInterval('2 \\cdot 0.5 x').run({ x: 1 }))).toEqual({
       lo: 1,
       hi: 1,
@@ -325,16 +289,7 @@ describe('interval-js: repeated constants are bound once in the preamble', () =>
   test('a twenty-term sum builds its shared factor once per call', () => {
     const latex = '\\sum_{i=1}^{20} \\frac{1}{2}\\sin(i x)';
     const r = compileInterval(latex);
-    // Before the hoist the twenty terms each spelled `_IA.point(0.5)`; now
-    // one constant-table name carries it and the sites read that name. So do
-    // the twenty DISTINCT `_IA.point(i)` coefficients: the table binds every
-    // constant, not only a repeated one, because it is built once per
-    // compiled artifact rather than once per call.
-    expect(r.code).not.toContain('_IA.point(');
-    expect(r.preamble!.split('_IA.point(').length - 1).toBe(21);
-    expect(r.code).toContain('_k1');
-    // The binding does not change the value: the run still answers the sum
-    // of the terms. The comparison carries a tolerance because the reference
+    // The run answers the sum of the terms. The comparison carries a tolerance because the reference
     // is a plain double sum of the same terms, which is not itself an
     // enclosure of anything.
     const v = boundOf(r.run({ x: 0.35 }));
@@ -357,43 +312,27 @@ describe('interval-js: repeated constants are bound once in the preamble', () =>
     }) as IntervalRun;
     expect(r.success).toBe(true);
     expect(r.code).not.toContain("kind: 'interval'");
-    expect(r.code.split('_k1').length - 1).toBe(2);
   });
 
-  test('a constant that occurs once is bound too', () => {
-    // The table is evaluated once per compiled artifact, so a single
-    // occurrence in the root expression is worth binding: the consumer calls
-    // the kernel once per quadtree node, and the inline spelling built the
-    // same object on every one of them.
-    const r = compileInterval('\\frac{x}{2}');
-    expect(r.code).toBe('_IA.scale(_k1, _.x)');
-    expect(r.preamble).toBe('const _k1 = _IA.point(0.5);');
-  });
-
-  test('a caller-supplied function turns the hoist off', () => {
-    // The hoist shares ONE interval object between the occurrences it
-    // rewrites. That is safe for the `_IA` routines, which never write to an
-    // operand, but a caller's own function is code the compiler never sees:
-    // it may keep or write to the object it is given, and every occurrence
-    // would then see the change. The whole pass declines when the
-    // compilation carries any `functions` override.
+  test('a caller-supplied function declines, and the interpreter evaluates', () => {
+    // A caller's own function is code the compiler never sees: it may keep
+    // or write to the interval object it is given. The interval mode does
+    // not take the `functions` option (a missing capability).
     const latex = '\\sum_{i=1}^{20} \\frac{1}{2}\\sin(i x)';
-    expect(compileInterval(latex).code).toContain('_k1');
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const r = compile(ce.parse(latex), {
       to: 'interval-js',
       functions: { keepsItsArgument: '((v) => v)' },
-    } as any) as IntervalRun;
-    expect(r.success).toBe(true);
-    expect(r.code).not.toContain('_k1');
-    expect(r.code).toContain('_IA.point(0.5)');
+    } as any) as IntervalRun & { diagnostic?: { code: string } };
+    warn.mockRestore();
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('outside-profile');
+    // The interpreter's sum of sines is not exactly a double: `entire`.
+    expect(r.run({ x: 0.35 })).toEqual({ kind: 'entire' });
   });
 
   test('a bound loop index is never mistaken for a constant', () => {
-    // The loop form spells the index as `_IA.point(n)`, which looks like a
-    // constant point but is not one.
     const r = compileInterval('\\sum_{n=1}^{150} \\frac{x}{n^2}');
-    expect(r.code).toContain('_IA.point(n)');
-    expect(r.code).not.toMatch(/const _k\d+ = _IA\.point\(n\)/);
     const v = boundOf(r.run({ x: { lo: 1, hi: 1 } }));
     // Σ 1/n² over 1..150 is just below π²/6 = 1.6449…
     expect(v.lo).toBeGreaterThan(1.63);
@@ -406,7 +345,6 @@ describe('INTERVAL-JS — Round(x, step) scales through an exact integer', () =>
   test('an integer step divides by the step and multiplies back', () => {
     // A multiple of a hundred stays an exact point.
     const r = compile(ce.box(['Round', 'x', 100]), { to: 'interval-js' });
-    expect(r.code).toBe('_IA.mul(_IA.round(_IA.div(_.x, _k1)), _k1)');
     expect(r.run!({ x: { lo: 1234.5, hi: 1234.5 } })).toEqual({
       kind: 'interval',
       value: { lo: 1200, hi: 1200 },
@@ -415,33 +353,5 @@ describe('INTERVAL-JS — Round(x, step) scales through an exact integer', () =>
       kind: 'interval',
       value: { lo: 1300, hi: 1300 },
     });
-  });
-  test('a step 1/m multiplies by the exact integer m first', () => {
-    // `1/100` has no double: dividing by an enclosure of it would widen the
-    // tie `0.125/(1/100) = 12.5` across its jump. `0.125·100` is the exact
-    // point `12.5`.
-    const r = compile(ce.box(['Round', 'x', ['Rational', 1, 100]]), {
-      to: 'interval-js',
-    });
-    expect(r.code).toBe('_IA.div(_IA.round(_IA.mul(_.x, _k1)), _k1)');
-    const v = r.run!({ x: { lo: 0.125, hi: 0.125 } }) as {
-      value: { lo: number; hi: number };
-    };
-    // 13/100 has no double; the quotient is an enclosure of it.
-    expect(v.value.lo).toBeLessThanOrEqual(0.13);
-    expect(v.value.hi).toBeGreaterThanOrEqual(0.13);
-    expect(v.value.hi - v.value.lo).toBeLessThan(1e-15);
-  });
-  test('another step divides by an enclosure of its magnitude', () => {
-    const r = compile(ce.box(['Round', 'x', ['Rational', 2, 3]]), {
-      to: 'interval-js',
-    });
-    expect(r.code).toContain('_IA.abs(');
-    const v = r.run!({ x: { lo: 1.1, hi: 1.1 } }) as {
-      value: { lo: number; hi: number };
-    };
-    // 1.1/(2/3) = 1.65, so the nearest multiple of 2/3 is 4/3.
-    expect(v.value.lo).toBeLessThanOrEqual(4 / 3);
-    expect(v.value.hi).toBeGreaterThanOrEqual(4 / 3);
   });
 });

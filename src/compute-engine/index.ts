@@ -363,16 +363,15 @@ export { BigDecimal } from '../big-decimal/index.js';
 // (`src/compute-engine.ts`) and by `src/compile.ts`, so that the `./core`
 // entry does not bundle them (`engine-compilation-targets.ts` says why).
 export { JavaScriptTarget } from './compilation/javascript-target.js';
-export { IntervalJavaScriptTarget } from './compilation/interval-javascript-target.js';
 export { BaseCompiler } from './compilation/base-compiler.js';
 
 // Import for internal use
 import type {
   LanguageTarget,
-  IntervalJsCompilationTarget,
   JavaScriptCompilationTarget,
   CompilationResult,
 } from './compilation/types.js';
+import { ROUTED_TARGETS } from './compilation/targets.js';
 import { compile as _compile } from './compilation/compile-expression.js';
 import { fu as _fu } from './symbolic/fu.js';
 
@@ -1925,9 +1924,6 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal Get a registered compilation target by name. */
   _getCompilationTarget(
-    name: 'interval-js'
-  ): IntervalJsCompilationTarget<Expression> | undefined;
-  _getCompilationTarget(
     name: 'javascript'
   ): JavaScriptCompilationTarget<Expression> | undefined;
   _getCompilationTarget(name: string): LanguageTarget<Expression> | undefined;
@@ -1935,9 +1931,16 @@ export class ComputeEngine implements IComputeEngine {
     return this._compilationTargets.get(name);
   }
 
-  /** @internal Return the names of all registered compilation targets. */
+  /** @internal Return the names this engine compiles to: the names that
+   * `compile()` routes itself (`ROUTED_TARGETS`), then the registered
+   * targets. */
   _listCompilationTargets(): string[] {
-    return this._compilationTargets.list();
+    return [
+      ...new Set<string>([
+        ...ROUTED_TARGETS,
+        ...this._compilationTargets.list(),
+      ]),
+    ];
   }
 
   /**
@@ -1947,18 +1950,23 @@ export class ComputeEngine implements IComputeEngine {
    * string and the target must implement `getOperators()`, `getFunctions()`,
    * `createTarget()` and `compile()`; otherwise this throws.
    *
-   * Every engine has `javascript` and `interval-js`. Every engine also has
-   * `glsl` once the full package entry,
+   * Every engine compiles to `interval-js`, which `compile()` routes itself
+   * (a registration under that name throws), and has the target
+   * `javascript`. Every engine also has `glsl` once the full package entry,
    * `@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
    * the program, whichever entry made the engine and in whichever order. A
-   * program that loads only `@cortex-js/compute-engine/core` has the two
-   * built-in targets: import `GLSLTarget`
-   * from `@cortex-js/compute-engine/compile` and register it here.
+   * program that loads only `@cortex-js/compute-engine/core`: import
+   * `GLSLTarget` from `@cortex-js/compute-engine/compile` and register it
+   * here.
    */
   registerCompilationTarget(
     name: string,
     target: LanguageTarget<Expression>
   ): void {
+    if (name === 'interval-js')
+      throw new Error(
+        'The compilation target "interval-js" is built in and cannot be registered'
+      );
     this._compilationTargets.register(name, target);
   }
 
@@ -1971,8 +1979,13 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** Remove the compilation target registered under `name`. A name that is
-   * not registered is ignored. */
+   * not registered is ignored. `interval-js`, which `compile()` routes
+   * itself, cannot be removed: this throws. */
   unregisterCompilationTarget(name: string): void {
+    if (name === 'interval-js')
+      throw new Error(
+        'The compilation target "interval-js" is built in and cannot be unregistered'
+      );
     this._compilationTargets.unregister(name);
   }
 

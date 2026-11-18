@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 /**
  * Complex values on the targets that have no complex form for a head, or a
@@ -195,34 +196,38 @@ describe('GPU: the real-only shader lowerings', () => {
 });
 
 describe('interval-js: a complex symbol fails closed', () => {
-  // The interval target reports a decline as `success: false` with the
-  // reason in `error`, rather than throwing.
+  // The interval target throws its decline: a complex input has no lane on
+  // interval-js.
+  function declineCode(ce: ComputeEngine, expr: any): string {
+    try {
+      run(ce, 'interval-js', expr);
+    } catch (e) {
+      return compileDiagnosticOf(e).code;
+    }
+    return 'no decline';
+  }
+
   test('a declared complex symbol in real arithmetic', () => {
     const ce = engine();
-    const r = run(ce, 'interval-js', ['Subtract', 1, ['Add', 't', 'z']]);
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/`z`: the symbol has the complex type `complex`/);
-    const abs = run(ce, 'interval-js', ['Abs', 'z']);
-    expect(abs.success).toBe(false);
-    expect(abs.error).toMatch(/`z`: the symbol/);
+    expect(declineCode(ce, ['Subtract', 1, ['Add', 't', 'z']])).toBe(
+      'outside-profile'
+    );
+    expect(declineCode(ce, ['Abs', 'z'])).toBe('outside-profile');
   });
 
   test('Re of a complex symbol fails closed', () => {
     const ce = engine();
-    const r = run(ce, 'interval-js', ['Re', 'z']);
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/Could not compile/);
+    expect(declineCode(ce, ['Re', 'z'])).toBe('outside-profile');
   });
 
-  test('a real symbol, and an undeclared one, still compile', () => {
+  test('a real symbol still compiles', () => {
     const ce = engine();
+    // 1 − (t + x) is −2 at t = 1, x = 2.
     expect(
-      run(ce, 'interval-js', ['Subtract', 1, ['Add', 't', 'x']]).code
-    ).toBe('_IA.add(_IA.sub(_IA.negate(_.t), _.x), _k1)');
-    // A use of an undeclared symbol infers `y: complex | infinity`; that is
-    // not a complex-valued symbol.
-    const r = compile(ce.parse('|y|'), { to: 'interval-js' } as any) as any;
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('_IA.abs(_.y)');
+      run(ce, 'interval-js', ['Subtract', 1, ['Add', 't', 'x']]).run!({
+        t: { lo: 1, hi: 1 },
+        x: { lo: 2, hi: 2 },
+      })
+    ).toEqual({ kind: 'interval', value: { lo: -2, hi: -2 } });
   });
 });

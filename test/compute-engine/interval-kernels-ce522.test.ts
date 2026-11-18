@@ -16,6 +16,13 @@ import type {
   IntervalResult,
 } from '../../src/compute-engine/interval/types';
 import { nextUp } from '../../src/compute-engine/numerics/numeric';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
+
+/** `compile()` to `interval-js`, with the call shape of a target's `compile()`. */
+const INTERVAL_JS = {
+  compile: (expr: any, options: Record<string, unknown> = {}) =>
+    compile(expr, { ...options, to: 'interval-js' } as any) as any,
+};
 
 const p = (lo: number, hi: number = lo): Interval => ({ lo, hi });
 
@@ -411,7 +418,7 @@ describe('CE-522.7 a negative integer power rounds outward at each step', () => 
 describe('CE-522.8 the angular unit on interval-js uses exact factors', () => {
   test('Cos at a quarter turn contains 0', () => {
     const ce = new ComputeEngine();
-    const ijs = ce._getCompilationTarget('interval-js')!;
+    const ijs = INTERVAL_JS;
     const cases = [
       ['turn', 0.25],
       ['deg', 90],
@@ -617,7 +624,7 @@ describe('CE-522.11 mod with a divisor interval keeps a certified endpoint', () 
 
 describe('CE-522.12 Root with a symbolic degree on interval-js', () => {
   const ce = new ComputeEngine();
-  const ijs = ce._getCompilationTarget('interval-js')!;
+  const ijs = INTERVAL_JS;
   const root = ijs.compile(ce.box(['Root', 'x', 'n']));
   const run = (x: Interval, n: number): IntervalResult =>
     root.run!({ x, n: p(n) }) as IntervalResult;

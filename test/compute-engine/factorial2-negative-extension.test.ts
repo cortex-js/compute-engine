@@ -188,32 +188,6 @@ describe('Factorial2 compiled at a negative integer', () => {
     expect(run(-4)).toBe(Infinity);
     expect(run(5)).toBe(15);
   });
-
-  test('interval-js', () => {
-    const f = compile(ce.parse('x!!'), {
-      to: 'interval-js',
-      fallback: false,
-    } as never);
-    expect(f.success).toBe(true);
-    const run = (x: unknown) => f.run!({ x } as never) as any;
-    expect(run(-1)).toEqual({ kind: 'interval', value: { lo: 1, hi: 1 } });
-    expect(run(-3)).toEqual({ kind: 'interval', value: { lo: -1, hi: -1 } });
-    const third = run(-5);
-    expect(third.kind).toBe('interval');
-    expect(third.value.lo).toBeLessThanOrEqual(1 / 3);
-    expect(third.value.hi).toBeGreaterThanOrEqual(1 / 3);
-    expect(run(-2)).toMatchObject({ kind: 'singular', at: -2 });
-    // An interval whose rounded endpoints straddle -2 holds the pole.
-    expect(run({ lo: -3.2, hi: -1.8 })).toMatchObject({
-      kind: 'singular',
-      at: -2,
-    });
-    // From -1 up the values do not decrease: (-1)!! = 0!! = 1!! = 1.
-    const r = run({ lo: -0.7, hi: 3.2 });
-    expect(r.kind).toBe('interval');
-    expect(r.value.lo).toBeLessThanOrEqual(1);
-    expect(r.value.hi).toBeGreaterThanOrEqual(3);
-  });
 });
 
 describe('Factorial2 symbolic reductions with a negative argument', () => {

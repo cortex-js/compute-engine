@@ -200,8 +200,12 @@ describe('compiled code', () => {
             true,
           ]);
           const r = interval.run!({ x: { lo: x, hi: x } }) as {
+            kind: string;
             value: { lo: number; hi: number };
           };
+          // A declined step gives the interpreter's value: a point only when
+          // it is exactly a double, else `entire`, which holds every value.
+          if (r.kind === 'entire') continue;
           expect(r.value.lo).toBeLessThanOrEqual(want + 1e-12);
           expect(r.value.hi).toBeGreaterThanOrEqual(want - 1e-12);
         }

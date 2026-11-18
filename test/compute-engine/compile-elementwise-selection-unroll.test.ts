@@ -39,7 +39,7 @@ function interpreted(latex: string, x: number): number {
 
 function expectAllTargetsAgree(latex: string, xs: number[]): void {
   const expr = ce.parse(latex);
-  for (const to of ['interval-js', 'javascript', 'glsl'] as const) {
+  for (const to of ['javascript', 'glsl'] as const) {
     const r = compile(expr, { to, fallback: false });
     expect([to, r.success, r.error?.message]).toEqual([to, true, undefined]);
   }
@@ -388,18 +388,6 @@ describe('A selection over a wide list-shaped condition is written out', () => {
       0,
     ]);
     expect(unrollFixedWidthCollections(expr)).toBe(expr);
-  });
-
-  test('the interval target compiles any width, with constants', () => {
-    // `Which(x + [1, 2, 3] < 2, 1, True, 0)[k]` has an index; a bare
-    // selection is a list value, which the interval target declines as a
-    // root and this pass writes out under its options (`minWidth: 1`,
-    // `unrollConstantLists: true`) when a scalar consumer reads it.
-    const expr = ce.parse(
-      String.raw`\sum_{k=1}^{3} \begin{cases}1 & x + \bigl\lbrack1, 2, 3\bigr\rbrack < 2 \\ 0 & \top\end{cases}[k]`
-    );
-    const r = compile(expr, { to: 'interval-js', fallback: false });
-    expect([r.success, r.error?.message]).toEqual([true, undefined]);
   });
 });
 

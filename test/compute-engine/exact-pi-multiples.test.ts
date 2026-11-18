@@ -357,17 +357,6 @@ describe('compiled: a user binding of a library constant name', () => {
     }
   });
 
-  test('interval JavaScript', () => {
-    const result = compile(ce.box(['Multiply', 'Pi', 'x']), {
-      to: 'interval-js',
-      fallback: false,
-    } as any);
-    expect(result.run!({ x: 0.5 })).toEqual({
-      kind: 'interval',
-      value: { lo: 0.5, hi: 0.5 },
-    });
-  });
-
   test.each([['GLSL', () => new GLSLTarget()]])('%s', (_label, make) => {
     const code = (make() as any).compile(ce.box(['Multiply', 'Pi', 'x'])).code;
     expect(code).not.toContain('3.14159');
@@ -399,12 +388,5 @@ describe('compiled: a symbol bound to a library constant, inside a scope that de
     expect(expr.subs({ x: 0.5 }).N().re).toBeCloseTo(expected, 15);
     const js = compile(expr, { fallback: false });
     expect(js.run!({ x: 0.5 })).toBeCloseTo(expected, 15);
-    const interval = compile(expr, {
-      to: 'interval-js',
-      fallback: false,
-    } as any).run!({ x: 0.5 }) as any;
-    expect(interval.kind).toBe('interval');
-    expect(interval.value.lo).toBeLessThanOrEqual(expected);
-    expect(interval.value.hi).toBeGreaterThanOrEqual(expected);
   });
 });

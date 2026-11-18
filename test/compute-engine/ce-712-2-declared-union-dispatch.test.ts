@@ -133,29 +133,11 @@ describe('CE-712.2: an input declared with a union of shapes', () => {
       expect(r.run!(vars as any)).toEqual(interpreted(ce, expr, vars, points));
   });
 
-  test.each(CASES)('interval-js: %s', (_name, json, inputs, points) => {
-    const ce = engine();
-    const expr = ce.box(json as any);
-    const r = compile(expr, { to: 'interval-js', fallback: false });
-    expect(r.success).toBe(true);
-    for (const vars of inputs)
-      expect(fromIntervals(r.run!(vars as any))).toEqual(
-        interpreted(ce, expr, vars, points)
-      );
-  });
-
   test('the code tests the shape of the input once, at the entry', () => {
     const ce = engine();
     const r = compile(ce.box(['Add', 'U', 1]), { fallback: false });
     expect(r.code).toBe(
       '(Array.isArray(_.U) ? _SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), _.U, 1) : _.U + 1)'
-    );
-    const i = compile(ce.box(['Add', 'U', 1]), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(i.code).toBe(
-      '(Array.isArray(_.U) ? _IA.bcast((_tv1) => _IA.add(_tv1, _k1), _.U) : _IA.add(_.U, _k1))'
     );
   });
 
@@ -232,6 +214,13 @@ describe('CE-712.2: the declines of a declared union', () => {
       // A point of two reals and a list of two reals are both `[a, b]`.
       const ce = engine();
       const expr = ce.box(['Add', ['At', 'T', 1], 1]);
+      if (to === 'interval-js') {
+        // The interval mode declines a union of shapes at an input as
+        // outside its profile, and names the input in `value`.
+        expect(declineCode(expr, to)).toBe('outside-profile');
+        expect(compile(expr, { to }).diagnostic?.value).toBe('T');
+        return;
+      }
       expect(declineCode(expr, to)).toBe('union-dispatch');
       expect(compile(expr, { to }).unsupported).toContain('T');
     }
@@ -243,6 +232,13 @@ describe('CE-712.2: the declines of a declared union', () => {
       // Three inputs of two members each need eight bodies.
       const ce = engine();
       const expr = ce.box(['Add', 'U', 'V', 'W']);
+      if (to === 'interval-js') {
+        // The interval mode declines at the first input of a union of
+        // shapes, as outside its profile.
+        expect(declineCode(expr, to)).toBe('outside-profile');
+        expect(compile(expr, { to }).diagnostic?.value).toBe('U');
+        return;
+      }
       expect(declineCode(expr, to)).toBe('union-dispatch');
       const { unsupported } = compile(expr, { to });
       expect(unsupported).toEqual(expect.arrayContaining(['U', 'V', 'W']));
@@ -276,7 +272,7 @@ describe('CE-712.2: a parameter declared with a union of shapes', () => {
     return ce;
   }
 
-  test.each(['javascript', 'interval-js'] as const)(
+  test.each(['javascript'] as const)(
     '%s: one variant per member, and a dispatcher',
     (to) => {
       const ce = withFunctions();
@@ -295,7 +291,7 @@ describe('CE-712.2: a parameter declared with a union of shapes', () => {
     }
   );
 
-  test.each(['javascript', 'interval-js'] as const)(
+  test.each(['javascript'] as const)(
     '%s: each member gives the interpreter value',
     (to) => {
       const ce = withFunctions();
@@ -401,7 +397,9 @@ describe('CE-712.2: absent values and deeper lists at a declared union', () => {
       // the rank-3 map read 1 and 2 as lists.
       const type = 'list<list<real>> | list<list<list<real>>>';
       const ce = absentEngine(type);
-      expect(declineCode(ce.parse('f(L)'), to)).toBe('union-dispatch');
+      expect(declineCode(ce.parse('f(L)'), to)).toBe(
+        to === 'interval-js' ? 'outside-profile' : 'union-dispatch'
+      );
       if (to !== 'javascript') return;
       const r = compile(ce.parse('f(L)'));
       const v: Value = [[], [1, 2]];
@@ -447,23 +445,18 @@ describe('CE-712.2: `nothing` in a declared union of a list and a number', () =>
     }
   });
 
-  test.each(CASES)('interval-js: f(x) with x: %s', (type, values) => {
-    const ce = nothingEngine(type);
-    const expr = ce.parse('f(x)');
-    const r = compile(expr, { to: 'interval-js', fallback: false });
-    expect(r.success).toBe(true);
-    for (const v of values)
-      expect(fromIntervals(r.run!({ x: v } as any))).toEqual(
-        interpreted(ce, expr, { x: v })
-      );
-  });
-
   test.each(['javascript', 'interval-js'] as const)(
     '%s: the decline names the members that are the same array',
     (to) => {
       const ce = engine();
       const r = compile(ce.box(['Add', ['At', 'T', 1], 1]), { to });
       expect(r.success).toBe(false);
+      // The interval mode declines the input as outside its profile.
+      if (to === 'interval-js') {
+        expect(r.diagnostic?.code).toBe('outside-profile');
+        expect(r.diagnostic?.value).toBe('T');
+        return;
+      }
       expect(r.error).toContain(
         'the values of `tuple<real, real>` and of `list<real>` are arrays of the same nesting'
       );

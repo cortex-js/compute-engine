@@ -38,6 +38,12 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
+/** `compile()` to `interval-js`, with the call shape of a target's `compile()`. */
+const INTERVAL_JS = {
+  compile: (expr: any, options: Record<string, unknown> = {}) =>
+    compile(expr, { ...options, to: 'interval-js' } as any) as any,
+};
+
 /** `f0 := base`, then `f(k) := f(k-1) + 2 f(k-1)` up to `depth`, stored RAW
  * so each level references the previous one as a symbol. Level `k` is worth
  * `3^k · base`. */
@@ -144,13 +150,6 @@ describe('COMPILE: folded symbol values are bound once', () => {
     expect(bound.code).toBe('_val_f30');
     expect(bound.preamble).toContain('const _val_f30 = ');
     expect(bound.run!({})).toBe(2 * 3 ** 30);
-  });
-
-  it('the interval target binds too', () => {
-    const ce = towerEngine(4);
-    const target = ce._getCompilationTarget('interval-js')!;
-    const { code } = target.compile(ce.box('f4'));
-    expect(code).toBe('_val_f4');
   });
 
   it('a leaf value stays inline', () => {

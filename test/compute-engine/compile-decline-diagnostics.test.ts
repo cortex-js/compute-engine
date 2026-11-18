@@ -1,8 +1,11 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+
+/** `compile()` to `interval-js`, called as a target's `compile()` is. */
+const intervalCompile = (expr: any, options: Record<string, unknown> = {}) =>
+  compile(expr, { ...options, to: 'interval-js' } as any) as any;
 
 /**
  * Compile-decline diagnostics (Tycho item 109a).
@@ -110,24 +113,6 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
     });
   });
 
-  describe('a handler with no lowering for the TARGET says so', () => {
-    // A `PointList` with a list COMPONENT is a list of points (the components
-    // zip), and the interval target has no lowering that builds one — a
-    // different cause from the operand-shape decline above. (An all-scalar
-    // `PointList` is one point, which the interval target spells as the array
-    // of its coordinates, so it no longer witnesses this decline.)
-    it('interval-js: success:false with a specific `error`', () => {
-      const r = new IntervalJavaScriptTarget().compile(
-        ce.box(['PointList', ['List', 1, 2, 3], 'x'] as any)
-      );
-      expect(r.success).toBe(false);
-      expect(r.error).toMatch(
-        /Could not compile `PointList`: the operator's compile handler has no lowering/
-      );
-      expect(r.error).not.toMatch(/Unknown operator/);
-    });
-  });
-
   describe('a KNOWN head with no target codegen is not "unknown"', () => {
     it('glsl: GammaRegularized names the target gap', () => {
       expect(() =>
@@ -147,13 +132,11 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
       // A list of NUMBERS at the root is an array of intervals since
       // 2026-09-15; a list whose elements have no interval reading (strings)
       // still reaches the head with no lowering.
-      const r = new IntervalJavaScriptTarget().compile(
+      const r = intervalCompile(
         ce.box(['List', "'a'", "'b'"])
       );
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(
-        /Could not compile `List`: the operator is known to the engine/
-      );
+      expect(r.diagnostic?.code).toBe('outside-profile');
     });
   });
 

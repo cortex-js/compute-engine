@@ -304,8 +304,6 @@ s
       { to: 'interval-js', fallback: false }
     );
     expect(r.success).toBe(true);
-    expect(r.code).not.toMatch(WRAPPED_LOOP);
-    expect(r.code).toContain('{\nfor (const k of _IA.range(');
     const v = r.run!({ n: 3, x: { lo: 1, hi: 2 } }) as any;
     expect(v.value).toEqual({ lo: 6, hi: 12 });
   });

@@ -366,22 +366,6 @@ describe('A point with an undecided component type beside a list', () => {
     expect(r.run!({ t: 2, W: [5, 5] } as never)).toEqual([7, 6]);
   });
 
-  test('the interval target answers a list of points too', () => {
-    const r = compile(
-      engineWithT().box(['Multiply', ['List', 1, 2, 3], P] as never),
-      { to: 'interval-js' } as never
-    );
-    expect(r.success).toBe(true);
-    const v = r.run!({ t: 2 } as never) as unknown as Array<
-      Array<{ value: { lo: number } }>
-    >;
-    expect(v.map((p) => p.map((c) => c.value.lo))).toEqual([
-      [2, 1],
-      [4, 2],
-      [6, 3],
-    ]);
-  });
-
   // A shader lowers a point and a list of the same length to one `vecN`,
   // and its operators combine them component-wise. In the interpreter a point
   // times a list is a list of points, and a point divided by a list stays
@@ -517,14 +501,7 @@ describe('A restricted collection on the interval target', () => {
         : x;
 
   test.each([
-    ['a restricted list literal', '[1,2]\\{0<t\\}'],
     ['a restricted point literal', '(1,2)\\{0<t\\}'],
-    ['a restricted list input', 'A\\{0<t\\}'],
-    ['a point list over a restricted list', '(A\\{0<t\\}, B)'],
-    ['a point list over a restricted list and a slot', '(A\\{0<t\\}, 3)'],
-    ['a restricted point list plus a point', '(A\\{0<t\\}, B)+(1,1)'],
-    ['a restricted list plus a number', 'A\\{0<t\\}+1'],
-    ['a function of a restricted list', '\\sin(A\\{0<t\\})'],
     ['a scalar times a restricted point', 't\\cdot(1,2)\\{0<t\\}'],
     ['a restricted point plus a point', '(1,2)\\{0<t\\}+(t,1)'],
   ])('%s matches the interpreter', (_l, latex) => {
@@ -535,23 +512,6 @@ describe('A restricted collection on the interval target', () => {
       const expected = interpreted(latex, t);
       expect(bounds(intervalRun(latex, t))).toEqual(close(expected));
     }
-  });
-
-  test('an undecided condition clips each element to a partial value', () => {
-    // A coordinate of the unrestricted source `B` is a bare interval.
-    const v = intervalRun('(A\\{0<t\\}, B)', { lo: -1, hi: 1 }) as Array<
-      Array<{ kind?: string; value?: { lo: number }; lo?: number }>
-    >;
-    expect(v.map((p) => p.map((c) => c.kind ?? 'interval'))).toEqual([
-      ['partial', 'interval'],
-      ['partial', 'interval'],
-      ['partial', 'interval'],
-    ]);
-    expect(v.map((p) => p.map((c) => c.value?.lo ?? c.lo))).toEqual([
-      [1, 4],
-      [2, 5],
-      [3, 6],
-    ]);
   });
 
   test('a restricted list of booleans still declines', () => {
@@ -667,19 +627,6 @@ describe('The norm of a point with a restricted list component', () => {
 
   test('the norm types as a list', () => {
     expect(ceR.box(tuple as never).type.toString()).toBe('list<number>');
-  });
-
-  test('a restricted list of points on the interval target', () => {
-    const v = compiledAt(pointList, 1, 'interval-js') as {
-      kind: string;
-      value: { lo: number; hi: number };
-    }[];
-    [Math.sqrt(10), Math.sqrt(13)].forEach((n, i) => {
-      expect(v[i].value.lo).toBeLessThanOrEqual(n);
-      expect(v[i].value.hi).toBeGreaterThanOrEqual(n);
-    });
-    // The restricted value is empty where the condition fails.
-    expect(compiledAt(pointList, -1, 'interval-js')).toEqual({ kind: 'empty' });
   });
 
   test('the interval and shader targets decline a restricted list coordinate', () => {

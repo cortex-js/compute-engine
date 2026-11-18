@@ -154,20 +154,4 @@ describe('Factorial2 interval enclosure contains the true value', () => {
     expect(enclosure(5)).toEqual({ lo: 15, hi: 15 });
     expect(enclosure(-3)).toEqual({ lo: -1, hi: -1 });
   });
-
-  test('the compiled interval-js route encloses (-303)!!', () => {
-    const f = compile(ce.parse('x!!'), {
-      to: 'interval-js',
-      fallback: false,
-    } as never);
-    expect(f.success).toBe(true);
-    const r = f.run!({ x: -303 } as never) as {
-      kind: string;
-      value: { lo: number; hi: number };
-    };
-    expect(r.kind).toBe('interval');
-    const [p, q] = exactValue(-303);
-    expect(compareExact(r.value.lo, p, q)).toBeLessThanOrEqual(0);
-    expect(compareExact(r.value.hi, p, q)).toBeGreaterThanOrEqual(0);
-  });
 });

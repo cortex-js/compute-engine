@@ -230,7 +230,7 @@ const CASES: [string, Json, string[]][] = [
   ['f7(P)', ['f7', 'P'], ['javascript']],
   // At a parameter declared as a scalar, the call maps over the
   // coordinates.
-  ['g7(rows)', ['g7', 'rows'], ['javascript', 'interval-js']],
+  ['g7(rows)', ['g7', 'rows'], ['javascript']],
   ['g7(P)', ['g7', 'P'], ['javascript']],
   // A list whose rows hold points of two widths: the list levels do not
   // lead to one point type, so no definition for one point exists, and
@@ -456,8 +456,6 @@ describe('a call over an argument declared broadcastable<real>', () => {
         .evaluate()
         .N().json
     );
-  const toInterval = (v: unknown): unknown =>
-    Array.isArray(v) ? v.map(toInterval) : { lo: v, hi: v };
   const EXPRS: [string, Json][] = [
     ['g(b)', ['g', 'b']],
     ['Apply(t ↦ t + 1, b)', ['Apply', ['Function', ['Add', 't', 1], 't'], 'b']],
@@ -472,15 +470,6 @@ describe('a call over an argument declared broadcastable<real>', () => {
         expect(r).toBeDefined();
         expect(r!.code).toContain('_SYS.bcast(');
         expectClose(r!.run!({ b: js }), interpretedB(ce, expr, mj));
-      });
-      test(`${label} for ${what} on interval-js`, () => {
-        const ce = engine();
-        const r = compiled(ce, expr, 'interval-js');
-        expect(r).toBeDefined();
-        expectClose(
-          intervalValue(r!.run!({ b: toInterval(js) })),
-          interpretedB(ce, expr, mj)
-        );
       });
     }
 

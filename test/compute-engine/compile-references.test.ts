@@ -10,6 +10,7 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { resolveLibraryNames } from '../../src/epsil/resolve-library-names';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
@@ -690,7 +691,7 @@ describe('COMPILE reference analysis of a function called inside a binder of one
   ];
 
   it('lists the name as the bare call does, although a Block local has it', () => {
-    for (const to of ['javascript', 'interval-js', 'glsl'] as const) {
+    for (const to of ['javascript', 'glsl'] as const) {
       const ce = engine(true);
       expect(compile(ce.box(['ok', 4]), { to }).freeSymbols).toEqual(['minR']);
       const r = compile(ce.box(inBlock as never), { to });
@@ -759,7 +760,7 @@ describe('COMPILE: `unsupported` of a program that defines a function', () => {
   };
 
   it('reports no unsupported operator for a program that compiled', () => {
-    for (const to of ['javascript', 'interval-js'] as const) {
+    for (const to of ['javascript'] as const) {
       const r = program('function f(t) { t + 1 }\nf(x)', to);
       expect(r.success).toBe(true);
       expect(r.unsupported).toEqual([]);
@@ -786,17 +787,25 @@ describe('COMPILE: `unsupported` of a program that defines a function', () => {
     expect(r.unsupported).not.toContain('f');
   });
 
-  // A declined result of the interval target does not go through the
-  // interpreter fallback when `fallback` is false. It keeps the list.
-  it('keeps the list of a compilation that declined without a fallback', () => {
+  // A decline of the interval target does not go through the interpreter
+  // fallback when `fallback` is false: it throws, and its diagnostic names
+  // the operator.
+  it('names the operator of a compilation that declined without a fallback', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
-    const r = compile(ce.box(['GammaRegularized', 'x', 2]), {
-      to: 'interval-js',
-      fallback: false,
+    let diagnostic: unknown;
+    try {
+      compile(ce.box(['GammaRegularized', 'x', 2]), {
+        to: 'interval-js',
+        fallback: false,
+      });
+    } catch (e) {
+      diagnostic = compileDiagnosticOf(e);
+    }
+    expect(diagnostic).toMatchObject({
+      code: 'outside-profile',
+      operator: 'GammaRegularized',
     });
-    expect(r.success).toBe(false);
-    expect(r.unsupported).toEqual(['GammaRegularized']);
   });
 
   it('still reports a definition that the target declines', () => {

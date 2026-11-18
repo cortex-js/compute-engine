@@ -54,6 +54,39 @@ const code = (
   return String(r.code);
 };
 
+/**
+ * The interval-js result encloses the interpreter's value at a few points of
+ * `(x, y)`, and at points inside a small box.
+ */
+function expectEnclosesInterpreter(ce: ComputeEngine, latex: string): void {
+  const expr = ce.parse(latex);
+  const r = compile(expr, { to: 'interval-js' });
+  expect(r.success).toBe(true);
+  const run = r.run as (vars: unknown) => { value: { lo: number; hi: number } };
+  const encloses = (
+    out: { value: { lo: number; hi: number } },
+    x: number,
+    y: number
+  ) => {
+    const expected = expr.subs({ x, y }).N().re;
+    expect(out.value.lo).toBeLessThanOrEqual(expected);
+    expect(out.value.hi).toBeGreaterThanOrEqual(expected);
+  };
+  for (const [x, y] of [
+    [1, 2],
+    [-0.5, 3],
+    [0, 0],
+  ])
+    encloses(run({ x: { lo: x, hi: x }, y: { lo: y, hi: y } }), x, y);
+  const box = run({ x: { lo: 0.5, hi: 1 }, y: { lo: -1, hi: -0.5 } });
+  for (const [x, y] of [
+    [0.5, -1],
+    [0.75, -0.75],
+    [1, -0.5],
+  ])
+    encloses(box, x, y);
+}
+
 describe('Tycho item 216: point calls use shared helpers where supported', () => {
   test('point-typed parameter, glsl', () => {
     const ce = engine();
@@ -70,21 +103,10 @@ describe('Tycho item 216: point calls use shared helpers where supported', () =>
 
   test('point-typed parameter, interval-js', () => {
     const ce = engine();
-    // The definition is emitted and the call goes by reference; the body
-    // reads the coordinates of its parameter at run time.
-    expect(code(ce, String.raw`f((x,y))`, 'interval-js')).toBe(
-      '_fn_f([_.x, _.y])'
-    );
-    expect(code(ce, String.raw`d((x,y))`, 'interval-js')).toBe(
-      '_fn_d([_.x, _.y])'
-    );
-    const r = compile(ce.parse(String.raw`d((x,y))`), { to: 'interval-js' });
-    expect(r.success).toBe(true);
-    // The parameter may also be a numeric array of rank 3, which the call
-    // states to the helper.
-    expect(r.preamble).toContain(
-      '_IA.pointComponent(P, 0, true, undefined, false, true)'
-    );
+    expect(
+      compile(ce.parse(String.raw`f((x,y))`), { to: 'interval-js' }).success
+    ).toBe(true);
+    expectEnclosesInterpreter(ce, String.raw`d((x,y))`);
   });
 
   test('two point parameters, one of them a numeric literal point', () => {
@@ -99,9 +121,7 @@ describe('Tycho item 216: point calls use shared helpers where supported', () =>
     expect(code(ce, String.raw`e_2((x,y))`, 'glsl')).toEqual(
       expect.stringMatching(/^_fn_e_2_.*\(vec2\(x, y\)\)$/)
     );
-    expect(code(ce, String.raw`e_2((x,y))`, 'interval-js')).toBe(
-      '_fn_e_2([_.x, _.y])'
-    );
+    expectEnclosesInterpreter(ce, String.raw`e_2((x,y))`);
   });
 
   test('the inlined interval body agrees with the evaluator', () => {
@@ -138,7 +158,6 @@ describe('Tycho item 216: point calls use shared helpers where supported', () =>
     expect(code(ce, String.raw`f(P)`, 'glsl')).toEqual(
       expect.stringMatching(/^_fn_f_.*\(P\)$/)
     );
-    expect(code(ce, String.raw`f(P)`, 'interval-js')).toBe('_fn_f(_.P)');
     const point = (v: number) => ({ lo: v, hi: v });
     const r = compile(ce.parse(String.raw`f(P)`), { to: 'interval-js' });
     const out = r.run({ a: point(2), b: point(3), P: [point(1), point(2)] });

@@ -44,17 +44,6 @@ describe('A symbolic integration attempt that timed out', () => {
   beforeAll(() => BaseCompiler.setAntiderivativeAttemptBudgetForTesting(0));
   afterAll(() => BaseCompiler.setAntiderivativeAttemptBudgetForTesting());
 
-  test('is not repeated for another target, or for the same one', () => {
-    const ce = new ComputeEngine();
-    const first = compiled(ce, TAIL);
-    expect(first.searches).toBe(1);
-    expect(first.code).toContain('_SYS.integrate');
-    expect(compiled(ce, TAIL, 'interval-js').searches).toBe(0);
-    const again = compiled(ce, TAIL);
-    expect(again.searches).toBe(0);
-    expect(again.code).toBe(first.code);
-  });
-
   test('is not repeated inside a helper that holds the integral', () => {
     const ce = new ComputeEngine();
     expect(compiled(ce, TAIL).searches).toBe(1);

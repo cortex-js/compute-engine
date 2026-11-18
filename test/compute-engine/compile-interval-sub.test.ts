@@ -36,6 +36,14 @@ function count(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
 
+/** The interval of a result, with its `IntervalResult` wrapper removed. */
+function interval(result: unknown): { lo: number; hi: number } {
+  const r = result as { kind?: string; value?: { lo: number; hi: number } };
+  if (r.kind !== 'interval' || !r.value)
+    throw new Error(`Expected interval result, got: ${JSON.stringify(result)}`);
+  return r.value;
+}
+
 /** A point, a non-degenerate interval, and one that straddles zero. */
 const SAMPLES = [
   { x: 3, y: 1, z: 0.5 },
@@ -79,20 +87,22 @@ describe('INTERVAL JS - SUBTRACTION EMITS _IA.sub', () => {
       [ce.function('Negate', [ce.function('Random', [])]), ce.symbol('x')],
       { form: 'structural' }
     );
-    // On this target a draw lowers to its range, and the negated range folds
-    // to a literal; the witness is the chain shape: an addition whose FIRST
-    // argument is that negated range, not a subtraction from `x`.
-    const code = (compile(expr, { to: 'interval-js' }) as IntervalRun).code;
-    expect(code).toMatch(/^_IA\.add\(/);
-    expect(code).not.toContain('_IA.sub(');
+    // On this target a draw lowers to its range [0, 1], so the result at
+    // `x = 3` encloses every value `3 - Random()` can take.
+    const r = compile(expr, { to: 'interval-js' }) as IntervalRun;
+    const v = interval(r.run({ x: 3 }));
+    expect(v.lo).toBeLessThanOrEqual(2);
+    expect(v.hi).toBeGreaterThanOrEqual(3);
   });
 
   test('a constant subtrahend that canonicalizes to a negative literal still adds', () => {
     // `x - 2` canonicalizes to `Add(x, -2)`: the operand is a number
     // literal, not a `Negate` node, so there is no negation to remove.
     const r = compileInterval('x - 2');
-    expect(r.code).toBe('_IA.add(_.x, _k1)');
-    expect(r.preamble).toBe('const _k1 = _IA.point(-2);');
+    expect(interval(r.run({ x: 3 }))).toEqual({ lo: 1, hi: 1 });
+    const box = interval(r.run({ x: { lo: 1, hi: 2 } }));
+    expect(box.lo).toBeLessThanOrEqual(-1);
+    expect(box.hi).toBeGreaterThanOrEqual(0);
   });
 
   test('the chain-step fold still sees the subtraction step', () => {
@@ -100,11 +110,10 @@ describe('INTERVAL JS - SUBTRACTION EMITS _IA.sub', () => {
     // and no call survives.
     const r = compileInterval('\\pi - e');
     expect(count(r.code, '_IA.')).toBe(0);
-    expect(r.code).toBe('_k1');
-    expect(r.preamble).toBe(
-      "const _k1 = { kind: 'interval', value: { lo: 0.42331082513074714, " +
-        'hi: 0.4233108251307489 } };'
-    );
+    const v = interval(r.run({}));
+    const exact = ce.parse('\\pi - e').N().re;
+    expect(v.lo).toBeLessThanOrEqual(exact);
+    expect(v.hi).toBeGreaterThanOrEqual(exact);
   });
 
   test('`_IA.sub` answers what `_IA.add` of the negation answered', () => {

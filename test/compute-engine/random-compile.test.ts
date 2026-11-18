@@ -2134,45 +2134,6 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
     );
   });
 
-  test('interval-js runs caller code only after the pairs before it', () => {
-    const ce = new ComputeEngine();
-    ce.declare('W', 'real');
-    ce.declare('y', 'real');
-    const r = compile(ce.box(['Less', 'y', 1, 'W']), {
-      to: 'interval-js',
-      fallback: false,
-      vars: { W: '_.w()' },
-    })!;
-    const run = (y: number, w: number) => {
-      const log: string[] = [];
-      const value = r.run!({
-        y,
-        w: () => (log.push('w'), { lo: w, hi: w }),
-      } as any);
-      return { value, log: log.join(',') };
-    };
-    expect(run(5, 2)).toEqual({ value: 'false', log: '' });
-    expect(run(0, 2)).toEqual({ value: 'true', log: 'w' });
-    expect(run(0, 0)).toEqual({ value: 'false', log: 'w' });
-  });
-
-  test('interval-js binds the caller code of a chain', () => {
-    const ce = new ComputeEngine();
-    ce.declare('W', 'real');
-    const count = (code: string) => code.split('nextValue()').length - 1;
-    for (const to of ['interval-js'] as const)
-      for (const h of ['Less', 'Equal'])
-        expect(
-          count(
-            compile(ce.box([h, 1, 'W', 3]), {
-              to,
-              fallback: false,
-              vars: { W: 'nextValue()' },
-            })!.code
-          )
-        ).toBe(1);
-  });
-
   test('an earlier operand keeps the value it had before later caller code runs', () => {
     // `_.w()` writes the input `y` and returns `w`. The interpreter has the
     // value of each operand from before the next one is evaluated.
@@ -2194,16 +2155,6 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
       [['If', ['Less', 0, 'y', 'W'], true, false], 1, 2],
     ] as const)
       expect(run(json, y, w)).toEqual({ compiled: true, interpreted: true });
-    // interval-js reads the temporary of the earlier operand.
-    const ce = new ComputeEngine();
-    ce.declare('y', 'real');
-    ce.declare('W', 'real');
-    const code = (to: 'interval-js', json: any) =>
-      compile(ce.box(json), { to, fallback: false, vars: { W: 'nv()' } })!
-        .code;
-    expect(code('interval-js', ['Less', 0, 'y', 'W'])).toContain(
-      '_IA.less(_tv1, _tv2))(nv())'
-    );
   });
 
   test('a `vars` entry that reads another input compiles to its value', () => {

@@ -1,9 +1,10 @@
 /**
- * The profile `'ir'` of `compile()` for the `interval-js` target
- * (experimental): the result of the existing interval target from the slice
- * compiler in the interval mode (`print-interval.ts`). Anything else
- * declines with `'outside-profile'`; `compile()` then applies `fallback`
- * (the existing interval target). See "The interval mode" in `README.md`.
+ * The compilation of `compile()` for the `interval-js` target, with or
+ * without the option `profile: 'ir'`: the result of the interval target from
+ * the slice compiler in the interval mode (`print-interval.ts`). Anything
+ * else declines with `'outside-profile'`; `compile()` then applies
+ * `fallback` (the interpreter, `interval-fallback.ts`). See "The interval
+ * mode" in `README.md`.
  */
 
 import type { Expression } from '../../global-types.js';
@@ -43,6 +44,8 @@ const IR_INTERVAL_OPTIONS = {
   entryChecks: 'no-op',
   mode: 'declined',
   quadrature: 'no-op',
+  // `compile()` applies it to the result (`strictTypesChecked()`).
+  strictTypes: 'mapped',
 } as const satisfies Record<
   keyof typeof IR_OPTIONS,
   'mapped' | 'no-op' | 'declined'
@@ -94,7 +97,8 @@ function compileInterval(
     });
     // A name of `vars` is a read of the inputs object, not an entry
     // parameter: it is a boolean input when it is declared boolean, as in
-    // the existing target (`declaredBooleanNames()`).
+    // the interpreter fallback (`declaredBooleanNames()`,
+    // `interval-fallback.ts`).
     for (const name of expr.unknowns)
       if (
         name in vars &&

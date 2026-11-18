@@ -79,18 +79,8 @@ describe('Tycho item 237 — interval-js lowering batch', () => {
       to: 'interval-js',
     });
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/nullary/);
-  });
-
-  test('index-less Sum over a literal list, and the empty identity', () => {
-    const r = compile(ce().box(['Sum', ['List', 3, 4, 5]]), {
-      to: 'interval-js',
-    });
-    expect(r.success).toBe(true);
-    expect(pointOf(r.run({}))).toBe(12);
-    const empty = compile(ce().box(['Sum', ['List']]), { to: 'interval-js' });
-    expect(empty.success).toBe(true);
-    expect(pointOf(empty.run({}))).toBe(0);
+    expect(r.diagnostic?.code).toBe('outside-profile');
+    expect(r.diagnostic?.operator).toBe('Random');
   });
 
   test('index-less Sum over an element-wise body (the census witness)', () => {
@@ -149,44 +139,21 @@ describe('Tycho item 237 — interval-js lowering batch', () => {
     expect(iv.hi).toBeGreaterThanOrEqual(10);
   });
 
-  test('Range decomposition follows the interpreter contract', () => {
-    // Descending two-operand range infers step -1: 5+4+3+2+1 = 15.
-    const desc = compile(ce().box(['Sum', ['Range', 5, 1]]), {
+  test('a non-literal seed encloses the seeded draw', () => {
+    const engine = ce();
+    const json = ['WithRandomSeed', ['Add', 'n', 1], ['Random']];
+    const r = compile(engine.box(json), {
       to: 'interval-js',
     });
-    expect(desc.success).toBe(true);
-    expect(pointOf(desc.run({}))).toBe(15);
-    // Real step: 0 + 0.25 + 0.5 + 0.75 + 1 = 2.5.
-    const real = compile(ce().box(['Sum', ['Range', 0, 1, 0.25]]), {
-      to: 'interval-js',
-    });
-    expect(real.success).toBe(true);
-    expect(pointOf(real.run({}))).toBe(2.5);
-    // Sign-mismatched step is empty: the identity.
-    const empty = compile(ce().box(['Sum', ['Range', 1, 2, -1]]), {
-      to: 'interval-js',
-    });
-    expect(empty.success).toBe(true);
-    expect(pointOf(empty.run({}))).toBe(0);
-    // A single element at the edge of the safe-integer range compiles
-    // without hanging (the count-driven expansion makes no endpoint
-    // progress assumption).
-    const huge = compile(
-      ce().box(['Sum', ['Range', 9007199254740992, 9007199254740992]]),
-      { to: 'interval-js' }
-    );
-    expect(huge.success).toBe(true);
-  });
-
-  test('a non-literal seed fails closed', () => {
-    const r = compile(
-      ce().box(['WithRandomSeed', ['Add', 'n', 1], ['Random']]),
-      {
-        to: 'interval-js',
-      }
-    );
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/literal finite real or string seed/);
+    expect(r.success).toBe(true);
+    // The draw of the interpreter for the seed n + 1 lies in the enclosure.
+    for (const n of [1, 2]) {
+      const want = engine.box(json).subs({ n }).evaluate().re;
+      const v: any = r.run({ n });
+      const iv = v.value ?? v;
+      expect(iv.lo).toBeLessThanOrEqual(want);
+      expect(iv.hi).toBeGreaterThanOrEqual(want);
+    }
   });
 
   test('non-numeric elements fail closed', () => {

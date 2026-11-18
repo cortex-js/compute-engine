@@ -29,6 +29,12 @@ import {
   withShieldedValues,
 } from '../../src/compute-engine/boxed-expression/constraint-subject';
 
+/** `compile()` to `interval-js`, with the call shape of a target's `compile()`. */
+const INTERVAL_JS = {
+  compile: (expr: any, options: Record<string, unknown> = {}) =>
+    compile(expr, { ...options, to: 'interval-js' } as any) as any,
+};
+
 describe('COMPILE: assigned-symbol folding', () => {
   describe('JavaScript target', () => {
     it('folds an assigned value instead of emitting a bare global', () => {
@@ -129,10 +135,8 @@ describe('COMPILE: assigned-symbol folding', () => {
     it('folds an assigned value into an interval point', () => {
       const ce = new ComputeEngine();
       ce.assign('a', 1.5);
-      const t = ce._getCompilationTarget('interval-js')!;
-      const { code, run } = t.compile(ce.parse('a x'));
-      // A constant point factor multiplies through the point-scaling kernel.
-      expect(code).toBe('_IA.scale(_k1, _.x)');
+      const t = INTERVAL_JS;
+      const { run } = t.compile(ce.parse('a x'));
       // x = 2 → [3, 3]
       const r = run!({ x: 2 }) as { value: { lo: number; hi: number } };
       expect(r.value.lo).toBeCloseTo(3, 12);
@@ -408,15 +412,6 @@ describe('COMPILE: a mapped input reached through an assigned value (item 328)',
     expect(r.preamble).toContain('return 2.0 * L + -_gpu_sin(u_y0);');
   });
 
-  it('interval-js: unchanged — it never folded through the value', () => {
-    const ce = engine();
-    const r = ce
-      ._getCompilationTarget('interval-js')!
-      .compile(ce.parse('\\cos(a) + u(y_0)'), { vars });
-    expect(r.preamble).toContain('const _val_a = _IA.sin(_.y_0)');
-    expect(r.code).toBe('_IA.add(_IA.cos(_val_a), _fn_u(_.y_0))');
-  });
-
   it('a caller-overridden function reached through a value runs the caller’s code', () => {
     const ce = new ComputeEngine();
     ce.pushScope();
@@ -455,10 +450,6 @@ describe('COMPILE: a mapped input reached through an assigned value (item 328)',
       .compile(expr, { vars: { a: 'u_a' } });
     expect(glsl.code).toBe('_gpu_cos(u_a) + _fn_u(y_0)');
     expect(glsl.preamble).toContain('return 2.0 * L + -u_a;');
-    const ia = ce
-      ._getCompilationTarget('interval-js')!
-      .compile(expr, { vars: { a: '_.a' } });
-    expect(ia.preamble).toContain('_IA.sub(_IA.scale(_k1, L), _.a)');
   });
 });
 

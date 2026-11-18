@@ -80,9 +80,7 @@
  * count: it finds a candidate root with `.N()`, which can run host code,
  * but keeps a factor only after an exact polynomial division confirms it,
  * so the stored factorization does not depend on a value that the host code
- * returned. The cache of folded interval code (`FOLDED_INTERVAL_CODE`,
- * `compilation/interval-javascript-target.ts`) maps a code string that the
- * compiler made to its folded form: no host code runs to make it.
+ * returned.
  *
  * The definitions of the standard libraries are not host code. They are
  * marked when they are made, while the engine installs the standard

@@ -18,6 +18,10 @@
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import {
+  compileDiagnosticOf,
+  isCompileDeclineError,
+} from '../../src/compute-engine/compilation/diagnostics';
 import { IntervalArithmetic as IA } from '../../src/compute-engine/interval';
 
 type Enclosure = { lo: number; hi: number };
@@ -46,81 +50,19 @@ function point(x: number): Enclosure {
   return { lo: x, hi: x };
 }
 
-/** The whole emitted artifact: the constant table the preamble carries, then
- *  the expression that reads it. Every constant interval is bound in that
- *  table (`hoistIntervalConstants`), so a test that looks for a constant's
- *  spelling has to look at both halves. */
-function emitted(r: IntervalRun): string {
-  return `${r.preamble ?? ''}\n${r.code}`;
-}
-
 describe('interval-js: the argument (phase) of a complex value', () => {
-  test('a value built as `a + i·b` compiles to atan2 of its real parts', () => {
-    const ce = new ComputeEngine();
-    const r = compileInterval(
-      ce.parse('\\arg((x-0.3127)+\\imaginaryI(y-0.329))')
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('_IA.atan2(_IA.add(_.y, _k1), _IA.add(_.x, _k2))');
-    expect(r.preamble).toBe(
-      'const _k1 = _IA.point(-0.329);\nconst _k2 = _IA.point(-0.3127);'
-    );
-  });
-
-  test('the enclosure contains the interpreter value at a point', () => {
-    const ce = new ComputeEngine();
-    const r = compileInterval(
-      ce.parse('\\arg((x-0.3127)+\\imaginaryI(y-0.329))')
-    );
-    for (const [x, y] of [
-      [0.5, 0.4],
-      [0.1, 0.1],
-      [0.3127, 0.9],
-      [-1, 0.329],
-      [0.2, 0.2],
-    ]) {
-      const interpreted = ce
-        .box(['Argument', ['Complex', x - 0.3127, y - 0.329]])
-        .N().re;
-      const got = boundOf(r.run({ x: point(x), y: point(y) }));
-      expect(got.lo).toBeLessThanOrEqual(interpreted);
-      expect(got.hi).toBeGreaterThanOrEqual(interpreted);
-    }
-  });
-
-  test('a box across the branch cut answers the hull [−π, π] as a jump', () => {
-    const ce = new ComputeEngine();
-    const r = compileInterval(ce.parse('\\arg(x+\\imaginaryI y)'));
-    expect(r.code).toBe('_IA.atan2(_.y, _.x)');
-    const cut = r.run({
-      x: { lo: -1, hi: -0.5 },
-      y: { lo: -0.25, hi: 0.25 },
-    }) as { kind: string } & { value: Enclosure };
-    // Every value the phase takes on that box lies in the hull, and the jump
-    // across the negative real axis is reported rather than smoothed over.
-    expect(cut.kind).toBe('singular');
-    expect(cut.value.lo).toBeLessThanOrEqual(-Math.PI);
-    expect(cut.value.hi).toBeGreaterThanOrEqual(Math.PI);
-  });
-
-  test('a real operand is the same call with a zero imaginary part', () => {
-    const ce = new ComputeEngine();
-    const r = compileInterval(ce.parse('\\arg(x)'));
-    expect(r.code).toBe('_IA.atan2(_k1, _.x)');
-    expect(r.preamble).toBe('const _k1 = _IA.point(0);');
-    expect(boundOf(r.run({ x: point(2) })).hi).toBeCloseTo(0, 15);
-    const negative = boundOf(r.run({ x: point(-2) }));
-    expect(negative.lo).toBeLessThanOrEqual(Math.PI);
-    expect(negative.hi).toBeGreaterThanOrEqual(Math.PI);
-  });
-
   test('an opaque complex operand fails closed', () => {
     const ce = new ComputeEngine();
     ce.declare('z', 'complex');
-    const r = compileInterval(ce.parse('\\arg(\\sin(z))'));
-    expect(r.success).toBe(false);
-    expect(r.error).toContain('Argument');
-    expect(r.error).toContain('Could not compile');
+    // The interval mode declines the complex input: it has no complex lane.
+    let error: unknown;
+    try {
+      compileInterval(ce.parse('\\arg(\\sin(z))'));
+    } catch (e) {
+      error = e;
+    }
+    expect(isCompileDeclineError(error)).toBe(true);
+    expect(compileDiagnosticOf(error).code).toBe('outside-profile');
   });
 });
 
@@ -132,39 +74,25 @@ describe('interval-js: constants of a user-function body are hoisted', () => {
     return ce;
   }
 
-  test('a constant written once in a body becomes a preamble local', () => {
-    const ce = engineWithF();
-    const r = compileInterval(ce.box(['Add', ['f', 'x'], ['f', 'y']]));
-    expect(r.success).toBe(true);
-    // The body allocates no interval object of its own: `2`, `3` and `0.5`
-    // each occur once in it and are each bound in the preamble.
-    const body = r.preamble!.slice(r.preamble!.indexOf('const _fn_f'));
-    expect(body).not.toContain('_IA.point(');
-    expect(body).not.toContain('{ lo:');
-    for (const decl of ['_IA.point(2)', '_IA.point(3)', '_IA.point(0.5)'])
-      expect(r.preamble).toContain(`= ${decl};`);
-  });
-
-  test('a constant written once in the ROOT expression is bound too', () => {
-    // The constant table is built once per compiled artifact, not once per
-    // call, so a single occurrence in the root is worth a name: the consumer
-    // calls the kernel once per quadtree node.
-    const ce = new ComputeEngine();
-    const r = compileInterval(ce.parse('x + 7'));
-    expect(r.code).toBe('_IA.add(_.x, _k1)');
-    expect(r.preamble).toBe('const _k1 = _IA.point(7);');
-  });
-
-  test('a constant written once in a LOOP body becomes a preamble local', () => {
+  test('a constant written once in a LOOP body', () => {
     // 200 terms exceed the unroll limit, so a loop is emitted and its body
     // runs once per iteration.
     const ce = new ComputeEngine();
-    const r = compileInterval(ce.parse('\\sum_{n=1}^{200} \\sin(n x + 0.3)'));
-    expect(r.preamble).toContain('= _IA.point(0.3);');
-    const loop = r.code.slice(r.code.indexOf('for ('));
-    expect(loop).not.toContain('_IA.point(0.3)');
-    // The point over the loop INDEX is not a constant and stays where it is.
-    expect(loop).toContain('_IA.point(n)');
+    const expr = ce.parse('\\sum_{n=1}^{200} \\sin(n x + 0.3)');
+    const r = compileInterval(expr);
+    expect(r.success).toBe(true);
+    for (const x of [0.7, -1.3]) {
+      const interpreted = expr.subs({ x }).N().re;
+      const got = boundOf(r.run({ x: point(x) }));
+      expect(got.lo).toBeLessThanOrEqual(interpreted);
+      expect(got.hi).toBeGreaterThanOrEqual(interpreted);
+    }
+    const box = boundOf(r.run({ x: { lo: 0.7, hi: 0.7001 } }));
+    for (const x of [0.7, 0.70005, 0.7001]) {
+      const interpreted = expr.subs({ x }).N().re;
+      expect(box.lo).toBeLessThanOrEqual(interpreted);
+      expect(box.hi).toBeGreaterThanOrEqual(interpreted);
+    }
   });
 
   test('the hoisted body answers what the inline body answered', () => {
@@ -179,22 +107,6 @@ describe('interval-js: constants of a user-function body are hoisted', () => {
 });
 
 describe('interval-js: a constant point factor scales instead of multiplying', () => {
-  test('a literal point factor emits the scaling kernel', () => {
-    const ce = new ComputeEngine();
-    expect(emitted(compileInterval(ce.parse('0.5x')))).toBe(
-      'const _k1 = _IA.point(0.5);\n_IA.scale(_k1, _.x)'
-    );
-    // The point is written first even when it is the right-hand factor:
-    // interval multiplication is commutative endpoint for endpoint.
-    expect(emitted(compileInterval(ce.parse('\\sin(x) \\cdot 3')))).toBe(
-      'const _k1 = _IA.point(3);\n_IA.scale(_k1, _IA.sin(_.x))'
-    );
-    // A constant divisor divides through the matching kernel.
-    expect(emitted(compileInterval(ce.parse('\\frac{\\sin(x)}{1.6}')))).toBe(
-      'const _k1 = _IA.point(1.6);\n_IA.scaleDiv(_IA.sin(_.x), _k1)'
-    );
-  });
-
   test('an INEXACT constant keeps the general product', () => {
     // `π` is a two-ulp enclosure, not a point, so there is nothing to
     // specialize and the four endpoint products are all needed.
@@ -249,11 +161,6 @@ describe('interval-js: a constant chain folds into one enclosure', () => {
   test('`2πs/100` is one multiplication by an enclosure of π/50', () => {
     const ce = new ComputeEngine();
     const r = compileInterval(ce.parse('\\frac{2\\pi s}{100}'));
-    expect(r.code).toBe('_IA.mul(_k1, _.s)');
-    expect(r.preamble).toBe(
-      "const _k1 = { kind: 'interval', value: { lo: 0.06283185307179584, " +
-        'hi: 0.06283185307179588 } };'
-    );
     expect(r.code).not.toContain('_IA.div(');
   });
 
@@ -284,9 +191,6 @@ describe('interval-js: a constant chain folds into one enclosure', () => {
     // there. A folded `2/49` — no double holds that value — would answer an
     // interval around `2k` instead, and `floor` would read a discontinuity.
     const ce = new ComputeEngine();
-    const r = compileInterval(ce.parse('\\frac{2x}{49}'));
-    expect(r.code).toContain('_IA.scaleDiv(_.x, _k2)');
-    expect(r.preamble).toContain('const _k2 = _IA.point(49);');
     const floored = compileInterval(ce.parse('\\lfloor\\frac{2x}{49}\\rfloor'));
     for (let k = 1; k <= 40; k++)
       expect(boundOf(floored.run({ x: point(49 * k) }))).toEqual(point(2 * k));

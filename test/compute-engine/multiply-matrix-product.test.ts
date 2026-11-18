@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { IntervalArithmetic } from '../../src/compute-engine/interval';
 import type { MathJsonExpression } from '../../src/math-json/types';
 
 /**
@@ -472,45 +471,6 @@ describe('compiled code', () => {
     expect(r.diagnostic?.code).toBe('outside-fragment');
   });
 
-  it('interval-js checks the shapes of the values of lists that may be matrices', () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', 'broadcastable<number>');
-    ce.declare('L', 'list<number>');
-    for (const expr of [
-      ['Multiply', 'a', 'L'],
-      ['Multiply', 'a', 'a'],
-    ] as MathJsonExpression[]) {
-      const r = compile(ce.box(expr), { to: 'interval-js', fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.code).toContain('_IA.bcastProduct');
-      // Two vectors: the product of each entry.
-      const vectors = r.run!({ a: [1, 2], L: [3, 4] } as never) as unknown[];
-      expect(vectors).toHaveLength(2);
-      // A matrix beside another list: the interpreter takes the matrix
-      // product, which this target does not compute. The code throws, and
-      // the runner of this target turns a run-time error into `entire`
-      // ("cannot bound this"). The absence marker (`empty`) would say
-      // "no value", and the product has a value.
-      expect(
-        r.run!({
-          a: [
-            [1, 2],
-            [3, 4],
-          ],
-          L: [3, 4],
-        } as never)
-      ).toMatchObject({ kind: 'entire' });
-    }
-    // Two lists of numbers keep the product of each entry, with no check.
-    ce.declare('v', 'list<number>');
-    ce.declare('w', 'list<number>');
-    const vw = compile(ce.box(['Multiply', 'v', 'w']), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(vw.code).toContain('_IA.bcast(');
-  });
-
   it('evaluates a factor that is repeated once for each position', () => {
     const ce = new ComputeEngine();
     ce.declare('f', '() -> tensor<number>');
@@ -704,38 +664,6 @@ describe('matrices whose dimensions do not agree', () => {
 describe('second review round', () => {
   const MJ = toMathJson(M);
   const QJ = toMathJson(Q);
-
-  it('1. interval-js refuses a matrix-vector product, never answers empty', () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', 'broadcastable<number>');
-    ce.declare('L', 'list<number>');
-    const r = compile(ce.box(['Multiply', 'a', 'L']), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    // The compiled code throws, and the runner answers `entire` ("cannot
-    // bound this"), never `empty` ("no value"): [3, 4] times the matrix has
-    // the value [11, 25].
-    const code = new Function('_IA', '_', `return ${r.code}`);
-    expect(() =>
-      code(IntervalArithmetic, {
-        a: [
-          [1, 2],
-          [3, 4],
-        ],
-        L: [3, 4],
-      })
-    ).toThrow(/matrix product/);
-    expect(
-      r.run!({
-        a: [
-          [1, 2],
-          [3, 4],
-        ],
-        L: [3, 4],
-      } as never)
-    ).toEqual({ kind: 'entire' });
-  });
 
   it('2. broadcastable<number> products check the shapes at run time', () => {
     const ce = new ComputeEngine();

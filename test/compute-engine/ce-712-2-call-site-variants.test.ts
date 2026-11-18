@@ -113,7 +113,7 @@ const ROWS: [string, unknown, string | undefined, string[]][] = [
     'row 7: f(M)',
     ['f', 'M'],
     '_SYS.mapFn(_fn_f, [2], _.M)',
-    ['javascript', 'interval-js'],
+    ['javascript'],
   ],
   [
     'f(L) + f(x)',
@@ -137,13 +137,13 @@ const ROWS: [string, unknown, string | undefined, string[]][] = [
     'row 14: Block(q ≔ s ↦ 3s, q(L))',
     ['Block', Q, ['q', 'L']],
     undefined,
-    ['javascript', 'interval-js'],
+    ['javascript'],
   ],
   [
     'row 15: Block(q ≔ s ↦ 3s, q(x) + q(y))',
     ['Block', Q, ['Add', ['q', 'x'], ['q', 'y']]],
     undefined,
-    ['javascript', 'interval-js'],
+    ['javascript'],
   ],
 ];
 

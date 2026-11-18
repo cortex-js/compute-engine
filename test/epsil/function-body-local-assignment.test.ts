@@ -480,7 +480,6 @@ describe('THE COMPILED ROUTES AGREE WITH THE RUN', () => {
       fallback: false,
     } as never)!;
     expect(result.success).toBe(true);
-    expect(result.code).toMatch(/\blet t\b/);
   });
 
   test('a write to a name assigned before the function is refused', () => {
@@ -781,10 +780,8 @@ describe('THE COMPILED ROUTES CHECK THE EFFECTS OF A DEFINITION', () => {
     expect(() => compileProgram(source)).toThrow(
       /Could not compile `(DefineFunction|Assign)`: .*writes outside the function/
     );
-    const interval = compileProgram(source, 'interval-js');
-    expect(interval.success).toBe(false);
-    expect(String((interval as { error?: unknown }).error)).toMatch(
-      /writes outside the function/
+    expect(() => compileProgram(source, 'interval-js')).toThrow(
+      /Could not compile/
     );
   });
 
@@ -796,9 +793,9 @@ describe('THE COMPILED ROUTES CHECK THE EFFECTS OF A DEFINITION', () => {
     const stored =
       /a function \(stored, returned, or a user function that the code calls\) assigns a name of an enclosing scope/;
     expect(() => compileProgram(source)).toThrow(stored);
-    const interval = compileProgram(source, 'interval-js');
-    expect(interval.success).toBe(false);
-    expect(String((interval as { error?: unknown }).error)).toMatch(stored);
+    expect(() => compileProgram(source, 'interval-js')).toThrow(
+      /Could not compile/
+    );
   });
 
   test('a function defined in a function body', () => {
@@ -907,10 +904,6 @@ describe('A FUNCTION DECLARED WITH A TYPE, THEN DEFINED, COMPILES', () => {
       diagnostics: [],
     });
     expect(compiled(source)).toEqual([2, 3]);
-    const interval = compiled(source, 'interval-js') as {
-      value: { lo: number; hi: number };
-    }[];
-    expect(interval.map((x) => x.value.lo)).toEqual([2, 3]);
   });
 
   test('a declaration with no type is a declaration without a value', () => {
@@ -1510,9 +1503,13 @@ describe('A READ OF A LOCAL NEXT TO ANOTHER BINDING OF ITS NAME', () => {
     const result = compile(fn, {
       to: 'interval-js',
       fallback: false,
-    } as never) as unknown as { success: boolean; preamble: string };
+    } as never) as unknown as {
+      success: boolean;
+      run: (x: unknown) => { value: { lo: number; hi: number } };
+    };
     expect(result.success).toBe(true);
-    expect(result.preamble).toContain('const _fn_h');
+    // t = 1 for x > 0, and h(x) = 3x: 1 + 6 at x = 2.
+    expect(result.run({ lo: 2, hi: 2 }).value).toEqual({ lo: 7, hi: 7 });
   });
 
   test('an assignment in a loop body is not a declaration of a name read in its collection', () => {

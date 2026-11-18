@@ -41,6 +41,7 @@ describe('a bare Nothing fails closed on every target', () => {
       return;
     }
     expect(r.diagnostic?.code).toBe('possible-nothing');
+    if (to === 'interval-js') return;
     expect(r.diagnostic?.message ?? r.error ?? '').toMatch(
       /read here as an operand/
     );

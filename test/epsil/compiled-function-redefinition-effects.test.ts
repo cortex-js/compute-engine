@@ -44,8 +44,9 @@ describe('A FUNCTION REDEFINED WITH A BODY THAT WRITES OUTSIDE', () => {
     expect(() => compileProgram(source)).toThrow(
       /Could not compile `Assign`: .*writes outside the function/
     );
-    const interval = compileProgram(source, 'interval-js');
-    expect(interval.success).toBe(false);
+    expect(() => compileProgram(source, 'interval-js')).toThrow(
+      /Could not compile/
+    );
   });
 
   // A redefined function is a function value stored in a local, which

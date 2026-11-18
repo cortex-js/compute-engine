@@ -17,7 +17,10 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
-import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
+
+/** `compile()` to `interval-js`, called as a target's `compile()` is. */
+const intervalCompile = (expr: any, options: Record<string, unknown> = {}) =>
+  compile(expr, { ...options, to: 'interval-js' } as any) as any;
 
 const ce = new ComputeEngine();
 ce.declare('m', 'real');
@@ -150,15 +153,11 @@ describe('Sum/Product with a non-finite bound fails closed', () => {
   });
 
   it('the interval-js target declines it too', () => {
-    // `compileOrThrow` reports this class as `success: false` rather than
-    // throwing, so the decline is read off the result.
-    const direct = new IntervalJavaScriptTarget().compile(INFINITE_SUM(), {
+    const direct = intervalCompile(INFINITE_SUM(), {
       constantFold: false,
     });
     expect(direct.success).toBe(false);
-    expect(direct.error).toMatch(
-      /Could not compile `Sum`: the upper bound .* is not a finite number/
-    );
+    expect(direct.diagnostic?.code).toBe('outside-profile');
     expect(
       compile(INFINITE_SUM(), { to: 'interval-js', constantFold: false })
         .success

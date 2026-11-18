@@ -114,9 +114,7 @@ describe('A call at a parameter whose point type was inferred', () => {
     expect(ok.diagnostic?.code).toBe('unsettled-shape');
 
     // A matrix arm is not a list of numbers: the call still declines. The
-    // branches of the `Which` (a number and a matrix) also have different
-    // shapes, but the shape check runs after the code is generated, so the
-    // more specific reason of the call is the one that the result reports.
+    // branches of the `Which` (a number and a matrix) have different shapes.
     ce.assign(
       'T',
       ce.box([
@@ -129,9 +127,7 @@ describe('A call at a parameter whose point type was inferred', () => {
       to: 'interval-js',
     });
     expect(no.success).toBe(false);
-    expect(no.error).toMatch(
-      /argument 1 has the type `integer \| matrix<2x2>`, which admits a collection that is not a list of points/
-    );
+    expect(no.diagnostic?.code).toBe('unsettled-shape');
   });
 });
 

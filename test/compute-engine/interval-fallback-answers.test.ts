@@ -5,8 +5,8 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * When `interval-js` cannot compile an expression, the result runs the
  * interpreter at the midpoint of each interval input and wraps its value as
  * an interval answer (`buildIntervalFallback`,
- * `compilation/interval-javascript-target.ts`). `Fibonacci` has no lowering
- * on this target, so it takes that route.
+ * `compilation/interval-fallback.ts`). `Fibonacci` has no lowering in the
+ * interval mode (`compilation/ir/`), so it takes that route.
  *
  * - A boolean is the answer string of a comparison, `'true'` or `'false'`, as
  *   compiled code of this target gives it (user decision of 2026-10-23,

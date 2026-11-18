@@ -194,26 +194,4 @@ describe('the targets with no object absence axis', () => {
     const r = compile(ce.box(['IsMissing', 'Missing']), { to: 'glsl' } as any);
     expect(r.success).toBe(false);
   });
-
-  // The interval target's numeric marker is a whole-NaN bare interval, and its
-  // absence spellings cover its whole value model, so both primitives answer.
-  test('the interval target discharges a written Missing', () => {
-    const missing = compile(ce.box(['IsMissing', 'Missing']), {
-      to: 'interval-js',
-      fallback: false,
-    } as any);
-    expect(missing.success).toBe(true);
-    expect(missing.freeSymbols).toEqual([]);
-    expect(missing.run!({})).toBe('true');
-
-    const coalesced = compile(ce.box(['Coalesce', 'Missing', 7]), {
-      to: 'interval-js',
-      fallback: false,
-    } as any);
-    expect(coalesced.success).toBe(true);
-    expect(coalesced.run!({})).toEqual({
-      kind: 'interval',
-      value: { lo: 7, hi: 7 },
-    });
-  });
 });

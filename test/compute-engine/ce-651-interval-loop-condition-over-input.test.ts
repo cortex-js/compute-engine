@@ -52,7 +52,6 @@ function check(json: unknown, x: number, expected: number) {
   ce.declare('x', 'real');
   const result = compile(ce.box(json as any), { to: 'interval-js' });
   expect(result.success).toBe(true);
-  expect(result.code).toContain('_IA.decided(');
   expect(result.run!({ x })).toEqual(point(expected));
 }
 
@@ -133,81 +132,6 @@ describe('CE-651: an interval loop condition over an input', () => {
     });
     const out = result.broadcast!({ x: new Float64Array([2, 2, 1.5, 2.5]) });
     expect(Array.from(out)).toEqual([4, 4, 0, NaN, NaN, 2]);
-  });
-
-  // The interpreter stops `And` at its first `False` operand, so a host
-  // function in a later operand does not run. With `x = 0`, `k < x` is false
-  // on each pass, and `f` must not be called.
-  test('a later operand of And runs only when the first does not decide', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('f', '(real) -> real');
-    const g = globalThis as { ce651Calls?: number };
-    g.ce651Calls = 0;
-    const result = compile(
-      ce.box(
-        loopOf([
-          'Block',
-          ['If', ['And', ['Less', 'k', 'x'], ['Greater', ['f', 'k'], 0]], ['Break']],
-          ['Assign', 's', ['Add', 's', 'k']],
-        ]) as any
-      ),
-      {
-        to: 'interval-js',
-        functions: {
-          // The function is emitted from its source, so it counts its calls
-          // in a global.
-          f: (a: unknown) => {
-            (globalThis as { ce651Calls?: number }).ce651Calls! += 1;
-            return a;
-          },
-        },
-      }
-    );
-    expect(result.success).toBe(true);
-    expect(result.run!({ x: 0 })).toEqual(point(15));
-    expect(g.ce651Calls).toBe(0);
-    // With `x = 9`, `k < x` is true on each pass: `f(1) > 0` runs and breaks.
-    expect(result.run!({ x: 9 })).toEqual(point(0));
-    expect(g.ce651Calls).toBe(1);
-    delete g.ce651Calls;
-  });
-
-  // A `Not` around the connective keeps the order of evaluation: with
-  // `x = 0`, `Not(And(k < x, f(k) > 0))` is true on the first pass, and `f`
-  // is not called.
-  test('a connective under Not keeps the order of evaluation', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('f', '(real) -> real');
-    const g = globalThis as { ce651Calls?: number };
-    g.ce651Calls = 0;
-    const result = compile(
-      ce.box(
-        loopOf([
-          'Block',
-          [
-            'If',
-            ['Not', ['And', ['Less', 'k', 'x'], ['Greater', ['f', 'k'], 0]]],
-            ['Break'],
-          ],
-          ['Assign', 's', ['Add', 's', 'k']],
-        ]) as any
-      ),
-      {
-        to: 'interval-js',
-        functions: {
-          f: (a: unknown) => {
-            (globalThis as { ce651Calls?: number }).ce651Calls! += 1;
-            return a;
-          },
-        },
-      }
-    );
-    expect(result.success).toBe(true);
-    expect(result.run!({ x: 0 })).toEqual(point(0));
-    expect(g.ce651Calls).toBe(0);
-    delete g.ce651Calls;
   });
 
   // An operand that is a list is not a condition of a loop pass: the

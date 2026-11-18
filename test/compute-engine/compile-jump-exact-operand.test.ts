@@ -105,7 +105,13 @@ describe('Compiled jump function of a closed exact operand, no constant fold', (
         to: 'interval-js',
         ...NO_FOLD,
       });
-      expect(String(r.code)).toMatch(/_IA\.floor\(/);
+      expect(r.success).toBe(true);
+      const expected = box(['Floor', nearInt]).N().re;
+      const got = r.run!({}) as unknown as {
+        value: { lo: number; hi: number };
+      };
+      expect(got.value.lo).toBeLessThanOrEqual(expected);
+      expect(got.value.hi).toBeGreaterThanOrEqual(expected);
     });
   });
 });

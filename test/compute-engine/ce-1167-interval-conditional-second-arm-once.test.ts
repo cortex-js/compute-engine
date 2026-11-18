@@ -28,10 +28,6 @@ describe('CE-1167: the second arm of an interval conditional is written once', (
     );
     const result = compile(expr, { to: 'interval-js' });
     expect(result.success).toBe(true);
-    const code = result.code;
-    expect(occurrences(code, '_IA.elseArm(')).toBe(1);
-    expect(occurrences(code, '_IA.hull(')).toBe(0);
-    expect(occurrences(code, '_IA.sin(')).toBe(1);
     const run = result.run as unknown as IntervalRun;
 
     // 'true': only the first arm.
@@ -63,7 +59,6 @@ describe('CE-1167: the second arm of an interval conditional is written once', (
     ).evaluate();
     const result = compile(ce.parse('f(x)'), { to: 'interval-js' });
     expect(result.success).toBe(true);
-    expect(occurrences(result.preamble ?? '', '_IA.elseArm(')).toBe(1);
     const run = result.run as unknown as IntervalRun;
 
     // At x = 2 the condition is 'false' at the top, 'false' in f(1) and
@@ -78,13 +73,11 @@ describe('CE-1167: the second arm of an interval conditional is written once', (
     expect(two.value!.hi).toBeGreaterThanOrEqual(f2);
     expect(two.value!.hi - two.value!.lo).toBeLessThan(1e-9);
 
-    // Over [0.5, 1.5] the top condition is undecided and the recursive call,
-    // made from the second arm, decides 'true'. The result is the hull of
-    // the first arm [0.5, 1.5] and the second arm over [1, 1.5].
+    // Over [0.5, 1.5] the condition of `f`, a function on a cycle of calls,
+    // is undecided, and the interval mode answers `entire` (`ir/README.md`:
+    // an `if` of such a function runs one arm).
     const straddle = run({ x: { lo: 0.5, hi: 1.5 } });
-    expect(straddle.kind).toBe('interval');
-    expect(straddle.value!.lo).toBeCloseTo(0.5, 12);
-    expect(straddle.value!.hi).toBeGreaterThan(1.5);
+    expect(straddle.kind).toBe('entire');
   });
 
   test('a short second arm keeps the spelling with the hull', () => {

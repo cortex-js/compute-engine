@@ -304,15 +304,19 @@ describe('NORM / ABS of a point list agree on both routes (item 138)', () => {
     }
   });
 
-  // Every non-JS target declines rather than answer a flattened scalar or a
-  // component-wise array (the GPU targets already declined).
-  test('the other targets fail closed on a point list', () => {
+  // The GPU target declines rather than answer a flattened scalar or a
+  // component-wise array.
+  test('glsl fails closed on a point list, interval-js gives its values', () => {
     const e = new ComputeEngine();
     // `constantFold: false` throughout: `S_TUPLES` is a literal point list, so
     // each of these would otherwise be evaluated at compile time and emitted
     // as a literal vector, bypassing the point-list declines under test.
-    for (const lang of ['glsl', 'interval-js']) {
-      const target = e._getCompilationTarget(lang as any);
+    // interval-js compiles them with the interpreter's values (below).
+    for (const lang of ['glsl']) {
+      const target = {
+        compile: (expr: any, options: Record<string, unknown> = {}) =>
+          compile(expr, { ...options, to: lang } as any) as any,
+      };
       for (const head of ['Norm', 'Abs']) {
         expect(
           target.compile(e.box([head, S_TUPLES]), {
@@ -327,6 +331,15 @@ describe('NORM / ABS of a point list agree on both routes (item 138)', () => {
           constantFold: false,
         }).success
       ).toBe(false);
+    }
+    const midpoints = (v: any): unknown =>
+      Array.isArray(v) ? v.map(midpoints) : (v.value.lo + v.value.hi) / 2;
+    for (const head of ['Norm', 'Abs']) {
+      const r: any = compile(e.box([head, S_TUPLES]), {
+        to: 'interval-js',
+        constantFold: false,
+      });
+      expect(midpoints(r.run({}))).toEqual([0, 5, 10]);
     }
   });
 });

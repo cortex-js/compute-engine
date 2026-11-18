@@ -24,6 +24,13 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
+
+/** `compile()` to `interval-js`, with the call shape of a target's `compile()`. */
+const INTERVAL_JS = {
+  compile: (expr: any, options: Record<string, unknown> = {}) =>
+    compile(expr, { ...options, to: 'interval-js' } as any) as any,
+};
 
 const glsl = new GLSLTarget();
 
@@ -402,7 +409,7 @@ describe('sampler-backed At — the static-index and gather tiers read texels', 
 describe('`storage` option — validated everywhere, ignored off the shader targets', () => {
   const ce = boardEngine();
   const js = ce._getCompilationTarget('javascript')!;
-  const interval = ce._getCompilationTarget('interval-js')!;
+  const interval = INTERVAL_JS;
 
   test('an unknown storage kind is an error on every target', () => {
     const bad = { storage: { S: 'buffer' } } as any;

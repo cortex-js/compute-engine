@@ -19,6 +19,7 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
 const glsl = new GLSLTarget();
@@ -220,6 +221,16 @@ describe('CE-583: the GLSL output does not change', () => {
   });
 });
 
+/** The code of the decline that interval-js throws for `expr`. */
+function intervalDeclineCode(expr: Parameters<typeof compile>[0]): string {
+  try {
+    compile(expr, { to: 'interval-js', fallback: false });
+  } catch (e) {
+    return compileDiagnosticOf(e).code;
+  }
+  return 'compiled';
+}
+
 describe('CE-583: a use of a block local before its Declare declines', () => {
   // The local exists from the start of the block, so a statement before
   // the `Declare` uses the local. The canonical form holds the static error
@@ -262,10 +273,11 @@ describe('CE-583: a use of a block local before its Declare declines', () => {
       expect(() => compile(expr, { to: 'glsl', fallback: false })).toThrow(
         /The head `Error` is outside the GLSL fragment/
       );
-      // The interval target gives its decline in the result.
-      const interval = compile(expr, { to: 'interval-js', fallback: false });
-      expect(interval.success).toBe(false);
-      expect(interval.error).toMatch(decline);
+      // The interval mode declines the static error.
+      expect(() =>
+        compile(expr, { to: 'interval-js', fallback: false })
+      ).toThrow(decline);
+      expect(intervalDeclineCode(expr)).toBe('static-type-error');
     });
   }
 
@@ -395,9 +407,10 @@ describe('CE-583: the order checks also run on a loop body', () => {
     const decline = /read-before-declaration/;
     for (const to of ['javascript'])
       expect(() => compile(expr, { to, fallback: false })).toThrow(decline);
-    const interval = compile(expr, { to: 'interval-js', fallback: false });
-    expect(interval.success).toBe(false);
-    expect(interval.error).toMatch(decline);
+    expect(() =>
+      compile(expr, { to: 'interval-js', fallback: false })
+    ).toThrow(decline);
+    expect(intervalDeclineCode(expr)).toBe('static-type-error');
     ce.assign('U', 1);
     expect(expr.evaluate().toString()).toMatch(/^Error\(/);
   });

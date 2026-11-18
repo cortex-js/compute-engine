@@ -1,9 +1,9 @@
 # The slice compiler
 
 An experiment: a table-driven compiler with an SSA representation and two thin
-printers, JavaScript and GLSL ES 3.00. `compile()` uses it only with the
-experimental option `profile: 'ir'`, on JavaScript and GLSL ("Selecting the
-pipeline" below), and on `interval-js` ("The interval mode"). The entry is
+printers, JavaScript and GLSL ES 3.00. `compile()` uses it with the experimental
+option `profile: 'ir'` on JavaScript and GLSL ("Selecting the pipeline" below),
+and always on `interval-js` ("The interval mode"). The entry is
 `compileSlice(expr, { target, passes, extend, iterationBudget })` in `index.ts`;
 it returns the code and its `warnings`. Anything out of scope throws a `Decline`
 with the fields `node`, `head` and `cause`, also for a refusal of the target
@@ -597,13 +597,13 @@ undecided error, so that a recursion ends where both arms would recurse; the
 function calls, keep the three-way form. With every verdict decided, each call
 follows the path of every point of the box. A recursion that does not reach its
 base case throws a `RangeError` at the end of the JavaScript stack (`s(x, 2.5)`
-of "User functions", about 1.5 ms, as on the existing target); `run()` answers
-both errors with `entire`. The pass `fold` runs only its list rules (an element
-of a `list` is that element, an element of an element-wise operation is the
-operation on the elements, an `At` of a constant index in range is an `elem`)
-and its rule of an exact zero (`zeros()`): an `add` with an exact zero as an
-operand is its other operand. An exact zero is a value printed as the point
-`[0, 0]` or `[-0, -0]`: the integer literal 0, its `neg`, its `elem` at a
+of "User functions", about 1.5 ms, as on the earlier interval target); `run()`
+answers both errors with `entire`. The pass `fold` runs only its list rules (an
+element of a `list` is that element, an element of an element-wise operation is
+the operation on the elements, an `At` of a constant index in range is an
+`elem`) and its rule of an exact zero (`zeros()`): an `add` with an exact zero
+as an operand is its other operand. An exact zero is a value printed as the
+point `[0, 0]` or `[-0, -0]`: the integer literal 0, its `neg`, its `elem` at a
 constant index of a `list`, and its `div` by a nonzero integer literal, whose
 kernel gives `[0, 0]` (`x + 0/3`, `x - List(0, 1)[0]` and the identity of a sum
 written out are `x`; a real literal 0, a `sub` and a `mul` by an exact zero
@@ -628,39 +628,40 @@ printed when the arm is pure; another arm keeps `_IA.decided()`.
 Spelled: the arithmetic (`div.q` is `_IA.div`; an `add` of a `neg` that has no
 other use is `_IA.sub`, with the `neg` removed after the passes,
 `subtractions()`: `x - y` is `_IA.sub(_.x, _.y)`, `-x + y` is
-`_IA.sub(_.y, _.x)`, as on the existing target; a `div` whose dividend is such a
-`neg` is `_IA.negDiv(a, b)`, the kernel of `div` of `negate` with the same
-endpoints, kinds and marks (not a `neg` of a `div`, whose clipped end differs,
-as on the existing target); a product with a rational `p/q` and a constant
-marked `inexact` and a factor that is not a constant, `Rational(2, 3)·π·x`, is
-one constant, computed once, times the other factors: the product of the
-rational and the constant factors folded as a closed node (`N()` and one ulp,
-`2π/3`), or, where a closed node is not folded (machine precision),
-`(π / q) · p`, the constant of the existing target; with no such constant, or
-with constant factors only (a term of a sum written out, computed once anyway),
-it is `(p·π·x)/q` (`product()`: `1/3 · 6` stays the point 2)), `Power` (`pow`,
-also of integers, is `_IA.powReal`; a power by the exact constant 2 is
-`_IA.square`, the operation `square` that the lowering makes; a float literal
-exponent below), `Root` (`_IA.nthRootInterval`), `Sqrt`, `Abs`, `Exp`, `Ln`,
-`Log` of base 10 and 2, the trigonometric and hyperbolic functions and their
-inverses (also the reciprocal ones), `Arctan2`, `Hypot`, `Degrees` (the product
-by an enclosure of π, then the quotient by 180), `Floor`, `Ceil`, `Round`,
-`Truncate`, `Fract`, `Sign`, `Mod`, `Max`, `Min`, `Erf`, `Erfc`, `Gamma`,
-`GammaLn`, `Factorial`, `Factorial2`, `Binomial` and `Choose` (also of real
-operands, `binomial.real`, a row of the mode), `GCD`, `LCM`, the comparisons,
-`And`, `Or`, `Not` (Kleene logic on verdicts), `If`, `Which`, a `Block` with
-locals, user functions, `Sum` and `Product` with `Limits`, `Random()` and
-`WithRandomSeed` of a number seed, a root function literal, and the lists below,
-and integrals (below). `Haversine`, `Zeta`, `FresnelC`, `FresnelS` (the kernel
-`_IA.fresnelS` misses S(1.5) by 4 ulps, more than its outward ulp) and the
-complex and colour operations have no spelling and decline (a cause of the mode
-ends with "on interval-js"). A `Loop` is lowered as on JavaScript ("Loops and
-the runtime"): its carried values are intervals, a local assigned in an
-undecided `If` of a pass holds the hull of both arms (the existing target
-answers `entire` there), and one whose values are not read is removed; a `Break`
-and a `Continue` compile, and a pass whose flag of a `Break` is undecided throws
-the error of `_IA.decided()` (the whole range); a `Return` declines in the
-slice. A string seed and `Random` of a domain decline in the lowering.
+`_IA.sub(_.y, _.x)`, as on the earlier interval target; a `div` whose dividend
+is such a `neg` is `_IA.negDiv(a, b)`, the kernel of `div` of `negate` with the
+same endpoints, kinds and marks (not a `neg` of a `div`, whose clipped end
+differs, as on the earlier interval target); a product with a rational `p/q` and
+a constant marked `inexact` and a factor that is not a constant,
+`Rational(2, 3)·π·x`, is one constant, computed once, times the other factors:
+the product of the rational and the constant factors folded as a closed node
+(`N()` and one ulp, `2π/3`), or, where a closed node is not folded (machine
+precision), `(π / q) · p`, the constant of the earlier interval target; with no
+such constant, or with constant factors only (a term of a sum written out,
+computed once anyway), it is `(p·π·x)/q` (`product()`: `1/3 · 6` stays the point
+2)), `Power` (`pow`, also of integers, is `_IA.powReal`; a power by the exact
+constant 2 is `_IA.square`, the operation `square` that the lowering makes; a
+float literal exponent below), `Root` (`_IA.nthRootInterval`), `Sqrt`, `Abs`,
+`Exp`, `Ln`, `Log` of base 10 and 2, the trigonometric and hyperbolic functions
+and their inverses (also the reciprocal ones), `Arctan2`, `Hypot`, `Degrees`
+(the product by an enclosure of π, then the quotient by 180), `Floor`, `Ceil`,
+`Round`, `Truncate`, `Fract`, `Sign`, `Mod`, `Max`, `Min`, `Erf`, `Erfc`,
+`Gamma`, `GammaLn`, `Factorial`, `Factorial2`, `Binomial` and `Choose` (also of
+real operands, `binomial.real`, a row of the mode), `GCD`, `LCM`, the
+comparisons, `And`, `Or`, `Not` (Kleene logic on verdicts), `If`, `Which`, a
+`Block` with locals, user functions, `Sum` and `Product` with `Limits`,
+`Random()` and `WithRandomSeed` of a number seed, a root function literal, and
+the lists below, and integrals (below). `Haversine`, `Zeta`, `FresnelC`,
+`FresnelS` (the kernel `_IA.fresnelS` misses S(1.5) by 4 ulps, more than its
+outward ulp) and the complex and colour operations have no spelling and decline
+(a cause of the mode ends with "on interval-js"). A `Loop` is lowered as on
+JavaScript ("Loops and the runtime"): its carried values are intervals, a local
+assigned in an undecided `If` of a pass holds the hull of both arms (the earlier
+interval target answers `entire` there), and one whose values are not read is
+removed; a `Break` and a `Continue` compile, and a pass whose flag of a `Break`
+is undecided throws the error of `_IA.decided()` (the whole range); a `Return`
+declines in the slice. A string seed and `Random` of a domain decline in the
+lowering.
 
 Lists. What the lowering makes of a list (sections "Lists" and "Tuples") is
 printed with the spellings of the mode, and what it declines for JavaScript
@@ -668,74 +669,76 @@ stays declined (`Linspace`, `At` of a list of tuples that can be out of range);
 `RandomChoice`, `RandomShuffle`, a `Zip` or a `Map` of several lists of run-time
 length and a comprehension of several clauses over a `Range` decline (a length
 that is not one number); `ListJoin` and a comprehension of several clauses over
-lists compile. A list literal is the array of its elements; an element-wise
-operation is the kernel at each index, a loop that fills an array (no
-`Array.from()`); a reduction is the loop of the lowering (`Max()` of no element
-is `empty`); `build` (`Map`, a comprehension, the elements of a `Range`) is a
-loop that fills an array, with no deadline check; the `iterationBudget` does not
-count the elements of a list, as on the JavaScript target, and a count of 2^32
-or more, which no array holds, throws the error of `_IA.decided()` before the
-first element (`entire`). `filter` keeps an element whose verdict is `'true'`,
-drops it for `'false'`, and for `'maybe'` throws the error of `_IA.decided()`:
-the length of the result is not one number, and the result is `entire`. `At` is
-`_IA.at(list, index)`, the interval extension of the interpreter's rule: the
-hull of the elements that the integers of the index select, `partial` when some
-select nothing, `empty` when none does (`At(List(x, 2x, x^2), Floor(y) + 1)`).
-The pass `plain` writes an `At` of a constant index in range of a stated length
-as `elem` (the `at` to `elem` rewrites of `scalarize` and of the list rules of
-`fold` run first, for a list of a constant length). A length is a plain integer
-of the bound 2^32: the length parameter of an input or of a parameter of a user
-function, the length result of a call, the count of a `filter`, and the count of
-a `Range`, `_IA.rangeCount(lo, hi, step)`, the engine's `rangeCount()` on
-numbers, which throws for a count of 2^32 or more; so are the index of a `build`
-and of a `filter`, and the index of `elem` (`$0[$1]`). The operands of a `Range`
-go through `number`: a bound that is not one integer in the box (`Range(1, n)`
-of `n` in `[1, 5]`) gives `entire`; a `Range` of an operand of a real type
-declines (its count over an interval is not one number in general). A comparison
-of two plain integers (the test of `Max()` of no element) is a verdict of
-numbers. A value whose length is not a plain integer declines. An `if` of two
-list arms (of one length, as the lowering requires in the mode) joins element by
-element (`_IA.hull`). A list result, also a root `Tuple`, is an array of kinded
-results; the return writes no copy, because `run()` copies the inputs and the
-result and no kernel writes to an operand. An input of a list or tuple type
-(`list<real>`, `list<real^3>`, `tuple<real, real>`, `list<tuple<real, real>>`,
+lists compile. A list literal is the array of its elements (of two or more
+points: `_IA.points([4, 4.5, …])`, the array of their numbers, about as long as
+on JavaScript, Tycho row 368); an element-wise operation is the kernel at each
+index, a loop that fills an array (no `Array.from()`); a reduction is the loop
+of the lowering (`Max()` of no element is `empty`); `build` (`Map`, a
+comprehension, the elements of a `Range`) is a loop that fills an array, with no
+deadline check; the `iterationBudget` does not count the elements of a list, as
+on the JavaScript target, and a count of 2^32 or more, which no array holds,
+throws the error of `_IA.decided()` before the first element (`entire`).
+`filter` keeps an element whose verdict is `'true'`, drops it for `'false'`, and
+for `'maybe'` throws the error of `_IA.decided()`: the length of the result is
+not one number, and the result is `entire`. `At` is `_IA.at(list, index)`, the
+interval extension of the interpreter's rule: the hull of the elements that the
+integers of the index select, `partial` when some select nothing, `empty` when
+none does (`At(List(x, 2x, x^2), Floor(y) + 1)`). The pass `plain` writes an
+`At` of a constant index in range of a stated length as `elem` (the `at` to
+`elem` rewrites of `scalarize` and of the list rules of `fold` run first, for a
+list of a constant length). A length is a plain integer of the bound 2^32: the
+length parameter of an input or of a parameter of a user function, the length
+result of a call, the count of a `filter`, and the count of a `Range`,
+`_IA.rangeCount(lo, hi, step)`, the engine's `rangeCount()` on numbers, which
+throws for a count of 2^32 or more; so are the index of a `build` and of a
+`filter`, and the index of `elem` (`$0[$1]`). The operands of a `Range` go
+through `number`: a bound that is not one integer in the box (`Range(1, n)` of
+`n` in `[1, 5]`) gives `entire`; a `Range` of an operand of a real type declines
+(its count over an interval is not one number in general). A comparison of two
+plain integers (the test of `Max()` of no element) is a verdict of numbers. A
+value whose length is not a plain integer declines. An `if` of two list arms (of
+one length, as the lowering requires in the mode) joins element by element
+(`_IA.hull`). A list result, also a root `Tuple`, is an array of kinded results;
+the return writes no copy, because `run()` copies the inputs and the result and
+no kernel writes to an operand. An input of a list or tuple type (`list<real>`,
+`list<real^3>`, `tuple<real, real>`, `list<tuple<real, real>>`,
 `vector<integer^90001>`) is an array of the inputs object, whose elements
 `run()` converts (`processInput()`), and is named in `listInputs`, so that
 `broadcast()` converts it once and shares it between the cells.
 
 Decided comparisons. A pure node whose type is the value `true` or `false` is
-that verdict, the rule of the existing interval target (`booleanClaim()` of
+that verdict, the rule of the earlier interval target (`booleanClaim()` of
 `compile-conditions.ts`): `(x + 1)^2 < 0` and `Equal(x, x)` of a real `x` are
 `'false'` and `'true'`, and `x < y` is computed. A condition that is such a
 verdict, or a constant, takes its arm in the lowering, and the other arm is not
 lowered (`fold` is off in the mode).
 
 Integrals. The region `integrate` (`Integrate` of one `Limits`, `NIntegrate`) is
-`_IA.integrate((t) => { …; return y; }, a, b, n)`, the enclosure of the existing
+`_IA.integrate((t) => { …; return y; }, a, b, n)`, the enclosure of the earlier
 interval target (`interval/integrate.ts`): `t` is the interval of one of `n`
 pieces, the integrand is a region body of the mode, and the bounds are
-intervals. `n` is the count of the existing target for the same expression
-(`intervalQuadratureSize()` of `compilation/interval-quadrature.ts`): the
-lowering measures it at the outermost integral of a body, from the `Integrate`
-nodes of its subtree, and every integral in its bounds and its integrand takes
-it (`Instr.pieces`; an `NIntegrate` node is a level in the mode, not on the
-existing target, which does not compile it); an integral in a user function has
-the count of its own subtree, and the library's run-time budget bounds the
-integrals nested through calls. A count under 4 declines with the reason of the
-existing target. A part of the integrand that does not read the variable and
-whose heads are all pure rows of the library (no reduction, loop, call,
-conditional or integral, which could throw or run where the integrand would
-not), found through the operands of rows and of calls, is lowered once before
-the region (the memo of `value()` reads it there), as the existing target
-computes the invariants of an integrand once; unlike a value that reads no
-input, which the printer computes once per artifact, such a part can read an
-input and is computed once per call. Not with a bound that is a number literal
-±∞ (`PositiveInfinity`): `_IA.integrate` then answers `entire` and
-`_IA.integrateClosed` the closed form, neither calling the integrand; a bound
-that is infinite only at run time keeps the hoisting.
+intervals. `n` is the count of the earlier interval target for the same
+expression (`intervalQuadratureSize()` of `compilation/interval-quadrature.ts`):
+the lowering measures it at the outermost integral of a body, from the
+`Integrate` nodes of its subtree, and every integral in its bounds and its
+integrand takes it (`Instr.pieces`; an `NIntegrate` node is a level in the mode,
+not on the earlier interval target, which did not compile it); an integral in a
+user function has the count of its own subtree, and the library's run-time
+budget bounds the integrals nested through calls. A count under 4 declines with
+the reason of the earlier interval target. A part of the integrand that does not
+read the variable and whose heads are all pure rows of the library (no
+reduction, loop, call, conditional or integral, which could throw or run where
+the integrand would not), found through the operands of rows and of calls, is
+lowered once before the region (the memo of `value()` reads it there), as the
+earlier interval target computes the invariants of an integrand once; unlike a
+value that reads no input, which the printer computes once per artifact, such a
+part can read an input and is computed once per call. Not with a bound that is a
+number literal ±∞ (`PositiveInfinity`): `_IA.integrate` then answers `entire`
+and `_IA.integrateClosed` the closed form, neither calling the integrand; a
+bound that is infinite only at run time keeps the hoisting.
 
-The closed form is the existing target's rule: the engine's antiderivative
-(`integralClosedForm()`, which calls `closedFormIntegral()` of
+The closed form is the earlier interval target's rule: the engine's
+antiderivative (`integralClosedForm()`, which calls `closedFormIntegral()` of
 `closed-form-integral.ts`, shared with the old compilers, under the
 antiderivative budget of the compilation and with no fold of a `vars` name that
 holds a value; none with an angular unit other than radians, because that
@@ -761,9 +764,9 @@ An indefinite integral (no bounds, or a bound `Nothing`) is its closed form, and
 declines with none, and when it is not pure ("an integrand with an effect"); its
 variable is then an input of the closed form, of the type that the closed form's
 use of it gives (`Integrate(x^2, x)` of an undeclared `x` compiles as `x^3/3`
-does, where the existing target, whose walk sees `x` as bound, refuses it as an
-input with no type). A compilation of the pipeline takes a fresh budget of the
-antiderivatives when no compilation of either pipeline is in progress, and
+does, where the earlier interval target, whose walk saw `x` as bound, refused it
+as an input with no type). A compilation of the pipeline takes a fresh budget of
+the antiderivatives when no compilation of either pipeline is in progress, and
 otherwise consumes the budget of the one in progress
 (`withIntegralClosedFormBudgets()`), so a public compilation with the shadow
 measure or with `fallback` can search twice for one integral, once per target; a
@@ -822,20 +825,20 @@ loop of more passes than the budget (2^32 without one) throws the error of
 `_IA.decided()` before its first pass (`_IA.undecided()`), so the result is
 `entire`; so does a `build` or a `filter` of more elements, before its first
 element. With a finite budget a pass of a `Loop` is counted instead, as on the
-existing target: `_IA.countLoopPass(budget)` adds one to the count of the call
-(nested loops and the loops of user functions included), and over the budget
-throws the `CancellationError` that `run()` rethrows; the count starts again in
-`preamblePerCall` (`_IA.resetLoopPasses()`), at each call and for the values
-computed at the first call, whose passes no call counts. A sum of constant
-bounds of at most 100 passes within the budget is written out ("Lists"), with no
-loop and no such test. A sum is a loop from the lower bound up (or, written out,
-added in that order), so that its result contains the value that the scalar code
-computes by adding upward in doubles (each `_IA.add` rounds outward). The
-existing target writes a sum of constant bounds out and adds from the last term:
-narrower (4.5 times for `Sum(x/i, i = 1..100)` at `x = -1.623107644263655`), but
-it misses that value at some points: at 169 of 100,000 random points for
-`Sum(sin(i·x)/i, i = 1..100)` (by up to 5 ulps) and at 700 for
-`Sum(x^i/i, i = 1..20)` (by up to 4 ulps).
+earlier interval target: `_IA.countLoopPass(budget)` adds one to the count of
+the call (nested loops and the loops of user functions included), and over the
+budget throws the `CancellationError` that `run()` rethrows; the count starts
+again in `preamblePerCall` (`_IA.resetLoopPasses()`), at each call and for the
+values computed at the first call, whose passes no call counts. A sum of
+constant bounds of at most 100 passes within the budget is written out
+("Lists"), with no loop and no such test. A sum is a loop from the lower bound
+up (or, written out, added in that order), so that its result contains the value
+that the scalar code computes by adding upward in doubles (each `_IA.add` rounds
+outward). The earlier interval target wrote a sum of constant bounds out and
+added from the last term: narrower (4.5 times for `Sum(x/i, i = 1..100)` at
+`x = -1.623107644263655`), but it missed that value at some points: at 169 of
+100,000 random points for `Sum(sin(i·x)/i, i = 1..100)` (by up to 5 ulps) and at
+700 for `Sum(x^i/i, i = 1..20)` (by up to 4 ulps).
 
 Constants. An integer and a real literal whose double is its value are a point
 `{ lo: c, hi: c }`; NaN is `{ kind: 'empty' }`; a boolean is `'true'` or
@@ -846,11 +849,11 @@ ulps on each side, computed when the code is printed. The double is the value
 for a number that is not exact (a machine number or a decimal: `0.1`, `1.8`, as
 in the JavaScript code: the precision of the target), so the interpreter at the
 default precision, which computes with the decimal, can differ: at `x` the
-double of 1.8, `Ceil(x - 1.8)` is 0 in the mode, on the existing target and in
-the interpreter at machine precision, and 1 in the interpreter at the default
-precision (`x - 1.8` is about 4.4e-17 there); and for an exact number that is a
-double (`exactDoubleValue()`: `1/2`, `5`); another exact number takes one ulp
-per rounding of its double (`exactValueDoubleRoundings()`: `1/3` is
+double of 1.8, `Ceil(x - 1.8)` is 0 in the mode, on the earlier interval target
+and in the interpreter at machine precision, and 1 in the interpreter at the
+default precision (`x - 1.8` is about 4.4e-17 there); and for an exact number
+that is a double (`exactDoubleValue()`: `1/2`, `5`); another exact number takes
+one ulp per rounding of its double (`exactValueDoubleRoundings()`: `1/3` is
 `[0.33333333333333326, 0.33333333333333337]`). `Pi` and `ExponentialE` take one
 ulp, and so does every other constant of the library whose value is not exact
 (`EulerGamma`, `CatalanConstant`: the engine holds the double nearest to a
@@ -867,18 +870,19 @@ the node is lowered as written and the kernels enclose it at run time.
 `Root(x, q)^p`, for any sign of `p`: `x^(2/3)` over `[-8, -1]` is `[1, 4]`. When
 `q` is a power of 2, `p/q` is a double and the power has no real value over a
 negative base: it is `pow.principal` of that double, one kernel, as on the
-existing target (`(x^2)^(3/2)` is `_IA.pow` of `_IA.square(_.x)` and 1.5). A
-float literal exponent that is not an integer is its double `e`, read when the
-program is lowered as the interpreter reads it (`realPowerBranchTerms()`), which
-takes only the sign from the reading: over a base that can be negative, a
-rational `p/q` of odd `q` is `pow.branch` (`pow.branch.even` for an even `p`),
-the real root `±|x|^e` with the double, `_IA.powRealBranch` (`x^0.2`, `x^2.2`,
-`x^0.6000000000000001`); any other float, and every float over a base that the
-lowering proves non-negative from its operations and constants (`nonnegative()`:
-`Abs(x - 1)^0.2`; not from the type, an assumption or a value of an input, which
-the code does not keep), is `pow.principal`, `_IA.pow` of the double as on the
-existing target, which has no value over a negative base (`x^1.5`, `x^3.87`).
-The existing target computes `x^(p/q)` with `_IA.powRational` where `e` is the
+earlier interval target (`(x^2)^(3/2)` is `_IA.pow` of `_IA.square(_.x)` and
+1.5). A float literal exponent that is not an integer is its double `e`, read
+when the program is lowered as the interpreter reads it
+(`realPowerBranchTerms()`), which takes only the sign from the reading: over a
+base that can be negative, a rational `p/q` of odd `q` is `pow.branch`
+(`pow.branch.even` for an even `p`), the real root `±|x|^e` with the double,
+`_IA.powRealBranch` (`x^0.2`, `x^2.2`, `x^0.6000000000000001`); any other float,
+and every float over a base that the lowering proves non-negative from its
+operations and constants (`nonnegative()`: `Abs(x - 1)^0.2`; not from the type,
+an assumption or a value of an input, which the code does not keep), is
+`pow.principal`, `_IA.pow` of the double as on the earlier interval target,
+which had no value over a negative base (`x^1.5`, `x^3.87`). The earlier
+interval target computed `x^(p/q)` with `_IA.powRational` where `e` is the
 double of `p/q`: at `x = 1e300`, `x^0.2` is `1.0000000000000077e60` in the mode
 and in the interpreter at machine precision, and
 `[9.999999999999998e59, 1.0000000000000001e60]` there. An exponent known at run
@@ -893,13 +897,13 @@ base whose enclosure the lowering proves `>= 0` (`nonnegative()` with
 other than `e`, `abs`, `exp`, `square`, `sqrt` of any operand, an even integer
 power, a sum of such values and a `max` of one; not a product or `hypot`, whose
 outward step can move a lower end 0 to `-5e-324`, nor a real constant printed a
-few ulps wide around 0) is `pow.interval`, `_IA.powInterval` as on the existing
-target (`2^y`, `Abs(x)^y`, `Max(x, 0)^y`): the reading cannot apply there. The
-two kernels differ over such a base only at a negative exponent read as a
-rational of odd denominator, where `_IA.powReal` takes the scalar `_IA.pow`: a
-base `[0, b]` gives the same `partial` with the other clipped side, and a base
-whose upper end raised to the exponent underflows to 0 (an upper end `+∞`
-included) the lower end `-5e-324` where `_IA.powInterval` gives 0.
+few ulps wide around 0) is `pow.interval`, `_IA.powInterval` as on the earlier
+interval target (`2^y`, `Abs(x)^y`, `Max(x, 0)^y`): the reading cannot apply
+there. The two kernels differ over such a base only at a negative exponent read
+as a rational of odd denominator, where `_IA.powReal` takes the scalar
+`_IA.pow`: a base `[0, b]` gives the same `partial` with the other clipped side,
+and a base whose upper end raised to the exponent underflows to 0 (an upper end
+`+∞` included) the lower end `-5e-324` where `_IA.powInterval` gives 0.
 
 Values computed once (`computedOnce()` of `print-interval.ts`). A value that
 depends on no input, parameter, loop index or draw is computed when the code is
@@ -926,42 +930,48 @@ is written only into a wrapper that the kernel made, `rounding.ts`), and `run()`
 copies its result (`freshIntervalValue()`), so a change of a returned value does
 not change the next result.
 
-The result has the stored form of the existing interval target
-(`StoredIntervalJavaScript`): `code`, an expression of the inputs object `_`
-(the expression itself for a body of one `return`), or for a root function
-literal the function of its arguments; `preambleOnce`, the user functions and
-the values computed at the load; `preamblePerCall`, the values computed at the
-first call, when there are some; `runtimeVersion` (`INTERVAL_RUNTIME_VERSION`).
-The code reads `_IA` only. `run()` is `createIntervalRuntime().load()` of the
-stored form, so `run()` and stored code loaded on a worker agree by
-construction: an input given as a number is a point, a boolean is a verdict, and
-the result is a kinded `IntervalResult` or a verdict, never a bare `{ lo, hi }`;
-an error of the code other than a `ReferenceError` or a cancellation is
-`entire`.
+The result has the stored form `StoredIntervalJavaScript`: `code`, an expression
+of the inputs object `_` (the expression itself for a body of one `return`), or
+for a root function literal the function of its arguments; `preambleOnce`, the
+user functions and the values computed at the load; `preamblePerCall`, the
+values computed at the first call, when there are some; `runtimeVersion`
+(`INTERVAL_RUNTIME_VERSION`). The code reads `_IA` only. `run()` is
+`createIntervalRuntime().load()` of the stored form, so `run()` and stored code
+loaded on a worker agree by construction: an input given as a number is a point,
+a boolean is a verdict, and the result is a kinded `IntervalResult` or a
+verdict, never a bare `{ lo, hi }`; an error of the code other than a
+`ReferenceError` or a cancellation is `entire`.
 
-`compile(expr, { to: 'interval-js', profile: 'ir' })` compiles with the mode
-(`adapter-interval.ts`). A decline has the code of its reason ("Selecting the
-pipeline"; a `mode` other than `'strict'` is `'unsupported-mode'`); with
-`fallback` not `false`, the existing interval target then compiles the
-expression and a warning is logged. The result has `target: 'interval-js'`,
-`success`, `runtimeVersion`, `code`, `preambleOnce`, `preamblePerCall` when
-there is one, `preamble` (the two, in that order), `calling` (`'expression'`, or
-`'lambda'` for a root `Function` literal, which declines when its body reads a
-free name), `booleanInputs`, `listInputs`, `run`, `freeSymbols`,
-`freeSymbolTypes`, `unsupported` (empty) and `mode` (`'strict'`), as on the
-existing target, with `freeSymbols` and `freeSymbolTypes` by the rule of every
-target ("The report of the inputs", in "Selecting the pipeline"; `lowered` is
-`interval` for a real or integer input). `profile: 'ir'`, and for an expression
-`broadcast()`, `broadcastAsync()`, `shippable` and `willUsePool()`, built by
+`compile(expr, { to: 'interval-js' })` compiles with the mode
+(`adapter-interval.ts`), with or without `profile: 'ir'`. A decline has the code
+of its reason ("Selecting the pipeline"; a `mode` other than `'strict'` is
+`'unsupported-mode'`); with `fallback: false` it throws a `CompileDeclineError`,
+and otherwise the result is `success: false` with the interpreter's `run`, which
+gives interval results (`interval-fallback.ts`): at a point box a number is a
+point only when the interpreter's value is exactly that double, and otherwise
+`entire`, and a boolean is decided only when every number it is computed from is
+exact, and otherwise `'maybe'`; over a wider box, or with a draw, a number is
+`entire` and a boolean `'maybe'`. An expression with an input or a result of the
+kind `enclosure` has no fallback: it throws a `KindDeclineError`. The result has
+`target: 'interval-js'`, `success`, `runtimeVersion`, `code`, `preambleOnce`,
+`preamblePerCall` when there is one, `preamble` (the two, in that order),
+`calling` (`'expression'`, or `'lambda'` for a root `Function` literal, which
+declines when its body reads a free name), `booleanInputs`, `listInputs`, `run`,
+`freeSymbols`, `freeSymbolTypes`, `unsupported` (empty) and `mode` (`'strict'`),
+with `freeSymbols` and `freeSymbolTypes` by the rule of every target ("The
+report of the inputs", in "Selecting the pipeline"; `lowered` is `interval` for
+a real or integer input). `profile: 'ir'`, and for an expression `broadcast()`,
+`broadcastAsync()`, `shippable` and `willUsePool()`, built by
 `createIntervalRuntime()` (`loadBroadcast()`, `loadBroadcastSlice()`) over the
 stored result. Options: `inputs`, `symbolic`, `symbolDeps`, `varsObjectRefs` and
 `cse: false` as on JavaScript; `constantFold: false`, no closed node evaluated;
 `vars` only for a text that reads the inputs object (`readsVarsObject()`: `_.c`,
-read at each use), another text declines; a `mode` other than `'strict'`,
-`functions`, `operators`, `imports`, `preamble` and `strictTypes: true` decline
-by name; `entryChecks`, `storage`, `broadcast` and `quadrature` have no effect;
-`iterationBudget` limits the passes of each `Sum` and `Product`, and those of
-the `Loop`s of a call (above).
+read at each use), another text declines; `strictTypes: true` turns the result
+into a decline when an input has no declared type (`strictTypesChecked()` of
+`compile-expression.ts`); a `mode` other than `'strict'`, `functions`,
+`operators`, `imports` and `preamble` decline by name; `entryChecks`, `storage`,
+`broadcast` and `quadrature` have no effect; `iterationBudget` limits the passes
+of each `Sum` and `Product`, and those of the `Loop`s of a call (above).
 
 ## Lists
 

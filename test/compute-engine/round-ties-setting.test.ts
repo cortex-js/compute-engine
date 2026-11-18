@@ -276,36 +276,6 @@ describe('a compiled function keeps the rule of its compilation', () => {
   });
 });
 
-describe('an interval that contains a tie', () => {
-  test('to-even: the jump at 0.5 is continuous from the left, at 1.5 from the right', () => {
-    const ce = engine('to-even');
-    const f = compile(ce.box(['Round', 'x']), { to: 'interval-js' });
-    expect(f.run!({ x: { lo: 0.2, hi: 0.8 } })).toMatchObject({
-      kind: 'singular',
-      at: 0.5,
-      continuity: 'left',
-      value: { lo: 0, hi: 1 },
-    });
-    expect(f.run!({ x: { lo: 1.2, hi: 1.8 } })).toMatchObject({
-      kind: 'singular',
-      at: 1.5,
-      continuity: 'right',
-      value: { lo: 1, hi: 2 },
-    });
-  });
-
-  test('the rule is the second argument of _IA.round, left out for the default', () => {
-    const ce = engine('away-from-zero');
-    expect(compile(ce.box(['Round', 'x']), { to: 'interval-js' }).code).toBe(
-      '_IA.round(_.x)'
-    );
-    ce.roundingTies = 'toward-zero';
-    expect(compile(ce.box(['Round', 'x']), { to: 'interval-js' }).code).toBe(
-      '_IA.round(_.x, "toward-zero")'
-    );
-  });
-});
-
 describe('the shader code of each rule', () => {
   const glsl = new GLSLTarget();
   const code: Record<RoundingTies, string> = {

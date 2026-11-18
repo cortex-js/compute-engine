@@ -196,7 +196,7 @@ function atRaw(
  *
  * The interval target spells such a list as `_IA.points([4, 4.5, …])` over
  * the array of numbers, not as `[_IA.point(4), _IA.point(4.5), …]`
- * (`intervalArrayCode` in `compilation/interval-javascript-target.ts`). The
+ * (`compilation/ir/print-interval.ts`). The
  * elementwise spelling made every element a constant of its own, which the
  * constant-table pass bound to a name before it bound the array: a list of N
  * numbers cost N + 1 declarations. The compact spelling is one constant,
@@ -435,11 +435,9 @@ const MAX_RUNTIME_COLLECTION_LENGTH = 1_000_000;
  * the empty list, as the interpreter does (`sin([])` evaluates to `[]` —
  * rule of 2026-09-21, `docs/BROADCAST-MODEL.md`).
  *
- * The compiler emits a call to this function only when every collection
- * argument's static type proves a list of numbers (`tryIntervalBroadcast`
- * in `compilation/interval-javascript-target.ts`); a wider operand keeps the
- * scalar-kernel gate, so a value that is not a list of intervals never
- * reaches here from compiled code.
+ * Compiled code calls this function only when every collection argument's
+ * static type proves a list of numbers, so a value that is not a list of
+ * intervals never reaches here from compiled code.
  */
 export function bcast(
   f: (...operands: unknown[]) => unknown,

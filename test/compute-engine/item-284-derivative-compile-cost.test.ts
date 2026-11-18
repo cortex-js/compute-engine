@@ -436,18 +436,26 @@ describe('applied derivative: where the jet lowering declines', () => {
 });
 
 describe('applied derivative: interval compilation keeps expensive derivatives bounded', () => {
-  test('the decline names Apply and does not walk into the callee', () => {
+  test('the second derivative encloses the interpreter; the decline of the third names Derivative and does not walk into the callee', () => {
     const ce = radical;
-    for (const order of [2, 3]) {
-      const r = compiled(ce, order, 'interval-js');
-      expect(r.success).toBe(false);
-      // `Apply` itself is what this target cannot lower. Reporting the heads
-      // of the derivative's closed form instead would mean the analysis had
-      // computed that closed form — the work the decline exists to avoid.
-      expect(r.unsupported).toContain('Apply');
-      expect(r.unsupported).not.toContain('Sqrt');
-      expect(r.freeSymbols).toContain('x');
+    const second = compiled(ce, 2, 'interval-js');
+    expect(second.success).toBe(true);
+    for (const x of [0.5, 2]) {
+      const v = second.run({ x }) as unknown as {
+        value: { lo: number; hi: number };
+      };
+      const want = interpreted(ce, 2, x).re;
+      expect(v.value.lo).toBeLessThanOrEqual(want);
+      expect(v.value.hi).toBeGreaterThanOrEqual(want);
     }
+    const r = compiled(ce, 3, 'interval-js');
+    expect(r.success).toBe(false);
+    // The `Derivative` is what this target cannot lower. Reporting the
+    // heads of the derivative's closed form instead would mean the analysis
+    // had computed that closed form — the work the decline exists to avoid.
+    expect(r.unsupported).toContain('Derivative');
+    expect(r.unsupported).not.toContain('Sqrt');
+    expect(r.freeSymbols).toContain('x');
   });
 
   test('a small first derivative compiles and answers', () => {

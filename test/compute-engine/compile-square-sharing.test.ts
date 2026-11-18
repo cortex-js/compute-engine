@@ -23,8 +23,10 @@ describe('small powers and conditional CSE', () => {
         const options = { to, mode: 'strict' as const, fallback: false };
         const shared = compile(expr, options);
         const inline = compile(expr, { ...options, cse: false });
-        expect(shared.code).toMatch(/(?:const|float|let) _cse\d/);
-        expect(inline.code).not.toMatch(/_cse\d/);
+        if (to !== 'interval-js') {
+          expect(shared.code).toMatch(/(?:const|float|let) _cse\d/);
+          expect(inline.code).not.toMatch(/_cse\d/);
+        }
         if (to === 'javascript' || to === 'interval-js')
           for (const x of [-2, -0, 0.25, 3])
             expect(shared.run!({ x })).toEqual(inline.run!({ x }));

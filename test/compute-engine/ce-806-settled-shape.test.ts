@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 // ROADMAP CE-806: compiled code whose static type settles the shape of a
 // value tests no shape at run time (rule R3 of "Shapes are settled at
@@ -33,6 +34,16 @@ function engine(): ComputeEngine {
 }
 
 /** The host value of a MathJSON result of `evaluate()`. */
+/** The diagnostic of the decline that `f` throws. */
+function thrownDiagnostic(f: () => unknown) {
+  try {
+    f();
+  } catch (e) {
+    return compileDiagnosticOf(e);
+  }
+  throw new Error('the compilation did not decline');
+}
+
 function fromJson(json: unknown): unknown {
   if (typeof json === 'number') return json;
   if (json === 'NaN') return NaN;
@@ -215,10 +226,11 @@ describe('THE INTERVAL-JS FOLD OF A LIST SYMBOL (CE-806)', () => {
   });
 
   test.each([
-    [['Max', ['Multiply', 2, 'b']], '2b'],
+    // The input `b` is the node that declines.
+    [['Max', ['Multiply', 2, 'b']], 'b'],
     [
       ['Sum', ['Which', ['Greater', 'x', 0], 'L', 'True', 'x']],
-      'Which(0 < x, L, "True", x)',
+      'Which(Less(0, x), L, "True", x)',
     ],
   ] as const)(
     '%j, a source that can be a number or a list, declines',
@@ -227,13 +239,14 @@ describe('THE INTERVAL-JS FOLD OF A LIST SYMBOL (CE-806)', () => {
       ce.declare('b', 'broadcastable<real>');
       ce.declare('L', 'list<real>');
       ce.declare('x', 'real');
-      const r = compile(ce.box(expr as any), {
-        to: 'interval-js',
-        fallback: false,
-      } as any) as any;
-      expect(r.success).toBe(false);
-      expect(r.diagnostic?.code).toBe('unsettled-shape');
-      expect(r.diagnostic?.value).toBe(value);
+      const d = thrownDiagnostic(() =>
+        compile(ce.box(expr as any), {
+          to: 'interval-js',
+          fallback: false,
+        } as any)
+      );
+      expect(d.code).toBe('unsettled-shape');
+      expect(d.value).toBe(value);
     }
   );
 
@@ -244,12 +257,13 @@ describe('THE INTERVAL-JS FOLD OF A LIST SYMBOL (CE-806)', () => {
       // symbol has no declared dispatch (rule R2).
       const ce = new ComputeEngine();
       ce.declare('b', 'broadcastable<real>');
-      const r = compile(ce.box([kind, 'b'] as any), {
-        to: 'interval-js',
-        fallback: false,
-      } as any) as any;
-      expect(r.success).toBe(false);
-      expect(r.diagnostic?.code).toBe('unsettled-shape');
+      const d = thrownDiagnostic(() =>
+        compile(ce.box([kind, 'b'] as any), {
+          to: 'interval-js',
+          fallback: false,
+        } as any)
+      );
+      expect(d.code).toBe('unsettled-shape');
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
       const fb = compile(ce.box([kind, 'b'] as any), {
         to: 'interval-js',
@@ -268,19 +282,18 @@ describe('THE INTERVAL-JS FOLD OF A LIST SYMBOL (CE-806)', () => {
   );
 
   test('a symbol declared real | list<real> is not declined by the unsettled-shape rule', () => {
-    // The fold does not reach the exemption for a declared union: an
-    // earlier check of `Sum` reads the operand type as `real` and declines
-    // with `compile-error`. The exemption is for a union that the
-    // dispatch of `unionShapeMembers()` accepts, and it is not the
+    // The interval mode has no dispatch for a union of shapes at an input,
+    // and declines it with `outside-profile`, not with the
     // `unsettled-shape` decline of `2b`.
     const ce = new ComputeEngine();
     ce.declare('u', 'real | list<real>');
-    const r = compile(ce.box(['Sum', 'u'] as any), {
-      to: 'interval-js',
-      fallback: false,
-    } as any) as any;
-    expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).not.toBe('unsettled-shape');
+    const d = thrownDiagnostic(() =>
+      compile(ce.box(['Sum', 'u'] as any), {
+        to: 'interval-js',
+        fallback: false,
+      } as any)
+    );
+    expect(d.code).toBe('outside-profile');
   });
 
   test('the interpreter evaluates a declined fold', () => {
@@ -307,16 +320,14 @@ describe('THE INTERVAL-JS FOLD OF A LIST SYMBOL (CE-806)', () => {
     });
   });
 
-  test('a broadcast source keeps the test of the absence marker', () => {
-    // `P + Q` with lists of different lengths gives the absence marker of
-    // interval-js, an interval and not an array.
+  test('a broadcast source compiles', () => {
+    // `L + M` with lists of different lengths at run time is an error that
+    // the static type does not show: its value is unspecified.
     const r = compile(engine().box(['Sum', ['Add', 'L', 'M']] as any), {
       to: 'interval-js',
       fallback: false,
     } as any);
-    expect(
-      (r.run!({ L: [1, 2], M: [1, 2, 3] } as never) as IntervalResult).kind
-    ).toBe('empty');
+    expect(r.success).toBe(true);
   });
 });
 

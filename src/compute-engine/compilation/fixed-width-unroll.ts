@@ -967,8 +967,7 @@ function tupleTypeArity(t: Readonly<Type>): number | undefined {
  * operand.
  *
  * A `Tuple` is always one point. An ALL-SCALAR `PointList` is one too —
- * component k is operand k — the same equivalence the interval target relies
- * on (`literalPointOps` in `interval-javascript-target.ts`). Requiring every
+ * component k is operand k. Requiring every
  * operand to be provably numeric is what excludes the other `PointList`
  * shapes: a component that is (or may be) a collection is a SOURCE zipped
  * across several points, so operand k is then not component k.
@@ -2189,10 +2188,7 @@ const MAX_UNROLLED_RANGE_WIDTH = 64;
 /**
  * The most elements a literal `List` of NUMBER LITERALS is written out into
  * by the fan-out rules on a target that asks for constant lists
- * (`UnrollOptions.unrollConstantLists`, the interval target). That target's
- * own cap on emitted terms (`INTERVAL_UNROLL_LIMIT` in
- * `interval-javascript-target.ts`) is defined as this constant, so the two
- * caps stay equal.
+ * (`UnrollOptions.unrollConstantLists`).
  *
  * The interval target spells a constant list as one table bound once per
  * compiled function (`_IA.points([…])`) and broadcasts arithmetic over it at

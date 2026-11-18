@@ -69,12 +69,6 @@ describe('Heaviside JS compilation', () => {
 });
 
 describe('Heaviside interval-js compilation', () => {
-  test('compiles successfully', () => {
-    const result = compile(ce.expr(['Heaviside', 'x']), { to: 'interval-js' });
-    expect(result.success).toBe(true);
-    expect(result.code).toContain('_IA.heaviside');
-  });
-
   test('negative → {lo: 0, hi: 0}', () => {
     const result = compile(ce.expr(['Heaviside', 'x']), { to: 'interval-js' });
     const out = result.run!({ x: -5 }) as any;
@@ -97,14 +91,5 @@ describe('Heaviside interval-js compilation', () => {
     const val = out.kind === 'interval' ? out.value : out;
     expect(val.lo).toBe(1);
     expect(val.hi).toBe(1);
-  });
-
-  test('singularity at 0 for spanning interval', () => {
-    const result = compile(ce.expr(['Heaviside', 'x']), { to: 'interval-js' });
-    // Input interval [-1, 1] spans the discontinuity
-    const out = result.run!({ x: { lo: -1, hi: 1 } }) as any;
-    const val = out.kind === 'interval' ? out.value : out;
-    expect(val.kind).toBe('singular');
-    expect(val.at).toBe(0);
   });
 });

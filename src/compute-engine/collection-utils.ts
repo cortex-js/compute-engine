@@ -3770,9 +3770,8 @@ function selectionArms(
  * top-typed (`unknown`/`any`) operand. Widening that far reclassifies every
  * undeclared symbol and is a different, much larger change; the narrow test is
  * the one the comparison operators (`undecidedCollectionComparison`,
- * `library/relational-operator.ts`) and the compiled paths
- * (`compilation/interval-javascript-target.ts`) already use, so this keeps one
- * convention across the interpreter and the emitters.
+ * `library/relational-operator.ts`) and the compiled paths already use, so
+ * this keeps one convention across the interpreter and the emitters.
  *
  * A caller that also wants the possibly-collection operands should spell it
  * `isValuelessCollectionTyped(x) || isPossiblyCollectionTyped(x)`.

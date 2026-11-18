@@ -912,7 +912,7 @@ export function lower(
       decline(e, `a call of the vars name ${e.operator}`);
     // The interval mode: a pure node whose type is the value `true` or
     // `false` (`Equal(x, x)`, `(x + 1)^2 < 0` of a real `x`) is that
-    // verdict, the rule of the existing interval target (`booleanClaim()`).
+    // verdict, the rule of the earlier interval target.
     const claim = e.type.type;
     if (interval && typeof claim === 'object' && claim.kind === 'value')
       if (typeof claim.value === 'boolean' && e.isPure === true)
@@ -1625,7 +1625,7 @@ export function lower(
     // The interval mode, with a constant marked `inexact` among the scalars
     // (`π`) and a factor that is not a constant: the product of the rational
     // and the constants is one constant, folded as a closed node (`N()` and
-    // one ulp) or else `(π / q) · p` as on the existing target, computed
+    // one ulp) or else `(π / q) · p` as on the earlier target, computed
     // once, times the other factors. Else the division stays last: `1/3 · 6`
     // is the point 2.
     const c0 = interval ? scalars.find((v) => inexacts.has(v)) : undefined;
@@ -2052,7 +2052,7 @@ export function lower(
     // The interval mode: a constant of the library whose value is not exact
     // (`EulerGamma`, `CatalanConstant`) holds the double nearest to a number
     // that is not a double: an enclosure of one ulp on each side, as on the
-    // existing interval target. A decimal of the program is its double
+    // earlier interval target. A decimal of the program is its double
     // (`literalUlps()`).
     if (
       library &&
@@ -2450,7 +2450,7 @@ export function lower(
     if (type(cond).lane !== 'boolean')
       decline(test, 'a condition that is not a boolean');
     // The interval mode, whose `fold` is off: a decided condition takes its
-    // arm, and the other is not lowered, as on the existing interval target.
+    // arm, and the other is not lowered, as on the earlier interval target.
     // A false one with no arm after it is lowered: the shape of the missing
     // value is the shape of its arm.
     const decided = interval ? b.constants.get(cond) : undefined;
@@ -2786,7 +2786,7 @@ export function lower(
   const integral = (e: Fn): V => {
     const [f, limits] = e.ops;
     // The interval mode: an indefinite integral (no bounds, or a bound
-    // `Nothing`) is its closed form, as on the existing interval target;
+    // `Nothing`) is its closed form, as on the earlier interval target;
     // with none it is a function, not a number.
     if (
       interval &&
@@ -2807,7 +2807,19 @@ export function lower(
             ? 'an indefinite integral with an angular unit other than radians (its closed form is not used)'
             : 'an indefinite integral with no closed form (a function, not a number)'
         );
-      return scalar(c);
+      // The closed form reads the variable of the integral through the
+      // binding of its `Limits`; the code reads the input of that name, so
+      // its occurrences are read with the binding of the scope of the
+      // compilation (its declared type, or no type).
+      const variable =
+        isFunction(limits, 'Limits') && isSymbol(limits.ops[0])
+          ? limits.ops[0].symbol
+          : undefined;
+      return scalar(
+        variable === undefined
+          ? c
+          : c.subs({ [variable]: e.engine.symbol(variable) })
+      );
     }
     const bounds =
       e.operator === 'NIntegrate'
@@ -2905,7 +2917,7 @@ export function lower(
     // The interval mode: a part of the integrand that does not read its
     // variable and is safe to compute early (`speculatable()`) is lowered
     // once before the region, and the memo of `value()` reads it there, as
-    // the existing interval target computes the invariants of an integrand
+    // the earlier interval target computed the invariants of an integrand
     // once. Only the operands of rows and of calls are searched: a part of
     // an arm or of a scope stays in place. Not with an infinite bound, where
     // the integrand never runs.
@@ -2923,7 +2935,7 @@ export function lower(
     };
     if (interval && !bounds.some((x) => isNumber(x) && x.isInfinity))
       invariant(literal?.ops[0] ?? f);
-    // The interval mode: the closed form of the existing interval target,
+    // The interval mode: the closed form, as on the earlier interval target,
     // which `_IA.integrateClosed` gives when its scan of the integrand
     // finds no pole (`print-interval.ts`); otherwise the enclosure. Not
     // with a draw in a bound: the engine would read one draw, at compile
@@ -3099,7 +3111,7 @@ function numberKey(nv: number | NumericValue): string | undefined {
  * The interval mode: the count of ulps within which the double of the
  * number literal `nv` is its value, or `undefined` when the double is the
  * value. A number that is not exact (a machine number or a decimal: `1.8`)
- * is its double, as on the existing target and in the JavaScript code (the
+ * is its double, as on the earlier target and in the JavaScript code (the
  * precision of the target); so is an exact number that is a double (`1/2`,
  * `5`). An exact number with no double value (`1/3`, a radical) is
  * enclosed.

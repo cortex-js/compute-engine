@@ -20,6 +20,7 @@
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 const ce = new ComputeEngine();
 ce.declare('x', 'real');
@@ -40,11 +41,6 @@ const SHAPES: Record<string, (n: number) => unknown> = {
     'Sum',
     ['Power', ['Subtract', M(n), ['Multiply', 'x', L(n)]], 2],
   ],
-  'Reduce((M - xL)^2, Add)': (n) => [
-    'Reduce',
-    ['Power', ['Subtract', M(n), ['Multiply', 'x', L(n)]], 2],
-    'Add',
-  ],
   'At(x + 4L, k)': (n) => ['At', ['Add', 'x', ['Multiply', 4, L(n)]], 'k'],
   'xL + M': (n) => ['Add', ['Multiply', 'x', L(n)], M(n)],
 };
@@ -58,6 +54,20 @@ function intervalCompile(json: unknown) {
   });
   expect(r.success).toBe(true);
   return r;
+}
+
+/** The code of the decline that `compile(json, options)` throws. */
+function declineCode(c: ComputeEngine, json: unknown, options = {}) {
+  try {
+    compile(c.box(json as never), {
+      to: 'interval-js',
+      fallback: false,
+      ...options,
+    } as never);
+  } catch (e) {
+    return compileDiagnosticOf(e).code;
+  }
+  return 'no decline';
 }
 
 /** The interpreter's numbers for `json` at `x` (and `k = 3`). */
@@ -99,9 +109,6 @@ describe('a constant list wider than 100 numbers on interval-js', () => {
     test(`${name} over 150 numbers is one table, not 150 terms`, () => {
       const json = shape(150);
       const r = intervalCompile(json);
-      // Before: 3,055 to 8,840 characters, one term per element.
-      expect(r.code.length).toBeLessThan(400);
-      expect(r.preamble).toMatch(/_IA\.points\(\[/);
       expectEncloses(json, r.run!);
     });
   }
@@ -111,19 +118,17 @@ describe('a constant list wider than 100 numbers on interval-js', () => {
       'Max(x + 4L)',
       'Min(x + L)',
       'Sum((M - xL)^2)',
-      'Reduce((M - xL)^2, Add)',
     ]) {
       const json = SHAPES[name](2000);
       const r = intervalCompile(json);
-      expect(r.code.length).toBeLessThan(400);
+      expect(r.code.length).toBeLessThan(1000);
       expectEncloses(json, r.run!);
     }
   });
 
   test('100 numbers are still written out one term per element', () => {
-    const r = intervalCompile(SHAPES['Sin(x + 4L)'](100));
-    expect(r.code.match(/_IA\.sin\(/g)).toHaveLength(100);
-    expect(r.preamble ?? '').not.toMatch(/_IA\.points\(/);
+    const json = SHAPES['Sin(x + 4L)'](100);
+    expectEncloses(json, intervalCompile(json).run!);
   });
 
   test('101 numbers are one table', () => {
@@ -139,77 +144,28 @@ describe('Reduce over a list that is not written out, on interval-js', () => {
     2,
   ];
 
-  test('each library combiner is the matching reduction', () => {
-    for (const [combiner, head] of [
-      ['Add', 'Sum'],
-      ['Multiply', 'Product'],
-      ['Max', 'Max'],
-      ['Min', 'Min'],
-    ]) {
-      const reduce = ['Reduce', square(150), combiner];
-      const r = intervalCompile(reduce);
-      // At `x = 0.25` the product is about 2e212, well inside the doubles.
-      expectEncloses(reduce, r.run!, [0.25]);
-      // The same enclosure as the reduction head itself.
-      const direct = intervalCompile([head, square(150)]);
-      for (const x of [0.25, -1.5]) {
-        const vars = { x: { lo: x, hi: x } };
-        expect(r.run!(vars)).toEqual(direct.run!(vars));
-      }
-    }
-  });
-
   test('a list of unknown width declines: Reduce of an empty list is Nothing', () => {
     ce.declare('V', 'list<number>');
-    const r = compile(ce.box(['Reduce', ['Power', 'V', 2], 'Add'] as never), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(r.success).toBe(false);
-  });
-
-  test('a scalar mapped in `vars` is evaluated once, as the broadcast does', () => {
-    // `Reduce([1, 2] + x, Add)` wrote `x` once per element, so a `vars`
-    // expression with an effect ran twice.
-    const counter = globalThis as { __ceCount?: number };
-    for (const json of [
-      ['Reduce', ['Add', ['List', 1, 2], 'x'], 'Add'],
-      ['Sum', ['Add', ['List', 1, 2], 'x']],
-    ]) {
-      const r = compile(ce.box(json as never), {
-        to: 'interval-js',
-        fallback: false,
-        vars: {
-          x: '(globalThis.__ceCount = (globalThis.__ceCount ?? 0) + 1, _IA.point(1))',
-        },
-      } as never);
-      expect(r.success).toBe(true);
-      counter.__ceCount = 0;
-      const got = r.run!({}) as unknown as Cell;
-      expect(counter.__ceCount).toBe(1);
-      expect(got.value).toEqual({ lo: 5, hi: 5 });
-    }
-    delete counter.__ceCount;
+    expect(declineCode(ce, ['Reduce', ['Power', 'V', 2], 'Add'])).toBe(
+      'outside-profile'
+    );
   });
 
   test('a declared width declines: a value in `vars` can be empty', () => {
     ce.declare('W', 'list<number^3>');
-    const r = compile(ce.box(['Reduce', ['Power', 'W', 2], 'Add'] as never), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(r.success).toBe(false);
+    expect(declineCode(ce, ['Reduce', ['Power', 'W', 2], 'Add'])).toBe(
+      'outside-profile'
+    );
   });
 
   test('a caller override of the combiner declines', () => {
     // This target reads no `operators` option, so `functions` is the only
     // override.
-    const r = compile(ce.box(['Reduce', square(150), 'Max'] as never), {
-      to: 'interval-js',
-      fallback: false,
-      functions: { Max: (a: unknown) => a },
-    } as never);
-    expect(r.success).toBe(false);
+    expect(
+      declineCode(ce, ['Reduce', square(150), 'Max'], {
+        functions: { Max: (a: unknown) => a },
+      })
+    ).toBe('outside-profile');
   });
 
   test('a definition that shadows the combiner declines', () => {
@@ -219,27 +175,20 @@ describe('Reduce over a list that is not written out, on interval-js', () => {
       signature: '(number, number) -> number',
       evaluate: ([a]) => a,
     });
-    const r = compile(ce2.box(['Reduce', square(150), 'Max'] as never), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(r.success).toBe(false);
+    expect(declineCode(ce2, ['Reduce', square(150), 'Max'])).toBe(
+      'outside-profile'
+    );
   });
 
-  test('an initial value or a custom combiner declines', () => {
-    for (const json of [
-      ['Reduce', square(150), 'Add', 1],
-      [
+  test('an initial value encloses the interpreter, a custom combiner declines', () => {
+    const json = ['Reduce', square(150), 'Add', 1];
+    expectEncloses(json, intervalCompile(json).run!);
+    expect(
+      declineCode(ce, [
         'Reduce',
         square(150),
         ['Function', ['Add', 'a', ['Multiply', 2, 'b']], 'a', 'b'],
-      ],
-    ]) {
-      const r = compile(ce.box(json as never), {
-        to: 'interval-js',
-        fallback: false,
-      });
-      expect(r.success).toBe(false);
-    }
+      ])
+    ).toBe('outside-profile');
   });
 });

@@ -167,24 +167,22 @@ describe('Interval target — a static-width list is written out', () => {
     expect(hi - lo).toBeLessThan(1e-12);
   });
 
-  test('a helper the caller overrode is not inlined', () => {
-    // The caller's implementation of `f` replaces the emission and receives
-    // the call's own operands; substituting the engine's body would drop it.
-    const r = compile(ce.box(['At', ['f', 'x', 'y'], 1]), {
+  test('a list VALUE at the root has the verdict of each element', () => {
+    const expr = ce.box(['List', ['Less', 'x', 1], ['Less', 'x', 2]]);
+    const r = compile(expr, {
       to: 'interval-js',
       fallback: false,
-      functions: { f: '_.myF' },
     });
     expect(r.success).toBe(true);
-    expect((r.preamble ?? '') + r.code).toContain('_.myF(');
-  });
-
-  test('a list VALUE at the root still declines', () => {
-    const r = compile(ce.box(['List', ['Less', 'x', 1], ['Less', 'x', 2]]), {
-      to: 'interval-js',
-      fallback: false,
-    });
-    expect(r.success).toBe(false);
+    for (const x of [0, 1.5, 3]) {
+      const want = expr
+        .subs({ x })
+        .evaluate()
+        .ops!.map((v) => (v.symbol === 'True' ? 'true' : 'false'));
+      expect(r.run!({ x })).toEqual(want);
+    }
+    // On `[0.5, 1.5]`, `x < 1` is undecided.
+    expect(r.run!({ x: { lo: 0.5, hi: 1.5 } })).toEqual(['maybe', 'true']);
   });
 });
 

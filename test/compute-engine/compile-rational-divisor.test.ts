@@ -28,24 +28,6 @@ function codeOf(latex: string, to: 'javascript' | 'glsl'): string {
   return r.code!;
 }
 
-/**
- * The emitted interval expression with the constant table folded back in:
- * every `_kN` replaced by the constant it is bound to.
- *
- * The interval target binds every constant interval to a name in a table the
- * preamble carries (`hoistIntervalConstants`), so the expression reads names
- * rather than object literals. The pins in this file are about which DIVISION
- * KERNEL an operation lowers to, not about where its constants live.
- */
-function intervalCodeOf(latex: string): string {
-  const r = compile(ce.parse(latex), { to: 'interval-js' });
-  expect(r.success).toBe(true);
-  const constants = new Map<string, string>();
-  for (const m of (r.preamble ?? '').matchAll(/^const (_k\d+) = (.*);$/gm))
-    constants.set(m[1], m[2]);
-  return r.code.replace(/_k\d+/g, (name) => constants.get(name) ?? name);
-}
-
 /** The compiled JavaScript value of `latex` at `x`. */
 function jsRun(latex: string, x: number): number {
   const r = compile(ce.parse(latex), { to: 'javascript' });
@@ -73,12 +55,6 @@ describe('COMPILE a rational factor as a division', () => {
   test('`x / 49` divides on every target', () => {
     expect(codeOf('\\frac{x}{49}', 'javascript')).toBe('_.x / 49');
     expect(codeOf('\\frac{x}{49}', 'glsl')).toBe('x / 49.0');
-    // A constant point divisor divides through the point-dividing kernel,
-    // which answers the same endpoints as the general division with half the
-    // corner quotients (`interval/arithmetic.ts`).
-    expect(intervalCodeOf('\\frac{x}{49}')).toBe(
-      '_IA.scaleDiv(_.x, _IA.point(49))'
-    );
   });
 
   test('a divisor with 32 zero low bits is not a power of two', () => {
@@ -87,9 +63,6 @@ describe('COMPILE a rational factor as a division', () => {
     // operand to 32 bits — read it as one and kept the rounded reciprocal.
     expect(codeOf('\\frac{x}{210453397504}', 'javascript')).toBe(
       '_.x / 210453397504'
-    );
-    expect(intervalCodeOf('\\frac{x}{210453397504}')).toBe(
-      '_IA.scaleDiv(_.x, _IA.point(210453397504))'
     );
     expect(jsRun('\\lfloor\\frac{x}{210453397504}\\rfloor', 210453397504)).toBe(
       1
@@ -102,9 +75,6 @@ describe('COMPILE a rational factor as a division', () => {
     );
     expect(codeOf('\\lfloor\\frac{x}{49}\\rfloor', 'glsl')).toBe(
       'floor(x / 49.0)'
-    );
-    expect(intervalCodeOf('\\lfloor\\frac{x}{49}\\rfloor')).toBe(
-      '_IA.floor(_IA.scaleDiv(_.x, _IA.point(49)))'
     );
     expect(jsRun('\\lfloor\\frac{x}{49}\\rfloor', 49)).toBe(1);
     expect(jsRun('\\lfloor\\frac{x}{49}\\rfloor', 98)).toBe(2);
@@ -145,17 +115,7 @@ describe('COMPILE a rational factor as a division', () => {
     // float that limit is about 1e38.
     expect(codeOf('\\frac{3x}{49}', 'javascript')).toBe('_.x / 49 * 3');
     expect(codeOf('\\frac{3x}{49}', 'glsl')).toBe('x / 49.0 * 3.0');
-    // The interval target divides first here too. Its numerator factor is a
-    // constant point, so the product is emitted as the point-scaling kernel,
-    // whose point operand comes FIRST — the quotient is the operand being
-    // scaled, and it is still computed before the scaling.
-    expect(intervalCodeOf('\\frac{3x}{49}')).toBe(
-      '_IA.scale(_IA.point(3), _IA.scaleDiv(_.x, _IA.point(49)))'
-    );
     expect(codeOf('\\frac{-3x}{49}', 'javascript')).toBe('_.x / 49 * -3');
-    expect(intervalCodeOf('\\frac{-3x}{49}')).toBe(
-      '_IA.scale(_IA.point(-3), _IA.scaleDiv(_.x, _IA.point(49)))'
-    );
   });
 
   test('a large operand does not overflow before the division', () => {
@@ -172,13 +132,6 @@ describe('COMPILE a rational factor as a division', () => {
     expect(codeOf('-\\frac{x}{49}', 'javascript')).toBe('-(_.x / 49)');
     expect(codeOf('\\frac{x}{-49}', 'javascript')).toBe('-(_.x / 49)');
     expect(codeOf('-\\frac{x}{49}', 'glsl')).toBe('-(x / 49.0)');
-    // The interval target puts the sign on the DIVISOR instead: `x/(-49)` is
-    // the same correctly rounded quotient as `(-x)/49`, and it keeps the
-    // two-corner point-dividing kernel where a separate `_IA.negate` call
-    // would build an interval the division consumes at once.
-    expect(intervalCodeOf('\\frac{x}{-49}')).toBe(
-      '_IA.scaleDiv(_.x, _IA.point(-49))'
-    );
     expect(intervalRunPoint('\\frac{x}{-49}', 49)).toEqual({ lo: -1, hi: -1 });
     expect(jsRun('-\\frac{x}{49}', 49)).toBe(-1);
   });
@@ -192,31 +145,15 @@ describe('COMPILE a rational factor as a division', () => {
     expect(codeOf('\\frac{2\\pi x}{49}', 'glsl')).toBe(
       '(3.14159265359 * x) / 49.0 * 2.0'
     );
-    // On the interval target the constant factor is INEXACT — π compiles to
-    // a two-ulp enclosure — so the product has no exact multiple of 49 to
-    // protect, and the whole constant `2π/49` folds into one enclosure at
-    // compile time. The emitted code multiplies by it and does not divide.
-    expect(intervalCodeOf('\\frac{2\\pi x}{49}')).toBe(
-      "_IA.mul({ kind: 'interval', value: { lo: 0.12822827157509356, " +
-        'hi: 0.12822827157509364 } }, _.x)'
-    );
   });
 
   test('the rewrite composes with a surrounding sum', () => {
     expect(codeOf('\\frac{x}{49} + 1', 'javascript')).toBe('_.x / 49 + 1');
-    expect(intervalCodeOf('\\frac{x}{49} + 1')).toBe(
-      '_IA.add(_IA.scaleDiv(_.x, _IA.point(49)), _IA.point(1))'
-    );
   });
 
   test('an unrolled Sum body divides in every term', () => {
     expect(codeOf('\\sum_{n=1}^{3}\\frac{n x}{49}', 'javascript')).toBe(
       '((_.x / 49) + ((2 * _.x) / 49) + ((3 * _.x) / 49))'
-    );
-    expect(intervalCodeOf('\\sum_{n=1}^{3}\\frac{n x}{49}')).toBe(
-      '_IA.add(_IA.scaleDiv(_.x, _IA.point(49)), _IA.add(_IA.scaleDiv(' +
-        '_IA.scale(_IA.point(2), _.x), _IA.point(49)), _IA.scaleDiv(' +
-        '_IA.scale(_IA.point(3), _.x), _IA.point(49))))'
     );
     // 6x/49 at x = 49 is exactly 6.
     expect(jsRun('\\sum_{n=1}^{3}\\frac{n x}{49}', 49)).toBe(6);
@@ -231,9 +168,6 @@ describe('COMPILE what the rational rewrite must NOT touch', () => {
     expect(codeOf('\\frac{x}{8}', 'javascript')).toBe('0.125 * _.x');
     expect(codeOf('\\frac{3x}{8}', 'javascript')).toBe('0.375 * _.x');
     expect(codeOf('\\frac{x}{2}', 'glsl')).toBe('0.5 * x');
-    expect(intervalCodeOf('\\frac{x}{2}')).toBe(
-      '_IA.scale(_IA.point(0.5), _.x)'
-    );
     // A power of two past the 32-bit range is still exempt.
     expect(codeOf('\\frac{x}{4294967296}', 'javascript')).toBe(
       '2.3283064365386963e-10 * _.x'
@@ -243,9 +177,6 @@ describe('COMPILE what the rational rewrite must NOT touch', () => {
   test('a decimal divisor is not on this path', () => {
     // `x / 1.6` stays a `Divide` node through canonicalization.
     expect(codeOf('\\frac{x}{1.6}', 'javascript')).toBe('_.x / 1.6');
-    expect(intervalCodeOf('\\frac{x}{1.6}')).toBe(
-      '_IA.scaleDiv(_.x, _IA.point(1.6))'
-    );
   });
 
   test('a literal with a radical part is not a plain rational', () => {

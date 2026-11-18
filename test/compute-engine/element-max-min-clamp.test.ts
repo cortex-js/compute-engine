@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { expectTypeBetween } from '../utils';
 
 /**
@@ -163,7 +164,7 @@ describe('Max / Min — scalar+collection compile fix (reduction, was NaN)', () 
 
 describe('cross-target compilation', () => {
   const compileOn = (target: string, mj: any) =>
-    ce._getCompilationTarget(target as any)!.compile(ce.box(mj));
+    compile(ce.box(mj), { to: target } as any) as any;
 
   test('interval-js: Clamp clamps an interval (restores break detection)', () => {
     const r = compileOn('interval-js', ['Clamp', 'x', 0, 1]);

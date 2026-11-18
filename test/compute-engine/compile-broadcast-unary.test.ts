@@ -19,8 +19,11 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+
+/** `compile()` to `interval-js`, called as a target's `compile()` is. */
+const intervalCompile = (expr: any, options: Record<string, unknown> = {}) =>
+  compile(expr, { ...options, to: 'interval-js' } as any) as any;
 
 // A fresh engine: these declarations must not leak into (or inherit from) the
 // shared test engine.
@@ -35,7 +38,7 @@ ce.declare('Z', 'list<complex>');
 ce.declare('SN', 'set<number>');
 
 const glsl = new GLSLTarget();
-const intervalJs = new IntervalJavaScriptTarget();
+const intervalJs = { compile: intervalCompile };
 
 // `constantFold: false` throughout: what is under test is the LOWERING of a
 // broadcast unary head over a collection — the emitted source and, for the

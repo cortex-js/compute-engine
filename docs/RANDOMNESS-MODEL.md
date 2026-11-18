@@ -725,11 +725,9 @@ stream: the interval code evaluates a cell at other points, and in another
 order, than the scalar code that plots the same expression, so a draw it took
 from the stream would not enclose the values the scalar code draws. For the
 same reason a `WithRandomSeed` frame adds nothing there and only its body is
-emitted; a seed that is not a literal fails closed, because the interpreter
-evaluates and validates the seed and this target cannot. `Random(source)` also
-fails closed, since the target does not derive the support of a source
-(`interval-javascript-target.ts`, the `Random` and `WithRandomSeed`
-handlers).
+emitted, whatever the seed. `Random(source)` declines, since the target does
+not derive the support of a source (the interval mode of the IR pipeline,
+`compilation/ir/lower.ts`).
 
 ## 8. The GPU target has no draw
 

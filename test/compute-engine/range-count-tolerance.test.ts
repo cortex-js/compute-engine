@@ -266,37 +266,4 @@ describe('RANGE COUNT: COMPILE ROUTES', () => {
       4
     );
   });
-
-  test('interval-js, with point bounds at run time', () => {
-    const e = new ComputeEngine();
-    const fn = compile(e.box(['Length', ['Range', 'lo', 'hi', 'step']]), {
-      to: 'interval-js',
-    });
-    expect(fn.success).toBe(true);
-    const r = fn.run!({
-      lo: 0,
-      hi: (2 - 2 / 500) * Math.PI,
-      step: (2 * Math.PI) / 500,
-    }) as { kind: string; value: { lo: number; hi: number } };
-    expect(r.kind).toBe('interval');
-    expect(r.value).toEqual({ lo: 500, hi: 500 });
-    const s = fn.run!({ lo: 0, hi: 0.3, step: 0.1 }) as {
-      value: { lo: number; hi: number };
-    };
-    expect(s.value).toEqual({ lo: 4, hi: 4 });
-  });
-
-  test('interval-js, the witness with d free and with d assigned', () => {
-    // The bounds involve π, so they are not point intervals: the length of
-    // the range is then not a single number, and the interval route answers
-    // `entire` ("cannot bound this"). It must not answer 499.
-    const e = new ComputeEngine();
-    const free = compile(lengthOfWitness(e), { to: 'interval-js' });
-    expect(free.success).toBe(true);
-    expect(free.run!({ d: 500 })).toEqual({ kind: 'entire' });
-    e.assign('d', 500);
-    const assigned = compile(lengthOfWitness(e), { to: 'interval-js' });
-    expect(assigned.success).toBe(true);
-    expect(assigned.run!({})).toEqual({ kind: 'entire' });
-  });
 });

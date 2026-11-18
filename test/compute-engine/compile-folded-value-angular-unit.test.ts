@@ -15,6 +15,7 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
 function engine(): ComputeEngine {
@@ -61,10 +62,26 @@ describe('a folded value in degree mode', () => {
       to: 'interval-js',
       fallback: false,
     });
-    expect(r.code).toBe('_IA.add(_val_c, _k2)');
-    expect(r.preamble).toContain('const _val_c = _IA.sin(_IA.mul(_k1, _.x));');
     const p = compile(ce.parse('P.x'), { to: 'interval-js', fallback: false });
-    expect(p.code).toBe('_IA.sin(_IA.mul(_k1, _.x))');
+    // The values of `c` and `P.x` are `sin(x)` with `x` in degrees.
+    for (const [result, latex] of [
+      [r, '\\sin(x) + 1'],
+      [p, '\\sin(x)'],
+    ] as const) {
+      expect(result.success).toBe(true);
+      const encloses = (
+        got: { value: { lo: number; hi: number } },
+        x: number
+      ) => {
+        const expected = ce.parse(latex).subs({ x }).N().re;
+        expect(got.value.lo).toBeLessThanOrEqual(expected);
+        expect(got.value.hi).toBeGreaterThanOrEqual(expected);
+      };
+      for (const x of [0, 30, 90, -45])
+        encloses(result.run!({ x: { lo: x, hi: x } }) as any, x);
+      const box = result.run!({ x: { lo: 80, hi: 100 } }) as any;
+      for (const x of [80, 90, 100]) encloses(box, x);
+    }
   });
 
   test('a trig call of the expression and of the value: each converted once', () => {
@@ -269,8 +286,7 @@ describe('AbsArg in degree mode', () => {
     ['a function body', ['g', 'x']],
   ];
 
-  // The interval target reports a refusal as `success: false`; the others
-  // throw.
+  // A refusal throws.
   function refusal(ce: ComputeEngine, json: unknown, to: string): string {
     try {
       const r = compile(ce.box(json as any), {
@@ -285,6 +301,20 @@ describe('AbsArg in degree mode', () => {
 
   for (const [label, json] of CASES)
     test.each(TARGETS)(`${label}: %s refuses`, (to) => {
+      // The interval mode has no `AbsArg` in any unit.
+      if (to === 'interval-js') {
+        const ce = engineWithK();
+        expect(() =>
+          compile(ce.box(json as any), { to, fallback: false })
+        ).toThrow();
+        try {
+          compile(ce.box(json as any), { to, fallback: false });
+        } catch (e) {
+          expect(compileDiagnosticOf(e).code).toBe('outside-profile');
+          expect(compileDiagnosticOf(e).operator).toBe('AbsArg');
+        }
+        return;
+      }
       // On GLSL the typing pass reads a stored value in the radian
       // convention, as the emitter writes it (`foldedValueInRadians()`), so
       // the refusal of the angular unit comes first there too.

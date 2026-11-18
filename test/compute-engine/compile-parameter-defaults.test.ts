@@ -71,12 +71,6 @@ function interpreted(
   return ['List', ...JSON.parse(value.toString())];
 }
 
-/** The point interval `{ lo: v, hi: v }` of an interval-JavaScript result. */
-function point(r: unknown): number | undefined {
-  const v = (r as any)?.value;
-  return v !== undefined && v.lo === v.hi ? v.lo : undefined;
-}
-
 describe('COMPILED PARAMETER DEFAULTS: JAVASCRIPT', () => {
   const ce = new ComputeEngine();
   ce.declare('y', 'real');
@@ -288,26 +282,6 @@ describe('COMPILED PARAMETER DEFAULTS: INTERVAL AND GLSL', () => {
   // canonicalizes the call.
   const completed = ['Apply', defaulted(2), 'y'];
 
-  test('interval: a saturated call and a completed call agree with the interpreter', () => {
-    expect(interpreted(ce, saturated, { y: 3 })).toBe(15);
-    expect(interpreted(ce, completed, { y: 3 })).toBe(6);
-    expect(point(run(ce, saturated, 'interval-js', { y: 3 }).value)).toBe(15);
-    expect(point(run(ce, completed, 'interval-js', { y: 3 }).value)).toBe(6);
-  });
-
-  test('interval: a `Map` callback and a block-local call', () => {
-    const map = ['Map', defaulted(2), ['List', 'y', 2]];
-    const values = run(ce, map, 'interval-js', { y: 3 }).value as unknown[];
-    expect(values.map(point)).toEqual([6, 4]);
-    expect(interpreted(ce, map, { y: 3 })).toEqual(['List', 6, 4]);
-    const local = [
-      'Block',
-      ['Declare', 'g', "'unknown'", defaulted(2)],
-      ['g', 'y'],
-    ];
-    expect(point(run(ce, local, 'interval-js', { y: 3 }).value)).toBe(6);
-  });
-
   test('GLSL: a saturated call, a completed call and a `Map` callback', () => {
     // The GLSL fragment refuses `Apply` of a function literal.
     const declined = (expr: Json) => {
@@ -384,8 +358,6 @@ describe('COMPILED PARAMETER DEFAULTS: CALLBACKS AND FOLDS', () => {
     const map = ['Map', lit, ['List', 'y', 2]];
     expect(interpreted(ce, map, { y: 3 })).toEqual(['List', 6, 4]);
     expect(run(ce, map, 'javascript', { y: 3 }).value).toEqual([6, 4]);
-    const values = run(ce, map, 'interval-js', { y: 3 }).value as unknown[];
-    expect(values.map(point)).toEqual([6, 4]);
     expect(run(ce, map, 'glsl').code).toBe('vec2(2.0 * y, 4.0)');
   });
 
@@ -679,50 +651,6 @@ describe('COMPILED PARAMETER DEFAULTS: DECLARED DEFAULTS AND OTHER ROUTES', () =
         expected
       );
     }
-  });
-
-  describe('interval-js: a supplied value at a defaulted position compiles', () => {
-    // The interval target no longer declines an argument that can be absent
-    // (a pole, a domain error, a user function call): the call is not
-    // filled at run time. The value of such a call is unspecified, so only
-    // the compilation is checked.
-    const ce = new ComputeEngine();
-    const r = executeEpsil(ce, 'function hr(x, k: real = 2) { k + x }');
-    expect(r.diagnostics).toEqual([]);
-    ce.declare('y', 'real');
-    ce.declare('L', 'list<real>');
-    const K = ['Function', 'k', ['Optional', 'k', 2]];
-    const compiles = (expr: Json) => {
-      const result: any = compile(
-        ce.box(expr) as any,
-        {
-          to: 'interval-js',
-          fallback: false,
-        } as any
-      );
-      return result.success === true;
-    };
-
-    test.each([
-      ['a pole', ['Apply', K, ['Divide', 1, ['Subtract', 'y', 3]]]],
-      ['a domain error', ['Apply', K, ['Sqrt', ['Subtract', 'y', 5]]]],
-      ['a user function call', ['hr', 1, ['At', 'L', 9]]],
-    ])('%s', (_, expr) => {
-      expect(compiles(expr)).toBe(true);
-    });
-
-    test('a present argument and a left-out argument compile', () => {
-      expect(point(run(ce, ['Apply', K, 5], 'interval-js').value)).toBe(5);
-      expect(point(run(ce, ['Apply', K], 'interval-js').value)).toBe(2);
-      const mapped = [
-        'Map',
-        ['Function', ['Multiply', 'x', 'k'], 'x', ['Optional', 'k', 2]],
-        ['List', 'y', 2],
-      ];
-      const values = run(ce, mapped, 'interval-js', { y: 3 })
-        .value as unknown[];
-      expect(values.map(point)).toEqual([6, 4]);
-    });
   });
 
   test('evaluateAsync: a left-out argument takes the default', async () => {

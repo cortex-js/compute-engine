@@ -38,15 +38,17 @@ const NESTED: MathJsonExpression = [
 
 const DECLINE = /pattern has the name 'a' at more than one position/;
 
-/** The result of the compilation, or the message of its decline: with no
- * interpreter fallback, a decline throws on most targets. */
+/** The result of the compilation, or the message and the diagnostic of its
+ * decline: with no interpreter fallback, a decline throws on most targets. */
 function compileTo(ce: ComputeEngine, json: MathJsonExpression, to: string) {
   try {
     return compile(ce.box(json), { to: to as any, fallback: false });
   } catch (e) {
-    return { success: false, error: (e as Error).message } as ReturnType<
-      typeof compile
-    >;
+    return {
+      success: false,
+      error: (e as Error).message,
+      diagnostic: (e as { diagnostic?: unknown }).diagnostic,
+    } as ReturnType<typeof compile>;
   }
 }
 
@@ -69,6 +71,13 @@ describe('A destructuring declaration with a repeated name declines', () => {
         expect(r.error).toMatch(
           /The destructuring declaration has the name `a` at more than one position/
         );
+      // The interval mode of the IR pipeline declines a destructuring
+      // declaration with the generic code of its profile.
+      else if (to === 'interval-js')
+        expect(r.diagnostic).toMatchObject({
+          code: 'outside-profile',
+          operator: 'Declare',
+        });
       else expect(r.error).toMatch(DECLINE);
     }
   });

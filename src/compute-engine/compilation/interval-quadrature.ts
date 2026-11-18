@@ -1,8 +1,6 @@
 /**
- * The subdivision count of an interval enclosure of an integral: the rule
- * of the existing interval target (`compileIntervalIntegrate()`) and of the
- * interval mode of the IR pipeline (`ir/lower.ts`), which take the same
- * count for the same expression.
+ * The subdivision count of an interval enclosure of an integral, read by the
+ * interval mode of the IR pipeline (`ir/lower.ts`).
  *
  * @module compilation/interval-quadrature
  */
@@ -158,7 +156,7 @@ const NUMERIC_INTEGRALS: ReadonlySet<string> = new Set(['NIntegrate']);
  * or whose text is not a plain read). `vars`: the `vars` texts of the
  * compilation. With an angular unit other than
  * radians there is none: `closedFormIntegral()` reads operands written in
- * radians (the existing target rewrites its tree at its entry), and the
+ * radians, and the
  * lowering scales the trigonometric functions of the closed form again.
  * There is none either when the operands reach an `NIntegrate`, directly
  * or through a definition.

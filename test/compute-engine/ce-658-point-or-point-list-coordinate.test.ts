@@ -26,6 +26,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 const UNION = 'tuple<number, number> | list<tuple<number, number>>';
 
@@ -109,7 +110,7 @@ function declineOf(
 describe('CE-658: the declines that stay', () => {
   const sum = ['Add', ['At', 'P', 1], 'x'];
 
-  test.each(['javascript', 'interval-js'] as const)(
+  test.each(['javascript'] as const)(
     '%s: no assigned value compiles the point member',
     (to) => {
       const ce = engine();
@@ -121,15 +122,11 @@ describe('CE-658: the declines that stay', () => {
     const ce = engine();
     const expr = ce.box(sum as any);
     const js = compile(expr, { fallback: false });
-    const interval = compile(expr, { to: 'interval-js', fallback: false });
     for (const x of SAMPLES) {
       const expected = expr
         .subs({ x, P: ce.box(['Tuple', 3, 4]) })
         .N().re;
       expect(js.run!({ x, P: [3, 4] } as any)).toBe(expected);
-      expect(pointInterval(interval.run!({ x, P: [3, 4] } as any))).toBe(
-        expected
-      );
     }
   });
 
@@ -142,9 +139,20 @@ describe('CE-658: the declines that stay', () => {
       expect(ce.box(sum as any).subs({ x: 5 }).evaluate().operator).toBe(
         'Error'
       );
-      expect(declineOf(ce.box(sum as any), to)).toMatch(
-        /an operand may be a point/
-      );
+      if (to === 'interval-js') {
+        // The decline is at the sum of the point and the number.
+        let diagnostic: { code: string; operator?: string } | undefined;
+        try {
+          compile(ce.box(sum as any), { to, fallback: false });
+        } catch (e) {
+          diagnostic = compileDiagnosticOf(e);
+        }
+        expect(diagnostic?.code).toBe('outside-profile');
+        expect(diagnostic?.operator).toBe('Add');
+      } else
+        expect(declineOf(ce.box(sum as any), to)).toMatch(
+          /an operand may be a point/
+        );
     }
   );
 
@@ -183,7 +191,7 @@ describe('CE-658: a call that runs code of the caller is left as written', () =>
     expect(r.run!({ x: 10, y: 20 })).toBe(30);
   });
 
-  test.each(['javascript', 'interval-js'] as const)(
+  test.each(['javascript'] as const)(
     '%s: an argument that a `vars` entry gives as caller source',
     (to) => {
       // The body of `f` does not read its parameter. The call stays a

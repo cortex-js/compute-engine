@@ -67,9 +67,8 @@ function clipElements(list: unknown[]): IntervalModelValue[] {
  * list of length 2 or of length 1. The absence marker that this function
  * gave before reads as `empty`, which claims that there is no value, so
  * `Length` of it was `empty` where the length is 1 or 2. The compiler
- * declines such a selection when it knows both lengths
- * (`compileIntervalSelectionValue`, `interval-javascript-target.ts`); this
- * answer covers the lengths that only the run time knows.
+ * declines such a selection when it knows both lengths; this answer covers
+ * the lengths that only the run time knows.
  *
  * `entire` beside any value is `entire`.
  *

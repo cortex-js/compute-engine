@@ -91,8 +91,8 @@ for (const name of ['runtime', 'kernel-worker']) {
 // 3. A `./core` engine, a `./compile` target.
 const ce = new loaded.core.ComputeEngine();
 const names = ce._listCompilationTargets();
-if (names.join(',') !== 'javascript,interval-js')
-  fail(`a core engine registers ${JSON.stringify(names)}, expected javascript and interval-js`);
+if (names.join(',') !== 'interval-js,javascript')
+  fail(`a core engine registers ${JSON.stringify(names)}, expected interval-js and javascript`);
 ce.registerCompilationTarget('glsl', new loaded.compile.GLSLTarget());
 const glsl = loaded.compile.compile(
   ce.box(['Add', 'x', 1]),
@@ -113,10 +113,10 @@ for (const name of Object.keys(ENTRIES)) if (!loaded[name]) load(name);
 // throw on it).
 const full = new loaded['compute-engine'].ComputeEngine();
 const fullNames = full._listCompilationTargets();
-if (fullNames.join(',') !== 'javascript,interval-js,glsl')
+if (fullNames.join(',') !== 'interval-js,javascript,glsl')
   fail(`a full-entry engine registers ${JSON.stringify(fullNames)}`);
 const upgraded = plain._listCompilationTargets();
-if (upgraded.join(',') !== 'javascript,interval-js,glsl')
+if (upgraded.join(',') !== 'interval-js,javascript,glsl')
   fail(`the core engine made before the full entry loaded registers ${JSON.stringify(upgraded)}`);
 const upgradedGlsl = loaded.compile.compile(plain.box(['Add', 'x', 1]), { to: 'glsl', fallback: false });
 if (!upgradedGlsl.success) fail('the core engine made before the full entry loaded does not compile to GLSL');

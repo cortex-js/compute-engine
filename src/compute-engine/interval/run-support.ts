@@ -1,11 +1,12 @@
 /**
- * The run-time support of a compiled `interval-js` function, shared by the
- * engine's own runner (`ComputeEngineIntervalFunction` in
- * `compilation/interval-javascript-target.ts`) and by the standalone interval
- * runtime (`createIntervalRuntime` in `compilation/interval-runtime.ts`), which rebuilds a
- * stored compilation result with no engine behind it. Both must convert the
- * inputs and copy the results the same way, so that a value computed from
- * stored code on a worker is the value `run()` gives on the main thread.
+ * The run-time support of a compiled `interval-js` function, read by the
+ * interval runtime (`createIntervalRuntime` in
+ * `compilation/interval-runtime.ts`), which builds the `run` of a compilation
+ * and rebuilds a stored compilation result with no engine behind it, and by
+ * the interpreter fallback (`compilation/interval-fallback.ts`). Both must
+ * convert the inputs and copy the results the same way, so that a value
+ * computed from stored code on a worker is the value `run()` gives on the
+ * main thread.
  *
  * This module is a leaf: it imports types only.
  */

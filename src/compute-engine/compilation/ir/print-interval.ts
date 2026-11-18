@@ -67,6 +67,10 @@ const BINARY: Record<string, string> = { add: 'add', sub: 'sub', mul: 'mul',
 
 const text = (x: number) => (Object.is(x, -0) ? '-0' : String(x));
 
+/** The spelling of a point (`{ lo: x, hi: x }`, as `enclosure(x, 0)`
+ *  spells it), with its number. */
+const POINT = /^\{ lo: (-?[\d.e+-]+|-0), hi: \1 \}$/;
+
 /** The enclosure of `x` widened by `ulps` on each side. */
 const enclosure = (x: number, ulps: number): string => {
   let [lo, hi] = [x, x];
@@ -116,6 +120,15 @@ const fill =
  *  each operation (README, "The interval mode"). */
 export const JS_INTERVAL: Syntax = Object.freeze({
   ...JS,
+  // A list of two or more points is the array of their numbers, made into
+  // points once (`_IA.points()`): a list of constants is about as long as
+  // on JavaScript (Tycho row 368).
+  list: (elements, type) => {
+    const values = elements.map((e) => POINT.exec(e)?.[1]);
+    return elements.length > 1 && values.every((v) => v !== undefined)
+      ? `_IA.points([${values.join(', ')}])`
+      : JS.list(elements, type);
+  },
   ops: {
     ...Object.fromEntries(UNARY.map((op) => [op, ia(op)])),
     ...Object.fromEntries(
@@ -154,7 +167,7 @@ export const JS_INTERVAL: Syntax = Object.freeze({
   regions: {
     build: fill('build'),
     filter: fill('filter'),
-    // The enclosure of the existing interval target, of the count of
+    // The enclosure of the earlier interval target, of the count of
     // pieces that the lowering chose (`intervalQuadratureSize()`): the
     // integrand is a function of the interval of one piece. With a closed
     // form (the second region), `_IA.integrateClosed` runs it when its scan
@@ -259,8 +272,8 @@ export function dropClosedForms(
 /** `p` with each `add` that has an operand `neg` of no other use written
  *  `sub` and the `neg` removed, a copy (`p` is unchanged):
  *  `Add(a, Negate(b))` is `_IA.sub(a, b)`, `Add(Negate(a), b)` is
- *  `_IA.sub(b, a)`, one kernel where there were two, as the existing target
- *  writes them. `sub` gives the endpoints of `add` of `negate` in every
+ *  `_IA.sub(b, a)`, one kernel where there were two, as the earlier target
+ *  wrote them. `sub` gives the endpoints of `add` of `negate` in every
  *  kind and rounding (`interval/arithmetic.ts`); an inlined operand is
  *  pure, so the order of the two is not observed. A `div` whose dividend is
  *  such a `neg` is `negdiv`, `_IA.negDiv(a, b)`, the kernel of `div` of
@@ -426,7 +439,7 @@ export function printInterval(
 ): IntervalPrinted {
   const limit = Math.min(Math.floor(iterationBudget ?? Infinity), 2 ** 32);
   // With a finite budget, each pass of a `Loop` counts one pass of the call
-  // (`_IA.countLoopPass()`, as the existing target), whose limit throws the
+  // (`_IA.countLoopPass()`, as on the earlier target), whose limit throws the
   // cancellation that `run()` rethrows; another loop is refused before its
   // first pass.
   const open: Syntax['loopOpen'] = (k, lo, hi, passes, done) =>

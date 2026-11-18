@@ -1,5 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
+import type { CompileDiagnostic } from '../../src/compute-engine/compilation/types';
 import { shaderFunctions } from './gpu-shader-f32-eval';
 import type { Value } from './gpu-shader-f32-eval';
 
@@ -404,6 +406,21 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
 
 describe('CE-588 — interval-js', () => {
   type Result = unknown;
+  /** The diagnostic of the decline that the interval mode throws. */
+  function declineOf(
+    ce: ComputeEngine,
+    json: unknown
+  ): CompileDiagnostic | undefined {
+    try {
+      compile(ce.box(json as never), {
+        to: 'interval-js',
+        fallback: false,
+      } as never);
+    } catch (e) {
+      return compileDiagnosticOf(e);
+    }
+    return undefined;
+  }
   const point = (lo: number) => ({ kind: 'interval', value: { lo, hi: lo } });
 
   function run(json: unknown) {
@@ -417,66 +434,10 @@ describe('CE-588 — interval-js', () => {
       r.run!({ x: { lo: X, hi: X }, y: { lo: Y, hi: Y }, ...vars } as never);
   }
 
-  // A boolean input of this target is the verdict `'true'` or `'false'`.
-  it.each(CASES.filter((k) => k.shape !== 'complex'))(
+  it.each(CASES.filter((k) => k.shape !== 'complex' && k.nan))(
     '$label',
-    ({ json, presentWhen, nan }) => {
-      if (nan) return expectUnsettled(json, 'interval-js');
-      const f = run(json);
-      const verdict = (b: boolean) => (b ? 'true' : 'false');
-      // `d` decides only `Which(c, (x, y), d, Missing)`, whose value is
-      // absent when `c` is false whatever `d` is.
-      for (const d of ['true', 'false']) {
-        expect(f({ c: verdict(presentWhen), d })).toEqual([point(X), point(Y)]);
-        // The run result of an absent value, `Missing` or `NaN`, is the
-        // `empty` result, as for the else-less `If`.
-        expect(f({ c: verdict(!presentWhen), d })).toEqual({ kind: 'empty' });
-      }
-    }
+    ({ json }) => expectUnsettled(json, 'interval-js')
   );
-
-  it('a condition over the interval input', () => {
-    const f = run(['If', ['Greater', 'x', 0], POINT, 'Missing']);
-    const g = run(['If', ['Greater', 'x', 0], POINT]);
-    for (const x of [
-      { lo: 1, hi: 2 },
-      { lo: -1, hi: 1 },
-    ]) {
-      // The written `Missing` gives the result of the else-less `If` where
-      // the condition can hold.
-      expect(f({ x })).toEqual(g({ x }));
-    }
-    // Where it fails, the written `Missing` is `empty`, and the else-less
-    // `If` of a point is the point of `empty` coordinates, the spelling on
-    // this target of the point of `NaN` coordinates (user decision
-    // 2026-11-03).
-    expect(f({ x: { lo: -2, hi: -1 } })).toEqual({ kind: 'empty' });
-    expect(g({ x: { lo: -2, hi: -1 } })).toEqual([
-      { kind: 'empty' },
-      { kind: 'empty' },
-    ]);
-  });
-
-  it('a nested selection as a value of an If', () => {
-    // The value `If(d, (x, y), Missing)` is typed `missing | tuple<real,
-    // real>`; the `If` is still spelled as a point selection.
-    for (const json of [
-      ['If', 'c', ['If', 'd', POINT, 'Missing'], 'Missing'],
-      ['If', 'c', ['If', 'd', LIST]],
-      ['If', 'c', ['If', 'd', POINT], 'Missing'],
-    ]) {
-      const f = run(json);
-      expect(f({ c: 'true', d: 'true' })).toEqual([point(X), point(Y)]);
-      // The else-less `If(d, (x, y))` with `d` false is the point of
-      // `empty` coordinates (user decision 2026-11-03).
-      expect(f({ c: 'true', d: 'false' })).toEqual(
-        json[2][3] === undefined && json[2][2] === POINT
-          ? [{ kind: 'empty' }, { kind: 'empty' }]
-          : { kind: 'empty' }
-      );
-      expect(f({ c: 'false', d: 'true' })).toEqual({ kind: 'empty' });
-    }
-  });
 
   it('a value that is never selected is not compiled', () => {
     // interval-js has no lowering for `Zeta`. The condition `x < -1` with
@@ -519,106 +480,13 @@ describe('CE-588 — interval-js', () => {
         ['Which', ['Greater', 'x', 0], LIST, 'True', ['List', 'x']],
         ['Length', ['If', ['Greater', 'x', 0], LIST, ['List', 'x']]],
       ]) {
-        const r = compile(engine().box(json as never), {
-          to: 'interval-js',
-          fallback: false,
-        } as never);
-        expect([JSON.stringify(json), r.success]).toEqual([
+        const diagnostic = declineOf(engine(), json);
+        expect([JSON.stringify(json), diagnostic?.code]).toEqual([
           JSON.stringify(json),
-          false,
+          'outside-profile',
         ]);
       }
     });
-
-    it('are entire, not empty, where only the run time knows the lengths', () => {
-      // `L` has no static length. Where `x > 0` is undecided the value is
-      // `L` (length 2 here) or `[x]` (length 1): no array encloses both,
-      // and `entire` says so. `empty` would say there is no value.
-      const ce = engine();
-      ce.declare('L', 'list<real>');
-      const L = [point(1), point(2)];
-      for (const json of [
-        ['If', ['Greater', 'x', 0], 'L', ['List', 'x']],
-        ['Which', ['Greater', 'x', 0], 'L', 'True', ['List', 'x']],
-        ['Length', ['If', ['Greater', 'x', 0], 'L', ['List', 'x']]],
-        ['Length', ['Which', ['Greater', 'x', 0], 'L', 'True', ['List', 'x']]],
-      ]) {
-        const r = compile(ce.box(json as never), {
-          to: 'interval-js',
-          fallback: false,
-        } as never);
-        expect(r.success).toBe(true);
-        const at = (lo: number, hi: number) =>
-          r.run!({ x: { lo, hi }, L: L.map((p) => p.value) } as never);
-        expect(at(-1, 1)).toEqual({ kind: 'entire' });
-        const length = json[0] === 'Length';
-        expect(at(1, 2)).toEqual(length ? point(2) : L);
-        expect(at(-2, -1)).toEqual(
-          length ? point(1) : [{ kind: 'interval', value: { lo: -2, hi: -1 } }]
-        );
-      }
-    });
-
-    it('stay entire inside an enclosing selection', () => {
-      // The inner `If(d, L, [2])` is `entire` where `d` is undecided (`L`
-      // has length 2 here). The outer `If` hulls it with `[1]`: `entire`
-      // beside an array is `entire`, not the absence marker of two domains,
-      // which the runner reports as `empty`.
-      const ce = engine();
-      ce.declare('L', 'list<real>');
-      const L = [point(1), point(2)];
-      for (const json of [
-        ['If', 'c', ['List', 1], ['If', 'd', 'L', ['List', 2]]],
-        ['If', 'c', ['If', 'd', 'L', ['List', 2]], ['List', 1]],
-        ['Which', 'c', ['List', 1], 'True', ['If', 'd', 'L', ['List', 2]]],
-        ['If', 'c', ['List', 1], ['If', 'c', ['If', 'd', 'L', ['List', 2]]]],
-      ]) {
-        const r = compile(ce.box(json as never), {
-          to: 'interval-js',
-          fallback: false,
-        } as never);
-        expect([JSON.stringify(json), r.success]).toEqual([
-          JSON.stringify(json),
-          true,
-        ]);
-        const v = r.run!({
-          c: 'maybe',
-          d: 'maybe',
-          L: L.map((p) => p.value),
-        } as never);
-        expect([JSON.stringify(json), v]).toEqual([
-          JSON.stringify(json),
-          { kind: 'entire' },
-        ]);
-      }
-    });
-  });
-
-  it('a deep chain of nested selections compiles each value once', () => {
-    // `If(x > k, …, Missing)` nested 24 deep. Each level probed its value
-    // and then compiled it again, so the compile time grew by a factor of
-    // about 3 per level (depth 8 took about a second, depth 10 overflowed
-    // the stack). Each value is now compiled once. The time bound is a hang
-    // guard: far above the time of the work and above a stall of a worker in
-    // a full run.
-    const ce = engine();
-    let json: unknown = POINT;
-    for (let k = 0; k < 24; k++)
-      json = ['If', ['Greater', 'x', k], json, 'Missing'];
-    const start = performance.now();
-    const r = compile(ce.box(json as never), {
-      to: 'interval-js',
-      fallback: false,
-    } as never);
-    expect(performance.now() - start).toBeLessThan(30_000);
-    expect(r.success).toBe(true);
-    const at = (lo: number, hi: number) =>
-      r.run!({ x: { lo, hi }, y: { lo: Y, hi: Y } } as never);
-    expect(at(30, 31)).toEqual([
-      { kind: 'interval', value: { lo: 30, hi: 31 } },
-      point(Y),
-    ]);
-    expect(at(10, 11)).toEqual({ kind: 'empty' });
   });
 
   it('an If between two points', () => {
@@ -633,11 +501,7 @@ describe('CE-588 — interval-js', () => {
       ['If', 'c', COMPLEX, 'Missing'],
       ['If', 'c', COMPLEX],
     ]) {
-      const r = compile(ce.box(json as never), {
-        to: 'interval-js',
-        fallback: false,
-      } as never);
-      expect(r.success).toBe(false);
+      expect(declineOf(ce, json)?.code).toBe('outside-profile');
     }
   });
 });

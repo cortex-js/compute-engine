@@ -1,7 +1,8 @@
 /**
  * Which compilation targets an engine registers, by package entry.
  *
- * Every engine registers `javascript` and `interval-js`. The full entry
+ * Every engine compiles to `interval-js`, which `compile()` routes itself
+ * (`ROUTED_TARGETS`, listed first), and registers `javascript`. The full entry
  * (`src/compute-engine.ts`) adds `glsl` to the table of
  * defaults when it is imported; the `./core` entry (`src/core.ts`) does not,
  * so a `./core` consumer registers a GPU target with
@@ -21,10 +22,32 @@ describe('compilation target registration', () => {
   test('an engine of the full entry has the three default targets', () => {
     const ce = new ComputeEngine();
     expect(ce._listCompilationTargets()).toEqual([
-      'javascript',
       'interval-js',
+      'javascript',
       'glsl',
     ]);
+  });
+
+  test('interval-js is listed, compiles, and cannot be registered or unregistered', () => {
+    const ce = new ComputeEngine();
+    expect(ce._listCompilationTargets()).toContain('interval-js');
+    const r = ce._compile(ce.box(['Add', 'x', 1]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(r.success).toBe(true);
+    expect(r.run!({ x: { lo: 1, hi: 2 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 2, hi: 3 },
+    });
+    // `compile()` routes the name itself: a registration under it is refused.
+    expect(() =>
+      ce.registerCompilationTarget('interval-js', new GLSLTarget())
+    ).toThrow(/"interval-js" is built in and cannot be registered/);
+    expect(() => ce.unregisterCompilationTarget('interval-js')).toThrow(
+      /"interval-js" is built in and cannot be unregistered/
+    );
+    expect(ce._listCompilationTargets()).toContain('interval-js');
   });
 
   test('an engine of the core entry has the two built-in targets only', () => {
@@ -32,8 +55,8 @@ describe('compilation target registration', () => {
       const core = require('../../src/core');
       const ce = new core.ComputeEngine();
       expect(ce._listCompilationTargets()).toEqual([
-        'javascript',
         'interval-js',
+        'javascript',
       ]);
 
       // An unregistered target name fails with a message that names the
@@ -41,7 +64,7 @@ describe('compilation target registration', () => {
       // (A `./core` engine has no LaTeX parser, hence `box`, not `parse`.)
       expect(() =>
         ce._compile(ce.box(['Add', 'x', 1]), { to: 'glsl', fallback: false })
-      ).toThrow(/"glsl" is not registered.*javascript.*interval-js/);
+      ).toThrow(/"glsl" is not registered.*interval-js, javascript$/);
     });
   });
 
@@ -52,8 +75,8 @@ describe('compilation target registration', () => {
       const ce = new core.ComputeEngine();
       ce.registerCompilationTarget('glsl', new IsolatedGLSLTarget());
       expect(ce._listCompilationTargets()).toEqual([
-        'javascript',
         'interval-js',
+        'javascript',
         'glsl',
       ]);
       const expr = ce.box(['Add', 'x', 1]);
@@ -73,13 +96,13 @@ describe('compilation target registration', () => {
       const core = require('../../src/core');
       const ce = new core.ComputeEngine();
       expect(ce._listCompilationTargets()).toEqual([
-        'javascript',
         'interval-js',
+        'javascript',
       ]);
       require('../../src/compute-engine');
       expect(ce._listCompilationTargets()).toEqual([
-        'javascript',
         'interval-js',
+        'javascript',
         'glsl',
       ]);
       const glsl = ce._compile(ce.box(['Add', 'x', 1]), { to: 'glsl' });

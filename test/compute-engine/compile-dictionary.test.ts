@@ -9,6 +9,7 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 import { typeHoldsKeyedValue } from '../../src/compute-engine/compilation/compiler-type-facts';
 import { parseType } from '../../src/common/type/parse';
 
@@ -316,9 +317,13 @@ describe('COMPILE A DICTIONARY: TARGETS WITH NO DICTIONARY VALUE', () => {
           /is outside the GLSL fragment/
         );
       }
-      const r = compiled(expr, 'interval-js');
-      expect(r.success).toBe(false);
-      expect(r.error).toMatch(/the target has no dictionary value/);
+      let diagnostic: unknown;
+      try {
+        compiled(expr, 'interval-js');
+      } catch (e) {
+        diagnostic = compileDiagnosticOf(e);
+      }
+      expect(diagnostic).toMatchObject({ code: 'outside-profile' });
     }
   });
 });

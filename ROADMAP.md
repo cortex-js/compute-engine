@@ -943,12 +943,11 @@ has none. A call bound to a user function compiles that function. Then
 `shadowedLibraryLoweringError()` are removed.
 
 The current source has 16 calls of `lookupApplicable()` and
-`shadowsLibraryName()` in 11 files of `src/compute-engine/compilation/`
+`shadowsLibraryName()` in 10 files of `src/compute-engine/compilation/`
 (`compile-expr-handlers.ts`, `compiler-core.ts`, `compile-operators.ts`,
 `compile-user-functions.ts`, `compile-protocol-dispatch.ts`,
 `builtin-callback.ts`, `compile-complexness.ts`, `compile-real-analysis.ts`,
-`compile-definitions.ts`, `javascript-target.ts`,
-`interval-javascript-target.ts`). Not each one selects a lowering: some read
+`compile-definitions.ts`, `javascript-target.ts`). Not each one selects a lowering: some read
 a free variable or a parameter. The first step is a census of these calls
 that sorts them into the two groups.
 

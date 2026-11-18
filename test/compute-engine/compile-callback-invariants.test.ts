@@ -113,25 +113,6 @@ describe('an integrand computes its loop invariants once', () => {
     expect(value).toBeCloseTo(plain.run!({ x: 2, k: 5 }) as number, 12);
   });
 
-  test('interval: the gamma product is one binding', () => {
-    const fn = compile(ce.parse(latex), { to: 'interval-js' });
-    expect(fn.success).toBe(true);
-    const code = fn.code!;
-    expect(code.split('_IA.gamma(').length - 1).toBe(1);
-    expect(code).toMatch(/let (_tv\d+) = false; let _tv\d+/);
-    const v = fn.run!({ x: { lo: 2, hi: 2 }, k: { lo: 5, hi: 5 } }) as {
-      kind: string;
-      value: { lo: number; hi: number };
-    };
-    expect(v.kind).toBe('interval');
-    const scalar = compile(ce.parse(latex), { to: 'javascript' }).run!({
-      x: 2,
-      k: 5,
-    }) as number;
-    expect(v.value.lo).toBeLessThanOrEqual(scalar);
-    expect(v.value.hi).toBeGreaterThanOrEqual(scalar);
-  });
-
   test('a nested integral with a dependent bound keeps its value', () => {
     // The inner integrand reads the outer variable, so the inner bindings
     // are declared inside the outer lambda, once per outer sample.

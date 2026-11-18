@@ -352,18 +352,6 @@ describe('FIXED-WIDTH UNROLL — Map with a bare user-function head', () => {
     expect(r.run(args)).toEqual(want);
   });
 
-  it('compiles `Min(Map(h, …))` on interval-js', () => {
-    // The reduction rule turns the unrolled list into an n-ary `Min`, which
-    // this target folds with `_IA.min`. Before the unroll the `Map` and its
-    // `List` had no lowering here at all.
-    const r: any = compile(ce.box(['Min', ['Map', 'h', FIVE]]), {
-      to: 'interval-js',
-      fallback: false,
-    } as any);
-    expect(r.success).not.toBe(false);
-    expect(`${r.preamble ?? ''}${r.code ?? ''}`).toContain('_IA.min');
-  });
-
   it('leaves a TWO-PARAMETER head untouched', () => {
     // `Map` calls its callback with one argument, so the canonical form of
     // this expression is already a `callback-arity` error rather than a
@@ -416,7 +404,7 @@ describe('FIXED-WIDTH UNROLL — Map with a bare user-function head', () => {
     ).toBe(
       '[Math.sin(_.a), Math.sin(_.b), Math.sin(_.c), Math.sin(_.d), Math.sin(_.s)]'
     );
-    for (const to of ['interval-js', 'glsl'] as const) {
+    for (const to of ['glsl'] as const) {
       const r: any = compile(ce.box(['Map', 'Sin', FIVE]), {
         to,
         fallback: false,

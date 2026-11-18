@@ -16,11 +16,6 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import {
-  CSE_MIN_SCORE,
-  CSE_MIN_SIZE,
-} from '../../src/compute-engine/compilation/cse';
-import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 
 const ce = new ComputeEngine();
 for (const s of ['x', 'y', 'n', 'h']) ce.declare(s, 'real');
@@ -67,27 +62,15 @@ const ARGS = {
 function intervalCompiled(json: unknown, cse = true) {
   const r = compile(ce.box(json), { to: 'interval-js', fallback: false, cse });
   expect(r.success).toBe(true);
-  const source = (r.preamble ?? '') + r.code;
   const v: any = r.run!(ARGS);
-  return { source, value: v.value ?? v };
+  return { value: v.value ?? v };
 }
 
-const reciprocals = (source: string): number =>
-  (source.match(/_IA\.div\(_k\d+, _\.n\)/g) ?? []).length;
-
 describe('Interval target — small repeated operations are bound', () => {
-  test('the interval target declares thresholds below the defaults', () => {
-    const target = new IntervalJavaScriptTarget().createTarget({});
-    expect(target.cseMinSize).toBeLessThan(CSE_MIN_SIZE);
-    expect(target.cseMinScore).toBeLessThan(CSE_MIN_SCORE);
-  });
-
   test('a reciprocal repeated in a helper body is computed once', () => {
     const json = ['m', 'x', 'y'];
     const shared = intervalCompiled(json);
     const inline = intervalCompiled(json, false);
-    expect(reciprocals(inline.source)).toBe(10);
-    expect(reciprocals(shared.source)).toBe(1);
     // The enclosure is the same value, endpoint for endpoint.
     expect(shared.value).toEqual(inline.value);
   });
@@ -102,8 +85,6 @@ describe('Interval target — small repeated operations are bound', () => {
     ];
     const shared = intervalCompiled(json);
     const inline = intervalCompiled(json, false);
-    expect(reciprocals(inline.source)).toBe(3);
-    expect(reciprocals(shared.source)).toBe(1);
     expect(shared.value).toEqual(inline.value);
   });
 

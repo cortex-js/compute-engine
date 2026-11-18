@@ -184,7 +184,7 @@ export class LaneMismatchError extends CompileDeclineError {
  * The decline of an expression that holds a value of a kind type which has
  * no interpreter fallback: on `interval-js`, an expression with an input or
  * a result typed `enclosure` (`holdsEnclosureInputOrResult()` in
- * `interval-javascript-target.ts`). The interpreter fallback reads an
+ * `interval-fallback.ts`). The interpreter fallback reads an
  * interval input as its midpoint, which would return a point where the
  * caller asked for an enclosure, so the decline is thrown even with
  * `fallback: true`. The engine-level `compile()` throws it again as it is,
@@ -235,8 +235,8 @@ export function bigintLaneError(payload: {
 
 /**
  * Throw when `options` has the `profile` option, in the `compile()` method
- * of a target (`JavaScriptTarget`, the shader targets,
- * `IntervalJavaScriptTarget`). The profile is an option of the function
+ * of a target (`JavaScriptTarget`, the shader targets). The profile is an
+ * option of the function
  * `compile()` with the target `javascript` or `glsl`, which selects another
  * compiler: a target called directly would compile with its own compiler
  * and ignore the option. It is an error of the options, thrown whatever

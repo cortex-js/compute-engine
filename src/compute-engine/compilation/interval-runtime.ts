@@ -182,8 +182,7 @@ export function createIntervalRuntime(): IntervalRuntime {
         try {
           return freshIntervalValue(raw(processInput(vars))) as IntervalValue;
         } catch (e) {
-          // The same rule as the runner of the engine
-          // (`ComputeEngineIntervalFunction`): a `ReferenceError` (the code
+          // A `ReferenceError` (the code
           // names something that is not defined, for example a helper that
           // reads a variable from outside its own body) is a defect of the
           // code and is thrown, and so is a cancellation (the `iterationBudget`

@@ -350,14 +350,25 @@ describe('the admission is plain-JavaScript only', () => {
     ]);
   }
 
-  test('INTERVAL JavaScript still declines', () => {
-    // `compileLoopBody` emits the condition as `_IA.decided(<verdict>)`,
-    // which throws for an undecided verdict, so an input interval on which
-    // the condition is not decided would give `entire`. Outside a loop the
-    // interpreter gives the exact value, so the shape declines.
-    const r = compile(elselessBlock(ce), { to: 'interval-js' });
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/Could not compile `If`: wrong number of arguments/);
+  test('INTERVAL JavaScript encloses the value of the interpreter', () => {
+    // The interval mode writes the statement on each side of an undecided
+    // condition and answers the hull of the values of `s`.
+    const expr = elselessBlock(ce);
+    const r = compile(expr, { to: 'interval-js', fallback: false });
+    expect(r.success).toBe(true);
+    for (const x of [3, -3, 0]) {
+      ce.assign('x', x);
+      const want = expr.evaluate().re;
+      expect((r.run as any)({ x })).toEqual({
+        kind: 'interval',
+        value: { lo: want, hi: want },
+      });
+    }
+    // On `[-1, 2]` the condition is undecided: the box holds both values.
+    expect((r.run as any)({ x: { lo: -1, hi: 2 } })).toEqual({
+      kind: 'interval',
+      value: { lo: -1, hi: 1 },
+    });
   });
 
   test('…and the interval else-FUL lowering, which is correct, is untouched', () => {

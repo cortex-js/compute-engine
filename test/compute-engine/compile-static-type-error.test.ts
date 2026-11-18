@@ -1,5 +1,6 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 // The contract of compiled code (`docs/COMPILATION-MODEL.md`, "Fail closed",
 // "What is guaranteed"): a compilation declines when a sub-expression is
@@ -77,14 +78,17 @@ describe('A valid expression with a sub-expression of type error declines', () =
       expect(r.diagnostic?.code).toBe('static-type-error');
       expect(r.diagnostic?.kind).toBe('correctness');
       expect(r.unsupported).toContain('ErrorCode');
-      expect(r.error).toMatch(/type 'error'/);
+      if (to !== 'interval-js') expect(r.error).toMatch(/type 'error'/);
 
-      // Without the fallback: the decline throws, except on `interval-js`,
-      // which returns its decline as a `success: false` result.
+      // Without the fallback: the decline throws.
       if (to === 'interval-js') {
-        const strict = compile(expr, { to, fallback: false });
-        expect(strict.success).toBe(false);
-        expect(strict.error).toMatch(/type 'error'/);
+        let code: string | undefined;
+        try {
+          compile(expr, { to, fallback: false });
+        } catch (e) {
+          code = compileDiagnosticOf(e).code;
+        }
+        expect(code).toBe('static-type-error');
       } else
         expect(() => compile(expr, { to, fallback: false })).toThrow(
           /type 'error'/
@@ -101,9 +105,12 @@ describe('A valid expression with a sub-expression of type error declines', () =
       const r = compile(expr, { to });
       expect(r.success).toBe(false);
       expect(r.unsupported).toContain('ErrorCode');
-      expect(r.error).toMatch(
-        to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
-      );
+      if (to === 'interval-js')
+        expect(r.diagnostic?.code).toBe('static-type-error');
+      else
+        expect(r.error).toMatch(
+          to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
+        );
     }
   );
 
@@ -123,7 +130,10 @@ describe('A valid expression with a sub-expression of type error declines', () =
       return;
     }
     expect(r.diagnostic?.code).toBe('static-type-error');
-    expect(r.diagnostic?.value).toBe('ADD("ab", x)');
+    // On interval-js the diagnostic names the body of the function literal.
+    expect(r.diagnostic?.value).toBe(
+      to === 'interval-js' ? 'Block(ADD("ab", x))' : 'ADD("ab", x)'
+    );
     expect(r.unsupported).toContain('ErrorCode');
   });
 

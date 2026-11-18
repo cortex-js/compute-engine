@@ -923,7 +923,9 @@ describe('the JavaScript target', () => {
             }
           ).success;
         } catch (e) {
-          declined = /parallel for|GLSL fragment/.test(String(e));
+          declined = /parallel for|GLSL fragment|is not in the slice/.test(
+            String(e)
+          );
         }
         expect(declined).toBe(true);
       }

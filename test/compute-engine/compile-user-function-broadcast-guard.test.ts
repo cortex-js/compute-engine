@@ -285,7 +285,19 @@ describe('the guard is NOT emitted where a broadcast would be wrong', () => {
       to: 'interval-js',
       constantFold: false,
     } as any);
-    expect(r?.code).toBe('_fn_f(_.y)');
+    expect(r?.success).toBe(true);
+    const encloses = (
+      got: { value: { lo: number; hi: number } },
+      y: number
+    ) => {
+      const expected = ce.box(['f', y] as any).N().re;
+      expect(got.value.lo).toBeLessThanOrEqual(expected);
+      expect(got.value.hi).toBeGreaterThanOrEqual(expected);
+    };
+    for (const y of [-2, 0, 3.5])
+      encloses(r!.run!({ y: { lo: y, hi: y } }) as any, y);
+    const box = r!.run!({ y: { lo: 1, hi: 1.5 } }) as any;
+    for (const y of [1, 1.25, 1.5]) encloses(box, y);
   });
 });
 

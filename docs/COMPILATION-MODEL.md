@@ -137,13 +137,7 @@ interpreter's value. A line is removed when the case declines or is fixed.
   compiled derivative is the general form `y·x^(y - 1)`, whose factor is
   `0^0` there: `javascript` gives `NaN` and `interval-js` gives `empty` at
   the point box (a box that holds other points is not affected).
-- `interval-js` (crafted), the existing compiler: `FresnelS(x)` over
-  `x = [1.5, 1.7]` gives an upper end `0.6975049600820927`, below
-  `S(1.5) = 0.6975049600820931`: the kernel widens its result by one ulp,
-  less than its error there. The profile `ir` declines `FresnelS` and
-  `FresnelC` on `interval-js`; the line goes with the existing interval
-  target.
-- `interval-js` (crafted), both compilers: `y^x` over `y = [-1, 0]`,
+- `interval-js` (crafted): `y^x` over `y = [-1, 0]`,
   `x = [-1.5, -0.5]` gives the interval `[-∞, +∞]` with no mark, where the
   base 0 is a pole (`0^-1` is `~oo` in the interpreter). The enclosure holds
   every value; the neighbouring boxes are marked (`y = [0, 2]` with
@@ -227,13 +221,13 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `(1/(s√(2π)))·Integrate(e^(−Z²/(2s²)), Limits(Z, −∞, x))` at `s = 1` gives
   `7.0866e-16` at `x = −8` and `0` at `x = −9`; the interpreter gives
   `6.2210e-16` and `1.1286e-19`.
-- `javascript` and `interval-js` (crafted), `x: real`, `g(u) = u + Random()`:
-  the closed form of a definite integral with a draw in a bound holds one
-  draw, made at compile time: `Integrate(t, Limits(t, 0, Random()))` and
-  `Integrate(t, Limits(t, 0, g(x)))` give the same number at every call
-  (`interval-js`: the same point interval), where the interpreter draws at
-  each evaluation. The profile `ir` draws at each call on `javascript`, and
-  in the interval mode gives the enclosure of every draw (no closed form).
+- `javascript` (crafted), `x: real`, `g(u) = u + Random()`: the closed form
+  of a definite integral with a draw in a bound holds one draw, made at
+  compile time: `Integrate(t, Limits(t, 0, Random()))` and
+  `Integrate(t, Limits(t, 0, g(x)))` give the same number at every call,
+  where the interpreter draws at each evaluation. The profile `ir` draws at
+  each call; `interval-js` gives the enclosure of every draw (no closed
+  form).
 - `javascript`, profile `ir` (crafted), `x: real`: `Zeta(x)` at
   `x = -171.5` gives `Infinity` (the machine kernel overflows below about
   `-171`); the interpreter at the default precision gives `4.739e172`.
@@ -308,6 +302,18 @@ interpreter's value. A line is removed when the case declines or is fixed.
   gives `[2, 4]`; the interpreter gives the error `incompatible-dimensions`.
   The length of a `Range` is a value for the compiler, and it does not
   compare a length value with a stated length.
+- `javascript` and `interval-js`, profile `ir` (crafted), `x: real`:
+  `Block(Declare(s, 'unknown', x), Declare(t, 'real', Add(s, 1)))`, whose
+  static type is `nothing`, gives `3` at `x = 2` (the point `[3, 3]` on
+  `interval-js`); the interpreter gives `Nothing`.
+- `interval-js` (crafted), `x: real`, `n: integer`:
+  `Sum(If(x > 1, Ln(k + x), If(x > 1, Ln(x - 1), Arccos(x))), Limits(k, 1, n))`
+  over `x = [0.5, 1.5]`, `n = 2` gives
+  `{ kind: 'partial', value: [0, 2.2999605196919664], domainClipped: 'both' }`:
+  the inner `If` is not narrowed to `x ≤ 1`, so `Ln(x - 1)` and `Arccos(x)`
+  are each read over the whole box. Every point of the box has a value, and
+  the earlier interval target gave `{ kind: 'interval' }` with the same
+  bounds.
 - `javascript`: a list whose length is random, then another draw:
   `Function(Block(Declare(A, 'list<integer>', Comprehension(j, Element(j, Range(1, 2 + Random(Range(1, 3)))))), Declare(r, 'real', Random()), 1000·r + Length(A)), u)`
   applied to `0.5` under the seed 1 gives `211.47662186831073`. The interpreter gives
@@ -2468,8 +2474,13 @@ value (decided by the user, 2026-10-18):
   enclosure whose lower bound is `NaN` is the absent marker of the compiled
   code, bare or carried by an `interval` or `partial` result (an operation
   over an absent operand), and the runner gives `{ kind: 'empty' }` for it:
-  `Min(L)` with `L = []`, a broadcast over lists of different lengths, and a
-  conditional whose undecided arms are a number and a list all give `empty`.
+  `Min(L)` with `L = []` gives `empty`. A broadcast over lists whose lengths
+  differ at run time is an error that the static type does not show, so its
+  value is unspecified: with `L`, `M: list<real>`, `Sum(L + M)` at
+  `L = [1, 2]`, `M = [1, 2, 3]` gives the point `6`. Lists of two lengths
+  that the types state (`[1, 2, 3] + [1, 2]`) decline, and so does a
+  conditional whose undecided arms are a number and a list
+  (`unsettled-shape`).
 - A collection value (a list, a range, a tuple, a point) is an array of these
   values, nested as the collection is. Each element is wrapped in the same
   way: `[x, 3]` over `x = [−1, 1]` gives
@@ -2486,8 +2497,17 @@ value (decided by the user, 2026-10-18):
   verdict of a relation over it is unspecified.
 
 The interpreter fallback (`success: false`, with `fallback` not `false`)
-gives the same shapes: a number is the `interval` result of a point, and an
-absent value is `empty`.
+gives the same shapes. It evaluates at the midpoint of each input, so it
+gives a bound only when every input is a point: then a number is the
+`interval` result of a point only when the interpreter's value is exactly
+that double (an integer, `1/4`), and otherwise `entire` (`Gamma(0.3)`, a
+quadrature, `1/3`: no double is the value); a boolean is `'true'` or
+`'false'` only when every number it is computed from is exact (an input
+counts as the double it was given), and otherwise `'maybe'`, since the
+interpreter compares with a tolerance (`Gamma(0.3) < 2.991568987687591` reads
+as `False`); and an absent value is `empty`. Over an input wider than a point,
+and for an expression that draws a random number, a number is `entire` and
+a boolean `'maybe'`.
 
 A root whose value is a function (a `Function` literal, a block whose value
 is one, a symbol whose value is one) is never given as a function value.
@@ -4115,6 +4135,13 @@ The design is `docs/plans/2026-10-26-value-kinds.md`, section 4.8.
 
 ### The enclosure on `interval-js`
 
+**Not available at present.** Since `interval-js` compiles with the
+interval mode of the IR pipeline, which does not lower the kind, an
+expression with an input or a result of the kind `enclosure` declines on
+`interval-js` with a `KindDeclineError`, also with `fallback: true`. This
+section describes the compiled form that the earlier interval target gave,
+which the interval mode is to give in a follow-up.
+
 `Enclosure(lo, hi)`, an interval that holds one real (`TYPE-SYSTEM.md`,
 "Enclosures"), is the one library kind with a compile contract
 (`ENCLOSURE_COMPILE`, `library/enclosure-compile.ts`). The contract answers
@@ -4181,8 +4208,7 @@ for it. So `Factorial(y)` with `y: real | enclosure` declines, as the
 interpreter leaves `Factorial` of an enclosure unevaluated.
 
 **The entry check of the interval runner.** For each free symbol whose type
-has an `enclosure` arm (`intervalKindEntries()`,
-`interval-javascript-target.ts`), `run()` checks the host value BEFORE it
+has an `enclosure` arm, `run()` checks the host value BEFORE it
 converts the inputs, and OUTSIDE the `try` whose `catch` answers `entire`,
 so a refused value throws. The kind's `entry` admits a record `{ lo, hi }`
 of two numbers with `lo <= hi`, `±Infinity` allowed but not the same

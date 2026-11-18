@@ -1218,12 +1218,9 @@ export function resolveStorageHints(
  * `["DefineFunction", "f"]`: it reads the definition as an operator with
  * no lowering, and it does not know that `f` is a local function.
  *
- * A declined result keeps the list of the walk. The interval target passes
- * one here: `compileToIntervalTarget()` returns `success: false` for an
- * operator with no interval kernel, and does not throw. Every other
- * decline gets the list of the walk in `buildInterpreterFallback()`. On a
- * decline the list can name `DefineFunction` beside the operator that
- * caused the decline.
+ * A declined result gets the list of the walk in
+ * `buildInterpreterFallback()`. On a decline the list can name
+ * `DefineFunction` beside the operator that caused the decline.
  */
 export function withReferences<
   R extends {

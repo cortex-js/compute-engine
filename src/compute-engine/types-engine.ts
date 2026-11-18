@@ -90,7 +90,6 @@ import type {
 import type {
   LanguageTarget,
   CompilationResult,
-  IntervalJsCompilationTarget,
   JavaScriptCompilationTarget,
 } from './compilation/types.js';
 
@@ -2161,18 +2160,14 @@ export interface IComputeEngine {
   /**
    * @internal Get a registered compilation target by name.
    *
-   * The two built-in executable targets are typed concretely so their compiled
-   * `run` needs no cast: `interval-js` accepts `number | Interval` variables
-   * and returns `IntervalResult`; `javascript` accepts
+   * The `javascript` target is typed concretely so its compiled `run` needs
+   * no cast: it accepts
    * `number | boolean | string | ComplexResult | RunnerListInput` variables
    * (plain reals, booleans, strings, complex domain-coloring inputs, or a
    * list for a symbol that the code reads as a list) and returns a
    * `CompiledValue`. Any other name (source-only or custom targets)
    * falls back to the generic `LanguageTarget<Expression>`.
    */
-  _getCompilationTarget(
-    name: 'interval-js'
-  ): IntervalJsCompilationTarget<Expression> | undefined;
   _getCompilationTarget(
     name: 'javascript'
   ): JavaScriptCompilationTarget<Expression> | undefined;
@@ -2188,13 +2183,14 @@ export interface IComputeEngine {
    * target lacks one of `getOperators()`, `getFunctions()`, `createTarget()`
    * and `compile()`.
    *
-   * Every engine has `javascript` and `interval-js`. Every engine also has
-   * `glsl` once the full package entry,
+   * Every engine compiles to `interval-js`, which `compile()` routes itself
+   * (a registration under that name throws), and has the target
+   * `javascript`. Every engine also has `glsl` once the full package entry,
    * `@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
    * the program, whichever entry made the engine and in whichever order. A
-   * program that loads only `@cortex-js/compute-engine/core` has the two
-   * built-in targets: import `GLSLTarget`
-   * from `@cortex-js/compute-engine/compile` and register it here.
+   * program that loads only `@cortex-js/compute-engine/core`: import
+   * `GLSLTarget` from `@cortex-js/compute-engine/compile` and register it
+   * here.
    */
   registerCompilationTarget(
     name: string,
@@ -2208,7 +2204,8 @@ export interface IComputeEngine {
   ): void;
 
   /** Remove the compilation target registered under `name`. A name that is
-   * not registered is ignored. */
+   * not registered is ignored. `interval-js`, which `compile()` routes
+   * itself, cannot be removed: this throws. */
   unregisterCompilationTarget(name: string): void;
 
   /** @internal The pre-2026-10-26 spelling of `unregisterCompilationTarget`. */

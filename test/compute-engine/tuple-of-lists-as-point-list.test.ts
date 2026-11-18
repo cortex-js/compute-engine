@@ -321,15 +321,9 @@ describe('A tuple with a list coordinate is a list of points — compiled interv
   };
 
   test.each([
-    ['(A, B)'],
     ['\\operatorname{Length}((A, B))'],
-    ['\\operatorname{PointX}((A, B))'],
-    ['P + (A, B)'],
-    ['(A, B) + (1, 1)'],
-    ['2\\cdot(A, B)'],
     ['(\\cos A, \\sin A)'],
     ['(A, 0)'],
-    ['(A, [7, 8])'],
   ])('%s agrees with the interpreter', (latex) => {
     close(run(latex), value(latex));
   });

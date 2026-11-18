@@ -2,7 +2,10 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
+
+/** `compile()` to `interval-js`, called as a target's `compile()` is. */
+const intervalCompile = (expr: any, options: Record<string, unknown> = {}) =>
+  compile(expr, { ...options, to: 'interval-js' } as any) as any;
 
 /**
  * `PointList` compile handler (Tycho item 25 follow-up).
@@ -75,7 +78,7 @@ describe('PointList compile — scalar parity with Tuple', () => {
 
 describe('PointList compile — interval-js parity', () => {
   const ce = freshEngine();
-  const iv = new IntervalJavaScriptTarget();
+  const iv = { compile: intervalCompile };
 
   it('a scalar Tuple and PointList are the same array of intervals at the root', () => {
     // The interval value model is one interval per quantity, so a point at the
@@ -201,7 +204,7 @@ describe('PointList compile — render-shaped case s(PointList(x,y))', () => {
 
   it('interval-js: PointList- and Tuple-spelled bodies compile identically', () => {
     const ce = freshEngine();
-    const iv = new IntervalJavaScriptTarget();
+    const iv = { compile: intervalCompile };
     const withPointList = iv.compile(body(ce, 'PointList'), { fallback: true });
     const withTuple = iv.compile(body(ce, 'Tuple'), { fallback: true });
     // The interval target's point accessors select the coordinate of a literal

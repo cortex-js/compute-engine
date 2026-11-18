@@ -1161,7 +1161,9 @@ language-agnostically and delegates formatting to a `LanguageTarget` /
   `gpu-shader-target.ts` (shared target class), `gpu-functions.ts` (operator
   handlers), `gpu-at.ts`, `gpu-points.ts`, `gpu-reduce.ts`, `gpu-random.ts`,
   `gpu-preambles.ts`, `gpu-shapes.ts`, `gpu-finite-proof.ts` and others.
-- `interval-javascript-target.ts` — JavaScript with interval arithmetic.
+- `interval-js` — JavaScript with interval arithmetic, compiled by the interval
+  mode of the IR pipeline (`ir/adapter-interval.ts`); `compile()` routes the
+  name itself (`targets.ts`).
 
 Built-in targets are registered in the engine's internal compilation-target
 registry and validated by the extension contracts. Consumers pass custom target

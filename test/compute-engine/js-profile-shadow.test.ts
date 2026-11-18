@@ -239,22 +239,21 @@ describe('the counters', () => {
     expect(stats.examples[keys[0]]).toBe(keys[0]);
   });
 
-  test('a compilation for interval-js is counted as interval:public', () => {
+  test('a compilation for interval-js is not counted: its result is that of the interval mode', () => {
     const ce = engine(true);
     const admitted = compile(ce.parse('x^2 + 1'), { to: 'interval-js' });
-    // `Sinc` has no row: the profile declines, the existing target compiles.
-    compile(ce.box(['Sinc', 'x']), { to: 'interval-js' });
-    // The result is the existing target's.
     expect(admitted.success).toBe(true);
-    expect(admitted.profile).toBeUndefined();
-    const stats = _jsProfileShadowStats(ce);
-    expect(stats['interval:public']).toMatchObject({
-      attempts: 2,
-      admitted: 1,
-      declined: 1,
-      failed: 0,
-    });
-    expect(stats.public).toBeUndefined();
+    expect(admitted.profile).toBe('ir');
+    // `Sinc` has no row: the mode declines, and the result is the
+    // interpreter fallback.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const declined = compile(ce.box(['Sinc', 'x']), { to: 'interval-js' });
+      expect(declined.success).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(_jsProfileShadowStats(ce)).toEqual({});
   });
 
   test('an expression with many paths is compiled with the profile', () => {

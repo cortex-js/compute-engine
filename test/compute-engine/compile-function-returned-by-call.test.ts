@@ -14,6 +14,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 function program(ce: ComputeEngine, source: string) {
   const [ast] = parseEpsil(source, {
@@ -122,12 +123,18 @@ describe('COMPILE a call of a function returned by a call', () => {
   });
 
   it('declines on interval-js', () => {
-    expect(() =>
+    // The definition of `mk` declines first on interval-js.
+    let diagnostic: { code: string; operator?: string } | undefined;
+    try {
       both(
         'function mk(n) { (x) => x * n }\nlet a = mk(3)\na(2)',
         'interval-js'
-      )
-    ).toThrow(RETURNED);
+      );
+    } catch (e) {
+      diagnostic = compileDiagnosticOf(e);
+    }
+    expect(diagnostic?.code).toBe('outside-profile');
+    expect(diagnostic?.operator).toBe('DefineFunction');
   });
 });
 

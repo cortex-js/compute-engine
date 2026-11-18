@@ -129,21 +129,46 @@ describe('IDENTITY PASSTHROUGH PARENTHESES — GPU (GLSL)', () => {
 });
 
 describe('IDENTITY PASSTHROUGH PARENTHESES — interval-js has no infix', () => {
-  // The interval target maps every operator to an `_IA.*` CALL (its
-  // `operators` hook always answers `undefined`), so no emission of that
-  // target can be captured by a surrounding operator and the defect class
-  // does not arise there. These pin that the arithmetic really is calls.
+  // The interval target maps every operator to an `_IA.*` CALL, so no
+  // emission of that target can be captured by a surrounding operator and the
+  // defect class does not arise there. These check that the value is the
+  // interpreter's: a missing pair of parentheses would give `3n + 1`.
+  function expectEnclosesInterpreter(
+    expr: ReturnType<typeof ce.box>,
+    sym: string,
+    points: number[]
+  ) {
+    const r = compile(expr, { to: 'interval-js', constantFold: false });
+    expect(r.success).toBe(true);
+    for (const v of points) {
+      const expected = expr.subs({ [sym]: v }).N().re;
+      const out = r.run!({ [sym]: { lo: v, hi: v } }) as {
+        kind: string;
+        value: { lo: number; hi: number };
+      };
+      expect(out.kind).toBe('interval');
+      expect(out.value.lo).toBeLessThanOrEqual(expected);
+      expect(out.value.hi).toBeGreaterThanOrEqual(expected);
+    }
+  }
+
   test('a scaled Floor stays a nest of calls', () => {
     const expr = ce.box(['Multiply', 3, ['Floor', ['Add', 'n', 1]]]);
-    const r = compile(expr, { to: 'interval-js', constantFold: false });
-    // Every constant interval is bound in the table the preamble carries
-    // (`hoistIntervalConstants`), so the expression reads `_k1`/`_k2`.
-    expect(r.code).toBe('_IA.scale(_k1, _IA.floor(_IA.add(_.n, _k2)))');
+    expectEnclosesInterpreter(expr, 'n', [-3, 0, 2, 7]);
   });
 
   test('a scaled one-operand Max stays a nest of calls', () => {
     const expr = ce.box(['Multiply', 3, ['Max', ['Add', 'x', 1]]]);
+    expectEnclosesInterpreter(expr, 'x', [-2.5, 0, 0.5, 4]);
+    // A small box: the result encloses the value at points inside it.
     const r = compile(expr, { to: 'interval-js', constantFold: false });
-    expect(r.code).toBe('_IA.scale(_k1, _IA.add(_.x, _k2))');
+    const out = r.run!({ x: { lo: 0.5, hi: 1.5 } }) as {
+      value: { lo: number; hi: number };
+    };
+    for (const v of [0.5, 1, 1.5]) {
+      const expected = expr.subs({ x: v }).N().re;
+      expect(out.value.lo).toBeLessThanOrEqual(expected);
+      expect(out.value.hi).toBeGreaterThanOrEqual(expected);
+    }
   });
 });

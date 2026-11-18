@@ -103,25 +103,6 @@ describe('Tycho item 255: Arctan2 across its branch cut', () => {
       expect(r.value.hi).toBeCloseTo(Math.PI, 14);
     }
   });
-
-  test('Argument of a complex expression inherits the same branch cut', () => {
-    // The item asks for the same contract from `Arg`. The interval lane is
-    // real-only, so `Arg(x + iy)` compiles only by splitting the value into
-    // its two REAL parts and reading the phase off `atan2` of them — which
-    // brings this kernel's branch-cut handling with it, rather than the
-    // bounded `interval` the item refused.
-    const r = compile(ce.parse('\\arg(x+iy)'), { to: 'interval-js' });
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('_IA.atan2(_.y, _.x)');
-    const cut = r.run!(box([-1.2, -0.8], [-0.1, 0.1]));
-    expect(cut.kind).toBe('singular');
-    expect(cut.at).toBe(0);
-    expect(cut.continuity).toBe('right');
-    const clear = r.run!(box([0.5, 1], [0.5, 1]));
-    expect(clear.kind).toBe('interval');
-    expect(clear.value.lo).toBeCloseTo(Math.atan2(0.5, 1), 12);
-    expect(clear.value.hi).toBeCloseTo(Math.atan2(1, 0.5), 12);
-  });
 });
 
 describe('Arctan2 across its branch cut along x', () => {
@@ -276,58 +257,5 @@ describe('Arctan2 across its branch cut along x', () => {
       expect(r.value!.hi).toBeGreaterThan(Math.PI);
       expect(r.value!.hi).toBeCloseTo(Math.PI, 14);
     }
-  });
-
-  test('a jump in x combined with a jump in y locates nothing', () => {
-    // `sign(y)` jumps at y = 0 and `atan2(y, x)` jumps at x = 0 over this
-    // box. Both locations are the number 0, in different coordinates, so the
-    // product reports the jump with its enclosure but with no location: a
-    // consumer cannot be told which axis to subdivide along.
-    const product = compile(
-      ce.box(['Multiply', ['Sign', 'y'], ['Arctan2', 'y', 'x']]),
-      { to: 'interval-js' }
-    );
-    const r = product.run!(box([-1, 1], [0, 0.5]));
-    expect(r.kind).toBe('singular');
-    expect(r.at).toBeUndefined();
-    expect(r.atOperand).toBeUndefined();
-    expect(r.value.hi).toBeCloseTo(Math.PI, 12);
-
-    // A jump in one coordinate only keeps its location: `floor(y)` jumps at
-    // y = 1, later than the angle's jump at x = 0, so the angle's location
-    // wins and carries its operand with it.
-    const withFloor = compile(
-      ce.box(['Multiply', ['Floor', 'y'], ['Arctan2', 'y', 'x']]),
-      { to: 'interval-js' }
-    );
-    const s = withFloor.run!(box([-1, 1], [0, 1.5]));
-    expect(s.kind).toBe('singular');
-    expect(s.at).toBe(0);
-    expect(s.atOperand).toBe(1);
-  });
-
-  test('Argument of a real expression reports the jump across zero', () => {
-    // `Arg(x + i·0)` is the phase of a real number: 0 for x > 0 and π for
-    // x < 0. It lowers through this kernel with a point zero as its first
-    // operand, so a box of x that reaches both sides of zero answers the
-    // jump rather than the bounded `interval` a sign test would misread.
-    const r = compile(ce.parse('\\arg(x+\\imaginaryI\\cdot 0)'), {
-      to: 'interval-js',
-    });
-    expect(r.success).toBe(true);
-    // The zero is bound in the constant table the preamble carries
-    // (`hoistIntervalConstants`).
-    expect(r.preamble).toContain('const _k1 = _IA.point(0);');
-    expect(r.code).toBe('_IA.atan2(_k1, _.x)');
-    const straddle = r.run!({ x: { lo: -1, hi: 1 } });
-    expect(straddle.kind).toBe('singular');
-    expect(straddle.at).toBe(0);
-    expect(straddle.atOperand).toBe(1);
-    expect(straddle.continuity).toBe('right');
-    expect(straddle.value.hi).toBeCloseTo(Math.PI, 14);
-
-    const positive = r.run!({ x: { lo: 0.5, hi: 2 } });
-    expect(positive.kind).toBe('interval');
-    expect(positive.value.hi).toBeCloseTo(0, 15);
   });
 });

@@ -24,7 +24,12 @@ import {
   isCompileDeclineError,
   isKindDeclineError,
   CompileDeclineError,
+  KindDeclineError,
 } from './diagnostics.js';
+import {
+  buildIntervalFallback,
+  holdsEnclosureInputOrResult,
+} from './interval-fallback.js';
 import { compilationScope, inCallerScope } from './compile-scope.js';
 import { rawTargetCheck } from './raw-target-check.js';
 import { rewriteAngularUnit } from './angular-unit.js';
@@ -234,9 +239,10 @@ let publicDepth = 0;
  * The consumer under which the shadow measure counts a compilation with
  * `options` (`jsProfileShadowConsumer()`), or `undefined` when it is not
  * measured: a target other than `javascript` (and `glsl`, counted as
- * `glsl:public`, and `interval-js`, counted as `interval:public`), a direct
- * target, a profile asked for, or a compilation of `implicitCompile()` that
- * follows an attempt of its switch.
+ * `glsl:public`), a direct target, a profile asked for, or a compilation of
+ * `implicitCompile()` that follows an attempt of its switch. `interval-js`
+ * is not measured: it always compiles with the interval mode of the profile
+ * (`compileInScope()`).
  */
 function shadowConsumerOf(
   options: CompileExpressionOptions | undefined
@@ -245,7 +251,6 @@ function shadowConsumerOf(
     return undefined;
   const to = options?.to ?? 'javascript';
   if (to === 'glsl') return 'glsl:public';
-  if (to === 'interval-js') return 'interval:public';
   if (to !== 'javascript') return undefined;
   return jsProfileShadowConsumer(options);
 }
@@ -597,12 +602,17 @@ function compileInScope<
         'preamble a registered target provides. Omit `storage` or use a ' +
         'registered target (`to: "glsl"`).'
     );
-  // The profile `ir` validates the hints with no compiler: a hinted name must
-  // be one that the run of the expression takes from its inputs
+  // The profile `ir`, and `interval-js`, which always compiles with it,
+  // validate the hints with no compiler: a hinted name must be one that the
+  // run of the expression takes from its inputs
   // (`resolveStorageHintsOfInputs()`).
   const irProfile =
     options?.profile === 'ir' && (options.mode as string) !== 'auto';
-  if (irProfile && options?.storage !== undefined)
+  if (
+    (irProfile ||
+      (options?.target === undefined && options?.to === 'interval-js')) &&
+    options?.storage !== undefined
+  )
     resolveStorageHintsOfInputs(options.storage, expr, {
       vars: options.vars,
       functions: options.functions,
@@ -801,6 +811,21 @@ function compileInScope<
 
     const targetName = (options?.to ?? 'javascript') as T;
 
+    // `interval-js` compiles with the interval mode of the profile `ir`
+    // (`ir/adapter-interval.ts`), whether the option `profile` is given or
+    // not, and reads no registered target; a decline falls back in the catch
+    // below.
+    if (targetName === 'interval-js')
+      return strictTypesChecked(
+        expr,
+        compileWithIrProfileInterval(
+          expr,
+          options
+        ) as unknown as CompilationResult<T, R>,
+        options,
+        undefined
+      );
+
     // Look up the target in the registry
     const languageTarget = expr.engine._getCompilationTarget(targetName);
 
@@ -813,12 +838,11 @@ function compileInScope<
     }
 
     // Use the language target to compile. `fallback` is passed through so the
-    // target normalizes its own failures — this matters for interval-js, whose
-    // primary failure class returns `success: false` WITHOUT throwing (so the
-    // catch below never sees it); without the pass-through such a decline
-    // reached the caller with no `run` at all, violating the fallback
-    // contract. The catch below remains for custom registered targets and
-    // pre-compile errors.
+    // target normalizes its own failures: a target whose failure returns
+    // `success: false` WITHOUT throwing (so the catch below never sees it)
+    // would otherwise give the caller a decline with no `run` at all,
+    // violating the fallback contract. The catch below remains for custom
+    // registered targets and pre-compile errors.
     const targetOptions = {
       fallback: options?.fallback ?? true,
       operators: options?.operators,
@@ -843,16 +867,13 @@ function compileInScope<
     // (with its fallback, as without the profile).
     // The profile `ir` (experimental) compiles with the IR compiler
     // (`ir/adapter.ts`); a decline falls back in the catch below. On
-    // `glsl` (`ir/adapter-glsl.ts`) and `interval-js`
-    // (`ir/adapter-interval.ts`), a decline falls back to that target.
-    if (irProfile && (targetName === 'glsl' || targetName === 'interval-js'))
+    // `glsl` (`ir/adapter-glsl.ts`), a decline falls back to that target.
+    if (irProfile && targetName === 'glsl')
       try {
-        return (targetName === 'glsl'
-          ? compileWithIrProfileGlsl(expr, options)
-          : compileWithIrProfileInterval(
-              expr,
-              options
-            )) as unknown as CompilationResult<T, R>;
+        return compileWithIrProfileGlsl(
+          expr,
+          options
+        ) as unknown as CompilationResult<T, R>;
       } catch (e) {
         if (!isCompileDeclineError(e) || options.fallback === false) throw e;
         console.warn(
@@ -890,28 +911,39 @@ function compileInScope<
     // It is thrown again here, with no fallback warning and no second
     // compilation, which would throw the same decline again.
     if (isKindDeclineError(e)) throw e;
+    // A decline on `interval-js` of an expression with an `enclosure` input
+    // or result is a kind decline, whatever `fallback` says: it has no
+    // interpreter fallback (`holdsEnclosureInputOrResult()`).
+    if (
+      options?.target === undefined &&
+      options?.to === 'interval-js' &&
+      isCompileDeclineError(e) &&
+      holdsEnclosureInputOrResult(expr)
+    )
+      throw new KindDeclineError(compileDiagnosticOf(e, e.message));
     if (options?.fallback ?? true) {
       const error = (e as Error).message;
-      console.warn(
-        `Compilation fallback for "${expr.operator}" (target: ${options?.to ?? 'javascript'}): ${error}`
-      );
       const target = (options?.to ?? 'javascript') as T;
-      // The interval target's own fallback wrapper produces an
-      // interval-shaped `run` (degenerate `{lo, hi}` intervals); the generic
-      // interpreter fallback below returns plain numbers, which would violate
-      // the interval-js result contract. Delegate to the target.
+      // The fallback of `interval-js` gives an interval-shaped `run`
+      // (`buildIntervalFallback()`, which warns); the generic interpreter
+      // fallback below returns plain numbers, which would violate the
+      // interval-js result contract.
       if ((target as string) === 'interval-js') {
-        const registered = expr.engine._getCompilationTarget('interval-js');
+        if (holdsEnclosureInputOrResult(expr))
+          throw new KindDeclineError(compileDiagnosticOf(e, error));
         // `target === 'interval-js'` pins `T` to 'interval-js' at runtime,
         // but TypeScript cannot correlate the narrowed string with the type
         // parameter — hence the two-step conversion.
-        if (registered)
-          return registered.compile(expr, {
-            vars: options?.vars,
-            symbolic: options?.symbolic,
-            fallback: true,
-          }) as unknown as CompilationResult<T, R>;
+        return buildIntervalFallback(
+          expr,
+          error,
+          { vars: options?.vars },
+          compileDiagnosticOf(e, error)
+        ) as unknown as CompilationResult<T, R>;
       }
+      console.warn(
+        `Compilation fallback for "${expr.operator}" (target: ${options?.to ?? 'javascript'}): ${error}`
+      );
       // A decline of the profile `ir` on JavaScript: the result is built with
       // no compiler (`interpreterFallback()`).
       if (irProfile && (target as string) === 'javascript')
@@ -1108,9 +1140,7 @@ export function strictTypesError(
  * `false`, and otherwise returns the `success: false` result with an
  * interpreter-backed `run`. That result keeps the type report of the
  * compilation, which a fresh analysis could not reproduce (a shader reads a
- * colour operand as a `vec3` only because the emission recorded it). On
- * interval-js the result keeps the compiled `run`, which already honours the
- * interval value contract that the generic interpreter fallback does not.
+ * colour operand as a `vec3` only because the emission recorded it).
  */
 function strictTypesChecked<T extends string, R>(
   expr: Expression,
@@ -1123,12 +1153,21 @@ function strictTypesChecked<T extends string, R>(
   if (error === undefined) return result;
   const e = new Error(error);
   if (options.fallback === false) throw e;
+  const diagnostic = compileDiagnosticOf(e, error);
+  // On interval-js, the interval fallback, which warns.
+  if ((result.target as string) === 'interval-js') {
+    const fallback = buildIntervalFallback(
+      expr,
+      error,
+      { vars: options.vars },
+      diagnostic
+    ) as unknown as CompilationResult<T, R>;
+    fallback.freeSymbolTypes = result.freeSymbolTypes;
+    return fallback;
+  }
   console.warn(
     `Compilation fallback for "${expr.operator}" (target: ${result.target}): ${error}`
   );
-  const diagnostic = compileDiagnosticOf(e, error);
-  if ((result.target as string) === 'interval-js')
-    return { ...result, success: false, code: '', error, diagnostic };
   const fallback = BaseCompiler.buildInterpreterFallback(
     expr,
     error,

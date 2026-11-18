@@ -83,6 +83,35 @@ function declineOf(f: () => unknown): CompileDeclineError {
   throw new Error('no decline');
 }
 
+/** The result `v` agrees with the interpreter's value of `json` on `engine`
+ *  at each of `points`: a real value lies in the enclosure, and an `empty`
+ *  result has no real value at any point. `entire` and a pole (`singular`
+ *  with no value) admit every value. */
+function agreesWithInterpreter(
+  v: any,
+  json: unknown,
+  points: Record<string, number>[],
+  engine: ComputeEngine = ce
+): void {
+  for (const point of points) {
+    const n = engine
+      .box(json as never)
+      .subs(
+        Object.fromEntries(
+          Object.entries(point).map(([k, x]) => [k, engine.number(x)])
+        )
+      )
+      .N();
+    const real = n.im === 0 && Number.isFinite(n.re);
+    if (v.kind === 'empty') expect([point, real]).toEqual([point, false]);
+    else if (real && v.value !== undefined)
+      expect([point, v.value.lo <= n.re && n.re <= v.value.hi]).toEqual([
+        point,
+        true,
+      ]);
+  }
+}
+
 const PROGRAMS: unknown[] = [
   ['Add', ['Power', 'x', 2], ['Power', 'y', 2], -1],
   ['Divide', 1, 'x'],
@@ -177,20 +206,12 @@ describe('the interval mode: the result contract', () => {
     expect(mode(['Not', 'p']).run({ p: true })).toBe('false');
   });
 
-  test('a boolean name of vars is a boolean input, as in the existing target', () => {
-    const options = { to: 'interval-js', vars: { p: '_.p' } };
-    const old = compile(
-      ce.box(['Not', 'p'] as never),
-      options as never
-    ) as unknown as Result;
+  test('a boolean name of vars is a boolean input', () => {
     const r = mode(['Not', 'p'], { vars: { p: '_.p' } });
     expect(r.profile).toBe('ir');
-    expect(old.booleanInputs).toEqual(['p']);
     expect(r.booleanInputs).toEqual(['p']);
-    expect(r.broadcast!({ p: [] })).toEqual(old.broadcast!({ p: [] }));
     expect(r.broadcast!({ p: [] }).length).toBe(0);
     expect(r.run({ p: true })).toBe('false');
-    expect(old.run({ p: true })).toBe('false');
   });
 
   test('a root Function literal is a lambda', () => {
@@ -256,8 +277,8 @@ describe('the interval mode: the result contract', () => {
     }
   });
 
-  test('a decline: outside-profile with fallback false, the existing target with it', () => {
-    // A `Loop` with no `Element` clause, which the existing target compiles.
+  test('a decline: outside-profile with fallback false', () => {
+    // A `Loop` with no `Element` clause.
     const loop = [
       'Block',
       ['Declare', 's', 'real', 0],
@@ -267,15 +288,6 @@ describe('the interval mode: the result contract', () => {
     const e = declineOf(() => mode(loop));
     expect(e.diagnostic.code).toBe('outside-profile');
     expect(e.message).toMatch(/a Loop with no Element clause/);
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const r = compile(ce.box(loop as never), IR as never) as unknown as Result;
-      expect(r.success).toBe(true);
-      expect(r.profile).toBeUndefined();
-      expect(r.run({ x: { lo: 1, hi: 2 } }).kind).toBe('interval');
-    } finally {
-      warn.mockRestore();
-    }
   });
 
   test('the options', () => {
@@ -296,11 +308,15 @@ describe('the interval mode: the result contract', () => {
       [{ mode: 'complex' }, /the option `mode` with the value 'complex'/],
       [{ functions: { f: () => 1 } }, /the option `functions`/],
       [{ preamble: 'const a = 1;' }, /the option `preamble`/],
-      [{ strictTypes: true }, /the option `strictTypes`/],
     ] as const)
       expect(declineOf(() => mode(['Add', 'x', 'c'], options)).message).toMatch(
         cause
       );
+    // `strictTypes` declines an input whose type is inferred, as on
+    // `javascript`.
+    expect(() => mode(['Add', 'x', 'c'], { strictTypes: true })).toThrow(
+      /strictTypes: declare `c`/
+    );
     // No effect.
     expect(
       mode(['Sin', 'x'], {
@@ -404,7 +420,7 @@ describe('the interval mode: recursive functions', () => {
 
   test('a recursion that never reaches its base case is entire', () => {
     // `m = 1` is decided false at every depth: the JavaScript stack ends,
-    // and run() answers a RangeError with entire, as the existing target.
+    // and run() answers a RangeError with entire.
     const r = mode(['rs', 'x', 'n']);
     for (const n of [2.5, -1])
       expect(r.run({ x: 0.3, n })).toEqual({ kind: 'entire' });
@@ -763,12 +779,6 @@ describe('the interval mode: loops at run time', () => {
     const r = mode(sum, { iterationBudget: 5 });
     expect(r.run({ x: 0.5, n: 5 }).kind).toBe('interval');
     expect(r.run({ x: 0.5, n: 6 })).toEqual({ kind: 'entire' });
-    // The existing target gives the same kinds.
-    const old = compile(ce.box(sum as never), {
-      to: 'interval-js',
-      iterationBudget: 5,
-    } as never) as unknown as Result;
-    expect(old.run({ x: 0.5, n: 6 })).toEqual({ kind: 'entire' });
   });
   test('broadcast() gives entire for such a cell, and counts no failure', () => {
     const r = mode(sum, { iterationBudget: 5 });
@@ -856,8 +866,7 @@ describe('the interval mode: narrowing in a nest', () => {
 
 describe('the interval mode: the size of conditionals', () => {
   // A nest of `If`s in the first arm, each arm reading the shared `s`: each
-  // arm is printed once (the existing target writes the first arm twice),
-  // so the text grows with the program.
+  // arm is printed once, so the text grows with the program.
   const nest = (depth: number): unknown => {
     let e: unknown = ['Sin', 's'];
     for (let k = 0; k < depth; k++)
@@ -941,15 +950,14 @@ describe('the interval mode: batch 4, results', () => {
     'a library constant that is not a double keeps its enclosure: %s',
     (name) => {
       // Its value is not the double that the engine holds for it, unlike a
-      // decimal of the program: one ulp on each side, as the existing target.
+      // decimal of the program: one ulp on each side.
       const json = ['Add', 'x', name];
       for (const engine of [defaultEngine, undefined]) {
-        const [r, old] = engine
+        const [r] = engine
           ? both(engine(), json)
           : atMachine((m) => both(m, json));
         const got = r.run({ x: 0 }) as { value: { lo: number; hi: number } };
         expect(got.value.lo).toBeLessThan(got.value.hi);
-        expect(got).toEqual(old.run({ x: 0 }));
       }
       // The JavaScript code reads the double, as before.
       const js = compile(defaultEngine().box(json as never), {
@@ -975,13 +983,11 @@ describe('the interval mode: batch 4, results', () => {
     );
     expect(both(engine, ['Add', 'x', 'Half'])[0].run({ x: 0 })).toEqual(point(0.5));
     // `MachineEpsilon` is 2^-52 exactly, but the engine holds it as a
-    // number that is not exact: an enclosure of one ulp, where the existing
-    // target, which names it, gives the point.
-    const [r, old] = both(engine, ['Add', 'x', 'MachineEpsilon']);
+    // number that is not exact: an enclosure of one ulp.
+    const [r] = both(engine, ['Add', 'x', 'MachineEpsilon']);
     const eps = r.run({ x: 0 }) as { value: { lo: number; hi: number } };
     expect(eps.value.lo).toBeLessThan(Number.EPSILON);
     expect(eps.value.hi).toBeGreaterThan(Number.EPSILON);
-    expect(old.run({ x: 0 })).toEqual(point(Number.EPSILON));
   });
 
   test('a decimal literal is a point: a pole of 1 / (0.5·Sin(2x) + 0.5) at the edge', () => {
@@ -992,10 +998,8 @@ describe('the interval mode: batch 4, results', () => {
       value: { lo: 1, hi: Infinity },
       domainClipped: 'hi',
     };
-    for (const results of [both(defaultEngine(), json), atMachine((m) => both(m, json))]) {
+    for (const results of [both(defaultEngine(), json), atMachine((m) => both(m, json))])
       expect(results[0].run(box)).toEqual(expected);
-      expect(results[1].run(box)).toEqual(expected);
-    }
   });
 
   test('a decimal literal is a point: a decided comparison', () => {
@@ -1019,10 +1023,13 @@ describe('the interval mode: batch 4, results', () => {
       'True',
       ['Arccos', ['Multiply', 2, 'x']],
     ];
-    const [r, old] = atMachine((m) => both(m, guard));
     const box = { x: { lo: 0.49, hi: 0.51 } };
-    expect(r.run(box).kind).toBe('interval');
-    expect(r.run(box)).toEqual(old.run(box));
+    atMachine((m) => {
+      const r = both(m, guard)[0];
+      expect(r.run(box).kind).toBe('interval');
+      const points = [0.49, 0.5, 0.51].map((x) => ({ x }));
+      agreesWithInterpreter(r.run(box), guard, points, m);
+    });
     // `1/3` has no double: its enclosure leaves `3x` above 1 at one ulp.
     const third = [
       'Which',
@@ -1031,10 +1038,13 @@ describe('the interval mode: batch 4, results', () => {
       'True',
       ['Arccos', ['Multiply', 3, 'x']],
     ];
-    const [r3, old3] = atMachine((m) => both(m, third));
     const box3 = { x: { lo: 0.33, hi: 0.34 } };
-    expect(r3.run(box3)).toMatchObject({ kind: 'partial', domainClipped: 'hi' });
-    expect(r3.run(box3)).toEqual(old3.run(box3));
+    atMachine((m) => {
+      const r3 = both(m, third)[0];
+      expect(r3.run(box3)).toMatchObject({ kind: 'partial', domainClipped: 'hi' });
+      const points = [0.33, 0.335, 0.34].map((x) => ({ x }));
+      agreesWithInterpreter(r3.run(box3), third, points, m);
+    });
   });
 
   test('a float exponent is its double: x^2.2 is |x|^e, not x^(11/5)', () => {
@@ -1080,22 +1090,28 @@ describe('the interval mode: batch 4, results', () => {
     expect(d.run({ x: -8 })).toEqual({ kind: 'empty' });
   });
 
-  test('a base that is provably non-negative: the principal power, as the existing target', () => {
+  test('a base that is provably non-negative: the principal power', () => {
     // Tycho's `neyret/dmibg1uaof`.
     const json = [
       'Power',
       ['Add', ['Power', ['Abs', ['Subtract', 'x', 1]], 0.2], ['Power', ['Abs', ['Add', ['Multiply', 2, 'x'], 1]], 0.2]],
       { num: '5.0' },
     ];
-    const [r, old] = atMachine((m) => both(m, json));
-    expect(r.code).not.toContain('powRealBranch');
-    expect(r.code).not.toContain('nthRoot');
-    for (const box of [
-      { x: { lo: -1.623107644263655, hi: -1.623107644263655 } },
-      { x: { lo: -2, hi: 3 } },
-      { x: { lo: 0.9, hi: 1.1 } },
-    ])
-      expect(r.run(box)).toEqual(old.run(box));
+    atMachine((m) => {
+      const r = both(m, json)[0];
+      expect(r.code).not.toContain('powRealBranch');
+      expect(r.code).not.toContain('nthRoot');
+      for (const { lo, hi } of [
+        { lo: -1.623107644263655, hi: -1.623107644263655 },
+        { lo: -2, hi: 3 },
+        { lo: 0.9, hi: 1.1 },
+      ]) {
+        const v = r.run({ x: { lo, hi } });
+        expect(v.kind).toBe('interval');
+        const points = [lo, (lo + hi) / 2, hi].map((x) => ({ x }));
+        agreesWithInterpreter(v, json, points, m);
+      }
+    });
   });
 
   test('the principal power reads no value or assumption of an input', () => {
@@ -1129,14 +1145,13 @@ describe('the interval mode: batch 4, results', () => {
 
   test('a decimal literal is its double: Ceil(x - 1.8)', () => {
     // The caveat of the precision of the target. At `x` the double of 1.8,
-    // `x - 1.8` is 0 in the mode, on the existing target, in the
-    // JavaScript code and in the interpreter at machine precision, and
-    // about 4.4e-17 in the interpreter at the default precision, which
-    // computes with the decimal 1.8: `Ceil` is 0 against 1.
+    // `x - 1.8` is 0 in the mode, in the JavaScript code and in the
+    // interpreter at machine precision, and about 4.4e-17 in the
+    // interpreter at the default precision, which computes with the
+    // decimal 1.8: `Ceil` is 0 against 1.
     const json = ['Ceil', ['Subtract', 'x', 1.8]];
-    const [r, old] = both(defaultEngine(), json);
+    const [r] = both(defaultEngine(), json);
     expect(r.run({ x: 1.8 })).toEqual({ kind: 'interval', value: { lo: 0, hi: 0 } });
-    expect(old.run({ x: 1.8 })).toEqual({ kind: 'interval', value: { lo: 0, hi: 0 } });
     const double = [BigInt(1.8 * 2 ** 52), 2n ** 52n];
     expect(
       atMachine((m) => m.box(json as never).subs({ x: m.number(double as never) }).N().re)
@@ -1176,8 +1191,7 @@ describe('the interval mode: batch 4, results', () => {
 
   test('a run-time exponent over a base whose enclosure is >= 0 is _IA.powInterval', () => {
     // The reading of `_IA.powReal` cannot apply there (`nonnegative()` with
-    // `enclosed` in `ir/lower.ts`); the existing target prints the same
-    // kernel.
+    // `enclosed` in `ir/lower.ts`).
     expect(inlined(mode(['Power', 2, 'y']))).toBe(
       '_IA.powInterval({ lo: 2, hi: 2 }, _.y)'
     );
@@ -1267,9 +1281,11 @@ describe('the interval mode: batch 4, results', () => {
     for (const head of ['Binomial', 'Choose']) {
       const r = mode([head, 'x', 'y']);
       expect(r.code).toBe('_IA.binomial(_.x, _.y)');
-      expect(r.run({ x: 5, y: 2.5 })).toEqual(
-        (compile(ce.box([head, 'x', 'y'] as never), { to: 'interval-js' } as never) as unknown as Result).run({ x: 5, y: 2.5 })
-      );
+      const point = { x: 5, y: 2.5 };
+      expect(ce.box([head, 'x', 'y'] as never).subs(point).N().im).toBe(0);
+      const got = r.run(point);
+      expect(got.kind).toBe('interval');
+      agreesWithInterpreter(got, [head, 'x', 'y'], [point]);
     }
     // The JavaScript target keeps the integer signature.
     expect(() =>
@@ -1283,21 +1299,13 @@ describe('the interval mode: batch 4, results', () => {
 });
 
 describe('the interval mode: decided comparisons', () => {
-  test('a comparison whose type is a verdict is that verdict, as on the existing target', () => {
-    const existing = (json: unknown) =>
-      (
-        compile(ce.box(json as never), {
-          to: 'interval-js',
-          fallback: false,
-        } as never) as unknown as Result
-      ).code;
+  test('a comparison whose type is a verdict is that verdict', () => {
     const square = ['Less', ['Power', ['Add', 'x', 1], 2], 0];
     for (const [json, verdict] of [
       [square, 'false'],
       [['Equal', 'x', 'x'], 'true'],
     ] as const) {
       expect(mode(json).code).toBe(`'${verdict}'`);
-      expect(existing(json)).toBe(`'${verdict}'`);
       expect(mode(json).run({ x: { lo: -3, hi: 2 } })).toBe(verdict);
     }
     // Not decided: computed.
@@ -1309,16 +1317,6 @@ describe('the interval mode: decided comparisons', () => {
     expect(mode(['If', square, 'x', ['Sqrt', 'x']]).code).toBe('_IA.sqrt(_.x)');
     // A false one with no other arm: the missing value has its arm's shape.
     const box = { x: { lo: 1, hi: 2 } };
-    for (const json of [
-      ['If', square, ['Tuple', 'x', 1]],
-      ['If', square, 'x'],
-    ]) {
-      const old = compile(ce.box(json as never), {
-        to: 'interval-js',
-        fallback: false,
-      } as never) as unknown as Result;
-      expect(mode(json).run(box)).toEqual(old.run(box));
-    }
     expect(mode(['If', square, ['Tuple', 'x', 1]]).run(box)).toEqual([
       { kind: 'empty' },
       { kind: 'empty' },
@@ -1503,11 +1501,6 @@ describe('the interval mode: values computed once', () => {
 });
 
 describe('the interval mode: batch 7, the order of a sum', () => {
-  const old = (json: unknown, engine = ce) =>
-    compile(engine.box(json as never), {
-      to: 'interval-js',
-      fallback: false,
-    } as never) as unknown as Result;
   const ascending = /for \(let (v\d+) = \1_lo; \1 <= \1_hi; \1\+\+\) \{/;
   /** The indices of the terms of a sum written out (`term` matches a term
    *  and captures its index), in the order of the additions. */
@@ -1517,7 +1510,7 @@ describe('the interval mode: batch 7, the order of a sum', () => {
 
   // The README of `ir/`, "The interval mode": a sum is a loop from the
   // lower bound up, which contains the value of the scalar code adding
-  // upward in doubles; the existing target adds from the last term.
+  // upward in doubles.
   describe('at machine precision', () => {
     let machine: ComputeEngine;
     beforeAll(() => {
@@ -1528,7 +1521,7 @@ describe('the interval mode: batch 7, the order of a sum', () => {
     afterAll(() => {
       BigDecimal.precision = ce.precision;
     });
-    test('a sum of constant bounds contains the value of the scalar code, where the existing target does not', () => {
+    test('a sum of constant bounds contains the value of the scalar code', () => {
       const json = ['Sum', ['Divide', ['Sin', ['Multiply', 'i', 'x']], 'i'], ['Limits', 'i', 1, 100]];
       const e = machine.box(json as never);
       const x = -11.491009020837964;
@@ -1549,11 +1542,6 @@ describe('the interval mode: batch 7, the order of a sum', () => {
       expect(scalar).toBe(want);
       const { value } = r.run({ x });
       expect(value.lo <= want && want <= value.hi).toBe(true);
-      // The stated difference: the existing target's sum, added from the
-      // last term, is narrower and leaves the value out.
-      const was = old(json, machine).run({ x });
-      expect(was.kind).toBe('interval');
-      expect(was.value.lo <= want && want <= was.value.hi).toBe(false);
     });
   });
 
@@ -1635,15 +1623,15 @@ describe('the interval mode: batch 7, the order of a sum', () => {
     expect(value.lo <= 3.7 && 3.7 <= value.hi).toBe(true);
   });
 
-  test('a sum of a list is added from the first element, as the existing target', () => {
+  test('a sum of a list is added from the first element', () => {
     // `L` holds 3 elements, a short list: the sum is written out, in
     // ascending order from the first element (README, "Lists", the short
     // lists).
     const r = mode(['Sum', 'L']);
     expect(r.code).toBe('_IA.add(_IA.add(_.L[0], _.L[1]), _.L[2])');
-    expect(r.run({ L: [0.1, 0.2, 0.3] })).toEqual(
-      old(['Sum', 'L']).run({ L: [0.1, 0.2, 0.3] })
-    );
+    const { value } = r.run({ L: [0.1, 0.2, 0.3] });
+    const want = ce.box(['Sum', ['List', 0.1, 0.2, 0.3]] as never).N().re;
+    expect(value.lo <= want && want <= value.hi).toBe(true);
   });
 
   test('a reduction of a literal list of scalars is the reduction of its elements, with no array', () => {
@@ -1652,7 +1640,6 @@ describe('the interval mode: batch 7, the order of a sum', () => {
     expect(r.code).toBe('_IA.max(_IA.max(_.x, _.y), _IA.mul(_.x, _.y))');
     const box = { x: { lo: -1, hi: 2 }, y: 0.5 };
     expect(r.run(box)).toEqual({ kind: 'interval', value: { lo: 0.5, hi: 2 } });
-    expect(old(json).run(box)).toEqual(r.run(box));
     const sum = mode(['Sum', ['List', 'x', 'y', ['Multiply', 'x', 'y']]]);
     expect(inlined(sum)).toBe(
       '_IA.add(_IA.add(_.x, _.y), _IA.mul(_.x, _.y))'
@@ -1736,11 +1723,6 @@ describe('the interval mode: batch 7, the order of a sum', () => {
 });
 
 describe('the interval mode: a subtraction and a power of a rational exponent', () => {
-  const old = (json: unknown) =>
-    compile(ce.box(json as never), {
-      to: 'interval-js',
-      fallback: false,
-    } as never) as unknown as Result;
   const text = (json: unknown, to: 'javascript' | 'glsl') =>
     (
       compile(ce.box(json as never), {
@@ -1754,8 +1736,7 @@ describe('the interval mode: a subtraction and a power of a rational exponent', 
   // spellings do not change.
   // prettier-ignore
   test.each([
-    // A negation read once is the subtrahend of `sub`, in either order, as
-    // the existing target writes it.
+    // A negation read once is the subtrahend of `sub`, in either order.
     [['Subtract', 'x', 'y'], '_IA.sub(_.x, _.y)', '(() => {\n  return (_.x + (-_.y));\n})()', '(x + (-y))'],
     [['Add', ['Negate', 'x'], 'y'], '_IA.sub(_.y, _.x)', '(() => {\n  return ((-_.x) + _.y);\n})()', '((-x) + y)'],
     [['Add', ['Negate', 'x'], ['Negate', 'y']], '_IA.sub(_IA.negate(_.x), _.y)', '(() => {\n  return ((-_.x) + (-_.y));\n})()', '((-x) + (-y))'],
@@ -1782,8 +1763,14 @@ describe('the interval mode: a subtraction and a power of a rational exponent', 
     [['Power', 'x', ['Rational', 3, 2]], { x: { lo: -4, hi: -1 } }],
     [['Power', 'x', ['Rational', -3, 2]], { x: { lo: 0, hi: 0 } }],
     [['Power', 'x', ['Rational', -3, 2]], { x: { lo: -1, hi: 1 } }],
-  ])('the result of the existing target: %j over %j', (json, box) => {
-    expect(mode(json).run(box)).toEqual(old(json).run(box));
+  ])('the interpreter value at the ends and the midpoint: %j over %j', (json, box) => {
+    const b = box as Record<string, { lo: number; hi: number }>;
+    const points = [0, 0.5, 1].map((t) =>
+      Object.fromEntries(
+        Object.entries(b).map(([k, { lo, hi }]) => [k, lo + t * (hi - lo)])
+      )
+    );
+    agreesWithInterpreter(mode(json).run(box), json, points);
   });
 
   test('the program that compileSlice() returns keeps its add and neg', () => {
@@ -1805,27 +1792,11 @@ describe('the interval mode: a subtraction and a power of a rational exponent', 
     const engine = new ComputeEngine();
     for (const v of ['x', 'y', 'z']) engine.declare(v, 'real');
     for (const v of ['j', 'm']) engine.declare(v, 'integer');
-    const both = (json: unknown) => {
-      const expr = engine.box(json as never);
-      return [
-        compile(expr, { ...IR, fallback: false } as never),
-        compile(expr, { to: 'interval-js', fallback: false } as never),
-      ] as unknown as [Result, Result];
-    };
-    const boxes = [
-      { x: { lo: 0.1, hi: 0.4 }, y: { lo: 1, hi: 2 }, z: { lo: -1, hi: 0 }, j: 3, m: -2 },
-      { x: { lo: -2, hi: 1 }, y: 0.5, z: 3, j: { lo: 5, hi: 5 }, m: 7 },
-    ];
-    /** The result of the mode is the existing target's, or inside it. */
-    const within = (json: unknown) => {
-      const [r, was] = both(json);
-      for (const b of boxes) {
-        const [a, o] = [r.run(b), was.run(b)];
-        expect(a.kind).toBe(o.kind);
-        expect(a.value.lo >= o.value.lo && a.value.hi <= o.value.hi).toBe(true);
-      }
-      return r;
-    };
+    const within = (json: unknown) =>
+      compile(engine.box(json as never), {
+        ...IR,
+        fallback: false,
+      } as never) as unknown as Result;
 
     test('an integer subtraction is sub.int, spelled _IA.sub', () => {
       expect(inlined(within(['Subtract', 'j', 'm']))).toBe('_IA.sub(_.j, _.m)');
@@ -1907,26 +1878,16 @@ describe('the interval mode: the references of the result', () => {
       L: { type: 'vector<real^3>', lowered: 'array', provenance: 'declared' },
     });
     // A vars name that only the body of a user function reads is listed
-    // after the names of the expression, where the call reads it; the
-    // existing target, which writes the body in place first, lists it
-    // before them.
+    // after the names of the expression, where the call reads it.
     const vars = { vars: { n: '_.n' } };
     expect(fields(['hv', 'x'], { profile: 'ir', ...vars }).freeSymbols).toEqual(['x', 'n']);
-    expect(fields(['hv', 'x'], vars).freeSymbols).toEqual(['n', 'x']);
-    // A predicate that the mode decides reads no input; the existing
-    // target lists the name of the expression.
+    // A predicate that the mode decides reads no input.
     const abs = ['LessEqual', 0, ['Abs', 'x']];
     expect(fields(abs, { profile: 'ir' }).freeSymbols).toEqual([]);
-    expect(fields(abs, {}).freeSymbols).toEqual(['x']);
   });
 });
 
-describe('the interval mode: three spellings of the existing target', () => {
-  const old = (json: unknown) =>
-    compile(ce.box(json as never), {
-      to: 'interval-js',
-      fallback: false,
-    } as never) as unknown as Result;
+describe('the interval mode: three spellings', () => {
   /** The interpreter's value of `json` at the point `x`. */
   const at = (json: unknown, x: number) =>
     ce.box(json as never).subs({ x }).N().re;
@@ -1939,8 +1900,7 @@ describe('the interval mode: three spellings of the existing target', () => {
     expect(r.preambleOnce).toBe(
       'const v2 = { lo: 2.0943951023931953, hi: 2.094395102393196 };'
     );
-    // At machine precision a closed node is not folded: `(π / 3) · 2`, the
-    // constant of the existing target.
+    // At machine precision a closed node is not folded: `(π / 3) · 2`.
     const machine = new ComputeEngine();
     machine.precision = 'machine';
     machine.declare('x', 'real');
@@ -1950,7 +1910,6 @@ describe('the interval mode: three spellings of the existing target', () => {
       'const v3 = _IA.div({ lo: 3.1415926535897927, hi: 3.1415926535897936 }, { lo: 3, hi: 3 });\nconst v5 = _IA.mul(v3, { lo: 2, hi: 2 });'
     );
     const k = (r: Result) => r.run({ x: 1 }).value;
-    expect(k(m)).toEqual(old(json).run({ x: 1 }).value);
     // Both contain 2π/3; the folded one is no wider (two ulps each).
     const want = at(['Multiply', ['Rational', 2, 3], 'Pi'], 0);
     for (const v of [k(r), k(m)]) expect(v.lo <= want && want <= v.hi).toBe(true);
@@ -2017,7 +1976,7 @@ describe('the interval mode: three spellings of the existing target', () => {
     });
   });
 
-  test('an addition of an exact zero is not written, as on the existing target', () => {
+  test('an addition of an exact zero is not written', () => {
     const forms: [unknown, unknown][] = [
       [['Sin', ['Subtract', 'x', ['At', ['List', 0, 1, 2], 1]]], ['Sin', 'x']],
       [['Add', ['Sqrt', 'x'], ['Divide', ['At', ['List', 0, 1], 1], 3]], ['Sqrt', 'x']],
@@ -2036,10 +1995,8 @@ describe('the interval mode: three spellings of the existing target', () => {
       const r = mode(json);
       expect(r.code).toBe(mode(alone).code);
       expect(r.code).not.toMatch(/_IA\.(add|sub)\(/);
-      for (const x of boxes) {
-        expect(r.run({ x })).toEqual(old(json).run({ x }));
+      for (const x of boxes)
         expect(r.run({ x })).toEqual(mode(alone).run({ x }));
-      }
     }
     expect(mode(forms[1][0]).run({ x: { lo: -1, hi: 4 } }).kind).toBe('partial');
     expect(mode(forms[2][0]).run({ x: { lo: 0.5, hi: 1.5 } }).kind).toBe('singular');
@@ -2092,12 +2049,15 @@ describe('the interval mode: three spellings of the existing target', () => {
         });
   });
 
-  test('a quotient of a negation is _IA.negDiv, as on the existing target', () => {
+  test('a quotient of a negation is _IA.negDiv', () => {
     const json = ['Divide', ['Negate', 'x'], 'y'];
     expect(mode(json).code).toBe('_IA.negDiv(_.x, _.y)');
+    const ends = ({ lo, hi }: { lo: number; hi: number }) => [lo, (lo + hi) / 2, hi];
     for (const y of [{ lo: 1, hi: 2 }, { lo: 0, hi: 1 }, { lo: -1, hi: 0 }, { lo: -1, hi: 1 }, { lo: 0, hi: 0 }])
-      for (const x of [{ lo: 1, hi: 2 }, { lo: -2, hi: 3 }, { lo: -0, hi: 0 }])
-        expect(mode(json).run({ x, y })).toEqual(old(json).run({ x, y }));
+      for (const x of [{ lo: 1, hi: 2 }, { lo: -2, hi: 3 }, { lo: -0, hi: 0 }]) {
+        const points = ends(x).flatMap((a) => ends(y).map((b) => ({ x: a, y: b })));
+        agreesWithInterpreter(mode(json).run({ x, y }), json, points);
+      }
     // A negation read twice is computed once, and the quotient reads it.
     expect(mode(['Add', json, ['Negate', 'x']]).code).toMatch(
       /_IA\.div\(v1, _\.y\)/
@@ -2139,8 +2099,7 @@ describe('the interval mode: three spellings of the existing target', () => {
 });
 
 describe('the interval mode: zero to the power zero (CE-1372)', () => {
-  // The mode calls the same kernels as the existing target: `0^0` has no
-  // value, as in the interpreter, and a box that is that point is `empty`.
+  // `0^0` has no value, as in the interpreter, and a box that is that point is `empty`.
   // A box that holds the point and others keeps its enclosure.
   const run = (json: unknown, b: Record<string, unknown>) =>
     (

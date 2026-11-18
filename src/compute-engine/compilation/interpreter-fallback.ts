@@ -210,10 +210,15 @@ export function inputNamesRead(
  * absence capability, or one with an object axis), and `writtenNumeric`
  * when it spells a written absence symbol with its numeric marker. On
  * JavaScript, both are `{ objectNull: true, writtenNumeric: false }`.
+ *
+ * `observe`, when given, receives the evaluated value of each run before it
+ * is converted: the interval fallback reads from it whether a number is
+ * exact (`interval-fallback.ts`).
  */
 export function interpreterRun(
   expr: Expression,
-  absence: { objectNull: boolean; writtenNumeric: boolean }
+  absence: { objectNull: boolean; writtenNumeric: boolean },
+  observe?: (value: Expression) => void
 ): { calling: 'lambda' | 'expression'; run: CompiledRunner } {
   const ce = expr.engine;
   // The color value of an evaluated color node, or `undefined` when `e` is
@@ -543,7 +548,9 @@ export function interpreterRun(
         expr,
         ...args.map((a, i) => boxArg(a, paramTypes[i])),
       ]);
-      return interpretedRunValue(applied.evaluate(), applied.type.type);
+      const value = applied.evaluate();
+      observe?.(value);
+      return interpretedRunValue(value, applied.type.type);
     }) as unknown as CompiledRunner;
     return { calling: 'lambda', run: lambdaRun };
   }
@@ -579,9 +586,11 @@ export function interpreterRun(
                   : ce.number(v as number);
       }
     return ce._inScope(buildScope, () =>
-      withBindingValuesFn(ce, bindings, values, () =>
-        interpretedRunValue(expr.evaluate(), expr.type.type)
-      )
+      withBindingValuesFn(ce, bindings, values, () => {
+        const value = expr.evaluate();
+        observe?.(value);
+        return interpretedRunValue(value, expr.type.type);
+      })
     );
   }) as unknown as CompiledRunner;
   return { calling: 'expression', run: fallbackRun };
@@ -605,18 +614,24 @@ export function interpreterRun(
  * - `mode`: `'strict'`, since no code was emitted.
  *
  * It has no `freeSymbolTypes`: the result of a compilation of the profile
- * on JavaScript has none.
+ * on JavaScript has none. `observe`, when given, receives the evaluated
+ * value of each run before it is converted (`interpreterRun()`).
  */
 export function interpreterFallback(
   expr: Expression,
   error: string,
   diagnostic: CompileDiagnostic,
-  varsKeys?: ReadonlySet<string>
+  varsKeys?: ReadonlySet<string>,
+  observe?: (value: Expression) => void
 ): CompilationResult<'javascript'> {
-  const { calling, run } = interpreterRun(expr, {
-    objectNull: true,
-    writtenNumeric: false,
-  });
+  const { calling, run } = interpreterRun(
+    expr,
+    {
+      objectNull: true,
+      writtenNumeric: false,
+    },
+    observe
+  );
   const unsupported: string[] = [];
   if (diagnostic.operator !== undefined) unsupported.push(diagnostic.operator);
   if (diagnostic.code === STATIC_TYPE_ERROR_CODE || !expr.isValid)

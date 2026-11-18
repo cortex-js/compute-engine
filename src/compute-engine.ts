@@ -105,7 +105,6 @@ export type {
 export { JavaScriptTarget } from './compute-engine/compilation/javascript-target.js';
 export { GPUShaderTarget } from './compute-engine/compilation/gpu-target.js';
 export { GLSLTarget } from './compute-engine/compilation/glsl-target.js';
-export { IntervalJavaScriptTarget } from './compute-engine/compilation/interval-javascript-target.js';
 export { BaseCompiler } from './compute-engine/compilation/base-compiler.js';
 
 // The engine module knows only `javascript` and `interval-js`

@@ -12,6 +12,13 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
+
+/** `compile()` to `interval-js`, with the call shape of a target's `compile()`. */
+const INTERVAL_JS = {
+  compile: (expr: any, options: Record<string, unknown> = {}) =>
+    compile(expr, { ...options, to: 'interval-js' } as any) as any,
+};
 
 function degEngine(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -133,7 +140,7 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
 
   test('deg: interval-js target', () => {
     const ce = degEngine();
-    const ijs = ce._getCompilationTarget('interval-js')!;
+    const ijs = INTERVAL_JS;
     const r = ijs.compile(ce.parse('\\sin(x)')).run!({ x: 90 }) as {
       kind: string;
       value: { lo: number; hi: number };

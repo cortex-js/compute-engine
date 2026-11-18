@@ -1,8 +1,8 @@
 /**
  * The interval mode of the IR pipeline (`compile(expr, { to: 'interval-js',
- * profile: 'ir' })`), batches 1, 2 and 4: containment and the comparison
- * with the existing interval target, on an engine at the default precision
- * and, for `MACHINE_CASES`, on an engine at machine precision.
+ * profile: 'ir' })`), batches 1, 2 and 4: containment, on an engine at the
+ * default precision and, for `MACHINE_CASES`, on an engine at machine
+ * precision.
  *
  * Containment: for each program, at seeded random boxes (points, narrow and
  * wide, across 0 and across the edges of domains), the interpreter's value
@@ -23,14 +23,9 @@
  * base and its points are skipped; `ir-interval-contract.test.ts` pins that
  * case ("a float exponent is read to the digits of the compiling engine").
  *
- * The comparison: the same kind as the result of the existing target and
- * bounds equal within 4 ulps or tighter. The programs for which some box
- * differs are pinned in `EXCEPTIONS`, so that a new one fails.
- *
  * `KERNEL_DEFECTS` are the programs whose result misses the interpreter's
- * value because of a kernel of the interval library, which the existing
- * target calls in the same way (same result): pinned, so that a fix or a
- * new miss fails.
+ * value because of a kernel of the interval library: pinned, so that a fix
+ * or a new miss fails.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -219,44 +214,6 @@ const MACHINE_CASES: Case[] = CASES.filter((c) => {
   return c === FOURIER || /\d\.\d|"Power"|Binomial|Choose|GCD|LCM/.test(text);
 });
 
-/** The programs whose result differs from the existing target's at some
- *  box: an other kind, or a bound wider by more than 4 ulps. */
-// prettier-ignore
-const EXCEPTIONS: string[] = [
-  // The existing target reads `Mod(1, 1/10)` as a jump; the mode folds it
-  // to the exact 0.
-  JSON.stringify(['Add', ['Mod', 1, ['Rational', 1, 10]], x]),
-  // A local assigned in both arms of an undecided `If`: the hull of both
-  // values. The existing target keeps the second arm's value ([-1, -1]
-  // over [-1.71, 0.29]), which excludes the value 2x at x > 0 (design
-  // note, section 10).
-  JSON.stringify(['Block', ['Declare', 't', "'real'", 0], ['If', ['Greater', x, 0], ['Assign', 't', ['Multiply', 2, x]], ['Assign', 't', -1]], 't']),
-  // A sum is a loop from the lower bound up, which contains the value of
-  // the scalar code adding upward in doubles; the existing target writes a
-  // sum of constant bounds out and adds from the last term: the ends differ
-  // in the last digits, by more than 4 ulps of an end near 0 (README of
-  // `ir/`, "The interval mode").
-  JSON.stringify(['Sum', ['Sin', ['Multiply', 'k', x]], ['Limits', 'k', 1, 3]]),
-  JSON.stringify(['Sum', ['Multiply', ['Power', -1, 'k'], ['Divide', ['Power', x, 'k'], 'k']], ['Limits', 'k', 1, 6]]),
-  `machine ${JSON.stringify(['Sum', ['Multiply', ['Power', -1, 'k'], ['Divide', ['Power', x, 'k'], 'k']], ['Limits', 'k', 1, 6]])}`,
-  JSON.stringify(FOURIER.json), `machine ${JSON.stringify(FOURIER.json)}`,
-  // The same order when the sum is written out (at most 4.4e-14 apart).
-  JSON.stringify(['Sum', ['Multiply', ['Divide', ['Power', -1, 'i'], 'i'], ['Sin', ['Multiply', 'i', x]]], ['Limits', 'i', 1, 100]]),
-  `machine ${JSON.stringify(['Sum', ['Multiply', ['Divide', ['Power', -1, 'i'], 'i'], ['Sin', ['Multiply', 'i', x]]], ['Limits', 'i', 1, 100]])}`,
-  JSON.stringify(['Sum', ['Multiply', ['Cos', ['Divide', ['Multiply', 'Pi', 'n'], 6]], ['Sin', ['Add', ['Multiply', 'n', x], ['Sin', ['Multiply', 1000, 'n']]]]], ['Limits', 'n', 0, 12]]),
-  // The existing target computes x^(p/q); the mode x^e with the double e,
-  // as the interpreter at machine precision and the JavaScript code: at
-  // x = 1e300, x^0.2 is 1.0000000000000077e60, the existing target gives
-  // [9.999999999999998e59, 1.0000000000000001e60].
-  JSON.stringify(['Power', x, 0.2]), `machine ${JSON.stringify(['Power', x, 0.2])}`,
-  JSON.stringify(['Power', x, 2.2]), `machine ${JSON.stringify(['Power', x, 2.2])}`,
-  // A run-time exponent: the mode reads a point exponent as the
-  // interpreter does; the existing target calls `powInterval` with no
-  // reading, which has no value over a negative base (`x^a` at a = -0.2
-  // over [-4, 4] is `singular` at 0, the existing target `partial`).
-  JSON.stringify(['Power', x, 'a']), `machine ${JSON.stringify(['Power', x, 'a'])}`,
-];
-
 /** A miss of the containment: the point, the interpreter's value there and
  *  the result of the mode. */
 type Miss = { point: Record<string, number>; v: number | boolean; got: unknown };
@@ -269,8 +226,8 @@ const relativeMiss = (v: number, got: unknown): number => {
 };
 
 /** The programs whose comparison the interpreter decides within its
- *  tolerance (1e-10): `1.7999999999999998 < 1.8` is `False`, the mode and
- *  the existing target compare the doubles. A miss is excused at a point
+ *  tolerance (1e-10): `1.7999999999999998 < 1.8` is `False`, the mode
+ *  compares the doubles. A miss is excused at a point
  *  within the tolerance of 1.8 only. */
 const TOLERANCE: Record<string, (m: Miss) => boolean> = {
   [`machine ${JSON.stringify(['Less', x, 1.8])}`]: (m) =>
@@ -444,12 +401,11 @@ const step = (x: number, n: number, f: (x: number) => number) => {
 let checks = 0;
 let slack = 0;
 const SAMPLES: string[] = [];
-const differences = new Map<string, string>();
 const misses = new Map<string, string[]>();
 
 /** The containment of the program `c` compiled on `engine`, against the
- *  interpreter's value on the default engine, and its comparison with the
- *  existing target; `label` is the key of `differences` and `misses`. */
+ *  interpreter's value on the default engine; `label` is the key of
+ *  `misses`. */
 function contain(engine: ComputeEngine, label: string, c: Case): void {
   {
     const expr = engine.box(c.json as never);
@@ -461,10 +417,6 @@ function contain(engine: ComputeEngine, label: string, c: Case): void {
       profile: 'ir',
       fallback: false,
     } as never) as unknown as { run: (b: Box) => unknown; code: string };
-    const old = compile(expr, { to: 'interval-js' }) as unknown as {
-      success: boolean;
-      run: (b: Box) => unknown;
-    };
     const rnd = random(label.length * 7919 + 17);
     const failures: string[] = [];
     // The misses that the reason of `EXCUSED` does not explain.
@@ -522,14 +474,6 @@ function contain(engine: ComputeEngine, label: string, c: Case): void {
           { point, v, got }
         );
       }
-      // The comparison with the existing target.
-      if (!old.success || differences.has(label)) continue;
-      const was = old.run(b);
-      if (!sameOrTighter(got, was))
-        differences.set(
-          label,
-          `${JSON.stringify(b)}: mode ${JSON.stringify(got)}, existing ${JSON.stringify(was)}`
-        );
     }
     if (failures.length > 0) misses.set(label, failures);
     if (!KERNEL_DEFECTS.includes(label)) expect(unexcused).toEqual([]);
@@ -569,26 +513,7 @@ describe('the interval mode: containment', () => {
     expect([...misses.keys()].sort()).toEqual(
       [...KERNEL_DEFECTS, ...Object.keys(EXCUSED)].sort()
     ));
-
-  test('the programs that differ from the existing target', () => {
-    console.log([...differences].map(([k, v]) => `${k}\n  ${v}`).join('\n'));
-    expect([...differences.keys()].sort()).toEqual([...EXCEPTIONS].sort());
-  });
 });
-
-/** The same verdict, or the same kind and bounds within 4 ulps of the
- *  existing result or inside it. */
-function sameOrTighter(got: unknown, was: unknown): boolean {
-  if (typeof got === 'string' || typeof was === 'string') return got === was;
-  const [a, b] = [got as Kinded, was as Kinded];
-  if (a.kind !== b.kind) return false;
-  if (a.value === undefined || b.value === undefined)
-    return a.value === b.value;
-  return (
-    a.value.lo >= step(b.value.lo, 4, nextDown) &&
-    a.value.hi <= step(b.value.hi, 4, nextUp)
-  );
-}
 
 /** The code of `r` with each constant of `preambleOnce` written where it is
  *  read. */

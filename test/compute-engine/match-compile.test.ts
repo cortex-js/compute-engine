@@ -1,9 +1,12 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 import type { MathJsonExpression } from '../../src/math-json/types';
+
+/** `compile()` to `interval-js`, called as a target's `compile()` is. */
+const intervalCompile = (expr: any, options: Record<string, unknown> = {}) =>
+  compile(expr, { ...options, to: 'interval-js' } as any) as any;
 
 /**
  * Phase 4 of the Epsil `match` design
@@ -711,7 +714,7 @@ describe('COMPILE Match — typed bindings (`MatchesType` with a literal type)',
   });
 
   it('the interval target keeps failing closed (its values are intervals)', () => {
-    const r = new IntervalJavaScriptTarget().compile(
+    const r = intervalCompile(
       ce.box(['MatchesType', 'x', { str: 'integer' }])
     );
     expect(r.success).toBe(false);

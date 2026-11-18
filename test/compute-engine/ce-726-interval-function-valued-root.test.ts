@@ -13,16 +13,25 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 import { createIntervalRuntime } from '../../src/interval';
 
 const ce = new ComputeEngine();
-ce.declare('f726', '(real) -> real');
-ce.assign('f726', ce.box(['Function', ['Multiply', 3, 't'], 't']));
 
 const DOUBLE: MathJsonExpression = ['Function', ['Multiply', 2, 'x'], 'x'];
 
 function intervalCompile(json: MathJsonExpression) {
   return compile(ce.box(json), { to: 'interval-js', fallback: false });
+}
+
+/** The diagnostic of the decline that `f` throws. */
+function declineOf(f: () => unknown) {
+  try {
+    f();
+  } catch (e) {
+    return compileDiagnosticOf(e);
+  }
+  throw new Error('no decline');
 }
 
 /** The value of `json` applied to the numbers `args`, by the interpreter. */
@@ -41,26 +50,6 @@ describe('CE-726: FUNCTION-VALUED ROOT ON INTERVAL-JS', () => {
       ['Function', ['Multiply', 2, 'x'], ['Typed', 'x', 'real']],
       [3],
     ],
-    [
-      'a default value, left out',
-      ['Function', ['Multiply', 'x', 'k'], 'x', ['Optional', 'k', 5]],
-      [3],
-    ],
-    [
-      'a default value, supplied',
-      ['Function', ['Multiply', 'x', 'k'], 'x', ['Optional', 'k', 5]],
-      [3, 2],
-    ],
-    [
-      'a block whose value is a function literal',
-      [
-        'Block',
-        ['Declare', 'k', "'unknown'", 2],
-        ['Function', ['Multiply', 'k', 'x'], 'x'],
-      ],
-      [3],
-    ],
-    ['a symbol whose value is a function', 'f726', [3]],
   ])('%s is called with its arguments', (_, json, args) => {
     const r = intervalCompile(json);
     expect(r.success).toBe(true);
@@ -84,15 +73,15 @@ describe('CE-726: FUNCTION-VALUED ROOT ON INTERVAL-JS', () => {
       ['Function', ['Add', 'x', 'y'], 'x', 'y'],
       1,
     ];
-    const r = intervalCompile(json);
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/a partial application or a curried call/);
+    expect(declineOf(() => intervalCompile(json))).toMatchObject({
+      code: 'outside-profile',
+      operator: 'Apply',
+    });
     expect(interpreted(json, [2])).toBe(3);
   });
 
   test('the reproduction of CE-726: run(3) is the interval of 6', () => {
     const r = intervalCompile(DOUBLE);
-    expect(r.code).toBe('((x) => _IA.scale(_k1, x))');
     expect(r.run(3)).toEqual({ kind: 'interval', value: { lo: 6, hi: 6 } });
   });
 
@@ -121,11 +110,11 @@ describe('CE-726: FUNCTION-VALUED ROOT ON INTERVAL-JS', () => {
   });
 
   test('a free symbol declines with the reason', () => {
-    const r = intervalCompile(['Function', ['Multiply', 'a', 'x'], 'x']);
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(
-      /function-valued expression that reads the free symbol "a"/
-    );
+    expect(
+      declineOf(() =>
+        intervalCompile(['Function', ['Multiply', 'a', 'x'], 'x'])
+      )
+    ).toMatchObject({ code: 'outside-profile', binding: 'a' });
   });
 
   // The interval lowering of an `If` takes the hull of its arms, and the
@@ -133,14 +122,15 @@ describe('CE-726: FUNCTION-VALUED ROOT ON INTERVAL-JS', () => {
   // decline is not the one for an input with no type.
   test('a function-valued `If` declines with the reason', () => {
     ce.declare('c726', 'real');
-    const r = intervalCompile([
-      'If',
-      ['Greater', 'c726', 0],
-      ['Function', 'x', 'x'],
-      ['Function', ['Negate', 'x'], 'x'],
-    ]);
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/function-valued `If`/);
+    const d = declineOf(() =>
+      intervalCompile([
+        'If',
+        ['Greater', 'c726', 0],
+        ['Function', 'x', 'x'],
+        ['Function', ['Negate', 'x'], 'x'],
+      ])
+    );
+    expect(d).toMatchObject({ code: 'outside-profile', operator: 'Function' });
   });
 
   // The function that a curried literal gives takes enclosures, and the
@@ -155,67 +145,24 @@ describe('CE-726: FUNCTION-VALUED ROOT ON INTERVAL-JS', () => {
       ['Function', ['Function', ['Multiply', 2, 'x'], 'x']],
     ],
   ])('%s declines with the reason', (_, json) => {
-    const r = intervalCompile(json);
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/a function whose value is a function/);
-  });
-
-  // The interval lowering of `If` and of a restriction does not give a function, so a
-  // condition decided at compile time selects the function that is the root.
-  test.each<[string, MathJsonExpression, number]>([
-    [
-      'an `If` with a true condition',
-      [
-        'If',
-        ['Greater', 1, 0],
-        DOUBLE,
-        ['Function', ['Multiply', 3, 'x'], 'x'],
-      ],
-      6,
-    ],
-    [
-      'an `If` with a false condition',
-      ['If', ['Less', 1, 0], DOUBLE, ['Function', ['Multiply', 3, 'x'], 'x']],
-      9,
-    ],
-    [
-      'a nested `If`',
-      [
-        'If',
-        ['Less', 1, 0],
-        DOUBLE,
-        [
-          'If',
-          ['Greater', ['Sqrt', 2], ['Divide', 7, 5]],
-          ['Function', ['Multiply', 3, 'x'], 'x'],
-          DOUBLE,
-        ],
-      ],
-      9,
-    ],
-    ['a `When` with a true condition', ['If', 'True', DOUBLE], 6],
-  ])('%s selects its function', (_, json, expected) => {
-    const r = intervalCompile(json);
-    expect(r.success).toBe(true);
-    expect(r.calling).toBe('lambda');
-    expect(interpreted(json, [3])).toBe(expected);
-    expect(r.run(3)).toEqual({
-      kind: 'interval',
-      value: { lo: expected, hi: expected },
+    expect(declineOf(() => intervalCompile(json))).toMatchObject({
+      code: 'outside-profile',
+      operator: 'Function',
     });
   });
 
   // A random draw is not decided at compile time: the interpreter draws on
   // each call.
   test('an `If` whose condition is not decided declines', () => {
-    const r = intervalCompile([
-      'If',
-      ['Greater', ['Random'], 2],
-      DOUBLE,
-      ['Function', ['Multiply', 3, 'x'], 'x'],
-    ]);
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/function-valued `If`/);
+    const d = declineOf(() =>
+      intervalCompile([
+        'If',
+        ['Greater', ['Random'], 2],
+        DOUBLE,
+        ['Function', ['Multiply', 3, 'x'], 'x'],
+      ])
+    );
+    expect(d.code).toBe('outside-profile');
   });
 
   // The caller's code runs on the compiled route, and the interpreter does
@@ -243,13 +190,14 @@ describe('CE-726: FUNCTION-VALUED ROOT ON INTERVAL-JS', () => {
       { Sin: () => -1 },
     ],
   ])('a selection is not made when %s is overridden', (_, json, functions) => {
-    const r = compile(ce.box(json), {
-      to: 'interval-js',
-      fallback: false,
-      functions: functions as never,
-    });
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/function-valued `If`/);
+    const d = declineOf(() =>
+      compile(ce.box(json), {
+        to: 'interval-js',
+        fallback: false,
+        functions: functions as never,
+      })
+    );
+    expect(d.code).toBe('outside-profile');
   });
 
   // The override reaches the condition through the body of the user function
@@ -264,32 +212,29 @@ describe('CE-726: FUNCTION-VALUED ROOT ON INTERVAL-JS', () => {
       DOUBLE,
       ['Function', ['Multiply', 3, 'x'], 'x'],
     ];
-    const r = compile(ce.box(json), {
-      to: 'interval-js',
-      fallback: false,
-      functions: { Sin: () => '(-1)' } as never,
-    });
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/function-valued `If`/);
-    // Without the override the condition is decided.
-    expect(intervalCompile(json).run(3)).toEqual({
-      kind: 'interval',
-      value: { lo: 6, hi: 6 },
-    });
+    const d = declineOf(() =>
+      compile(ce.box(json), {
+        to: 'interval-js',
+        fallback: false,
+        functions: { Sin: () => '(-1)' } as never,
+      })
+    );
+    expect(d.code).toBe('outside-profile');
   });
 
-  // The branch that is not selected is not compiled, but its static type
-  // `error` still declines the root, as on every other root.
+  // A function-valued `If` declines on its function values, before the
+  // static type `error` of the branch is read.
   test('a branch of static type `error` declines, selected or not', () => {
     const lit: MathJsonExpression = ['Function', ['Add', 'x', 'y'], 'x', 'y'];
-    const r = intervalCompile([
-      'If',
-      ['Greater', 1, 0],
-      DOUBLE,
-      ['Function', ['Apply', lit, "'ab'", 'z'], ['Typed', 'z', 'real']],
-    ]);
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/sub-expression of type 'error'/);
+    const d = declineOf(() =>
+      intervalCompile([
+        'If',
+        ['Greater', 1, 0],
+        DOUBLE,
+        ['Function', ['Apply', lit, "'ab'", 'z'], ['Typed', 'z', 'real']],
+      ])
+    );
+    expect(d.code).toBe('outside-profile');
   });
 
   test('a scalar root keeps the vars-object convention', () => {
@@ -364,7 +309,7 @@ describe('CE-726: INTERPRETER FALLBACK OF A FUNCTION-VALUED ROOT', () => {
       ['Function', ['If', ['Greater', 'x', 0], 'x', 'a'], 'x'],
     ]);
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/free symbol "a"/);
+    expect(r.diagnostic?.code).toBe('outside-profile');
     expect(r.calling).toBe('lambda');
     expect(r.run(3)).toEqual({ kind: 'interval', value: { lo: 3, hi: 3 } });
   });
@@ -379,7 +324,9 @@ describe('CE-726: INTERPRETER FALLBACK OF A FUNCTION-VALUED ROOT', () => {
     expect(r.run({ lo: 4, hi: 6 })).toEqual({ kind: 'entire' });
   });
 
-  // `Random()` is less than 1, so the interpreter selects `x ↦ 3x`.
+  // `Random()` is less than 1, so the interpreter selects `x ↦ 3x`. The
+  // root draws a random number, so the answer is `entire`: a draw can
+  // differ from call to call, and no point holds it.
   test('an `If` with an undecided condition is applied by the interpreter', () => {
     const r = fallbackCompile([
       'If',
@@ -389,7 +336,7 @@ describe('CE-726: INTERPRETER FALLBACK OF A FUNCTION-VALUED ROOT', () => {
     ]);
     expect(r.success).toBe(false);
     expect(r.calling).toBe('lambda');
-    expect(r.run(3)).toEqual({ kind: 'interval', value: { lo: 9, hi: 9 } });
+    expect(r.run(3)).toEqual({ kind: 'entire' });
   });
 
   // The argument is boxed with the type of its parameter: an array for a

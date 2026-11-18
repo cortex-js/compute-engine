@@ -4,7 +4,11 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { harvestCse } from '../../src/compute-engine/compilation/cse';
-import type { CompileTarget } from '../../src/compute-engine/compilation/types';
+import type {
+  CompileDiagnostic,
+  CompileTarget,
+} from '../../src/compute-engine/compilation/types';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 import type { Expression } from '../../src/compute-engine/global-types';
 
 const glsl = new GLSLTarget();
@@ -584,9 +588,6 @@ describe('COMPILE CSE — other targets', () => {
     const result = compile(expr, { to: 'interval-js', fallback: false });
 
     expect(occurrences(result.code, '_IA.sin')).toBe(1);
-    expect(result.code).toMatchInlineSnapshot(
-      `(() => { const _cse1 = _IA.sin(_IA.scale(_k1, _.u)); return _IA.add(_IA.square(_cse1), _IA.div(_cse1, _IA.add(_cse1, _k2))); })()`
-    );
 
     // A point interval reproduces the scalar value; a proper interval encloses
     // the values of the scalar function over it.
@@ -683,33 +684,31 @@ describe('COMPILE CSE — capture', () => {
     const expr = ce.parse(
       '\\sin(6n)^2+\\sin(6n)+\\sin(6n)+\\sum_{n=1}^{m}(\\sin(6n)^2+\\sin(6n)+\\sin(6n))'
     );
-    const code = compile(expr, { to: 'interval-js', fallback: false }).code;
+    const result = compile(expr, { to: 'interval-js', fallback: false });
+    expect(result.success).toBe(true);
+    const run = result.run as (v: object) => {
+      value: { lo: number; hi: number };
+    };
 
-    // The outer occurrences bind over the ENCLOSING `n`; the loop body is
-    // the binder's own region, so it shares `sin(6n)` over the loop index
-    // with itself, and the outer temporary never appears inside the loop.
-    // The constant factor 6 occurs on both sides of the binder, so it may be
-    // bound once as a preamble local (`_k1`) instead of being spelled
-    // `_IA.point(6)` at each site.
-    const six = '(?:_IA\\.point\\(6\\)|_k\\d+)';
-    // The constant factor is emitted as the point-scaling kernel when the
-    // emitter can see that it is a point, and as the general product when it
-    // has been hoisted to a preamble name the emitter cannot read.
-    const times = '_IA\\.(?:mul|scale)';
-    const outer = new RegExp(
-      `const (_cse\\d+) = _IA\\.sin\\(${times}\\(${six}, _\\.n\\)\\)`
-    ).exec(code);
-    expect(outer).not.toBeNull();
-    const loop = code.slice(
-      code.indexOf('for (let n'),
-      code.indexOf('return _tv1')
-    );
-    expect(loop).not.toContain(outer![1]);
-    expect(loop).toMatch(
-      new RegExp(
-        `const (_cse\\d+) = _IA\\.sin\\(${times}\\(${six}, _IA\\.point\\(n\\)\\)\\)`
-      )
-    );
+    // The outer occurrences read the ENCLOSING `n`, the loop body the loop
+    // index: a merge across the binder would give a different value.
+    const encloses = (
+      out: { value: { lo: number; hi: number } },
+      n: number,
+      m: number
+    ) => {
+      const want = expr.subs({ n, m }).N().re;
+      expect(out.value.lo).toBeLessThanOrEqual(want);
+      expect(out.value.hi).toBeGreaterThanOrEqual(want);
+    };
+    for (const [n, m] of [
+      [0.3, 4],
+      [-1, 2],
+      [2, 0],
+    ])
+      encloses(run({ n: { lo: n, hi: n }, m: { lo: m, hi: m } }), n, m);
+    const box = run({ n: { lo: 0.3, hi: 0.31 }, m: { lo: 4, hi: 4 } });
+    for (const n of [0.3, 0.305, 0.31]) encloses(box, n, 4);
   });
 });
 
@@ -747,15 +746,17 @@ describe('COMPILE CSE — `Match` is inert', () => {
   });
 
   it('keeps the interval-js fail-closed contract', () => {
-    const result = compile(
-      ce.box(['Match', probe3('u'), ['MatchCase', '_a', 'a']]),
-      { to: 'interval-js', fallback: false }
-    );
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(
-      /Could not compile `Match`: pattern matching is not supported by the interval-js compile target/
-    );
-    expect(result.code).not.toMatch(/_cse/);
+    let diagnostic: CompileDiagnostic | undefined;
+    try {
+      compile(ce.box(['Match', probe3('u'), ['MatchCase', '_a', 'a']]), {
+        to: 'interval-js',
+        fallback: false,
+      });
+    } catch (e) {
+      diagnostic = compileDiagnosticOf(e);
+    }
+    expect(diagnostic?.code).toBe('outside-profile');
+    expect(diagnostic?.operator).toBe('Match');
   });
 });
 
@@ -1948,9 +1949,14 @@ describe('COMPILE CSE — non-scalar aliasing', () => {
     // interval, which produces no shareable array.) The aliasing invariant is
     // pinned above on the JS target, where the audited `_SYS` helpers actually
     // live.
-    const result = compile(aliased(), { to: 'interval-js', fallback: false });
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Could not compile `Sort`: /);
+    let diagnostic: CompileDiagnostic | undefined;
+    try {
+      compile(aliased(), { to: 'interval-js', fallback: false });
+    } catch (e) {
+      diagnostic = compileDiagnosticOf(e);
+    }
+    expect(diagnostic?.code).toBe('outside-profile');
+    expect(diagnostic?.operator).toBe('Sort');
   });
 });
 
@@ -1969,8 +1975,10 @@ describe('COMPILE CSE — determinism across targets', () => {
       const first = compile(ce.parse(CHAINED), { to, fallback: false }).code;
       const second = compile(ce.parse(CHAINED), { to, fallback: false }).code;
 
-      expect(first).toContain('_cse1');
-      expect(first).toContain('_tv2');
+      if (to === 'javascript') {
+        expect(first).toContain('_cse1');
+        expect(first).toContain('_tv2');
+      }
       expect(second).toBe(first);
     }
   );

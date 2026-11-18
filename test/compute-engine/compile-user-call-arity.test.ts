@@ -42,6 +42,12 @@ describe('A user-function call with the wrong number of arguments', () => {
     const ce = engine();
     const r = compile(ce.parse('a(3, 4)'), { to } as never);
     expect(r.success).toBe(false);
+    // The interval mode declines the call as outside its profile.
+    if (to === 'interval-js') {
+      expect(r.diagnostic?.code).toBe('outside-profile');
+      expect(r.diagnostic?.operator).toBe('a');
+      return;
+    }
     expect(r.error).toMatch(
       /Could not compile a call of `a`: the function is declared with 3 parameters but called with 2\. .*partial application/
     );
@@ -51,6 +57,11 @@ describe('A user-function call with the wrong number of arguments', () => {
     const ce = engine();
     const r = compile(ce.parse('a(1, 2, 3, 4)'), { to } as never);
     expect(r.success).toBe(false);
+    if (to === 'interval-js') {
+      expect(r.diagnostic?.code).toBe('outside-profile');
+      expect(r.diagnostic?.operator).toBe('a');
+      return;
+    }
     expect(r.error).toMatch(
       to === 'glsl'
         ? /The head `Error` is outside the GLSL fragment/

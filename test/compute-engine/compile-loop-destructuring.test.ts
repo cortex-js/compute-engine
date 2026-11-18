@@ -1,9 +1,12 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 
 import type { MathJsonExpression } from '../../src/math-json/types';
+
+/** `compile()` to `interval-js`, called as a target's `compile()` is. */
+const intervalCompile = (expr: any, options: Record<string, unknown> = {}) =>
+  compile(expr, { ...options, to: 'interval-js' } as any) as any;
 
 //
 // The compilation tails of `docs/epsil/ROADMAP.md` ("Compilation tails"):
@@ -204,32 +207,40 @@ describe('COMPILE Loop — shapes that fail closed on JavaScript (review pins)',
     ],
     's',
   ];
-  const declinesOnEveryTarget = (program: MathJsonExpression): void => {
+  // JavaScript declines; the interval mode compiles the loop and gives the
+  // interpreter's value, `value`.
+  const declinesOnJavaScript = (
+    program: MathJsonExpression,
+    value: number
+  ): void => {
     expect(() => js(program)).toThrow(/stops the whole loop/);
-    const interval = new IntervalJavaScriptTarget().compile(ce.box(program));
-    expect(interval.success).toBe(false);
-    expect(interval.error).toMatch(/stops the whole loop/);
+    const interval = intervalCompile(ce.box(program), { fallback: false });
+    expect(interval.success).toBe(true);
+    expect(interval.run({})).toEqual({
+      kind: 'interval',
+      value: { lo: value, hi: value },
+    });
   };
 
-  it('a `Break` after a `Continue` under several Element clauses declines', () => {
+  it('a `Break` after a `Continue` under several Element clauses declines on javascript', () => {
     const program = twoClauseLoop([
       'Block',
       ['If', ['Less', 's', 0], ['Continue']],
       ['Assign', 's', ['Add', 's', 1]],
       ['Break'],
     ]);
-    declinesOnEveryTarget(program);
+    declinesOnJavaScript(program, 1);
     expect(interpreted(program)).toBe('1');
   });
 
-  it('a `Break` before a `Continue` under several Element clauses declines', () => {
+  it('a `Break` before a `Continue` under several Element clauses declines on javascript', () => {
     const program = twoClauseLoop([
       'Block',
       ['Assign', 's', ['Add', 's', 1]],
       ['If', ['GreaterEqual', 's', 2], ['Break']],
       ['If', ['Less', 's', 0], ['Continue']],
     ]);
-    declinesOnEveryTarget(program);
+    declinesOnJavaScript(program, 2);
     // The first turn adds 1, the second adds 1 and stops the whole loop.
     expect(interpreted(program)).toBe('2');
   });
@@ -285,7 +296,7 @@ describe('COMPILE Loop — shapes that fail closed on JavaScript (review pins)',
   });
 
   it('a destructuring binder declines on the interval target', () => {
-    const r = new IntervalJavaScriptTarget().compile(
+    const r = intervalCompile(
       ce.box(
         loopOver(
           ['Tuple', 'a', 'b'],

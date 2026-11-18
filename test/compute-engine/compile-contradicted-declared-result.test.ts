@@ -192,9 +192,9 @@ describe('a body that contradicts the declared result declines', () => {
         );
         return;
       }
-      expect(r.error).toMatch(
-        /Could not compile `g`: .* but its body computes a value of type 'boolean'/
-      );
+      // The interval mode reads the boolean value of the call.
+      expect(r.diagnostic?.code).toBe('outside-profile');
+      expect(r.diagnostic?.value).toBe('Add(g(b), 1)');
     }
   );
 

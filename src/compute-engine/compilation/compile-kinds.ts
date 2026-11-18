@@ -89,8 +89,7 @@ export function kindLoweringOf(
     if (kindContractOf(lowering, k) === undefined) return undefined;
   const names = [...kinds].map((t) => `'${t}'`).join(', ');
   // The runner of `interval-js` checks a host value of the kind type
-  // `enclosure` (`intervalKindEntries()`, `interval-javascript-target.ts`),
-  // and of no other kind type.
+  // `enclosure`, and of no other kind type.
   if (
     language.startsWith('interval') &&
     !(

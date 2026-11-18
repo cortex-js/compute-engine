@@ -29,6 +29,12 @@ describe('CE-142.5 a sum with one bound on the compile targets', () => {
     for (const to of TARGETS) {
       const result = compile(expr, { to } as Parameters<typeof compile>[1]);
       expect(result.success).toBe(false);
+      // The interval mode of the IR pipeline declines the `Nothing` marker
+      // of the missing bound.
+      if (to === 'interval-js') {
+        expect(result.diagnostic?.code).toBe('possible-nothing');
+        continue;
+      }
       // The GLSL fragment refuses the `Nothing` marker of the missing bound
       // before the target reads the sum.
       expect(String(result.error)).toContain(

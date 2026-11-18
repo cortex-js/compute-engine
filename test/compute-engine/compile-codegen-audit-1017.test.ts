@@ -95,7 +95,36 @@ describe('a vars entry that is a property path is a plain read', () => {
       vars: { a: '_.a' },
     });
     expect(result.success).toBe(true);
-    expect(result.code!.match(/_IA\.cos\(_\.a\)/g)).toHaveLength(1);
+    const expr = ce.parse('\\cos(a)\\sin(t) + \\cos(a)\\cos(t)');
+    const encloses = (
+      got: { value: { lo: number; hi: number } },
+      a: number,
+      t: number
+    ) => {
+      const expected = expr.subs({ a, t }).N().re;
+      expect(got.value.lo).toBeLessThanOrEqual(expected);
+      expect(got.value.hi).toBeGreaterThanOrEqual(expected);
+    };
+    for (const [a, t] of [
+      [0, 0],
+      [0.7, -1.2],
+      [2, 3],
+    ])
+      encloses(
+        result.run!({ a: { lo: a, hi: a }, t: { lo: t, hi: t } }) as any,
+        a,
+        t
+      );
+    const box = result.run!({
+      a: { lo: 0.5, hi: 0.6 },
+      t: { lo: 1, hi: 1.1 },
+    }) as any;
+    for (const [a, t] of [
+      [0.5, 1],
+      [0.55, 1.05],
+      [0.6, 1.1],
+    ])
+      encloses(box, a, t);
   });
 
   test('a value that reads it stays per call', () => {
@@ -205,7 +234,7 @@ describe('the value `If` that ends a function body', () => {
     return ce;
   }
 
-  test.each(['javascript', 'glsl', 'interval-js'])(
+  test.each(['javascript', 'glsl'])(
     'shares a call between its condition and its branch on %s',
     (to) => {
       const ce = engine();
@@ -216,6 +245,24 @@ describe('the value `If` that ends a function body', () => {
       expect(result.preamble!.match(/_fn_T\(c\)/g)).toHaveLength(1);
     }
   );
+
+  test('interval-js encloses the interpreter value', () => {
+    const ce = engine();
+    const result = compile(ce.parse('B(t)'), { to: 'interval-js' });
+    expect(result.success).toBe(true);
+    for (const t of [0, 2, 4.5]) {
+      const expected = ce.parse('B(t)').subs({ t }).N().re;
+      const got = result.run!({ t: { lo: t, hi: t } }) as any;
+      expect(got.value.lo).toBeLessThanOrEqual(expected);
+      expect(got.value.hi).toBeGreaterThanOrEqual(expected);
+    }
+    const box = result.run!({ t: { lo: 1, hi: 2 } }) as any;
+    for (const t of [1, 1.5, 2]) {
+      const expected = ce.parse('B(t)').subs({ t }).N().re;
+      expect(box.value.lo).toBeLessThanOrEqual(expected);
+      expect(box.value.hi).toBeGreaterThanOrEqual(expected);
+    }
+  });
 
   test('the value is the interpreter value', () => {
     const ce = engine();

@@ -71,6 +71,35 @@ function expectParity(json: unknown, run: (vars: object) => unknown) {
   }
 }
 
+/** Every cell of the interval run encloses the interpreter's value, at
+ * three points of `t` and over a box of `t`. */
+function expectIntervalEnclosure(
+  json: unknown,
+  run: (vars: object) => unknown
+) {
+  type Cell = { value: { lo: number; hi: number } };
+  const point = (v: number) => ({ lo: v, hi: v });
+  const inputs = (t: { lo: number; hi: number }) => ({
+    ...Object.fromEntries(Object.entries(VALUES).map(([k, v]) => [k, point(v)])),
+    t,
+  });
+  const expectCells = (got: Cell[], want: number[]) => {
+    expect(got).toHaveLength(want.length);
+    got.forEach((cell, k) => {
+      expect(cell.value.lo).toBeLessThanOrEqual(want[k] + 1e-12);
+      expect(cell.value.hi).toBeGreaterThanOrEqual(want[k] - 1e-12);
+    });
+  };
+  for (const t of [0, 0.5, 2])
+    expectCells(
+      run(inputs(point(t))) as Cell[],
+      interpreted(json, { ...VALUES, t })
+    );
+  const box = run(inputs({ lo: 0.4, hi: 0.6 })) as Cell[];
+  for (const t of [0.4, 0.5, 0.6])
+    expectCells(box, interpreted(json, { ...VALUES, t }));
+}
+
 /** Does the emitted code build points and read a coordinate back out? */
 const readsPointsBack = (source: string) =>
   /_pt\b|pointComponent/.test(source);
@@ -252,19 +281,20 @@ describe('Point arithmetic — when the points are still built', () => {
       fallback: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toContain('_IA.bcastPoint');
+    expectIntervalEnclosure(json, r.run!);
   });
 
   test('a constant list stays one table on the interval target', () => {
     // That target writes a constant list out element by element, at any
     // width, so the projected list would become one term per point. The
     // unprojected arithmetic reads the table through the run-time broadcast.
-    const r = compile(ce.box(['PointX', transformed(CONSTANT_POINTS)] as never), {
+    const json = ['PointX', transformed(CONSTANT_POINTS)];
+    const r = compile(ce.box(json as never), {
       to: 'interval-js',
       fallback: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toContain('_IA.bcastPoint');
+    expectIntervalEnclosure(json, r.run!);
   });
 });
 
@@ -336,8 +366,6 @@ describe('A coordinate of point arithmetic over a list of points held by a symbo
     const json = ['PointX', scaled('P')];
     const r = compileP(json, 'interval-js');
     expect(r.success).toBe(true);
-    expect(r.code).toContain('_IA.pointComponent(_.P, 0, true, true)');
-    expect(r.code).not.toContain('bcastPoint');
     for (const t of [0, 0.5, 2]) {
       const got = r.run!({ t: { lo: t, hi: t }, P: POINTS }) as unknown as {
         value: { lo: number; hi: number };

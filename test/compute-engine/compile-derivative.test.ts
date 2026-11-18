@@ -15,6 +15,7 @@ import {
   compile,
 } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
+import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 const ce = new ComputeEngine();
 ce.declare('n', 'real');
@@ -383,15 +384,19 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
         const closedForm = expr.evaluate();
         expect(closedForm.has('Derivative')).toBe(false);
         const js = compile(expr, { to: 'javascript', fallback: false });
-        const iv = compile(expr, { to: 'interval-js', fallback: false });
+        const iv =
+          unit === 'rad'
+            ? compile(expr, { to: 'interval-js', fallback: false })
+            : undefined;
         expect(js.success).toBe(true);
-        expect(iv.success).toBe(true);
+        if (iv) expect(iv.success).toBe(true);
         expect(js.code).not.toContain('_SYS.nd');
         for (const [x, n] of POINTS) {
           const expected = closedForm.subs({ x, n }).N().re;
           const actual = js.run!({ x, n });
           expect(typeof actual).toBe('number');
           expect(actual as number).toBeCloseTo(expected, 10);
+          if (!iv) continue;
           const r = iv.run!({ x, n }) as any;
           const v = (r.kind === 'interval' ? r.value : r) as {
             lo: number;
@@ -423,6 +428,17 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
     }
   }
 
+  /** The code and the operator of the decline that interval-js throws. */
+  function intervalDecline(expr: ReturnType<typeof ce.box>) {
+    try {
+      compile(expr, { to: 'interval-js', fallback: false });
+    } catch (e) {
+      const { code, operator } = compileDiagnosticOf(e);
+      return { code, operator };
+    }
+    return undefined;
+  }
+
   test.each([
     // The derivative of `BesselJ` in its order and of the upper incomplete
     // `Gamma` in its first argument have no closed form.
@@ -434,6 +450,13 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
     ['Gamma', 'glsl'],
   ])('Derivative(%s, 1, 0) with no closed form declines on %s', (f, to) => {
     const expr = ce.box(['Apply', ['Derivative', f, 1, 0], 's', 'x']);
+    if (to === 'interval-js') {
+      expect(intervalDecline(expr)).toEqual({
+        code: 'outside-profile',
+        operator: 'Derivative',
+      });
+      return;
+    }
     // The GLSL fragment refuses it with its own message, which gives the
     // same reason.
     expect(declineMessage(expr, to)).toMatch(
@@ -463,11 +486,17 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
       );
       const expr = ceBig.box(['Apply', ['Derivative', 'H', 2, 1], 'x', 'y']);
       const start = Date.now();
-      expect(declineMessage(expr, to)).toMatch(
-        to === 'glsl'
-          ? /`Apply` of this derivative is outside the GLSL fragment: the closed form of the derivative is too large to write out/
-          : /Could not compile `Apply`: the closed form of the derivative is too large to write out/
-      );
+      if (to === 'interval-js')
+        expect(intervalDecline(expr)).toEqual({
+          code: 'outside-profile',
+          operator: 'Derivative',
+        });
+      else
+        expect(declineMessage(expr, to)).toMatch(
+          to === 'glsl'
+            ? /`Apply` of this derivative is outside the GLSL fragment: the closed form of the derivative is too large to write out/
+            : /Could not compile `Apply`: the closed form of the derivative is too large to write out/
+        );
       // The decline with the interpreter fallback does not compute the
       // closed form either.
       const fallback = compile(expr, { to, fallback: true } as never) as {
@@ -495,7 +524,17 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
   test('each decline gives its true reason', () => {
     // A closed form with the wrong number of parameters is an arity decline,
     // not a missing closed form.
-    for (const to of ['javascript', 'interval-js', 'glsl']) {
+    // On interval-js the arity decline is a decline of the `Apply`, the
+    // missing closed form one of the `Derivative`.
+    for (const json of [
+      ['Apply', ['Derivative', 'Power', 0, 1], 'x'],
+      ['Apply', ['Derivative', 'Sin', 1], 'x', 'y'],
+    ])
+      expect(intervalDecline(ce.box(json))).toEqual({
+        code: 'outside-profile',
+        operator: 'Apply',
+      });
+    for (const to of ['javascript', 'glsl']) {
       expect(
         declineMessage(
           ce.box(['Apply', ['Derivative', 'Power', 0, 1], 'x']),
@@ -515,10 +554,13 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
     const ceBig = new ComputeEngine();
     ceBig.parse('f(x):=\\sqrt{x+\\sqrt{x+\\sqrt{x+\\sqrt{x+x}}}}').evaluate();
     const big = ceBig.box(['Apply', ['Derivative', 'f', 3], 'x']);
-    for (const to of ['interval-js', 'glsl'])
-      expect(declineMessage(big, to)).toMatch(
-        /the closed form of the derivative is too large to write out/
-      );
+    expect(intervalDecline(big)).toEqual({
+      code: 'outside-profile',
+      operator: 'Derivative',
+    });
+    expect(declineMessage(big, 'glsl')).toMatch(
+      /the closed form of the derivative is too large to write out/
+    );
   });
 
   test('javascript declines an application with the wrong number of arguments', () => {
