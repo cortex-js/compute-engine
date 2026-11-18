@@ -227,6 +227,13 @@
 
 ### Resolved Issues
 
+- **The type of a `Mod`, a `Sqrt` or a `Power` of an operand that calls a
+  user function or holds a `Sum` no longer throws** (CE-1445). `Mod(5,
+  Floor(g(1)))`, with `g` a function assigned without a declared type, threw
+  "The type handler of "Mod" modified engine state while deriving a type":
+  the type handler read the sign of `Floor(g(1))`, which evaluated `g(1)`.
+  The sign of such an operand is now the sign of its type.
+
 - **The interval `Remainder` of two reals holds the remainder** (CE-1448).
   `IntervalArithmetic.remainder` computed `a − b·round(a/b)` in plain
   doubles and widened the answer by 3 ulps, which does not cover the

@@ -72,13 +72,17 @@ const COUNT = NIGHTLY ? 5000 : 1000;
  *   `3.141592653589793` as a decimal, not as the double, so only machine
  *   precision gives the doubles. Also a tangent above 1e15 of a program
  *   that reads `Pi` (the double of a pole of `Tan`, where machine precision
- *   still finds the pole), when that tangent reaches the result.
+ *   still finds the pole), when that tangent reaches the result. Also a
+ *   `Mod` whose double value is rounded to its divisor (`Mod(-1e-300, 1)`
+ *   is 1, outside `[0, 1)`), or within 1e-12 of it, at the jump
+ *   (`Mod(-2, 2/3)` is 0, and 0.666… in doubles).
  * - `nan-from-complex`: an operation of the compiled code (`Sqrt`, `Ln`,
  *   `Power`) gave NaN for operands that are not NaN, where the interpreter
  *   has a complex value that it carries on to a real result (`0 · √-3` is
  *   0); and that NaN reaches the result. The `strict` mode: a complex
  *   value on the real lane is NaN.
- * - `pole`: the compiled code divided by zero, and that quotient reaches
+ * - `pole`: the compiled code divided by zero, or raised zero to a
+ *   negative power (`0^-1.25`), and that value reaches
  *   the result: the interpreter's `ComplexInfinity` has no sign, the
  *   compiled infinity has one, and a comparison or a sum on it can take
  *   another value.
@@ -87,7 +91,9 @@ const COUNT = NIGHTLY ? 5000 : 1000;
  *   value of every operation changes the compiled result by at least a tenth of the
  *   difference with the interpreter (or flips it, for a boolean): the
  *   rounding of the doubles is amplified (a modulo or a cosine of 1e300, a
- *   value of 2^53 and more). The precision of the target.
+ *   value of 2^53 and more). The precision of the target. Also a remainder
+ *   within 1e-14 of the largest dividend of a `Mod`, where the perturbation
+ *   gives NaN (a negative base to a perturbed exponent).
  * - `local-outside-its-type`: the interpreter has no value because a
  *   `real` local was given a value outside its type (NaN, a complex
  *   number), which the compiled code then overwrote or did not read: not in
@@ -97,8 +103,12 @@ const COUNT = NIGHTLY ? 5000 : 1000;
  *   compiled code gave NaN or an infinity that reaches the result (or the
  *   result is a boolean or a list, which a comparison of it can decide):
  *   the caveat value where the interpreter has none, and everything
- *   computed from it, is unspecified.
- * - `range`: an operation gave a value of 2^53 or more, where an integer
+ *   computed from it, is unspecified. Also a comparison of such a value
+ *   (the branch it picks), and a list that differs from the interpreter's
+ *   only at the elements where the interpreter has no value.
+ * - `range`: an operation gave a value of 2^53 or more, or a `Mod` had a
+ *   quotient of 2^53 or more (`Mod(e, -1e-300)`), or an `Exp` or a `Power`
+ *   of finite operands overflowed (`Ln(Exp(n))` at n = 2^53 - 1), where an integer
  *   is no longer exact and a real has no fractional digit (`2n + 0.5` at
  *   n = 2^53 - 1 rounds to an integer): the limit of the numeric model.
  *
@@ -134,7 +144,21 @@ function classify(
     [12345.678, -12345.678].some(
       (r) => !sameBits(instrumented(expr, point, r).value, flags.value)
     );
-  if (flags.caveat && interpret(ce, expr, point) === 'none') {
+  const interpreted = interpret(ce, expr, point);
+  // A list that differs only where the interpreter has no value: the
+  // element is computed from a caveat value (a `Map` of `z ↦ 2` over an
+  // element that a complex `Sqrt` made absent).
+  if (
+    flags.caveat &&
+    Array.isArray(value) &&
+    Array.isArray(interpreted) &&
+    value.length === interpreted.length &&
+    interpreted.some((x) => x === 'none') &&
+    interpreted.every((x, i) => x === 'none' || agrees(value[i], x))
+  )
+    return 'computed-from-a-caveat-value';
+  if (flags.caveat && interpreted === 'none') {
+    if (flags.caveatComparison) return 'computed-from-a-caveat-value';
     // A comparison of NaN is computed from it, though no replacement of
     // the NaN need change the boolean; so is a list whose elements such a
     // comparison keeps or drops (a `Filter` of an `At` at the index 0).
@@ -147,6 +171,8 @@ function classify(
     return 'precision';
   if (flags.complex && reaches()) return 'nan-from-complex';
   if (flags.pole && reaches()) return 'pole';
+  if (flags.modRounded && reaches()) return 'precision';
+  if (flags.overflow && reaches()) return 'range';
   const perturbed = instrumented(expr, point, undefined, true).value;
   const expected = interpret(ce, expr, point);
   if (typeof value === 'boolean' && perturbed !== value) return 'conditioning';
@@ -168,6 +194,17 @@ function classify(
   if (moved > 0 && (moved >= error / 10 || unstable || Number.isNaN(error)))
     return 'conditioning';
   if (flags.range) return 'range';
+  if (flags.modRange && reaches()) return 'range';
+  // A remainder within the rounding of a large dividend.
+  if (
+    flags.modLarge &&
+    flags.modScale !== undefined &&
+    reaches() &&
+    typeof value === 'number' &&
+    typeof expected === 'number' &&
+    error <= flags.modScale * 1e-14
+  )
+    return 'conditioning';
   return 'unclassified';
 }
 
@@ -182,34 +219,51 @@ EXACT_COMPARISONS.tolerance = 0;
  *  division by zero, and a tangent at the double of a pole (`tan(π/2)` is
  *  1.6e16). With `replace`, each flagged value is that number instead. With
  *  `perturb`, the value of every operation is multiplied by 1 + 1e-14. */
-function instrumented(
-  expr: Expression,
-  point: Point,
-  replace: number | undefined,
-  perturb = false
-): {
+type Flags = {
   complex?: boolean;
   pole?: boolean;
   tanPole?: boolean;
   range?: boolean;
   caveat?: boolean;
+  /** A `Mod` whose value is rounded to its divisor (`Mod(-1e-300, 1)`),
+   *  or within 1e-12 of it: a value at the jump of the modulo. */
+  modRounded?: boolean;
+  /** A `Mod` whose quotient is 2^53 or more (`Mod(e, -1e-300)`). */
+  modRange?: boolean;
+  /** A `Mod` whose quotient is 1000 or more, and the largest such
+   *  dividend: the error of the remainder is that of the dividend. */
+  modLarge?: boolean;
+  modScale?: number;
+  /** An `Exp` or a `Power` of finite operands that overflowed. */
+  overflow?: boolean;
+  /** A comparison of a value that is not finite: the branch it picks is
+   *  computed from that value. */
+  caveatComparison?: boolean;
   value?: unknown;
-} {
-  const flags: {
-    complex?: boolean;
-    pole?: boolean;
-    tanPole?: boolean;
-    range?: boolean;
-    caveat?: boolean;
-    value?: unknown;
-  } = {};
+};
+
+function instrumented(
+  expr: Expression,
+  point: Point,
+  replace: number | undefined,
+  perturb = false
+): Flags {
+  const flags: Flags = {};
   const flag = (name: string, test: string) =>
     `if (${test}) { _flags.${name} = true; if (_replace !== undefined) return _replace; } return r;`;
   const flagged: Syntax['ops'] = {
     ...JS.ops,
     sqrt: { text: '_cx(Math.sqrt($0), $0)', helpers: ['_cx'] },
     ln: { text: '_cx(Math.log($0), $0)', helpers: ['_cx'] },
-    pow: { text: '_cx(_SYS.ir.pow($0, $1), $0, $1)', helpers: ['_cx'] },
+    pow: { text: '_pw($0, $1)', helpers: ['_pw', '_cx'] },
+    mod: { text: '_md($0, $1)', helpers: ['_md'] },
+    exp: { text: '_ex($0)', helpers: ['_ex'] },
+    ...Object.fromEntries(
+      ['lt', 'le', 'gt', 'ge'].map((op) => [
+        op,
+        { text: `_cc(${String(JS.ops[op])}, $0, $1)`, helpers: ['_cc'] },
+      ])
+    ),
     div: { text: '_dz($0, $1)', helpers: ['_dz'] },
     tan: { text: '_tp(Math.tan($0))', helpers: ['_tp'] },
   };
@@ -232,6 +286,28 @@ function instrumented(
       ...JS.helpers,
       _cx: `const _cx = (r, ...a) => { ${flag('complex', 'Number.isNaN(r) && !a.some(Number.isNaN)')} };`,
       _dz: `const _dz = (a, b) => { const r = a / b; ${flag('pole', 'b === 0')} };`,
+      // A pole of a power (a zero base, a negative exponent), else the
+      // NaN of a complex value.
+      _pw: `const _pw = (a, b) => { const r = _SYS.ir.pow(a, b); if (a === 0 && b < 0) { ${flag('pole', 'true')} } if (Number.isFinite(a) && Number.isFinite(b) && Math.abs(r) === Infinity) { ${flag('overflow', 'true')} } return _cx(r, a, b); };`,
+      _ex: `const _ex = (a) => { const r = Math.exp(a); ${flag('overflow', 'Number.isFinite(a) && r === Infinity')} };`,
+      // A quotient of 2^53 or more (`Mod(e, -1e-300)`), whose value the
+      // doubles do not determine, and a value rounded to the divisor.
+      // Each flag is replaced, so that `reaches()` tells whether the value
+      // that it explains reaches the result.
+      _md: [
+        'const _md = (a, b) => {',
+        '  const r = _SYS.ir.mod(a, b);',
+        '  const q = Math.abs(a / b);',
+        '  let k;',
+        '  if (Number.isFinite(q) && q >= 2 ** 53) k = "modRange";',
+        '  else if (b !== 0 && Math.abs(r) >= Math.abs(b) * (1 - 1e-12)) k = "modRounded";',
+        '  else if (Number.isFinite(q) && q >= 1e3) { k = "modLarge"; _flags.modScale = Math.max(_flags.modScale ?? 0, Math.abs(a)); }',
+        '  if (k === undefined) return r;',
+        '  _flags[k] = true;',
+        '  return _replace !== undefined ? _replace : r;',
+        '};',
+      ].join('\n'),
+      _cc: `const _cc = (r, a, b) => { if (typeof a === 'number' && typeof b === 'number' && !(Number.isFinite(a) && Number.isFinite(b))) _flags.caveatComparison = true; return r; };`,
       _tp: `const _tp = (r) => { ${flag('tanPole', 'Math.abs(r) > 1e15')} };`,
       _q: [
         'const _q = (r) => {',
@@ -281,7 +357,8 @@ function perturbed(point: Point, expr: Expression): Point {
 describe('IR slice: random programs against the interpreter', () => {
   test(`${COUNT} programs`, () => {
     const ce = makeEngine();
-    const next = generator(20261112);
+    // `CE_RANDOM_SEED` runs the generator on another seed.
+    const next = generator(Number(process.env.CE_RANDOM_SEED ?? 20261112));
     let compiled = 0;
     let compared = 0;
     const declines = new Map<string, number>();
@@ -335,7 +412,9 @@ describe('IR slice: random programs against the interpreter', () => {
       try {
         warnings = sliceProgram(expr, { target: 'javascript' }).warnings;
       } catch (e) {
-        if (!(e instanceof Decline)) throw e;
+        // An engine error during the compilation names its program.
+        if (!(e instanceof Decline))
+          throw new Error(`${String(e)}\nin ${JSON.stringify(json)}`);
         declines.set(e.cause, (declines.get(e.cause) ?? 0) + 1);
         if (decline !== undefined && e.message.includes(decline))
           expectedDeclines.set(

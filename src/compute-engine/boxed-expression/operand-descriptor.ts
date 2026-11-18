@@ -31,6 +31,7 @@ import {
   hasInferredType,
 } from './type-guards.js';
 import { closedDictionaryType } from './generic-instantiation.js';
+import { isLibraryOperator } from '../library-shadowing.js';
 import { asRational } from './numerics.js';
 import { numberLiteralTierType } from './literal-tier.js';
 import { COUNT_STATS } from '../../common/cache-stats.js';
@@ -170,6 +171,21 @@ export function describeCallee(
 // the causes of the symbolic slowdown recorded in `ROADMAP.md` (entry P1).
 
 /** Finite: `true` below `complex`, `false` below `infinity` or `nan`. */
+/** True when the evaluation of `x` can open a scope: `x` holds a call of
+ *  a user function or a scoped operator (a binder such as `Sum`, a
+ *  `Block`, a function literal). */
+function opensScope(x: Expression, seen = new Set<Expression>()): boolean {
+  // A node seen before is a shared operand that does not open a scope: the
+  // walk stops at the first one that does.
+  if (!isFunction(x) || seen.has(x)) return false;
+  seen.add(x);
+  return (
+    !isLibraryOperator(x) ||
+    x.operatorDefinition?.scoped === true ||
+    x.ops.some((op) => opensScope(op, seen))
+  );
+}
+
 function finiteFromType(t: Type): Tri {
   // `infinity` is any value of infinite magnitude — the signed pair
   // `+oo | -oo` is one of its subtypes, so testing it covers `±∞`
@@ -690,7 +706,13 @@ class ExpressionOperandFacts implements OperandFacts {
       this._computed |= SGN_COMPUTED;
       const op = this.#op;
       let sgn: Sign | undefined;
-      if (isNumber(op) || isSymbol(op) || isFunction(op)) sgn = op.sgn;
+      // An application whose evaluation can open a scope (a call of a user
+      // function, a `Sum`) has the sign of its type only: an operator's
+      // `sgn` handler can compare or approximate its operands, which
+      // evaluates them, and a type handler must not open and close a scope
+      // (`Mod(5, Floor(g(1)))`, `Sqrt(Round(Sum(2, Limits(k, 1, 5))))`).
+      if (isNumber(op) || isSymbol(op) || (isFunction(op) && !opensScope(op)))
+        sgn = op.sgn;
       this._sgn = sgn ?? signOfType(this.#descriptor.type);
     }
     return this._sgn;
