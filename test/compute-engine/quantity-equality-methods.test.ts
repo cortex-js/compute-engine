@@ -1160,3 +1160,38 @@ describe('A QUANTITY WHOSE UNIT CANCELS', () => {
     ).toEqual(['Quantity', 2, 'rad']);
   });
 });
+
+describe('Two exact levels of units with no exact conversion', () => {
+  test('A level that is not zero is not 0 Np', () => {
+    const tiny = ['Quantity', ['Rational', 1, 1000000000000], 'dB'];
+    expect(ce.box(['Equal', tiny, ['Quantity', 0, 'Np']]).evaluate().json).toBe(
+      'False'
+    );
+    expect(ce.box(['Less', ['Quantity', 0, 'Np'], tiny]).evaluate().json).toBe(
+      'True'
+    );
+  });
+
+  test('An explicit tolerance of .is() applies', () => {
+    const a = ce.box(['Quantity', 1, 'dB']);
+    const b = ce.box(['Quantity', 1, 'Np']);
+    // 1 Np is about 8.686 dB
+    expect(a.is(b, 10)).toBe(true);
+    expect(a.is(b, 5)).toBe(false);
+    expect(a.is(b)).toBe(false);
+  });
+});
+
+describe('A unit string with a fraction exponent', () => {
+  test.each([
+    [['UnitDimension', { str: 'm^(1/2)' }], '[0.5,0,0,0,0,0,0,0]'],
+    [['IsCompatibleUnit', { str: 'm^(1/2)' }, { str: 'm^0.5' }], '"True"'],
+  ])('%j', (json, expected) =>
+    expect(
+      ce
+        .box(json as MathJsonExpression)
+        .evaluate()
+        .toString()
+    ).toBe(expected)
+  );
+});

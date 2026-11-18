@@ -88,9 +88,9 @@ export type QuantityCompareOptions = {
  * decimal number, an exact number), and the result is `undefined` when this
  * is not possible either.
  *
- * Two exact magnitudes of logarithmic units with no exact conversion (`dB`
- * and `Np`, whose factor `ln(10)/20` is irrational) are compared by their
- * machine numbers with no tolerance, and a difference within the rounding
+ * With `exact`, two exact magnitudes of logarithmic units with no exact
+ * conversion (`dB` and `Np`, whose factor `ln(10)/20` is irrational) are
+ * compared by their machine numbers with no tolerance, and a difference within the rounding
  * of the conversion gives `undefined`: `20 dB` and
  * `2302585092994046/10^15 Np` have no known order.
  *
@@ -154,18 +154,21 @@ export function compareQuantities(
   // Convert to the finer unit: the unit of `a` when it is the finer one.
   const toUnitOfA = aScale < bScale;
 
-  // Two exact levels whose units have no exact conversion (`dB` and `Np`:
-  // the factor `ln(10)/20` is irrational) are compared by their doubles,
-  // but with no tolerance, and a difference within the rounding of the
-  // conversion does not decide: `20 dB` is not equal to
-  // `2302585092994046/10^15 Np`, which is larger than `ln(10) Np`.
+  // With `exact`, two exact levels whose units have no exact conversion
+  // (`dB` and `Np`: the factor `ln(10)/20` is irrational) are compared by
+  // their doubles, but with no tolerance, and a difference within the
+  // rounding of the conversion does not decide: `20 dB` is not equal to
+  // `2302585092994046/10^15 Np`, which is larger than `ln(10) Np`. An
+  // explicit tolerance applies to them as to any other pair.
   const exactPair = isExactMagnitude(aMag) && isExactMagnitude(bMag);
   const inexactConversion =
+    options.exact &&
     exactPair &&
     logarithmicExponent(aUE) !== 0 &&
     exactUnitConversion(aUE, bUE) === null;
-  // The conversion of a level has no offset: `0 dB` is `0 Np`
-  if (inexactConversion && aMag.is(0) && bMag.is(0)) return 0;
+  // The conversion of a level has no offset: `0 dB` is `0 Np`. Only an
+  // exact zero: `10⁻¹² dB` is not `0 Np`.
+  if (inexactConversion && aMag.is(0, 0) && bMag.is(0, 0)) return 0;
 
   if (exactPair) {
     const order = orderByConversion(

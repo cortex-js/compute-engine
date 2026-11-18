@@ -131,7 +131,16 @@ function decodeUnitExpression(expr: Expression): UnitExpression | null {
 
   if (op === 'Power') {
     const base = decodeUnitExpression(expr.op1);
-    const exp = expr.op2?.re;
+    let exp = expr.op2?.re;
+    // A raw exponent (a string unit, `unitOperand()`) holds a fraction as
+    // `Rational(1, 2)`, which has a numeric value once it is canonical.
+    if (
+      exp !== undefined &&
+      Number.isNaN(exp) &&
+      !expr.op2.isCanonical &&
+      expr.op2.symbols.length === 0
+    )
+      exp = expr.op2.canonical.re;
     // A symbolic exponent (`m^n`) has no numeric value: `.re` is `NaN`.
     if (!base || exp === undefined || Number.isNaN(exp)) return null;
     return ['Power', base, exp];
