@@ -1622,3 +1622,15 @@ the mode compiles), `p0kazir1l9` #15 and #16 (an input of type
 in the document and the program has no value at any point on any target),
 `xyrqlhvltc` #18 (a `Which` over a list condition: the expanded fallback of
 #17, which the mode compiles).
+
+**The limit of `ir/` is 13,000 lines** (the user's decision of 2026-11-17,
+option 1 of the question put after `4befc6ca2`). The compiled form of the
+enclosure kind (`ir/lower-enclosure.ts`, the entry checks in
+`ir/adapter-interval.ts`) took `ir/` from 11,938 to 12,908 lines, over the
+limit of 12,000; it stays in `ir/`, since it lowers to IR and depends on the
+lowering's internals (a module beside `ir/` would only move the count), and
+the limit is raised so that it keeps measuring the compiler. Not done, put to
+the user as the other option: aligning the `.N()` route of the enclosure with
+the kernels of the interval mode, so that the enclosure could reuse the
+mode's rows (it changes seven rows of the value-kinds plan's acceptance
+table).
