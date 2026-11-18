@@ -333,6 +333,61 @@ describe('UNIT CONVERT', () => {
   });
 });
 
+describe('A COMPLEX MAGNITUDE KEEPS ITS IMAGINARY PART', () => {
+  const ev = (x: MathJsonExpression) => engine.expr(x).evaluate().toString();
+  const z: MathJsonExpression = ['Complex', 1, 1];
+
+  test('a conversion by a float factor', () => {
+    expect(ev(['UnitConvert', ['Quantity', z, 'm'], 'in'])).toBe(
+      '(39.37007874015748 + 39.37007874015748i) in'
+    );
+    expect(
+      ev(['UnitConvert', ['Quantity', ['Complex', 1.5, 1], 'm'], 'in'])
+    ).toBe('(59.05511811023622 + 39.37007874015748i) in');
+    expect(ev(['UnitConvert', ['Quantity', z, 'Np'], 'dB'])).toBe(
+      '(8.685889638065037 + 8.685889638065037i) dB'
+    );
+  });
+
+  test('a conversion with an offset', () => {
+    expect(ev(['UnitConvert', ['Quantity', z, 'degC'], 'degF'])).toBe(
+      '(33.8 + 1.8i) degF'
+    );
+  });
+
+  test('a conversion of a compound unit', () => {
+    expect(
+      ev([
+        'UnitConvert',
+        ['Quantity', z, ['Divide', 'm', 's']],
+        ['Divide', 'km', 'h'],
+      ])
+    ).toBe('(3.5999999999999996 + 3.5999999999999996i) km/h');
+  });
+
+  test('UnitSimplify by a float scale', () => {
+    expect(
+      ev([
+        'UnitSimplify',
+        ['Quantity', z, ['Multiply', 'g', 'm', ['Power', 's', -2]]],
+      ])
+    ).toBe('(0.001 + 0.001i) N');
+  });
+
+  test('a sum that converts the complex operand', () => {
+    expect(ev(['Add', ['Quantity', z, 'in'], ['Quantity', 1.5, 'm']])).toBe(
+      '(1.5254 + 0.0254i) m'
+    );
+    expect(
+      ev([
+        'Add',
+        ['Quantity', 1, ['Divide', 'm', 's']],
+        ['Quantity', z, ['Divide', 'km', 'h']],
+      ])
+    ).toBe('(1.2777777777777778 + 0.2777777777777778i) m/s');
+  });
+});
+
 describe('COMPOUND UNITS', () => {
   test('Dimension of m/s', () => {
     expect(getExpressionDimension(['Divide', 'm', 's'])).toEqual([

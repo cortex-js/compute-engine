@@ -71,6 +71,13 @@
 
 ### Resolved Issues
 
+- **A quantity with a complex value keeps its imaginary part when it is
+  converted to another unit.** `UnitConvert(Quantity(1 + i, m), in)` was
+  `39.37007874015748 in`; it is now
+  `(39.37007874015748 + 39.37007874015748i) in`. The same applies to
+  `UnitSimplify` and to a sum of quantities in different units:
+  `(1 + i) in + 1.5 m` was `1.5254 m` and is now `(1.5254 + 0.0254i) m`.
+
 - **A color or unit error says what is wrong.** In Epsil, `color("nosuchcolor")`
   printed `incompatible type: ` with nothing after it; it now prints
   ``expected `color`, got `"nosuchcolor"` ``, and

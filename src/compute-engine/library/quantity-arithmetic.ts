@@ -104,7 +104,9 @@ function convertMagnitude(
   targetSymbol: string | null,
   targetUE: ReturnType<typeof boxedToUnitExpression>
 ): Expression | undefined {
-  const numeric = !isMeasurement(mag) && !isSymbolicValue(mag);
+  // A magnitude that is not real is converted with expression arithmetic:
+  // the numeric conversion reads `.re`, which drops the imaginary part.
+  const numeric = !isMeasurement(mag) && !isSymbolicValue(mag) && mag.im === 0;
   // Above machine precision (`bignumPreferred()`), a float magnitude is
   // converted with the exact factor and offset of the conversion
   // (`exactUnitConversion()`), at the working precision: the machine factor

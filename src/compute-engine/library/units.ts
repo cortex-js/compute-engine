@@ -633,12 +633,15 @@ function convertQuantity(
   // multiplication by an integer, so that `evaluate()` keeps `π m` as
   // `100π cm` (see `isExactConversion()`). Otherwise the result is a float
   // (the conversion factor is a float), and an exact magnitude is converted
-  // numerically, as a float magnitude is.
+  // numerically, as a float magnitude is. A magnitude that is not real is
+  // always converted with expression arithmetic: the numeric conversion
+  // reads `.re`, which drops the imaginary part.
   const magExpr = quantity.op1;
-  const magIsMeasurement = isMeasurement(magExpr) || isSymbolicValue(magExpr);
-  const magIsExact = !magIsMeasurement && usesExpressionArithmetic([magExpr]);
+  const magIsExpression =
+    isMeasurement(magExpr) || isSymbolicValue(magExpr) || magExpr.im !== 0;
+  const magIsExact = !magIsExpression && usesExpressionArithmetic([magExpr]);
   const mag = magExpr.re;
-  if (!magIsMeasurement && mag === undefined) return undefined;
+  if (!magIsExpression && mag === undefined) return undefined;
   // The numeric conversion is used for a float magnitude, or for a
   // conversion by a float factor or with an offset. Its result is a float,
   // also when its value is an integer: `100 cm` converted to `m` is the
@@ -653,7 +656,7 @@ function convertQuantity(
   if (fromSymbol && toSymbol) {
     const c0 = convertUnit(0, fromSymbol, toSymbol);
     const c1 = convertUnit(1, fromSymbol, toSymbol);
-    if (magIsMeasurement || (magIsExact && isExactConversion(c0, c1))) {
+    if (magIsExpression || (magIsExact && isExactConversion(c0, c1))) {
       // The coefficients of the conversion are computed from exact data:
       // `c1 − c0` loses digits for a temperature (`degC → degF` gives
       // `1.7999999999999972`).
@@ -685,7 +688,7 @@ function convertQuantity(
 
   const c0 = convertCompoundUnit(0, fromUE, toUE);
   const c1 = convertCompoundUnit(1, fromUE, toUE);
-  if (magIsMeasurement || (magIsExact && isExactConversion(c0, c1))) {
+  if (magIsExpression || (magIsExact && isExactConversion(c0, c1))) {
     if (c0 === null || c1 === null)
       return incompatibleUnits(ce, fromUnit, targetUnitExpr);
     const convertedMag = affineMagnitude(ce, magExpr, c1 - c0, c0);
@@ -833,12 +836,15 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       // expression arithmetic: a numeric read of its value loses the error,
       // gives `NaN`, or makes an exact `π` a float. For an exact magnitude
       // that is the case only for an integer scale (see
-      // `isExactConversion()`). Otherwise the magnitude or the scale is a
-      // float, and the result is a float, also when its value is an integer.
+      // `isExactConversion()`). A magnitude that is not real is also scaled
+      // with expression arithmetic: `.re` drops its imaginary part.
+      // Otherwise the magnitude or the scale is a float, and the result is a
+      // float, also when its value is an integer.
       const magExpr = arg.op1;
       const scaled =
         isMeasurement(magExpr) ||
         isSymbolicValue(magExpr) ||
+        magExpr.im !== 0 ||
         (usesExpressionArithmetic([magExpr]) && isExactConversion(0, scale))
           ? affineMagnitude(ce, magExpr, scale, 0)
           : asFloat(ce.number(mag * scale));
