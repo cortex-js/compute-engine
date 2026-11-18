@@ -214,11 +214,18 @@ export function inputNamesRead(
  * `observe`, when given, receives the evaluated value of each run before it
  * is converted: the interval fallback reads from it whether a number is
  * exact (`interval-fallback.ts`).
+ *
+ * With `callable`, a function value (a value whose type is a function
+ * signature: `x ↦ x + 4`, `Derivative(Sin)`) is a JavaScript function that
+ * applies the value to its arguments with the interpreter and converts the
+ * result as the run does, as a compiled function value is. Without it, a
+ * function value is `NaN`.
  */
 export function interpreterRun(
   expr: Expression,
   absence: { objectNull: boolean; writtenNumeric: boolean },
-  observe?: (value: Expression) => void
+  observe?: (value: Expression) => void,
+  callable = false
 ): { calling: 'lambda' | 'expression'; run: CompiledRunner } {
   const ce = expr.engine;
   // The color value of an evaluated color node, or `undefined` when `e` is
@@ -348,6 +355,31 @@ export function interpreterRun(
     return collectionElementType(r) ?? r;
   };
   const isAbsentValue = (e: Expression): boolean => isSymbol(e, 'Missing');
+  // Whether `e` is a function value: a `Function` literal, or a value whose
+  // type is a function signature (the name of an operator).
+  const isFunctionValue = (e: Expression): boolean => {
+    if (isFunction(e, 'Function')) return true;
+    const r = resolveTypeForCompilation(e.type.type);
+    return (
+      r === 'function' || (typeof r !== 'string' && r.kind === 'signature')
+    );
+  };
+  // The JavaScript function of the function value `f` (`callable`): each
+  // call applies `f` to its arguments, boxed under the declared types of
+  // the parameters of a `Function` literal, and converts the value as the
+  // run does (a function value is a JavaScript function again).
+  const callableOf =
+    (f: Expression) =>
+    (...args: unknown[]): unknown => {
+      const paramTypes = isFunction(f, 'Function')
+        ? functionLiteralParameters(f).map((p) => p.type)
+        : [];
+      const applied = ce.function('Apply', [
+        f,
+        ...args.map((a, i) => boxArg(a, paramTypes[i])),
+      ]);
+      return interpretedRunValue(applied.evaluate(), applied.type.type);
+    };
   // Materialize an interpreted result matching the compiled-runner value
   // contract: a scalar yields a `number` (imaginary part exactly zero), a
   // `{re, im}` object (otherwise) or a boolean; a finite indexed collection
@@ -367,8 +399,10 @@ export function interpreterRun(
     | CompiledColor
     | string
     | unknown[]
+    | ((...args: unknown[]) => unknown)
     | undefined => {
     if (isAbsentValue(e)) return absentRunValue(t, undefined);
+    if (callable && isFunctionValue(e)) return callableOf(e);
     // A string is a JS string, as compiled code answers it. It is tested
     // before the collection rule below: a string is an indexed collection
     // of its grapheme clusters, which that rule read as an array of `NaN`.
@@ -615,14 +649,18 @@ export function interpreterRun(
  *
  * It has no `freeSymbolTypes`: the result of a compilation of the profile
  * on JavaScript has none. `observe`, when given, receives the evaluated
- * value of each run before it is converted (`interpreterRun()`).
+ * value of each run before it is converted (`interpreterRun()`). With
+ * `callable` (the default), a function value is a JavaScript function
+ * (`interpreterRun()`); the interval fallback, which gives no interval for
+ * a function value, passes `false`.
  */
 export function interpreterFallback(
   expr: Expression,
   error: string,
   diagnostic: CompileDiagnostic,
   varsKeys?: ReadonlySet<string>,
-  observe?: (value: Expression) => void
+  observe?: (value: Expression) => void,
+  callable = true
 ): CompilationResult<'javascript'> {
   const { calling, run } = interpreterRun(
     expr,
@@ -630,7 +668,8 @@ export function interpreterFallback(
       objectNull: true,
       writtenNumeric: false,
     },
-    observe
+    observe,
+    callable
   );
   const unsupported: string[] = [];
   if (diagnostic.operator !== undefined) unsupported.push(diagnostic.operator);

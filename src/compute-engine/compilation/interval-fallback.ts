@@ -341,7 +341,8 @@ export function buildIntervalFallback(
           exact = exactnessOf(value);
           // A `Function` literal root: its body is not evaluated here.
           decided = !isFunction(expr, 'Function') && booleanDecided(expr);
-        }
+        },
+        false
       ),
       target: 'interval-js',
     }) as unknown as CompilationResult<'interval-js', IntervalValue>;

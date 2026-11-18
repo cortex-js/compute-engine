@@ -270,6 +270,17 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `Sum(1, Limits(k, 1, Sqrt(x)^2))` at `x = 3` gives `2`: the bound is
   floored, and doubles compute `Sqrt(3)^2` just under 3. The interpreter
   gives `3`.
+- `javascript`, profile `ir` (crafted), `n: integer`: a jump function
+  (`Floor`, `Ceil`, `Round`, `Sign`, a comparison) of an exact rational
+  constant that no double holds takes the jump of the nearest double:
+  `Floor(n + (25! − 1)/24!)` at `n = 1` gives `26`; the interpreter gives
+  `25` (`compile-jump-integer-shift.test.ts`,
+  `compile-jump-exact-operand.test.ts` pin the existing compiler's exact
+  jumps).
+- `plausible?` — `javascript`, profile `ir`, `s: real`, `P: real`: a
+  comparison of a computed value that is zero in exact arithmetic follows
+  its rounding: `If(Sin(2πs/P) > 0, 1, 0)` at `s = 2`, `P = −2` gives `1`
+  (the sine is `2.449e-16` in doubles); the interpreter gives `0`.
 - `glsl`, profile `ir` (crafted), `x: real`, `y: real`: `Arctan2(y, x)` with
   an operand that is a zero computed as `-0` (`Arctan2(Negate(0·x), y)`) is
   off by π in the software renderer, and has the other sign on a GPU for
@@ -3612,10 +3623,13 @@ retain evaluation-once and effect ordering.
 
 A `PointList` with list components compiles on the JavaScript target to a
 map over the shortest component, scalar components repeated in each point.
-An `iterationBudget` option caps that length, and the list is then truncated
-(user decision 2026-07-31). This differs on purpose from a `Sum` or `Product`
-over budget, which gives `NaN`: a truncated point list still draws its first
-points.
+The `iterationBudget` option is not applied to the length of the list: the
+profile `ir` builds every point, also past the budget (at `L = [1, 2, 3, 4]`
+with `iterationBudget: 2`, `PointList(L, 2L)` gives four points). Compiled
+code need not cap its iterations: "Hosts that care about this can run in a
+worker to avoid blocking the main thread" (user ruling of 2026-11-16, which
+replaces the truncation of the user decision of 2026-07-31; the existing
+compiler still truncates the list to the budget).
 
 A restriction `value\{conditions\}` (`If(conditions, value)`) whose
 condition is a list compiles on the JavaScript target through
