@@ -117,8 +117,9 @@ shapes the pipeline declines (a decline runs the interpreter).
   decline tests whose message had changed, filed as "expects a compile"),
   and one agent's first bulk deletion had to be undone by a three-way merge.
 - **The line budget at the end.** The last fixes (CE-1191, CE-1309, the GLSL
-  `Mod` correction) each had to fit in a few lines; the budget is now
-  almost spent, so the next addition must remove code first.
+  `Mod` correction) each had to fit in a few lines. The user lifted the
+  limit on 2026-11-18, once the pipeline had replaced the existing
+  compilers.
 - **Performance found late.** The GLSL `pow` helper and the per-pass checks
   were found by the consumer trial, not by a benchmark of the workstream.
   The exact integer `pow` cost 1.54 times on GPU and was traded for the

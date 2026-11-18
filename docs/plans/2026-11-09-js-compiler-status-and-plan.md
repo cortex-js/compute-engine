@@ -2234,7 +2234,9 @@ User decisions of the evening of 2026-11-15, in the user's words:
   `enclosure` value kind (`4befc6ca2`) brought `ir/` to 12,908: the user
   chose to keep that code in `ir/` and rejected moving it beside `ir/` ("the
   goal is not to move files around to make it look like there code size is
-  less than it actually is"). `ir/` is 12,960 lines at `bc42631d2`.
+  less than it actually is"). `ir/` is 12,960 lines at `bc42631d2`. The
+  user lifted the limit on 2026-11-18, after the deletion of the existing
+  compilers (`e16216680`), at 12,994 lines: `ir/` has no line cap.
 - The goal: "Please continue coordinating with `ce-interval`. Our goal
   remains to produce code that executes at most 1.1x slower than the "old"
   compiler. In addition, let's work on increasing the breadth of coverage of
