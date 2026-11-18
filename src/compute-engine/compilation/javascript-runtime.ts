@@ -7158,6 +7158,8 @@ export const REAL_FUNCTIONS = Object.freeze({
   erfc: (x: number): number => erfc(x),
   fresnelc: (x: number): number => fresnelC(x),
   fresnels: (x: number): number => fresnelS(x),
+  // `Sinc(±∞)` is 0.
+  sinc: (x: number): number => (Math.abs(x) === Infinity ? 0 : sinc(x)),
   gamma: (x: number): number =>
     Number.isInteger(x) && x <= 0 ? Infinity : gamma(x),
   gammaln: (x: number): number => lnAbsGamma(x),

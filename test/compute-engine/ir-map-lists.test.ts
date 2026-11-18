@@ -156,6 +156,8 @@ describe('IR profile, batch G26: Map of several lists', () => {
   test.each([
     ['two inputs', ['Map', add2, 'A', 'B']],
     ['three inputs', ['Map', add3, 'A', 'B', 'C']],
+    ['a library operator by its name', ['Map', 'Add', 'A', 'B']],
+    ['a library operator of two operands by its name', ['Map', 'Power', 'A', 'C']],
     ['an input and a literal list', ['Map', add2, 'D', ['List', 'x', 2, 3]]],
     ['a Range and a list', ['Map', add2, ['Range', 1, 5], 'A']],
     ['a Range of a run-time length', ['Map', add2, ['Range', 1, ['Length', 'D']], 'B']],
@@ -183,7 +185,6 @@ describe('IR profile, batch G26: Map of several lists', () => {
 
   // prettier-ignore
   test.each([
-    ['a named function (the existing compiler compiles it)', ['Map', 'Add', 'A', 'B'], /Map of 2 lists and a function that is not a literal of 2 parameters/],
     ['a literal of another arity (an error of the canonical form)', ['Map', fn('a', 'a'), 'A', 'B'], /static type error/],
     ['a scalar source (an error of the interpreter)', ['Map', add2, 'A', 'x'], /static type error/],
     ['a tuple source', ['Map', add2, 'A', ['Tuple', 1, 'x']], /a tuple where a list is read/],

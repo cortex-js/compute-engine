@@ -180,13 +180,13 @@ describe('IR profile: an input with no type', () => {
 
   test('a decline of the lowering is reported, before or after the input with no type', () => {
     for (const json of [
-      ['List', 'w', ['Sinc', 'x']],
-      ['List', ['Sinc', 'x'], 'w'],
+      ['List', 'w', ['SinIntegral', 'x']],
+      ['List', ['SinIntegral', 'x'], 'w'],
     ])
       for (const to of ['javascript', 'glsl'])
         expect(
           compiled(json, { to, profile: 'ir', fallback: false }).diagnostic
-        ).toMatchObject({ code: 'outside-profile', operator: 'Sinc' });
+        ).toMatchObject({ code: 'outside-profile', operator: 'SinIntegral' });
   });
 
   test('a vars name with no type read in a called body is refused', () => {

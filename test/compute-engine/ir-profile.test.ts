@@ -27,6 +27,7 @@ import {
 import { ALL_PASSES } from '../../src/compute-engine/compilation/ir/passes';
 import { hasOwnLowering } from '../../src/compute-engine/compilation/ir/lower-context';
 import { rangeCount } from '../../src/compute-engine/numerics/range-count';
+import { sinIntegral } from '../../src/compute-engine/numerics/special-functions';
 import {
   agrees,
   interpret,
@@ -208,21 +209,21 @@ describe('the option selects the IR compiler', () => {
 
 describe('a decline', () => {
   test('falls back to the interpreter with the diagnostic', () => {
-    const r = quiet(() => compile(box(['Sinc', 'x']), IR));
+    const r = quiet(() => compile(box(['SinIntegral', 'x']), IR));
     expect(r.success).toBe(false);
     expect(r.diagnostic).toMatchObject({
       code: 'outside-profile',
       kind: 'capability',
-      operator: 'Sinc',
-      value: 'Sinc(x)',
+      operator: 'SinIntegral',
+      value: 'SinIntegral(x)',
     });
-    expect(r.run!({ x: 3 })).toBeCloseTo(Math.sin(3) / 3, 12);
+    expect(r.run!({ x: 3 })).toBeCloseTo(sinIntegral(3), 12);
   });
   test('with fallback: false is thrown', () => {
-    const o = outcome(box(['Sinc', 'x']));
+    const o = outcome(box(['SinIntegral', 'x']));
     expect('diagnostic' in o && o.diagnostic.code).toBe('outside-profile');
     expect('message' in o && o.message).toMatch(
-      /^Could not compile with the profile 'ir': Sinc\(x\)/
+      /^Could not compile with the profile 'ir': SinIntegral\(x\)/
     );
   });
 
@@ -491,7 +492,7 @@ describe('an internal error', () => {
       {
         rows: [
           {
-            head: 'Sinc',
+            head: 'SinIntegral',
             arity: 1,
             signatures: [[['real'], 'real', 'broken']],
             threads: false,
@@ -504,14 +505,19 @@ describe('an internal error', () => {
     );
 
   test('is a compile-error and falls back', () => {
-    const r = broken(() => quiet(() => compile(box(['Sinc', 'x']), IR)));
+    const r = broken(() =>
+      quiet(() => compile(box(['SinIntegral', 'x']), IR))
+    );
     expect(r.success).toBe(false);
     expect(r.diagnostic?.code).toBe('compile-error');
     expect(r.diagnostic?.message).toMatch(/internal error/);
-    expect(r.run!({ x: Math.PI / 2 })).toBeCloseTo(2 / Math.PI, 12);
+    expect(r.run!({ x: Math.PI / 2 })).toBeCloseTo(
+      sinIntegral(Math.PI / 2),
+      12
+    );
   });
   test('with fallback: false is thrown as a compile-error', () => {
-    const o = broken(() => outcome(box(['Sinc', 'x'])));
+    const o = broken(() => outcome(box(['SinIntegral', 'x'])));
     expect('diagnostic' in o && o.diagnostic.code).toBe('compile-error');
   });
 });
@@ -557,14 +563,14 @@ describe('a row whose head is the name of an IR operation', () => {
 
 describe('a cancellation', () => {
   // A row whose fold is cancelled: `Length(L)` is the constant 3, so the
-  // `fold` pass folds `Sinc(3)` with the row.
+  // `fold` pass folds `SinIntegral(3)` with the row.
   test('propagates, with fallback', () => {
     const cancelled = {
       rows: [
         {
-          head: 'Sinc',
+          head: 'SinIntegral',
           arity: 1,
-          signatures: [[['real'], 'real', 'sinc']],
+          signatures: [[['real'], 'real', 'si']],
           threads: false,
           effect: 'pure',
           fold: () => {
@@ -572,12 +578,12 @@ describe('a cancellation', () => {
           },
         },
       ],
-      spellings: { sinc: '(Math.sin($0) / $0)' },
+      spellings: { si: '_SYS.sinIntegral($0)' },
     } as const;
     let error: unknown;
     try {
       _withIrProfileTestExtension(cancelled, () =>
-        quiet(() => compile(box(['Sinc', ['Length', 'L']]), IR))
+        quiet(() => compile(box(['SinIntegral', ['Length', 'L']]), IR))
       );
     } catch (e) {
       error = e;
@@ -825,7 +831,7 @@ describe('the switch of the engine', () => {
     // A decline: the existing compiler compiles it.
     const declined = implicitCompile(
       engine,
-      engine.box(['Function', ['Sinc', 'u'], 'u']),
+      engine.box(['Function', ['SinIntegral', 'u'], 'u']),
       'nd'
     );
     expect(declined?.success).toBe(true);

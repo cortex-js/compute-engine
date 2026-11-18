@@ -1468,7 +1468,7 @@ describe('IR profile on GLSL: declines', () => {
     const broken = {
       rows: [
         {
-          head: 'Sinc',
+          head: 'ErfInv',
           arity: 1 as const,
           signatures: [[['real'], 'real', 'broken']] as never,
           threads: false,
@@ -1478,10 +1478,13 @@ describe('IR profile on GLSL: declines', () => {
       spellings: { broken: { text: 'x', helpers: 1 as never } },
     };
     _withIrProfileTestExtension(broken, () => {
-      expect(declined(['Sinc', 'x'])?.code).toBe('compile-error');
+      expect(declined(['ErfInv', 'x'])?.code).toBe('compile-error');
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
       try {
-        const r = compile(ce.box(['Sinc', 'x']), { to: 'glsl', profile: 'ir' });
+        const r = compile(ce.box(['ErfInv', 'x']), {
+          to: 'glsl',
+          profile: 'ir',
+        });
         expect([r.success, r.profile]).toEqual([true, undefined]);
       } finally {
         warn.mockRestore();

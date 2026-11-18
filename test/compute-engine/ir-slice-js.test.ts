@@ -40,6 +40,7 @@ import {
 import type { Program } from '../../src/compute-engine/compilation/ir/ir';
 import { foldSeed } from '../../src/compute-engine/numerics/random';
 import type { Expression } from '../../src/compute-engine/global-types';
+import { sinIntegral } from '../../src/compute-engine/numerics/special-functions';
 import {
   agrees,
   interpret,
@@ -571,13 +572,13 @@ describe('IR slice: declines', () => {
 });
 
 describe('IR slice: effects', () => {
-  // A test row, for these compilations only: `Sinc` as an effectful
+  // A test row, for these compilations only: `SinIntegral` as an effectful
   // operation that records its operand.
   const log: number[] = [];
   const TICK: Extension = {
     rows: [
       {
-        head: 'Sinc',
+        head: 'SinIntegral',
         arity: 1,
         signatures: [[['real'], 'real', 'tick']],
         threads: false,
@@ -597,30 +598,35 @@ describe('IR slice: effects', () => {
   beforeEach(() => (log.length = 0));
 
   test('not merged', () => {
-    tick(['List', ['Sinc', 'x'], ['Sinc', 'x']]).run({ x: 1 });
+    tick(['List', ['SinIntegral', 'x'], ['SinIntegral', 'x']]).run({ x: 1 });
     expect(log).toEqual([1, 1]);
   });
   test('not removed', () => {
-    expect(tick(['Block', ['Sinc', 'x'], 7]).run({ x: 2 })).toBe(7);
+    expect(tick(['Block', ['SinIntegral', 'x'], 7]).run({ x: 2 })).toBe(7);
     expect(log).toEqual([2]);
   });
   test('not reordered', () => {
-    tick(['List', ['Sinc', 'x'], ['Sinc', 'y'], ['Sinc', 'x']]).run({
+    tick([
+      'List',
+      ['SinIntegral', 'x'],
+      ['SinIntegral', 'y'],
+      ['SinIntegral', 'x'],
+    ]).run({
       x: 1,
       y: 2,
     });
     expect(log).toEqual([1, 2, 1]);
   });
   test('not folded, closed or not', () => {
-    expect(tick(['Add', ['Sinc', 2], 1]).run({})).toBe(3);
+    expect(tick(['Add', ['SinIntegral', 2], 1]).run({})).toBe(3);
     expect(log).toEqual([2]);
   });
   test('the table is not changed by a compilation', () => {
-    expect(OPERATORS.some((r) => r.head === 'Sinc')).toBe(false);
+    expect(OPERATORS.some((r) => r.head === 'SinIntegral')).toBe(false);
     expect(Object.isFrozen(OPERATORS) && Object.isFrozen(JS.ops)).toBe(true);
   });
   test('a shared node with an effect is evaluated at each occurrence', () => {
-    const e = ce.box(['Sinc', 'x'] as never);
+    const e = ce.box(['SinIntegral', 'x'] as never);
     const program = ce.function('Add', [e, e]);
     expect(
       compileSlice(program, { target: 'javascript', extend: TICK }).run({
@@ -630,7 +636,7 @@ describe('IR slice: effects', () => {
     expect(log).toEqual([3, 3]);
   });
   test('the right operand of Or is evaluated only when needed', () => {
-    const r = tick(['Or', 'p', ['Greater', ['Sinc', 'x'], 0]]);
+    const r = tick(['Or', 'p', ['Greater', ['SinIntegral', 'x'], 0]]);
     expect(r.run({ p: true, x: 5 })).toBe(true);
     expect(log).toEqual([]);
     expect(r.run({ p: false, x: 5 })).toBe(true);
@@ -723,34 +729,40 @@ describe('IR slice: the memo of the lowering', () => {
 });
 
 describe('IR slice: an operator is one row', () => {
-  test('Sinc: one row and one spelling per printer', () => {
+  test('SinIntegral: one row and one spelling per printer', () => {
+    // The kernel of the interpreter, which the spelling reads.
+    (globalThis as { __si?: (x: number) => number }).__si = sinIntegral;
     const rows: Extension['rows'] = [
       {
-        head: 'Sinc',
+        head: 'SinIntegral',
         arity: 1,
-        signatures: [[['real'], 'real', 'sinc']],
+        signatures: [[['real'], 'real', 'si']],
         threads: true,
         effect: 'pure',
-        fold: (x: number) => Math.sin(x) / x,
+        fold: sinIntegral,
       },
     ];
-    const expr = ce.box(['Add', ['Sinc', 'x'], ['Sinc', 'L']] as never);
+    const expr = ce.box([
+      'Add',
+      ['SinIntegral', 'x'],
+      ['SinIntegral', 'L'],
+    ] as never);
     const point = { x: 0.3, L: [1, -2, 0.5] };
     for (const passes of [false, true])
       expect(
         agrees(
           runSlice(expr, point, passes, {
             rows,
-            spellings: { sinc: '(Math.sin($0) / $0)' },
+            spellings: { si: 'globalThis.__si($0)' },
           }),
           interpret(ce, expr, point)
         )
       ).toBe(true);
-    const glsl = { rows, spellings: { sinc: '(sin($0) / $0)' } };
+    const glsl = { rows, spellings: { si: '_si($0)' } };
     expect(compileSlice(expr, { target: 'glsl', extend: glsl }).code).toMatch(
-      /sin\(in\d_x\) \/ in\d_x/
+      /_si\(in\d_x\)/
     );
-    expect(GLSL.ops.sinc).toBeUndefined();
+    expect(GLSL.ops.si).toBeUndefined();
   });
 });
 
@@ -1483,8 +1495,8 @@ describe('IR slice: runtime', () => {
     expect(g.head).toBe('Random');
   });
   test('a closed sub-expression of a head out of the slice is not evaluated', () => {
-    expect(declineOf(() => js(['Add', 'x', ['Sinc', 3]])).cause).toMatch(
-      /Sinc/
+    expect(declineOf(() => js(['Add', 'x', ['SinIntegral', 3]])).cause).toMatch(
+      /SinIntegral/
     );
   });
 });

@@ -164,6 +164,10 @@ export const GLSL: Syntax = deepFreeze({
       helpers: ['_gpu_ir_factorial'],
     },
     'gcd': { text: '_gpu_ir_gcd($0, $1)', helpers: ['_gpu_ir_gcd'] },
+    // Below 0.5 its Taylor polynomial (error 2e-11): a renderer's `sin` is
+    // wrong by 3e-5 there (`Sinc(1e-6)` was 1.03, `Sinc(1e-30)` 0).
+    'sinc':
+      '(abs($0) < 0.5 ? 1.0 - $0 * $0 * (0.16666666666666666 - $0 * $0 * (0.008333333333333333 - $0 * $0 * (0.0001984126984126984 - $0 * $0 * 2.7557319223985893e-6))) : sin($0) / $0)',
     'fresnelc': {
       text: '_gpu_ir_fresnelc($0)',
       helpers: ['_gpu_ir_polevl', '_gpu_ir_fresnel_fg', '_gpu_ir_fresnelc'],

@@ -80,18 +80,19 @@ The standard handler of `PointList` is not such a handler (the identity of the
 function in the library table). Then a sub-expression that the slice would lower
 and that has no free name, no name bound by the walk, no effectful operation and
 no loop is evaluated once with `N()` and becomes a literal (`Mod(1, 1/10)` is
-exactly 0). A closed `Sinc(3)` is not folded, because `Sinc` is not in the
-slice. A sub-expression whose static type is `error` declines (`Sin(Tuple(w))`
-of a vector `w`, `2·Tuple(L, L)`). A throw of `N()` means "not folded": the node
-is lowered as written, except a `CancellationError`, which propagates. A row
-that depends on an engine setting declines when the setting is not the default,
-except the angular unit: under `'deg'`, `'grad'` or `'turn'` the lowering
-multiplies each operand of a direct trigonometric row (`Sin`, `Cos`, `Tan`,
-`Cot`, `Sec`, `Csc`, `Haversine`) by the radians of one unit, and the result of
-an inverse row (`Arcsin`, ..., `Arctan2`, `Argument`, `Degrees`) by the units of
-one radian, on both lanes and both targets, as the interpreter converts them
-(`ANGLE_FACTORS`, the row field `angle`). Like every engine setting, the
-compiled code holds the factor of the unit at the time of the compilation.
+exactly 0). A closed `SinIntegral(3)` is not folded, because `SinIntegral` is
+not in the slice. A sub-expression whose static type is `error` declines
+(`Sin(Tuple(w))` of a vector `w`, `2·Tuple(L, L)`). A throw of `N()` means "not
+folded": the node is lowered as written, except a `CancellationError`, which
+propagates. A row that depends on an engine setting declines when the setting is
+not the default, except the angular unit: under `'deg'`, `'grad'` or `'turn'`
+the lowering multiplies each operand of a direct trigonometric row (`Sin`,
+`Cos`, `Tan`, `Cot`, `Sec`, `Csc`, `Haversine`) by the radians of one unit, and
+the result of an inverse row (`Arcsin`, ..., `Arctan2`, `Argument`, `Degrees`)
+by the units of one radian, on both lanes and both targets, as the interpreter
+converts them (`ANGLE_FACTORS`, the row field `angle`). Like every engine
+setting, the compiled code holds the factor of the unit at the time of the
+compilation.
 
 `closedValue()` gives a number only. A `Range` lowered as a list value (an
 operand of an element-wise row, an argument, the value of a name, an element of
@@ -264,8 +265,10 @@ rows (`Sec`, `Csc`, `Coth`, `Sech`, `Csch`) are builtins or their reciprocals.
 `_gpu_ir_fresnels`: the rational approximations of the JavaScript kernels, each
 table a `float[12]` padded with zeros (GLSL converts no array size), the phase
 πx²/2 reduced mod 2π from x = n + r, and its sine and cosine Taylor polynomials
-(a renderer's `sin` can be wrong by 1e-5); ±1/2 from |x| = 10^7. The other real
-functions (`Erf`, `Gamma`, `Zeta`, `Arccot`, `Arcsec`, ...) decline there.
+(a renderer's `sin` can be wrong by 1e-5); ±1/2 from |x| = 10^7. `Sinc` is its
+Taylor polynomial of degree 8 below |x| = 0.5 (error 2e-11), and `sin(x) / x`
+above. The other real functions (`Erf`, `Gamma`, `Zeta`, `Arccot`, `Arcsec`,
+...) decline there.
 
 `Mod` on JavaScript is `floorMod()` (the remainder with the sign of the
 divisor). For a divisor of 1 it computes `x - floor(x)`, the same double with no
@@ -653,8 +656,9 @@ comparisons, `And`, `Or`, `Not` (Kleene logic on verdicts), `If`, `Which`, a
 `Random()` and `WithRandomSeed` of a number seed, a root function literal, and
 the lists below, and integrals (below). `Haversine`, `Zeta`, `FresnelC`,
 `FresnelS` (the kernel `_IA.fresnelS` misses S(1.5) by 4 ulps, more than its
-outward ulp) and the complex and colour operations have no spelling and decline
-(a cause of the mode ends with "on interval-js"). A `Loop` is lowered as on
+outward ulp), `Sinc` (`_IA.sinc` misses the extremum on [4, 5] by 3e-14,
+CE-1436) and the complex and colour operations have no spelling and decline (a
+cause of the mode ends with "on interval-js"). A `Loop` is lowered as on
 JavaScript ("Loops and the runtime"): its carried values are intervals, a local
 assigned in an undecided `If` of a pass holds the hull of both arms (the earlier
 interval target answers `entire` there), and one whose values are not read is
@@ -1088,54 +1092,56 @@ gives the same enclosure or a tighter one, never a value outside it. On doubles
 `1 · a`, `max(−∞, a)` and `min(+∞, a)` are `a` (−0 and NaN included), but
 `0 + −0` is `0`: outside the interval mode a `Sum` starts from 0, as its loop
 (`((0 + L₁) + L₂) + L₃`, so `Sum(L)` of `L = [−0, −0]` is `0`).
-`Reduce(L, f, init)` starts from `init`, as its loop does. A list of one element
-is that element, and a list of 0 elements keeps the loop (and the value of `Max`
-and `Min` of no element, NaN). Builds written out are at most 4,096 elements in
-a program, the budget of GLSL: past it, a build keeps its loop in the mode,
-where GLSL declines. `scalarize` writes an element-wise operation of such a
-length one element at a time, the list rules of `fold` then read an element of
-its result as the operation on the elements, and `inline` copies a call whose
-result is such a list ("User functions"): `At(S(x), 2)` of
-`S(t) = Cos(t + List(0, 1, 2))` is `cos(x + 1)`, and the two other cosines are
-not computed. A list of a run-time length or of 17 elements or more keeps its
-loop and its build. `Max` and `Min` fold from -∞ and +∞ over all their operands,
-and give NaN when the total count of elements and scalars is 0; `Max(x)` and
-`Min(x)` of one real or integer scalar are `x` (of a boolean or a complex number
-they decline: the interpreter leaves them unevaluated). A reduction (`Sum`,
-`Max`, `Min`) of one literal `List` of at least one element, each of a number
-type, is the reduction of its elements, with no array and no loop:
-`Max(List(x, y, x·y))` is `Max(x, y, x·y)`, and `Sum(List(a, b))` is
-`(0 + a) + b`, the fold of the loop, and `a + b` in the interval mode, where the
-`0 +` is an exact zero (`Product(List(…))` is `Reduce` in the canonical form and
-keeps the loop). On JavaScript (the interval mode included; not in the bigint
-and complex modes, and never on GLSL; the internal switch
-`SliceOptions.unrollSums` turns it off for a test), a `Sum` or a `Product` with
-`Limits` of two integer constant bounds and 1 to 100 passes is written out: its
-body is lowered once per index, the index bound to the constant, and the terms
-are folded from the identity in ascending order, the operations of the loop
-(`Sum(sin(k·x)/k, k = 1..3)` is `((0 + sin(1·x)/1) + sin(2·x)/2) + sin(3·x)/3`,
-with no `0 +` after `fold` in the interval mode), so that a part that reads only
-the index is a constant (`(-1)^i/i`, computed once). One exception to the
-operations of the loop: a constant index selects the kernel of a constant
-operand, so `Log(x, k)` at k = 10 is `log10(x)` and at k = 2 `log2(x)`, where
-the loop computes `ln(x)/ln(k)` (`Sum(Floor(Log(x, k)), Limits(k, 10, 10))` at x
-= 1000 is 3, the interpreter's value, where the loop gives 2). A term that reads
-no index is one value, added once per pass. The sum keeps its loop when its body
-has an effect (a draw, a read of `vars`: n copies would be n draw sites), holds
-a loop (a `Loop`, an inner sum that is not written out) or calls a function on a
-cycle of calls, when a term computes a complex value (`Sqrt(k)` of the constant
--1, also under `Abs`, where the loop's real kernel gives NaN; the complex mode
-keeps every loop) or declines (`If(k < 0, x, Floor(Sqrt(k)))` at k = -1, whose
-comparison of constants is still an operation), past the `iterationBudget`, and
-when the bodies written out in the program would pass 4,096 (the budget of the
-builds of GLSL, shared) or half the nodes left to lower: in a nest of constant
-sums the inner ones are written out, and the outer one when they all are. The
-attempt stops at the first term that holds a loop, and a sum whose term held a
-loop that no limit made is not attempted again in the lowering (`looped`); a sum
-whose nest of sums of constant bounds (literals, or the values that free names
-hold) counts more bodies than are left is not attempted (`bodies()`); after the
-first sum refused by a limit, the lowering attempts no more sums (`limited`), so
-a small sum that follows it keeps its loop: in a nest of few terms each level
+`Reduce(L, f, init)` starts from `init`, as its loop does; `f` is a variadic row
+or a binary one, a left fold as the interpreter's (`Reduce(L, Subtract, 0)` is
+`((0 − L₁) − L₂) − L₃`). A list of one element is that element, and a list of 0
+elements keeps the loop (and the value of `Max` and `Min` of no element, NaN).
+Builds written out are at most 4,096 elements in a program, the budget of GLSL:
+past it, a build keeps its loop in the mode, where GLSL declines. `scalarize`
+writes an element-wise operation of such a length one element at a time, the
+list rules of `fold` then read an element of its result as the operation on the
+elements, and `inline` copies a call whose result is such a list ("User
+functions"): `At(S(x), 2)` of `S(t) = Cos(t + List(0, 1, 2))` is `cos(x + 1)`,
+and the two other cosines are not computed. A list of a run-time length or of 17
+elements or more keeps its loop and its build. `Max` and `Min` fold from -∞ and
++∞ over all their operands, and give NaN when the total count of elements and
+scalars is 0; `Max(x)` and `Min(x)` of one real or integer scalar are `x` (of a
+boolean or a complex number they decline: the interpreter leaves them
+unevaluated). A reduction (`Sum`, `Max`, `Min`) of one literal `List` of at
+least one element, each of a number type, is the reduction of its elements, with
+no array and no loop: `Max(List(x, y, x·y))` is `Max(x, y, x·y)`, and
+`Sum(List(a, b))` is `(0 + a) + b`, the fold of the loop, and `a + b` in the
+interval mode, where the `0 +` is an exact zero (`Product(List(…))` is `Reduce`
+in the canonical form and keeps the loop). On JavaScript (the interval mode
+included; not in the bigint and complex modes, and never on GLSL; the internal
+switch `SliceOptions.unrollSums` turns it off for a test), a `Sum` or a
+`Product` with `Limits` of two integer constant bounds and 1 to 100 passes is
+written out: its body is lowered once per index, the index bound to the
+constant, and the terms are folded from the identity in ascending order, the
+operations of the loop (`Sum(sin(k·x)/k, k = 1..3)` is
+`((0 + sin(1·x)/1) + sin(2·x)/2) + sin(3·x)/3`, with no `0 +` after `fold` in
+the interval mode), so that a part that reads only the index is a constant
+(`(-1)^i/i`, computed once). One exception to the operations of the loop: a
+constant index selects the kernel of a constant operand, so `Log(x, k)` at k =
+10 is `log10(x)` and at k = 2 `log2(x)`, where the loop computes `ln(x)/ln(k)`
+(`Sum(Floor(Log(x, k)), Limits(k, 10, 10))` at x = 1000 is 3, the interpreter's
+value, where the loop gives 2). A term that reads no index is one value, added
+once per pass. The sum keeps its loop when its body has an effect (a draw, a
+read of `vars`: n copies would be n draw sites), holds a loop (a `Loop`, an
+inner sum that is not written out) or calls a function on a cycle of calls, when
+a term computes a complex value (`Sqrt(k)` of the constant -1, also under `Abs`,
+where the loop's real kernel gives NaN; the complex mode keeps every loop) or
+declines (`If(k < 0, x, Floor(Sqrt(k)))` at k = -1, whose comparison of
+constants is still an operation), past the `iterationBudget`, and when the
+bodies written out in the program would pass 4,096 (the budget of the builds of
+GLSL, shared) or half the nodes left to lower: in a nest of constant sums the
+inner ones are written out, and the outer one when they all are. The attempt
+stops at the first term that holds a loop, and a sum whose term held a loop that
+no limit made is not attempted again in the lowering (`looped`); a sum whose
+nest of sums of constant bounds (literals, or the values that free names hold)
+counts more bodies than are left is not attempted (`bodies()`); after the first
+sum refused by a limit, the lowering attempts no more sums (`limited`), so a
+small sum that follows it keeps its loop: in a nest of few terms each level
 would double the attempts. A nest of fourteen sums of 3 terms or four of 100
 compiles in about 0.1 s, where each sum tried at each term of the sums around it
 took seconds or the whole memory. The passes written out are not counted by the
@@ -1851,15 +1857,22 @@ function whose body applies its own derivative declines after about 9 s. The
 forward-mode lowering of the existing JavaScript target (`jet-derivative.ts`)
 and its vector stencil (a body that is a list or a point) are not in the
 profile. A function value other than the literal of a `Map`, a `Filter`, an
-`Apply` or the root declines. A list argument of a call of a function whose
-parameters are all scalars (`paramsAreScalar()`, the interpreter's test: an
-untyped parameter is a scalar, a variadic signature is not) is mapped as the
-interpreter maps it (`mapOver()`): the arguments are lowered once, in order,
-then a build over the length of the lists (on GLSL the list of its elements, as
-`Map`) calls the function with the element of each list at the index and with
-each scalar argument, so a draw in an argument runs once and a draw in the body
-once per element, in order: `h(x, List(2, 4, 8, 16))`, `Sum(f(L))`. The function
-is defined with its scalar parameters, so a call with a list and a call with a
+`Apply` or the root declines. A name of a library operator of a row in the place
+of a literal of a `Map`, a `Filter` or the root is the literal
+`(p1, …, pn) ↦ Op(p1, …, pn)`, as the interpreter applies it
+(`operatorLiteral()`): at the arity of its row, or for a variadic row the number
+of lists of the `Map`, 1 for a `Filter` and 2 for the root (the combiner of the
+`Reduce` of the engine: `Reduce(L, Max, 0)` compiles `Max` as
+`Math.max(a0, a1)`). A user function, a shadowed name and a `chain` row (`Less`)
+decline as before. A list argument of a call of a function whose parameters are
+all scalars (`paramsAreScalar()`, the interpreter's test: an untyped parameter
+is a scalar, a variadic signature is not) is mapped as the interpreter maps it
+(`mapOver()`): the arguments are lowered once, in order, then a build over the
+length of the lists (on GLSL the list of its elements, as `Map`) calls the
+function with the element of each list at the index and with each scalar
+argument, so a draw in an argument runs once and a draw in the body once per
+element, in order: `h(x, List(2, 4, 8, 16))`, `Sum(f(L))`. The function is
+defined with its scalar parameters, so a call with a list and a call with a
 scalar, in either order, and calls with lists of two lengths call one function.
 The lists must be flat and have one length: equal stated lengths, or one
 run-time length value (`h(D, D)`); lists of two lengths (the interpreter gives

@@ -26,10 +26,12 @@ import {
 } from './ir.js';
 import {
   REDUCTIONS,
+  rowOfHead,
   rowOfOp,
   signatureOf,
   type OperatorRow,
 } from './operators.js';
+import { isLibraryOperator } from '../../library-shadowing.js';
 import {
   decline,
   type Fn,
@@ -43,6 +45,39 @@ import { SCALARIZE_LIMIT } from './passes.js';
 export function parameterName(p: Expression): string | undefined {
   if (isFunction(p, 'Typed')) p = p.ops[0];
   return isSymbol(p) ? p.symbol : undefined;
+}
+
+/** The function literal `(p1, …, pn) ↦ Op(p1, …, pn)` of a symbol `f` that
+ *  names the library operator `Op` of a row, which the interpreter applies
+ *  as the call `Op(a1, …, an)`; `f` itself otherwise (a user function, a
+ *  shadowed name, a parameter, a name of `vars`). A row of a fixed arity
+ *  takes `n` of that arity, a variadic row any `n` (2 when `n` is not
+ *  given: the combiner of a `Reduce`); a `chain` row, none. */
+export function operatorLiteral(
+  f: Expression,
+  rows: readonly OperatorRow[],
+  n?: number,
+  vars?: readonly string[]
+): Expression {
+  if (!isSymbol(f) || vars?.includes(f.symbol)) return f;
+  const name = f.symbol;
+  const node = {
+    operator: name,
+    operatorDefinition: f.operatorDefinition,
+    valueDefinition: f.valueDefinition,
+    engine: f.engine,
+  };
+  const arity = rowOfHead(rows, name)?.arity;
+  const k = arity === 'variadic' ? (n ?? 2) : arity;
+  if (
+    typeof k !== 'number' ||
+    k < 1 ||
+    (n !== undefined && k !== n) ||
+    !isLibraryOperator(node as never, name)
+  )
+    return f;
+  const ps = Array.from({ length: k }, (_, i) => `_p${i + 1}`);
+  return f.engine.box(['Function', [name, ...ps], ...ps]);
 }
 
 /** `l` is a literal `List` of the library (a user definition declines in
@@ -402,6 +437,7 @@ export function listLowering(cx: Lowering) {
   /** A `Map` (or, with `filter`, a `Filter`) of the function literal `f`
    *  over the list `l`: a build whose body reads the element `k`. */
   const build = (e: Fn, l: Expression, f: Expression, filter: boolean): V => {
+    f = operatorLiteral(f, cx.rows, 1);
     const param = isFunction(f, 'Function')
       ? parameterName(f.ops[1])
       : undefined;
@@ -419,7 +455,8 @@ export function listLowering(cx: Lowering) {
    *  lowered once; one with an effect declines (the interpreter reads them
    *  up to the shortest). */
   const mapLists = (e: Fn): V => {
-    const [f, ...ls] = e.ops;
+    const [g, ...ls] = e.ops;
+    const f = operatorLiteral(g, cx.rows, ls.length);
     const names = isFunction(f, 'Function')
       ? f.ops.slice(1).map(parameterName)
       : [];

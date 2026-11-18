@@ -118,7 +118,12 @@ import {
   type Lowering,
 } from './lower-context.js';
 import { toBigint } from '../../boxed-expression/numerics.js';
-import { listLowering, literalList, parameterName } from './lower-lists.js';
+import {
+  listLowering,
+  literalList,
+  operatorLiteral,
+  parameterName,
+} from './lower-lists.js';
 import { SCALARIZE_LIMIT } from './passes.js';
 import {
   CONTROL_FLOW_HEADS,
@@ -1366,10 +1371,11 @@ export function lower(
           isSymbol(head) && !shadowsLibraryName(ce as never, head.symbol)
             ? rowOfHead(rows, head.symbol)
             : undefined;
-        if (e.nops !== 3 || r?.arity !== 'variadic')
+        // A left fold, as the interpreter's: `Subtract` and `Divide` too.
+        if (e.nops !== 3 || (r?.arity !== 'variadic' && r?.arity !== 2))
           decline(
             e,
-            'a Reduce with no initial value, or not by a variadic library operator of the slice'
+            'a Reduce with no initial value, or not by a variadic or binary library operator of the slice'
           );
         return lists.reduce(e, r, [lists.source(l)], scalar(init));
       }
@@ -3085,7 +3091,10 @@ export function lower(
       ...(enclosure ? { valueKinds: ['enclosure'] } : {}),
     };
   };
-  // A root function literal: its parameters, by position, come first.
+  // A root function literal: its parameters, by position, come first. A
+  // root name of a library operator is its literal (`operatorLiteral()`).
+  if (isSymbol(root))
+    root = operatorLiteral(root, rows, undefined, options.vars);
   if (isFunction(root, 'Function') && isLibrary(root)) {
     b.literal = true;
     // A parameter of no declared type is a real. One that the body reads as

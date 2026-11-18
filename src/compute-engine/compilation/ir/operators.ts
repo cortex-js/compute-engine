@@ -253,6 +253,8 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Erfc',         1,          [[[R], R, 'erfc']],            { fold: F.erfc }),
   row('FresnelC',     1,          [[[R], R, 'fresnelc']],        { fold: F.fresnelc }),
   row('FresnelS',     1,          [[[R], R, 'fresnels']],        { fold: F.fresnels }),
+  // In radians under every angular unit, as the interpreter's.
+  row('Sinc',         1,          [[[R], R, 'sinc']],            { fold: F.sinc }),
   row('Gamma',        1,          [[[R], R, 'gamma']],           { fold: F.gamma }),
   row('GammaLn',      1,          [[[R], R, 'gammaln']],         { fold: F.gammaln }),
   // An integer operand first: GLSL spells `factorial.int` only.
