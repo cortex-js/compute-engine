@@ -219,6 +219,19 @@ function isProvablyNonZeroNumerator(x: Expression): boolean {
 }
 
 /**
+ * Whether `x` is a constant symbol whose value may be zero, so that `x/x` is
+ * not `1`: with `z` a constant of value 0, `z/z` is `0/0`, which has no value.
+ * The value of a constant does not change, so the canonical form may read it.
+ * A constant with no value is not read: `c/c` is `1`, as `x/x` is for a free
+ * variable.
+ */
+export function isConstantThatMayBeZero(x: Expression): boolean {
+  if (!isSymbol(x) || !x.isConstant) return false;
+  const value = x.value;
+  return value !== undefined && !isProvablyNonZeroNumerator(value);
+}
+
+/**
  * The exponent `x` of a power (or the index of a root) as a rational, when
  * it is exact. A float exponent is not read as a rational, also when its
  * value is an integer: `x^{2.0}` keeps its float exponent, and is grouped as
@@ -911,7 +924,16 @@ export class Product {
     // reads the terms between the two, so it scans the list.
     if (!noncommuting) {
       const x = this.findTerm(tallyTerm);
-      if (x) {
+      // A constant whose value may be zero is not divided out
+      // (`isConstantThatMayBeZero()`): with `z` a constant of value 0,
+      // `z·z^{-1}` is `0·(1/0)`, not `1`.
+      if (
+        x &&
+        !(
+          isNeg(x.exponent) !== isNeg(tallyExp) &&
+          isConstantThatMayBeZero(tallyTerm)
+        )
+      ) {
         x.exponent = rationalAdd(x.exponent, tallyExp);
         if (quotient) x.quotient = true;
       } else
@@ -1899,6 +1921,8 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // that is or may be a collection either, for the reason given at the a/0
   // rule above: `L / L` with `L: list<integer>` is a list of ones (or of
   // `NaN` for a zero cell), not the scalar `1`.
+  // A constant symbol whose value may be zero keeps the quotient
+  // (`isConstantThatMayBeZero()`), and its evaluation gives `NaN`.
   if (
     op2.isSame(0) === false &&
     op2.isFinite !== false &&
@@ -1911,7 +1935,8 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
       isSymbol(op2) &&
       op1.symbol === op2.symbol &&
       op1.isConstant &&
-      !op2HasBlockLocal
+      !op2HasBlockLocal &&
+      !isConstantThatMayBeZero(op2)
     )
       return ce.One;
 

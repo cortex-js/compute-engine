@@ -6,7 +6,10 @@ import {
   arctan2AtInfinity,
   halfTurnAngle,
 } from '../boxed-expression/trigonometry.js';
-import { mul } from '../boxed-expression/arithmetic-mul-div.js';
+import {
+  isConstantThatMayBeZero,
+  mul,
+} from '../boxed-expression/arithmetic-mul-div.js';
 import { simplifyLogicFunction } from './simplify-logic.js';
 import type { Expression, Rule, RuleStep } from '../global-types.js';
 import {
@@ -362,10 +365,12 @@ export const SIMPLIFY_RULES: Rule[] = [
     // Not for a collection: `[x]/[x]` is the list `[1]`, which the
     // element-wise evaluation gives, not the number 1. Not for an operand
     // that draws: the two occurrences of `Random()` in `Random()/Random()`
-    // are two independent values.
+    // are two independent values. Not for a constant whose value may be zero
+    // (`isConstantThatMayBeZero()`).
     if (
       num.isSame(denom) &&
       num.isSame(0) === false &&
+      !isConstantThatMayBeZero(num) &&
       num.isInfinity !== true &&
       !isCollectionShaped(num) &&
       isMergeable(num)

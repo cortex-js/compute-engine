@@ -4,6 +4,7 @@ import { asRational } from '../boxed-expression/numerics.js';
 import { baseOffset } from './simplify-factorial.js';
 import { isCollectionShaped } from '../collection-utils.js';
 import { isMergeable } from '../boxed-expression/effects-of.js';
+import { isConstantThatMayBeZero } from '../boxed-expression/arithmetic-mul-div.js';
 import { canCombineSameBase } from './simplify-power.js';
 
 /**
@@ -56,10 +57,13 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
   // collection: `[x]/[x]` is the list `[1]`, which the element-wise
   // evaluation gives, not the number 1. Not for an operand that draws: the
   // two occurrences of `r(x)` (with `r` a function with the `random` effect)
-  // in `r(x)/r(x)` are two independent values.
+  // in `r(x)/r(x)` are two independent values. Not for a constant whose value
+  // may be zero (`isConstantThatMayBeZero()`): `z/z` with `z` a constant of
+  // value 0 is `0/0`.
   if (
     num.isSame(denom) &&
     num.isSame(0) === false &&
+    !isConstantThatMayBeZero(num) &&
     num.isInfinity !== true &&
     (isNumber(num) || num.symbols.length !== 0) &&
     !isCollectionShaped(num) &&
