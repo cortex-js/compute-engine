@@ -1091,6 +1091,38 @@ describe('a collection passed in a self-call types the parameter', () => {
       );
     });
 
+    // The slot that takes a collection binds a list argument whole, so the
+    // call does not map over it.
+    test('ce.assign of the literal (MathJSON route)', () => {
+      const ce = new ComputeEngine();
+      ce.assign(
+        'r',
+        ce.box([
+          'Function',
+          [
+            'If',
+            ['Equal', 'n', 0],
+            's',
+            ['r', ['Subtract', 'n', 1], ['List', 1, 2]],
+          ],
+          ['Typed', 'n', "'number'"],
+          's',
+        ])
+      );
+      expect(
+        ce
+          .box(['r', 1, ['List', 0]])
+          .evaluate()
+          .toString()
+      ).toBe('[1,2]');
+      expect(
+        ce
+          .box(['r', 1, ['List', 0, 7]])
+          .evaluate()
+          .toString()
+      ).toBe('[1,2]');
+    });
+
     test('held as a value', () => {
       expect(
         run(

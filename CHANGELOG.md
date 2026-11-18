@@ -78,6 +78,14 @@
 
 ### Resolved Issues
 
+- **A recursive function with an annotated parameter no longer maps over a
+  list that its other parameter takes whole.** With
+  `r := (n: number, s) ↦ If(n = 0, s, r(n − 1, [1, 2]))`, `r(1, [0])` was
+  `[[1, 2]]`; it is now `[1, 2]`, as without the annotation. The call of `r`
+  to itself gives `s` a list, so the signature is
+  `(n: number, s: list<any>) -> unknown`, and a list argument at `s` is bound
+  whole.
+
 - **Under `.N()`, a user function that returns early with a rounding
   function gives the correct integer.** With
   `f := x ↦ Block(If(x > 1, Return(Floor(x))), 0)`,

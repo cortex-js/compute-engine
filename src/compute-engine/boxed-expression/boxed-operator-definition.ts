@@ -97,6 +97,7 @@ import {
   noteDefinitionCapturedTypes,
   resultOutsideCallType,
 } from './function-literal.js';
+import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
 import {
   broadcastCellType,
   DECLARED_MISSING_MESSAGE,
@@ -2619,10 +2620,17 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           boxedFn,
           derived
         );
-        if (withEvidence !== derived)
+        if (withEvidence !== derived) {
           this._setSignature(
             () => new BoxedType(withEvidence, this.engine._typeResolver)
           );
+          // The `broadcastable` flag of a derived signature was read from the
+          // literal's own arrow, where `s` is still a scalar slot. A slot
+          // that now takes a collection binds a list argument whole, so the
+          // call must not map over it: `r(1, [0])` gave `[[1, 2]]`.
+          if (!signatureParamsAreScalar(withEvidence))
+            this.broadcastable = false;
+        }
       }
 
       // Mark this operator definition as backed by a user-defined function
