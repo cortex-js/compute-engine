@@ -78,6 +78,16 @@
 
 ### Resolved Issues
 
+- **A `Series` at a kink, a jump or a branch point of a root no longer gives
+  a series that holds on one side only.** `Series(Abs(x), x, 0, 3)` was
+  `O(x⁴)`, `Series(Floor(x), x, 1, 3)` was `1` (the floor is `0` for
+  `x < 1`), and `Series(Sqrt(x^2), x, 0, 3)` was `x + O(x^(9/2))` (it is
+  `-x` for `x < 0`); `Sqrt(-x)` and `Sqrt(x^3)` had the wrong sign for
+  `x < 0`. Each one now stays `Series(...)`. Away from the kink or the jump
+  the series is unchanged: `Series(Abs(x), x, 1, 3)` is `x + O((x - 1)^4)`,
+  and `Series(Sqrt(x^4), x, 0, 3)` is `x^2 + O(x^(7/2))`. A `Mod` or an
+  `If` of the variable at a finite point now stays `Series(...)` too:
+  `Series(Mod(x, 1), x, 0, 3)` was `x`.
 - **An interval integral whose bound reaches past the domain of the
   integrand is no longer `empty`.** On `interval-js`,
   `Integrate(Sqrt(t), Limits(t, 0, x))` over `x = [-0.77, 1.23]` answered

@@ -215,6 +215,11 @@ interface ZeroTests {
  * `undefined` outside such a call. */
 let activeZeroTests: ZeroTests | undefined;
 
+/** Whether the expansion that runs must hold on both sides of the point: a
+ * `Series` at a finite point. The expansion at ±∞ (in `s` at `s = 0⁺`) and
+ * `laurentData()` keep the expansion for `t > 0` (`puiseuxPower()`). */
+let bothSides = false;
+
 /** The value in `cache` for the constant `e`. When there is none, it is
  * computed by `compute()` and put in `cache`. */
 function cachedByStructure<T>(
@@ -1679,6 +1684,61 @@ function asSmallNonIntegerRational(
 }
 
 /**
+ * Whether the Puiseux step `(t^m·U)^{p/r} = t^{m·p/r}·U^{p/r}` of
+ * `puiseuxPower()` holds for `t < 0` too. `bs` is the expansion of the base,
+ * `m` its valuation and `U0` its leading coefficient. The step always holds
+ * for `t > 0`.
+ *
+ * With an even `r`, `u^{p/r}` and `t^{m·p/r}` are principal powers. For
+ * `t < 0` and a real `U0 ≠ 0`, `t^m·U` has the argument `π·(m − 2k)` with
+ * `k = ⌊m/2⌋` when `U0 > 0` and `k = ⌈m/2⌉` when `U0 < 0`, so the two sides
+ * differ by the factor `e^{2iπ·k·p/r}`: the step holds when `k·p/r` is an
+ * integer. `√(x²)` (`k·p/r = 1/2`) is `|x|`, not `x`; `√(x⁴)` is `x²`; `√x`
+ * (`k = 0`) holds; `√(−x)` (`k = 1`) is `√|x|`, not `i·√x`.
+ *
+ * With an odd `r`, the engine takes the real root of a negative real number
+ * (`(−8)^{1/3} = −2`), which is multiplicative on the reals: the step holds
+ * when every coefficient of the base is real.
+ *
+ * When `U0 < 0`, `U` stays on the negative real axis, the cut of `u^{p/r}`,
+ * only when every coefficient is real and the base has no fractional power:
+ * `√(−x⁴ + i·x⁵)` crosses the cut at `x = 0`. A leading coefficient that is
+ * not a real number of known sign, and a base with a fractional power
+ * (`bs.d > 1`) that vanishes at the point, do not hold.
+ */
+function puiseuxHoldsBelow(
+  ce: ComputeEngine,
+  bs: Laurent,
+  m: number,
+  U0: Expression,
+  p: number,
+  r: number
+): boolean {
+  const positive = U0.isPositive === true;
+  if (!positive && U0.isNegative !== true) return false;
+  const real = bs.d === 1 && hasRealCoefficients(ce, bs, m);
+  if (!positive && !real) return false;
+  if (m === 0) return true;
+  if (bs.d !== 1) return false;
+  if (r % 2 !== 0) return real;
+  const k = positive ? Math.floor(m / 2) : Math.ceil(m / 2);
+  return (k * p) % r === 0;
+}
+
+/** Whether each coefficient of `L` from the power `from` to `L.hi` is real. */
+function hasRealCoefficients(
+  ce: ComputeEngine,
+  L: Laurent,
+  from: number
+): boolean {
+  for (let k = from; k <= L.hi; k++) {
+    const c = coeffAt(ce, L, k);
+    if (!c.type.matches('real') && !c.isSame(0)) return false;
+  }
+  return true;
+}
+
+/**
  * Puiseux expansion of `base^{p/r}` (`r ≥ 2`) about `x0`. Factors the base as
  * `G = t^{m/d}·U` with unit part `U` (leading coefficient `≠ 0`); the result is
  * `t^{m·p/(d·r)}·U^{p/r}`, a Laurent value with ramification `d·r` (`U^{p/r}`
@@ -1702,6 +1762,7 @@ function puiseuxPower(
   if (m > bs.hi) return null; // leading term past the reliable window
   const U0 = coeffAt(ce, bs, m);
   if (U0.isSame(0) || U0.has(x)) return null; // log-carrying leading coeff
+  if (bothSides && !puiseuxHoldsBelow(ce, bs, m, U0, p, r)) return null;
   const dB = bs.d;
   const D = dB * r;
   if (W * D > MAX_SERIES_ORDER) return null; // window too large — defer
@@ -2214,7 +2275,14 @@ export function laurentData(
     (x0.unknowns.length > 0 || exactComplexParts(x0) === undefined)
   )
     return null;
-  const L = expandLaurent(f, x, x0, ce, Math.min(W, MAX_SERIES_ORDER));
+  const outerSides = bothSides;
+  bothSides = false;
+  let L: Laurent | null;
+  try {
+    L = expandLaurent(f, x, x0, ce, Math.min(W, MAX_SERIES_ORDER));
+  } finally {
+    bothSides = outerSides;
+  }
   if (!L) return null;
   const v = trueVal(L);
   if (v === null || v > L.hi) return null; // window exhausted — undecidable
@@ -2370,11 +2438,14 @@ export function computeSeries(
   // expands a series) gets its own state, and the state of the outer call is
   // put back when it returns.
   const outer = activeZeroTests;
+  const outerSides = bothSides;
   activeZeroTests = { verdicts: new Map(), enclosures: new Map() };
+  bothSides = false;
   try {
     return computeSeriesInCall(f, x, x0, n, ce, resolveLimit);
   } finally {
     activeZeroTests = outer;
+    bothSides = outerSides;
   }
 }
 
@@ -2414,6 +2485,9 @@ function computeSeriesInCall(
   // A non-finite, non-±∞ point (NaN, unsigned ∞): cannot expand.
   if (x0.isNaN) return undefined;
   if (holdsHypergeometricOnCut(f, x, x0)) return undefined;
+  // The expansion is a series in `x − x0` on both sides of the point.
+  if (!isSmoothAt(f, x, x0)) return undefined;
+  bothSides = true;
 
   const xExpr = ce.symbol(x);
   const t = x0.isSame(0) ? xExpr : ce.function('Subtract', [xExpr, x0]);
@@ -2579,7 +2653,8 @@ function rewriteLnAtom(
  * choice by a condition. Their expansion at ±∞ is the one of the function
  * `1/s` is put in, at `s = 0`, where the derivative of a step is 0 and the
  * derivative of `|s|` is `Sign(0) = 0`: `1/|x|` at +∞ would lose its term
- * `1/x`. */
+ * `1/x`. At a finite point, `isSmoothAt()` tells whether each of them is
+ * smooth near the point. */
 const NON_SMOOTH_OPERATORS = new Set([
   'Abs',
   'Sign',
@@ -2615,6 +2690,98 @@ function holdsNonSmooth(e: Expression, x: string): boolean {
   if (!isFunction(e) || !e.has(x)) return false;
   if (NON_SMOOTH_OPERATORS.has(e.operator)) return true;
   return e.ops.some((op) => holdsNonSmooth(op, x));
+}
+
+/** Operators of `NON_SMOOTH_OPERATORS` with a kink or a jump where their
+ * operand is 0. */
+const KINK_AT_ZERO = new Set(['Abs', 'Sign', 'Heaviside']);
+
+/** Steps of `NON_SMOOTH_OPERATORS`, with the offset of their jumps from the
+ * integers: `Round` jumps at the half-integers. `Truncate` does not jump at
+ * 0 (`stepJumpsAt()`). */
+const STEP_JUMP_OFFSET: Record<string, number> = {
+  Floor: 0,
+  Ceil: 0,
+  Fract: 0,
+  Truncate: 0,
+  Round: 0.5,
+};
+
+/**
+ * Whether each operator of `NON_SMOOTH_OPERATORS` in `f` whose operand
+ * depends on `x` is smooth near the finite point `x0`. The Taylor engines
+ * differentiate `|u|` to `Sign(u)·u′` and a step to 0, and read the
+ * derivatives at `x0`, where `Sign(0) = 0`: `|x|` at 0 would give `O(x⁴)`, and
+ * `⌊x⌋` at 1 would give `1`, which is `0` for `x < 1`.
+ *
+ * `Abs`, `Sign` and `Heaviside` are smooth when their operand at `x0` is a
+ * real number that is not 0, and the operand holds no number that is not
+ * real (`|1 + i·x|` is `1 + x²/2`, not `1 + i·x`). A step is smooth when its
+ * operand at `x0` is a real number away from its jumps. Every other operator
+ * of the set (`Max`, `Mod`, `If`, …) is not.
+ */
+function isSmoothAt(f: Expression, x: string, x0: Expression): boolean {
+  if (!isFunction(f) || !f.has(x)) return true;
+  if (NON_SMOOTH_OPERATORS.has(f.operator)) {
+    const op = f.operator;
+    const kink = KINK_AT_ZERO.has(op);
+    if (!kink && STEP_JUMP_OFFSET[op] === undefined) return false;
+    if (f.nops !== 1 || holdsNonRealNumber(f.op1)) return false;
+    const u = f.op1.subs({ [x]: x0 }).evaluate();
+    if (kink ? !isRealNonzero(u) : !stepIsSmoothAt(op, u)) return false;
+  }
+  return f.ops.every((op) => isSmoothAt(op, x, x0));
+}
+
+/** Whether `e` holds a number literal that is not real, or `i`. */
+function holdsNonRealNumber(e: Expression): boolean {
+  if (isNumber(e)) return e.im !== 0;
+  if (isSymbol(e)) return e.symbol === 'ImaginaryUnit';
+  return isFunction(e) && e.ops.some(holdsNonRealNumber);
+}
+
+/** A value whose distance to a point of a jump or a kink is below this
+ * tolerance (relative above 1) is read as at that point. */
+const SMOOTH_POINT_TOLERANCE = 1e-9;
+
+/** The value of the constant `u` as a real machine number, or `undefined`
+ * when it is not a real number. */
+function realValue(u: Expression): number | undefined {
+  const n = u.N();
+  if (!isNumber(n) || n.im !== 0 || !Number.isFinite(n.re)) return undefined;
+  return n.re;
+}
+
+/** Whether the constant `u` is a finite real number that is not 0. A number
+ * literal is decided exactly, another constant by its numeric value. */
+function isRealNonzero(u: Expression): boolean {
+  if (isNumber(u)) return u.im === 0 && u.isFinite === true && !u.isSame(0);
+  const v = realValue(u);
+  return v !== undefined && Math.abs(v) > SMOOTH_POINT_TOLERANCE;
+}
+
+/** Whether the step `op` (a key of `STEP_JUMP_OFFSET`) is smooth at its
+ * operand value `u`, a constant. */
+function stepIsSmoothAt(op: string, u: Expression): boolean {
+  const v = realValue(u);
+  if (v === undefined) return false;
+  const w = v - STEP_JUMP_OFFSET[op];
+  const nearest = Math.round(w);
+  // `Truncate` is constant (0) on (−1, 1).
+  if (op === 'Truncate' && nearest === 0) return true;
+  const rat = asRational(u);
+  if (rat) {
+    // An exact rational: a step jumps where `u` is an integer, and `Round`
+    // where `2u` is an odd integer.
+    const scale = BigInt(op === 'Round' ? 2 : 1);
+    const num = BigInt(rat[0]) * scale;
+    const den = BigInt(rat[1]);
+    if (num % den !== BigInt(0)) return true;
+    return op === 'Round' && (num / den) % BigInt(2) === BigInt(0);
+  }
+  return (
+    Math.abs(w - nearest) > SMOOTH_POINT_TOLERANCE * Math.max(1, Math.abs(w))
+  );
 }
 
 /**
