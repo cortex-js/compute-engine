@@ -9,6 +9,7 @@ import {
   bignumPreferred,
 } from '../boxed-expression/utils.js';
 import { asFloat, hasFloatOperand } from '../boxed-expression/float-result.js';
+import { unitToString } from '../boxed-expression/ascii-math.js';
 import { decodedPayload } from '../boxed-expression/decoded-payload.js';
 import {
   isSymbol,
@@ -657,7 +658,7 @@ function convertQuantity(
       // `c1 − c0` loses digits for a temperature (`degC → degF` gives
       // `1.7999999999999972`).
       const map = unitConversionCoefficients(fromSymbol, toSymbol);
-      if (map === null) return ce.error('incompatible-type');
+      if (map === null) return incompatibleUnits(ce, fromUnit, targetUnitExpr);
       const convertedMag = affineMagnitude(ce, magExpr, map.factor, map.offset);
       // A unit name is not a variable: it must not be declared in the
       // current scope.
@@ -674,7 +675,7 @@ function convertQuantity(
         ce.symbol(toSymbol, { autoDeclare: false }),
       ]);
     // If conversion returned null, units are incompatible
-    return ce.error('incompatible-type');
+    return incompatibleUnits(ce, fromUnit, targetUnitExpr);
   }
 
   // Fall back to compound unit conversion
@@ -685,16 +686,33 @@ function convertQuantity(
   const c0 = convertCompoundUnit(0, fromUE, toUE);
   const c1 = convertCompoundUnit(1, fromUE, toUE);
   if (magIsMeasurement || (magIsExact && isExactConversion(c0, c1))) {
-    if (c0 === null || c1 === null) return ce.error('incompatible-type');
+    if (c0 === null || c1 === null)
+      return incompatibleUnits(ce, fromUnit, targetUnitExpr);
     const convertedMag = affineMagnitude(ce, magExpr, c1 - c0, c0);
     const r = ce._fn('Quantity', [convertedMag, targetUnitExpr]);
     return numericApproximation ? r.N() : r;
   }
 
   const converted = convertCompoundUnit(mag!, fromUE, toUE);
-  if (converted === null) return ce.error('incompatible-type');
+  if (converted === null)
+    return incompatibleUnits(ce, fromUnit, targetUnitExpr);
 
   return ce._fn('Quantity', [numericMagnitude(converted), targetUnitExpr]);
+}
+
+/**
+ * The `incompatible-type` error of a conversion of a quantity in the unit
+ * `from` to the unit `to`, which has another dimension or is not a unit:
+ * its payload is the target unit and the unit of the quantity, so the
+ * message reads "expected `m`, got `h`".
+ */
+function incompatibleUnits(
+  ce: ComputeEngine,
+  from: Expression,
+  to: Expression
+): Expression {
+  const text = (unit: Expression) => unitToString(unit, (x) => x.toString());
+  return ce.error(['incompatible-type', text(to), text(from)]);
 }
 
 export const UNITS_LIBRARY: SymbolDefinitions = {

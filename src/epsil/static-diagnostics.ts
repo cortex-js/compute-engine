@@ -3211,7 +3211,9 @@ export function describeError(error: MathJsonExpression): string {
       detail =
         payload.length === 2
           ? `expected \`${payload[0]}\`, got \`${payload[1]}\``
-          : `incompatible type: ${payload.join(', ')}`;
+          : payload.length === 0
+            ? 'incompatible type'
+            : `incompatible type: ${payload.join(', ')}`;
       break;
     case 'unevaluated-tuple': {
       // Payload: [operator] when the value is an application, else none. The

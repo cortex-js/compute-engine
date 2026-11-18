@@ -1,6 +1,28 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **The `incompatible-type` error of a color operator or of `UnitConvert`
+  has a payload.** `Color("nosuchcolor")` was `Error("incompatible-type")`; it
+  is now `Error(ErrorCode("incompatible-type", "color", "\"nosuchcolor\""))`,
+  the expected `color` and the operand that is not a color. This applies to
+  every color operator (`ColorToString`, `ColorMix`, `AsRgb`, …).
+  `UnitConvert(Quantity(2, h), m)` is now
+  `Error(ErrorCode("incompatible-type", "m", "h"))`, the target unit and the
+  unit of the quantity. A function color string with fewer than three
+  arguments, such as `"rgb(1 2)"`, was transparent black; it is now not a
+  color, as `"rgb()"` is.
+
 ### Resolved Issues
+
+- **A color or unit error says what is wrong.** In Epsil, `color("nosuchcolor")`
+  printed `incompatible type: ` with nothing after it; it now prints
+  ``expected `color`, got `"nosuchcolor"` ``, and
+  `unitConvert(quantity(2, h), "m")` prints ``expected `m`, got `h` ``. An
+  `incompatible-type` error with no detail reads `incompatible type`, with no
+  colon. A string that names no color does not write the warning
+  `parseColor: unrecognized color` to the console any more, in the
+  interpreter and in compiled JavaScript.
 
 - **A categorical palette is not interpolated.** `Colormap("tycho11", 0.05)`
   was a mix of the first two colors of the palette; it is now the nearest

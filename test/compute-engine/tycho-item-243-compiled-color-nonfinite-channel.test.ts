@@ -174,8 +174,10 @@ describe('a channel without a limit color', () => {
     ['Oklch infinite hue', '\\operatorname{Oklch}(0.5,0.1,\\infty)'],
   ])('%s is the NaN color, and the interpreter rejects it', (_label, latex) => {
     expect(run(latex)).toEqual(NAN_OKLCH);
-    expect(String(ce.parse(`\\operatorname{AsRgb}(${latex})`).evaluate())).toBe(
-      'Error("incompatible-type")'
+    expect(
+      String(ce.parse(`\\operatorname{AsRgb}(${latex})`).evaluate())
+    ).toMatch(
+      /^Error\(ErrorCode\("incompatible-type", "color", "\w+\(.*\)"\)\)$/
     );
   });
 

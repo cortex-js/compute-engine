@@ -16,7 +16,13 @@
  * below compute the same colors without the rounding.
  */
 
-import { gammaCorrect, inverseGammaCorrect, oklchToOklab } from '@arnog/colors';
+import {
+  gammaCorrect,
+  inverseGammaCorrect,
+  isNamedColor,
+  isValidColor,
+  oklchToOklab,
+} from '@arnog/colors';
 
 /** The five color spaces, spelled in lowercase. */
 export type ColorChannelSpace = 'rgb' | 'hsv' | 'hsl' | 'oklab' | 'oklch';
@@ -110,6 +116,49 @@ const OK_COLOR_FORM = /^(oklch|oklab)\s*\(([^()]*)\)$/;
 /** One argument: a number, with an optional unit or `%`, or `none`. */
 const OK_COLOR_ARGUMENT =
   /^(?:none|([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(%|deg|rad|grad|turn)?)$/;
+
+/** A function notation, as `parseColor()` matches it, with its arguments. */
+const PARSE_COLOR_FUNCTION =
+  /^(?:rgba?|hsla?|oklch|oklab)\s*\(\s*([^)]+)\s*\)$/;
+
+/**
+ * The spelling `s` without a trailing opacity suffix (`red/50` is `red`),
+ * split off as `parseColor()` splits it.
+ */
+function withoutOpacitySuffix(s: string): string {
+  const slash = s.lastIndexOf('/');
+  if (slash < 0) return s;
+  if (!/^\d+(?:\.\d+)?%?$/.test(s.slice(slash + 1).trim())) return s;
+  const base = s.slice(0, slash).trim();
+  return base === '' ? s : base;
+}
+
+/**
+ * Whether `parseColor()` of `@arnog/colors` reads the color string `s`
+ * without writing a warning to the console. It writes one for every string
+ * that it does not read, so a caller checks the string with this predicate
+ * first.
+ *
+ * The predicate follows the cases of `parseColor()`: a `#` form (which it
+ * never refuses: its shape is checked by the caller), a function notation
+ * with at least three arguments, `transparent`, a palette shade (`blue-500`)
+ * and a color name that `isNamedColor()` knows. An `oklch(…)` or `oklab(…)`
+ * string is read by `parseOkColorString()` instead.
+ */
+export function isParseColorSpelling(s: string): boolean {
+  const spelling = s.trim().toLowerCase();
+  if (OK_COLOR_FORM.test(spelling))
+    return parseOkColorString(spelling) !== null;
+  const base = withoutOpacitySuffix(spelling);
+  if (base.startsWith('#')) return true;
+  const fn = PARSE_COLOR_FUNCTION.exec(base);
+  if (fn !== null)
+    return fn[1].replace(/[,/]/g, ' ').trim().split(/\s+/).length >= 3;
+  // `isValidColor()` knows the palette names; for a bare word it answers
+  // `true` also when `parseColor()` does not know the word.
+  if (/^[a-z]+-\d+$/.test(base)) return isValidColor(base);
+  return isNamedColor(base);
+}
 
 /**
  * Read an `oklch(…)` or `oklab(…)` color string to its channels, with no

@@ -134,7 +134,7 @@ function reorderAsciiSeriesTerms(
 }
 
 /** Serialize a unit expression to a human-readable string like "m/s^2". */
-function unitToString(
+export function unitToString(
   expr: Expression,
   serialize: AsciiMathSerializer
 ): string {

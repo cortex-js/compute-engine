@@ -10,23 +10,6 @@ import { parseOkColorString } from '../../src/compute-engine/numerics/color-conv
 
 const ce = new ComputeEngine();
 
-// `parseColor()` (from `@arnog/colors`) warns on the console for a string
-// that names no color. The refusal cases below pass such strings on purpose.
-const originalWarn = console.warn;
-beforeAll(() => {
-  console.warn = (...message: unknown[]) => {
-    if (
-      typeof message[0] === 'string' &&
-      message[0].startsWith('parseColor: unrecognized color')
-    )
-      return;
-    originalWarn(...message);
-  };
-});
-afterAll(() => {
-  console.warn = originalWarn;
-});
-
 function evaluate(json: any): any {
   return ce.expr(json).evaluate().json;
 }
@@ -122,7 +105,7 @@ describe('CE-1415 oklch and oklab color strings', () => {
     ]) {
       expect(evaluate(['Color', { str: s }])).toEqual([
         'Error',
-        "'incompatible-type'",
+        ['ErrorCode', "'incompatible-type'", "'color'", `'"${s}"'`],
       ]);
       expect(() => run(['Color', { str: s }])).toThrow(/Unknown color/);
     }

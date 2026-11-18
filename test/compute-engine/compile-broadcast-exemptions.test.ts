@@ -110,7 +110,7 @@ describe('BROADCAST EXEMPTION — a tuple operand of an exempt head is ATOMIC', 
         .box(['AsRgb', ['Tuple', 1, 2]])
         .evaluate()
         .toString()
-    ).toBe('Error("incompatible-type")');
+    ).toBe('Error(ErrorCode("incompatible-type", "color", "(1, 2)"))');
     expect(js(['AsRgb', ['Tuple', 1, 2]]).success).toBe(false);
     expect(() => g(['AsRgb', ['Tuple', 1, 2]])).toThrow(
       /No signature of `AsRgb` in the GLSL fragment/

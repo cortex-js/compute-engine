@@ -34,6 +34,7 @@ import {
   inGamut,
   readColorGamut,
   displayP3String,
+  isParseColorSpelling,
   parseOkColorString,
 } from '../numerics/color-conversion.js';
 import type {
@@ -90,7 +91,7 @@ function normalizeColorHead(ce: any, expr: any): any {
       c1,
       c2
     );
-    if (read === undefined) return ce.error('incompatible-type');
+    if (read === undefined) return notAColor(ce, expr);
     // Only a channel that the rule changed is replaced, so an exact channel
     // such as `1/2` stays exact.
     if (channels.some((c: any, i: number) => isNumber(c) && c.re !== read[i])) {
@@ -176,6 +177,9 @@ export function parseColorString(s: string | undefined | null): number | null {
   if (parseOkColorString(s) === null) return null;
   const spelling = s.trim().toLowerCase();
   if (spelling.startsWith('#') && !HEX_COLOR_FORM.test(spelling)) return null;
+  // A string that `parseColor()` does not read is refused before the call,
+  // which would write a warning to the console.
+  if (!isParseColorSpelling(s)) return null;
   let color: number;
   try {
     color = parseColor(expandFourDigitHex(spelling) ?? s);
@@ -503,6 +507,19 @@ function extractRgb(ce: any, arg: any): RgbColor | undefined {
 }
 
 /**
+ * The `incompatible-type` error of the operand `arg`, which is not a color:
+ * its payload is the expected `color` and the operand as written, so the
+ * message reads "expected `color`, got `"nosuchcolor"`".
+ */
+function notAColor(ce: any, arg: any): any {
+  return ce.error([
+    'incompatible-type',
+    'color',
+    arg === undefined ? 'Nothing' : arg.toString(),
+  ]);
+}
+
+/**
  * A `ContrastingColor` candidate, as a color expression.
  *
  * A typed color head is answered VERBATIM, so the caller gets back the space
@@ -614,10 +631,10 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     signature: '(string) -> color',
     evaluate: (ops, { engine: ce }) => {
       const input = isString(ops[0]) ? ops[0].string : undefined;
-      if (!input) return ce.error('incompatible-type');
+      if (!input) return notAColor(ce, ops[0]);
 
       const color = colorStringToOklch(input);
-      if (color === null) return ce.error('incompatible-type');
+      if (color === null) return notAColor(ce, ops[0]);
       return oklchToExpr(ce, color);
     },
   },
@@ -636,7 +653,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     signature: '(color | string | tuple, string?) -> string',
     evaluate: (ops, { engine: ce }) => {
       const rgb = extractRgb(ce, ops[0]);
-      if (!rgb) return ce.error('incompatible-type');
+      if (!rgb) return notAColor(ce, ops[0]);
 
       const format =
         ops.length >= 2 && isString(ops[1])
@@ -725,7 +742,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
 
       const arg = ops[0];
       const rgb = extractRgb(ce, arg);
-      if (!rgb) return ce.error('incompatible-type');
+      if (!rgb) return notAColor(ce, arg);
 
       // An `Rgb` color already inside the gamut is returned as it is, so an
       // exact channel such as `1/2` stays exact. For `srgb` this requires
@@ -769,7 +786,8 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       // strings/Tuples via sRGB), then lerp in OKLCh and return as Oklch.
       const oklch1 = toOklch(ce, ops[0]);
       const oklch2 = toOklch(ce, ops[1]);
-      if (!oklch1 || !oklch2) return ce.error('incompatible-type');
+      if (!oklch1) return notAColor(ce, ops[0]);
+      if (!oklch2) return notAColor(ce, ops[1]);
 
       return oklchToExpr(ce, lerpOklchColor(oklch1, oklch2, ratio));
     },
@@ -862,7 +880,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       }
 
       const rgb = extractRgb(ce, ops[0]);
-      if (!rgb) return ce.error('incompatible-type');
+      if (!rgb) return notAColor(ce, ops[0]);
 
       const alpha = rgb.alpha;
 
@@ -926,7 +944,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
         !(arg.operator === 'Tuple' || COLOR_OPERATORS.has(arg.operator)) ||
         arg.ops.length < 3
       )
-        return ce.error('incompatible-type');
+        return notAColor(ce, arg);
       // The channels are read by the rule of the NAMED space
       // (`readColorChannels`), the rule a head of that space applies to its
       // own channels: the result of this operator is a head of that space.
@@ -940,7 +958,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
         arg.ops[1].re,
         arg.ops[2].re
       );
-      if (channels === undefined) return ce.error('incompatible-type');
+      if (channels === undefined) return notAColor(ce, arg);
       const alpha = arg.ops.length >= 4 ? arg.ops[3].re : undefined;
 
       return colorHeadFromSpace(ce, head, channels, alpha);
@@ -954,7 +972,8 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     evaluate: (ops, { engine: ce }) => {
       const bgRgb = extractRgb(ce, ops[0]);
       const fgRgb = extractRgb(ce, ops[1]);
-      if (!bgRgb || !fgRgb) return ce.error('incompatible-type');
+      if (!bgRgb) return notAColor(ce, ops[0]);
+      if (!fgRgb) return notAColor(ce, ops[1]);
       return ce.number(apca(bgRgb, fgRgb));
     },
   },
@@ -970,7 +989,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       '(color | string | tuple, (color | string | tuple)?, (color | string | tuple)?) -> color',
     evaluate: (ops, { engine: ce }) => {
       const bgRgb = extractRgb(ce, ops[0]);
-      if (!bgRgb) return ce.error('incompatible-type');
+      if (!bgRgb) return notAColor(ce, ops[0]);
 
       // The comparison `contrastingColor()` of `@arnog/colors` makes: the
       // candidate with the larger ABSOLUTE APCA contrast against the
@@ -983,7 +1002,8 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       if (ops.length >= 3 && ops[1] !== undefined && ops[2] !== undefined) {
         const fg1 = extractRgb(ce, ops[1]);
         const fg2 = extractRgb(ce, ops[2]);
-        if (!fg1 || !fg2) return ce.error('incompatible-type');
+        if (!fg1) return notAColor(ce, ops[1]);
+        if (!fg2) return notAColor(ce, ops[2]);
         return firstWins(fg1, fg2)
           ? asColorExpr(ce, ops[1], fg1)
           : asColorExpr(ce, ops[2], fg2);
@@ -1075,7 +1095,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       if (isFunction(arg) && arg.operator === 'Rgb')
         return normalizeColorHead(ce, arg);
       const rgb = extractRgb(ce, arg);
-      if (!rgb) return ce.error('incompatible-type');
+      if (!rgb) return notAColor(ce, ops[0]);
       // `extractRgb` returns 0-255 channels (the `@arnog/colors` internal
       // form); divide to bring back to the Rgb head's 0-1 convention.
       const args = [
@@ -1100,7 +1120,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       if (isFunction(arg) && arg.operator === 'Hsv')
         return normalizeColorHead(ce, arg);
       const rgb = extractRgb(ce, arg);
-      if (!rgb) return ce.error('incompatible-type');
+      if (!rgb) return notAColor(ce, ops[0]);
       const hsv = rgb255ToHsv(rgb.r, rgb.g, rgb.b);
       const args = [ce.number(hsv.h), ce.number(hsv.s), ce.number(hsv.v)];
       if (rgb.alpha !== undefined) args.push(ce.number(rgb.alpha));
@@ -1120,7 +1140,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       if (isFunction(arg) && arg.operator === 'Hsl')
         return normalizeColorHead(ce, arg);
       const rgb = extractRgb(ce, arg);
-      if (!rgb) return ce.error('incompatible-type');
+      if (!rgb) return notAColor(ce, ops[0]);
       const hsl = rgb255ToHsl(rgb.r, rgb.g, rgb.b);
       const args = [ce.number(hsl.h), ce.number(hsl.s), ce.number(hsl.l)];
       if (rgb.alpha !== undefined) args.push(ce.number(rgb.alpha));
@@ -1142,14 +1162,14 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       // Wide-gamut path: Oklch → Oklab without an sRGB pinch.
       if (isFunction(arg) && arg.operator === 'Oklch') {
         const c = readColorExpr(arg);
-        if (!c) return ce.error('incompatible-type');
+        if (!c) return notAColor(ce, ops[0]);
         const lab = oklchToOklab({ L: c.c0, C: c.c1, H: c.c2, alpha: c.alpha });
         const args = [ce.number(lab.L), ce.number(lab.a), ce.number(lab.b)];
         if (lab.alpha !== undefined) args.push(ce.number(lab.alpha));
         return ce.function('Oklab', args);
       }
       const rgb = extractRgb(ce, arg);
-      if (!rgb) return ce.error('incompatible-type');
+      if (!rgb) return notAColor(ce, ops[0]);
       const lab = rgbToOklab(rgb);
       const args = [ce.number(lab.L), ce.number(lab.a), ce.number(lab.b)];
       if (rgb.alpha !== undefined) args.push(ce.number(rgb.alpha));
@@ -1171,7 +1191,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       // Wide-gamut path: Oklab → Oklch without an sRGB pinch.
       if (isFunction(arg) && arg.operator === 'Oklab') {
         const c = readColorExpr(arg);
-        if (!c) return ce.error('incompatible-type');
+        if (!c) return notAColor(ce, ops[0]);
         const oklch = oklabToOklch({
           L: c.c0,
           a: c.c1,
@@ -1187,7 +1207,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
         return ce.function('Oklch', args);
       }
       const rgb = extractRgb(ce, arg);
-      if (!rgb) return ce.error('incompatible-type');
+      if (!rgb) return notAColor(ce, ops[0]);
       const c = rgbToOklch(rgb);
       const args = [ce.number(c.L), ce.number(c.C), ce.number(c.H)];
       if (rgb.alpha !== undefined) args.push(ce.number(rgb.alpha));
@@ -1209,7 +1229,8 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       // wide-gamut inputs aren't gamut-clipped before measurement.
       const a = toOklch(ce, ops[0]);
       const b = toOklch(ce, ops[1]);
-      if (!a || !b) return ce.error('incompatible-type');
+      if (!a) return notAColor(ce, ops[0]);
+      if (!b) return notAColor(ce, ops[1]);
       return ce.number(oklabDeltaE(oklchToOklab(a), oklchToOklab(b)));
     },
   },

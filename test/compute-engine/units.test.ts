@@ -1883,20 +1883,21 @@ describe('LOGARITHMIC UNITS (dB, Np)', () => {
   });
 
   test('a level does not convert to a ratio or a number', () => {
+    // The error names the target unit and the unit of the quantity.
     for (const target of ['percent', 'rad', 'ppm'])
       expect(
         ev(['UnitConvert', ['Quantity', 10, 'dB'], target]).toString()
-      ).toBe('Error("incompatible-type")');
+      ).toBe(`Error(ErrorCode("incompatible-type", "${target}", "dB"))`);
     expect(
       ev(['UnitConvert', ['Quantity', 10, 'percent'], 'Np']).toString()
-    ).toBe('Error("incompatible-type")');
+    ).toBe('Error(ErrorCode("incompatible-type", "Np", "percent"))');
     expect(
       ev([
         'UnitConvert',
         ['Quantity', 3, ['Divide', 'dB', 'm']],
         ['Power', 'm', -1],
       ]).toString()
-    ).toBe('Error("incompatible-type")');
+    ).toBe('Error(ErrorCode("incompatible-type", "m^-1", "dB/m"))');
     expect(convertUnit(1, 'Np', 'rad')).toBeNull();
     expect(
       convertCompoundUnit(1, ['Divide', 'dB', 'm'], ['Divide', 'percent', 'm'])

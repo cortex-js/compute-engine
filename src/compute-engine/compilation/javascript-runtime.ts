@@ -48,6 +48,7 @@ import {
   inGamut,
   readColorGamut,
   displayP3String,
+  isParseColorSpelling,
   parseOkColorString,
 } from '../numerics/color-conversion.js';
 import type { ColorGamut } from '../numerics/color-conversion.js';
@@ -719,6 +720,9 @@ function parseColorStringOrThrow(input: string): number {
     throw new Error(`Unknown color: ${input}`);
   };
   if (spelling.startsWith('#') && !HEX_COLOR_FORM.test(spelling)) refuse();
+  // A string that `parseColor()` does not read is refused before the call,
+  // which would write a warning to the console.
+  if (!isParseColorSpelling(input)) refuse();
   let c: number;
   try {
     c = parseColor((expandFourDigitHex(spelling) ?? input) as HexColor);
