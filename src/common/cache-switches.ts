@@ -10,6 +10,8 @@
  *   (`appmemo`, `approx`, `dictionary`, `eagersource`, `effects`,
  *   `facet`, `lazyvalue`, `limitprobe`, `slice`, `typeparse`, and the
  *   look-up of `element`).
+ * - `walkinvariant` does not wrap the callback of a walk, so the invariant
+ *   sub-expressions of the callback are evaluated at each element.
  * - `sgn` and `type` empty their cell before each read, unless a
  *   computation of the cell is in progress: a re-entrant read must still get
  *   the answer that ends a recursive read (`forgetSettledValue()`,
@@ -73,6 +75,7 @@ export const CACHE_SWITCHES = [
   'storedvalue', // evaluated stored value of a symbol (`boxed-symbol.ts`)
   'type', // type cache of a function expression (`boxed-function.ts`)
   'typeparse', // parsed type strings (`common/type/parse.ts`)
+  'walkinvariant', // values of the invariant nodes of a callback in a walk (`boxed-expression/walk-invariant-values.ts`)
 ] as const;
 export type CacheSwitch = (typeof CACHE_SWITCHES)[number];
 

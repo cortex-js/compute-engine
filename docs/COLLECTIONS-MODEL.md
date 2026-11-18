@@ -144,6 +144,16 @@ its value prints after an evaluation. The implementation is
 `heldEagerSources()`, `materializesAfterOperands()` and
 `previewHoldsEagerOperand()` in `boxed-expression/boxed-function.ts`.
 
+The callback of `Map` and `Filter` is evaluated at each element. In one walk
+of the view (one `each()`), a sub-expression of a pure callback body that
+reads no name bound in the callback (a parameter, a local, the variable of a
+binder) and no parameter or local of an enclosing call is evaluated once, and
+its value is used at the next elements while no write happens between two
+elements: in `Map(j ↦ At(Abs(C), j), Range(1, n))`, `Abs(C)` is evaluated once
+per walk, not `n` times. Only a value that is a collection is kept. A read
+by position (`at()`) is not a walk and evaluates the sub-expression each time.
+The implementation is `boxed-expression/walk-invariant-values.ts`.
+
 A source that is provably not a collection is refused when the call is boxed,
 as for an eager operator: `Dedup(5)` is `Dedup(Error(incompatible-type,
 collection, 5))`, an invalid call typed `error`

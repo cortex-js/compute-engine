@@ -32,6 +32,7 @@ import {
   sameOperator,
   structuralScope,
 } from '../library-shadowing.js';
+import { walkInvariantValue } from './walk-invariant-values.js';
 import {
   detachEagerSourceValues,
   keptEagerSourceValue,
@@ -5085,6 +5086,13 @@ export class BoxedFunction
         // compare the stamp).
         recordEvaluatedError(this, kept);
         return kept;
+      }
+      // A sub-expression of the callback of a walk that does not depend on
+      // the call is evaluated once in the walk (`walk-invariant-values.ts`).
+      const invariant = walkInvariantValue(this, options);
+      if (invariant !== undefined) {
+        recordEvaluatedError(this, invariant);
+        return invariant;
       }
     }
     // The pure-application memo (`IComputeEngine._applicationMemo`) is NOT

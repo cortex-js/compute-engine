@@ -33,6 +33,7 @@ import {
 } from '../boxed-expression/collection-element-memo.js';
 import type { MemoDeps } from '../boxed-expression/collection-element-memo.js';
 import { evaluateEagerSource } from '../boxed-expression/eager-source-values.js';
+import { walkInvariantApplicable } from '../boxed-expression/walk-invariant-values.js';
 import { isErrorTypedOperand } from '../boxed-expression/error-typed-operand.js';
 import { isAccessorOfPossibleList } from '../boxed-expression/point-accessor-operand.js';
 import {
@@ -15119,7 +15120,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
-        const f = applicable(expr.op2);
+        // A sub-expression of the predicate that does not depend on the
+        // element is evaluated once in the walk (`walk-invariant-values.ts`).
+        const f = walkInvariantApplicable(expr.op2, applicable(expr.op2));
         if (!f) return { next: () => ({ value: undefined, done: true }) };
 
         // An impure literal, or one with an element that may evaluate to
@@ -25820,8 +25823,13 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
     // A level that fails yields THAT level's position-preserving marker
     // as an ordinary element value, which flows through the remaining
     // levels — exactly what the nested general iterators do.
-    const run = makeSpineRunner(ce, spine, (levelExpr) =>
-      absenceMarker(ce, levelExpr)
+    // A closed operand of a level that is not a literal (`At(Abs(L), j)`)
+    // is evaluated once in the walk (`walk-invariant-values.ts`).
+    const run = walkInvariantApplicable(
+      spine.levels.flatMap((level) =>
+        isFunction(level.expr) ? [level.expr.op1] : []
+      ),
+      makeSpineRunner(ce, spine, (levelExpr) => absenceMarker(ce, levelExpr))
     );
     if (spine.bases.length > 1) {
       // Variadic bottom level: advance every base lockstep, ending as
@@ -25872,7 +25880,7 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
     // counts — so a source with an unknown count (or an infinite one
     // zipped with a finite one) still iterates; the zip ends as soon
     // as any source ends.
-    const f = applicable(expr.op1);
+    const f = walkInvariantApplicable(expr.op1, applicable(expr.op1));
     if (!f) return { next: () => ({ value: undefined, done: true }) };
     const sources = expr.ops.slice(1).map((c) => walkedSource(c).each());
     return {
@@ -25899,7 +25907,9 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
     };
   }
 
-  const f = applicable(expr.op1);
+  // A sub-expression of the mapping function that does not depend on the
+  // element is evaluated once in the walk (`walk-invariant-values.ts`).
+  const f = walkInvariantApplicable(expr.op1, applicable(expr.op1));
   if (!f) return { next: () => ({ value: undefined, done: true }) };
 
   const source = walkedSource(expr.op2).each();
