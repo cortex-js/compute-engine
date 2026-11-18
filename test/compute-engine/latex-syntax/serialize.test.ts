@@ -707,6 +707,25 @@ describe('DELIMITER WITH SQUARE BRACKETS', () => {
       '\\lbrack a,b)'
     );
   });
+
+  // CE-1399: the Unicode angle brackets were written as the characters
+  // themselves, which the parser rejects as an `unexpected-token` error.
+  test('Unicode fences are written as LaTeX commands', () => {
+    const latexOf = (json: MathJsonExpression) =>
+      ce.box(json, { form: 'raw' }).latex;
+    const abc: MathJsonExpression = ['Sequence', 1, 2, 3];
+    expect(latexOf(['Delimiter', abc, "'⟨,⟩'"])).toBe('\\langle1,2,3\\rangle');
+    expect(latexOf(['Delimiter', abc, "'⟨⟩'"])).toBe('\\langle1,2,3\\rangle');
+    expect(ce.parse('\\langle1,2,3\\rangle').json).toEqual([
+      'AngleBracket',
+      1,
+      2,
+      3,
+    ]);
+    expect(latexOf(['Delimiter', 'x', "'‖,‖'"])).toBe('\\Vert x\\Vert');
+    expect(latexOf(['Delimiter', 'x', "'⌈,⌉'"])).toBe('\\lceil x\\rceil');
+    expect(latexOf(['Delimiter', 'x', "'⌊,⌋'"])).toBe('\\lfloor x\\rfloor');
+  });
 });
 
 // A number raised to a negative integer is written as a power: the quotient

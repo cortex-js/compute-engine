@@ -6496,6 +6496,10 @@ export const DELIMITERS_SHORTHAND = {
   '}': '\\rbrace',
   '<': '\\langle',
   '>': '\\rangle',
+  // The parser has no reading of the Unicode angle brackets: a fence written
+  // with the character itself is an `unexpected-token` error on re-parse.
+  '⟨': '\\langle', // U+27E8 MATHEMATICAL LEFT ANGLE BRACKET
+  '⟩': '\\rangle', // U+27E9 MATHEMATICAL RIGHT ANGLE BRACKET
   // '|': '\\vert',
   '‖': '\\Vert', // U+2016 DOUBLE VERTICAL LINE
   '\\': '\\backslash',
