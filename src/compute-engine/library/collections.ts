@@ -3707,8 +3707,15 @@ function iterateArgs(
  * over the operands it emitted the operand itself (`Random()`, drawn again
  * by every consumer, and a filter's predicate had judged another draw). A
  * store-backed list holds numbers only.
+ *
+ * An `If` that is not a collection (`If(c, [4, 5], [1, 2, 3])`, see
+ * `restrictionCollectionHandlers()` in `control-structures.ts`) walks no
+ * element, but its value can be a collection. The walk reads that value as
+ * the count of the view does (`mapSource()`): otherwise `Map` counted 2
+ * elements and walked none, and `Sum(Map(f, If(…)))` was 0. (CE-1349)
  */
 function walkedSource(xs: Expression): Expression {
+  if (isFunction(xs, 'If')) return mapSource(xs);
   if (!isFunction(xs, 'List') && !isFunction(xs, 'Tuple')) return xs;
   if (xs._numericStore !== undefined) return xs;
   if (isTransitivelyPure(xs)) return xs;

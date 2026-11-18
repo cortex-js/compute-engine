@@ -22632,14 +22632,16 @@ function settleAbsentableLazyOperands(
  * evaluation, where the boxing admitted the symbol.
  *
  * A function literal is not such an operand. A held conditional (`Which`,
- * `If`) is not one either: the evaluation lifts it out of the
- * operator (step 4c). A symbol whose value mentions the symbol itself is not
+ * a single-branch `If`) is not one either: the evaluation lifts it out of the
+ * operator (step 4c). An `If` with an else branch is one when it selects a
+ * collection whole (`isSelectedCollectionSource()`). A symbol whose value mentions the symbol itself is not
  * one either: its value is not resolved (see `mapSource()` in
  * `library/collections.ts`).
  */
 function isHeldEagerSource(x: Expression): boolean {
   if (isFunction(x, 'Function') || x.isCollection) return false;
-  if (isFunction(x)) return x.operator !== 'Which' && x.operator !== 'If';
+  if (isFunction(x, 'If')) return isSelectedCollectionSource(x);
+  if (isFunction(x)) return x.operator !== 'Which';
   if (!isSymbol(x) || x.valueDefinition?.isSelfReferential) return false;
   const value = x.value;
   if (value === undefined) return false;
@@ -22650,6 +22652,26 @@ function isHeldEagerSource(x: Expression): boolean {
   // evaluation reads the value, and a value that cannot be a collection is
   // an `incompatible-type` error (`settleHeldEagerSources()`).
   return !value.isCollection;
+}
+
+/**
+ * Whether the `If` application `x` selects one of two collections whole: it
+ * has an else branch, a condition of type `boolean` (not a list of
+ * conditions, which selects element by element) and a collection type.
+ * Such an `If` is not a collection (`restrictionCollectionHandlers()` in
+ * `library/control-structures.ts`), and step 4c does not lift it. A lazy view
+ * over it evaluates it once, as it evaluates an eager source, and walks the
+ * value: `Map(f, If(c, [4, 5], [1, 2, 3]))`. Without that step, each walk of
+ * the view evaluated the `If` again, and an arm with an effect ran once per
+ * walk. (CE-1349)
+ */
+function isSelectedCollectionSource(x: Expression): boolean {
+  return (
+    isFunction(x, 'If') &&
+    x.nops === 3 &&
+    x.op1.type.matches('boolean') &&
+    isTypedAsCollection(x)
+  );
 }
 
 /**
