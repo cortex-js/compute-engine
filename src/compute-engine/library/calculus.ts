@@ -8624,6 +8624,21 @@ volumes
             }
             limitValues.push([l.op2.N(), l.op3.N()]);
           }
+          // A bound that is not a real number (`Limits(t, i, 0)`): the
+          // quadrature runs over a real interval and would read the real
+          // part of the bound only (`∫_i^0 t dt` was 0). The closed form of
+          // the exact route gives the value; without one, the integral
+          // stays unevaluated.
+          if (
+            limitValues.some((bounds) =>
+              bounds.some((b) => isNumber(b) && b.im !== 0)
+            )
+          ) {
+            const exact = expression?.evaluate();
+            return exact === undefined || exact.has('Integrate')
+              ? undefined
+              : exact.N();
+          }
           // The lengths are compared in the order the symbolic route reads
           // the bounds (the last limit first, the lower bound before the
           // upper), so that both routes name the lengths in one order in

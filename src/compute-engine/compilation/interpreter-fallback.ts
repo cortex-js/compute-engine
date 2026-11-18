@@ -169,21 +169,33 @@ export function inputNamesRead(
   varsKeys?: ReadonlySet<string>,
   skipBodies?: (name: string) => boolean
 ): string[] {
+  return inputsRead(expr, varsKeys, skipBodies).map((x) => x.name);
+}
+
+/**
+ * The inputs of `inputNamesRead()`, each with the type of its definition
+ * (`unknown` for a name with no definition; none for a name of `varsKeys`).
+ */
+function inputsRead(
+  expr: Expression,
+  varsKeys?: ReadonlySet<string>,
+  skipBodies?: (name: string) => boolean
+): { name: string; type?: Type }[] {
   const scope = callerScopeOf(expr.engine);
-  const result: string[] = [];
+  const result: { name: string; type?: Type }[] = [];
   for (const [name, sym] of namesRead(expr, skipBodies)) {
     if (varsKeys?.has(name)) {
-      result.push(name);
+      result.push({ name });
       continue;
     }
     const def = definitionRead(sym, name, scope);
     if (def === undefined) {
-      result.push(name);
+      result.push({ name, type: sym.type.type });
       continue;
     }
     if (!isValueDef(def)) continue;
     if (!def.value.isConstant && def.value.value === undefined)
-      result.push(name);
+      result.push({ name, type: sym.type.type });
   }
   return result;
 }
@@ -641,9 +653,11 @@ function interpreterRun(
  * - `unsupported`: the operator that the decline names (its diagnostic's
  *   `operator`); the names of the inputs of an `'untyped-input'` or a
  *   `'union-dispatch'` decline, and the node of an `'unsettled-shape'`
- *   decline (its diagnostic's `value`); and the token `ErrorCode` for an
+ *   decline (its diagnostic's `value`); the token `ErrorCode` for an
  *   invalid expression or a `'static-type-error'` decline, which a host
- *   reads to tell an error in the expression from a missing lowering.
+ *   reads to tell an error in the expression from a missing lowering; and,
+ *   for every decline, the inputs whose type where they are read is
+ *   `unknown` or `any`.
  * - `mode`: `'strict'`, since no code was emitted.
  *
  * It has no `freeSymbolTypes`: the result of a compilation of the profile
@@ -683,6 +697,23 @@ export function interpreterFallback(
     )
       unsupported.push(...diagnostic.value.split(','));
   }
+  // The inputs with no type (`unknown` or `any`), whatever the cause of the
+  // decline: a host learns which names to declare (rule R1). A local of a
+  // block (`Declare`) is not one, though `namesRead()` reads it.
+  const locals = new Set<string>();
+  const declared = (x: Expression): void => {
+    if (!isFunction(x)) return;
+    if (x.operator === 'Declare' && isSymbol(x.ops[0]))
+      locals.add(x.ops[0].symbol);
+    x.ops.forEach(declared);
+  };
+  declared(expr);
+  const inputs = inputsRead(expr, varsKeys);
+  for (const { name, type } of inputs) {
+    const t = type === undefined ? undefined : resolveTypeAlias(type);
+    if ((t === 'unknown' || t === 'any') && !locals.has(name))
+      unsupported.push(name);
+  }
   return {
     target: 'javascript',
     success: false,
@@ -692,7 +723,7 @@ export function interpreterFallback(
     error,
     diagnostic,
     mode: 'strict',
-    freeSymbols: inputNamesRead(expr, varsKeys),
+    freeSymbols: inputs.map((x) => x.name),
     unsupported: [...new Set(unsupported)],
   };
 }

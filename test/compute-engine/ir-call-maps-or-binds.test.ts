@@ -524,4 +524,21 @@ describe('CE-1422: A CALL OF A USER FUNCTION MAPS OR BINDS AS THE INTERPRETER', 
       );
     }
   );
+
+  // A list parameter of a run-time length: the decline prints the type
+  // without the internal value ids (`list<integer^v12>`, CE-1444).
+  test.each(['javascript', 'glsl'])(
+    'a list of reals at a list<integer> parameter declines on %s, the type printed for the user',
+    (to) => {
+      const ce = new ComputeEngine();
+      ce.declare('B', 'list<real>');
+      ce.declare('legal', '(list<integer>) -> integer');
+      ce.assign('legal', ce.box(['Function', ['Length', 'L'], 'L']));
+      expect(() =>
+        compile(ce.box(['legal', 'B']), { to, fallback: false } as never)
+      ).toThrow(
+        /^Could not compile: B: an argument of legal that is not list<integer>$/
+      );
+    }
+  );
 });

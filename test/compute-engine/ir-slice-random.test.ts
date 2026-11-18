@@ -94,9 +94,10 @@ const COUNT = NIGHTLY ? 5000 : 1000;
  *   the written contract (README, "Limits").
  * - `computed-from-a-caveat-value`: the interpreter has no value (an
  *   error, an unevaluated form), and an operation or a constant of the
- *   compiled code gave NaN or an infinity that reaches the result: the
- *   caveat value where the interpreter has none, and everything computed
- *   from it, is unspecified.
+ *   compiled code gave NaN or an infinity that reaches the result (or the
+ *   result is a boolean or a list, which a comparison of it can decide):
+ *   the caveat value where the interpreter has none, and everything
+ *   computed from it, is unspecified.
  * - `range`: an operation gave a value of 2^53 or more, where an integer
  *   is no longer exact and a real has no fractional digit (`2n + 0.5` at
  *   n = 2^53 - 1 rounds to an integer): the limit of the numeric model.
@@ -135,8 +136,9 @@ function classify(
     );
   if (flags.caveat && interpret(ce, expr, point) === 'none') {
     // A comparison of NaN is computed from it, though no replacement of
-    // the NaN need change the boolean.
-    if (reaches() || typeof value === 'boolean')
+    // the NaN need change the boolean; so is a list whose elements such a
+    // comparison keeps or drops (a `Filter` of an `At` at the index 0).
+    if (reaches() || typeof value === 'boolean' || Array.isArray(value))
       return 'computed-from-a-caveat-value';
     if (/"(Assign|Declare)"/.test(JSON.stringify(json)))
       return 'local-outside-its-type';
@@ -714,5 +716,27 @@ describe('IR slice: random programs with shared nodes', () => {
     console.log(`shared nodes: ${compared} comparisons`);
     expect(compared).toBeGreaterThan(200);
     expect(unclassified).toEqual([]);
+  });
+});
+
+// Two programs that a change of the generator's sequence produced and that
+// the run left unclassified (CE-1323), each a caveat of compiled code: they
+// are classified whichever programs the seeds of the runs above draw.
+describe('IR slice: the classification of disagreements', () => {
+  // prettier-ignore
+  const FILTER = ["Filter",["Add","J",["Map",["Function",["At",["Add","D",["Map",["Function","n","z404"],"D"]],["ev",["Mod",1,9]]],"z403"],"J"]],["Function",["Less",["If",["Or","p","p"],["Which","p",0.5,"p","n","True","z405"],["Abs",-1.25]],["Min","ExponentialE",["Min","Pi","Pi"]],["Subtract",["Round","n"],["Max",-1.25,0.5]]],"z405"]];
+  // prettier-ignore
+  const COSINE = ["Mod",["Cos",["Power",["If","p","Pi","ExponentialE"],["h2",2]]],["f",2,["At",["Floor","D"],["Subtract","n",0]]]];
+  // prettier-ignore
+  test.each([
+    ['an At at the index 0 in a Filter, no element kept', FILTER, { D: [1.5, -2, 3, 0.25], J: [4, -5, 6], n: 3, p: true }, 'computed-from-a-caveat-value'],
+    ['an At at the index 0 in a Filter, one element kept', FILTER, { D: [-0.5], J: [7], n: 5, p: true }, 'computed-from-a-caveat-value'],
+    ['the cosine of π^4 in a Mod', COSINE, { D: [1.5, -2, 3, 0.25], n: 3, p: true }, 'precision'],
+  ])('%s', (_, json, point, kind) => {
+    const ce = makeEngine();
+    const expr = ce.box(json as never);
+    const value = runSlice(expr, point as Point, true);
+    expect(agrees(value, interpret(ce, expr, point as Point))).toBe(false);
+    expect(classify(ce, json, expr, point as Point, value)).toBe(kind);
   });
 });

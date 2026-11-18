@@ -184,6 +184,26 @@ describe('IR profile: an input with no type', () => {
         ).toMatchObject({ code: 'outside-profile', operator: 'SinIntegral' });
   });
 
+  // `unsupported` names the inputs with no type also when the program
+  // declines for another reason, so the host learns which names to declare
+  // (CE-1432). A name that an occurrence types (`u` in `Add`) is not one.
+  test.each(['javascript', 'glsl', 'interval-js'])(
+    'a decline for another reason lists the inputs with no type on %s',
+    (to) => {
+      const ce = new ComputeEngine();
+      ce.declare('x', 'real');
+      const unsupported = (json: Json) =>
+        (compile(ce.box(json as never), { to } as never) as Result).unsupported;
+      expect(
+        unsupported(['Assign', 'u', ['If', ['Less', 'x', 0], 'u', 0]])
+      ).toEqual(['Assign', 'u']);
+      expect(unsupported(['Add', ['Sort', ['List', 'x', 'w']], 'v'])).toEqual([
+        'Sort',
+        'w',
+      ]);
+    }
+  );
+
   test('a vars name with no type read in a called body is refused', () => {
     for (const [json, vars, name] of [
       [['hm', 'x'], { ww: '_.ww' }, 'ww'],

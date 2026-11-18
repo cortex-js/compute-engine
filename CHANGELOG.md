@@ -67,10 +67,10 @@
     `Dot`, `Cross`, `Norm`, `Sort`, `Take`, `Mean`, `Median`, `Unique`,
     `EvaluateAt`, `BesselJ` and a list of points multiplied by another shape:
     they run in the interpreter on JavaScript.
-  - `epsil --compile` refuses a program that defines a function and calls
-    it (`f(x) = x^2 + 1; f(3)`, CE-1443) and a program with a `parallel for`:
-    it reports `compile declined: Could not compile: …` and exits with 1.
-    Both run without `--compile`.
+  - `epsil --compile` refuses a program with a `parallel for`: it reports
+    `compile declined: Could not compile: …` and exits with 1. The program
+    runs without `--compile`. A program that defines a function and calls it
+    (`f(x) = x^2 + 1; f(3)`) compiles, as before (CE-1443).
   - The message of a decline starts with `Could not compile: `, and an
     operator that the compiler does not support is named as such
     (`Could not compile: Sort(L): the operator Sort is not supported by the
@@ -156,6 +156,22 @@
 
 ### Resolved Issues
 
+- **`N()` of a definite integral with a complex bound gives the value of its
+  closed form.** `∫_i^0 t dt` is `0.5` under `N()`, as `evaluate()` gives
+  `1/2`; it was `0`, the quadrature over the real parts of the bounds.
+  Without a closed form, the integral stays unevaluated (CE-1440).
+- **The random test of the compiler classifies a list computed from a value
+  of the caveats.** A `Filter` that keeps or drops elements computed from an
+  `At` at the index 0 (NaN in compiled code, an error in the interpreter) was
+  left unclassified when the sequence of generated programs changed
+  (CE-1323).
+- **A declined compilation names the inputs with no type also when it
+  declines for another reason.** With `x` declared `real` and `u`
+  undeclared, `compile(u := If(x < 0, u, 0)).unsupported` is
+  `['Assign', 'u']`; it was `['Assign']` (CE-1432).
+- **A compilation refused for an argument of the wrong type prints the type
+  as declared.** The message read `an argument of legal that is not
+  list<integer^v129>`; it now reads `… that is not list<integer>` (CE-1444).
 - **A compilation refused for a parameter declared `any` or `value` names the
   parameter.** `compile(['Function', ['Multiply', 2, 't'], ['Typed', 't',
   "'any'"]])` has `unsupported` equal to `['t']`, and `diagnostic.value` is

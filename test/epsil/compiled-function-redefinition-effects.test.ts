@@ -42,7 +42,7 @@ describe('A FUNCTION REDEFINED WITH A BODY THAT WRITES OUTSIDE', () => {
 
   test('the compilation is refused', () => {
     expect(() => compileProgram(source)).toThrow(
-      /DefineFunction is not supported by the compiler/
+      /Assign\(g, .*a write to a name that is not a local/
     );
     expect(() => compileProgram(source, 'interval-js')).toThrow(
       /Could not compile/
@@ -55,7 +55,7 @@ describe('A FUNCTION REDEFINED WITH A BODY THAT WRITES OUTSIDE', () => {
   test('a redefinition with no write outside declines', () => {
     const plain = 'function g(k) { k + 1 }\ng = (k) => k + 5\n[g(1)]';
     expect(run(plain)).toEqual({ value: ['List', 6], diagnostics: [] });
-    expect(() => compileProgram(plain)).toThrow(/DefineFunction is not supported by the compiler/);
+    expect(() => compileProgram(plain)).toThrow(/Assign\(g, .*a write to a name that is not a local/);
   });
 });
 

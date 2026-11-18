@@ -123,7 +123,8 @@ describe('COMPILE a call of a function returned by a call', () => {
   });
 
   it('declines on interval-js', () => {
-    // The definition of `mk` declines first on interval-js.
+    // The function value that the body of `mk` gives declines first on
+    // interval-js.
     let diagnostic: { code: string; operator?: string } | undefined;
     try {
       both(
@@ -134,7 +135,7 @@ describe('COMPILE a call of a function returned by a call', () => {
       diagnostic = compileDiagnosticOf(e);
     }
     expect(diagnostic?.code).toBe('outside-profile');
-    expect(diagnostic?.operator).toBe('DefineFunction');
+    expect(diagnostic?.operator).toBe('Function');
   });
 });
 

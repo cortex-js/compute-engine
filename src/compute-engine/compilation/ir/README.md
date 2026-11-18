@@ -301,7 +301,8 @@ them (not always the order of the text: `Sum(w, Limits(k, v, u))` gives
 as it is; a refusal of the target after a completed lowering (recursion, a list
 of run-time length on GLSL) comes after the refusal of the input. Until the end
 such an input is read as a real. It is not `outside-profile`: with `fallback`,
-the interpreter fallback names them in `unsupported`, and the statistics of the
+the interpreter fallback names them in `unsupported` (also after a decline for
+another reason, by the type of the name where it is read), and the statistics of the
 switch count it `declined`. A name with a value, a local, an index, a parameter
 of a user function and a parameter of a root function literal are not inputs: a
 parameter of no declared type is a real, and one declared `any` or `value`
@@ -1947,6 +1948,14 @@ calls were copied, or removed with a value that nothing reads) leaves the
 program and is not printed, also when the pass is off; `symbolDeps` still names
 it (`captures`). The `bigint` mode does not run the pass (it serves
 `invariants`, which is off there).
+
+A statement `DefineFunction(f, Function(…))` of the compiled program (Epsil's
+`f(x) = x^2 + 1` at the top level of a `Program`) writes nothing: its canonical
+form installed the clause, and a call of `f` is a call of the user function of
+that binding (CE-1443). The statement declines when a call of `f` in the program
+binds another literal (a second clause, a function of several clauses), and in
+a nested block, where the function is a local whose value the statement writes.
+A program whose last statement is a definition is `Nothing` and declines.
 
 ## How to add
 

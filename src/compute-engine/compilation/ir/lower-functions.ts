@@ -690,7 +690,7 @@ export function functionLowering(
       )
         decline(
           op,
-          `an argument of ${e.operator} of another shape than at its first call: the parameter ${p.taken} is a point of ${p.shape[0]} numbers (${typeToString(t, cx.tuples.get(v))} here)`
+          `an argument of ${e.operator} of another shape than at its first call: the parameter ${p.taken} is a point of ${p.shape[0]} numbers (${typeToString(t, cx.tuples.get(v) ?? -1)} here)`
         );
       if (
         p.tuple === 1 &&
@@ -701,7 +701,7 @@ export function functionLowering(
       )
         decline(
           op,
-          `an argument of ${e.operator} of another shape than at its first call: the parameter ${p.taken} is a list of points of ${p.shape[1]} numbers (${typeToString(t, cx.tuples.get(v))} here)`
+          `an argument of ${e.operator} of another shape than at its first call: the parameter ${p.taken} is a list of points of ${p.shape[1]} numbers (${typeToString(t, cx.tuples.get(v) ?? -1)} here)`
         );
       if (
         p.taken !== undefined &&
@@ -711,7 +711,7 @@ export function functionLowering(
       )
         decline(
           op,
-          `an argument of ${e.operator} of another length than at its first call: the list parameter ${p.taken} has the length ${p.shape[0]} of that call (${typeof t.shape[0] === 'number' ? typeToString(t) : 'a list of no stated length'} here${cx.runtimeLengths ? '' : '; a target without run-time lengths'})`
+          `an argument of ${e.operator} of another length than at its first call: the list parameter ${p.taken} has the length ${p.shape[0]} of that call (${typeof t.shape[0] === 'number' ? typeToString(t, -1) : 'a list of no stated length'} here${cx.runtimeLengths ? '' : '; a target without run-time lengths'})`
         );
       if (p.shape.length > 0 && t.shape.length === 0)
         decline(
@@ -748,7 +748,7 @@ export function functionLowering(
       if (cx.tuples.get(v) !== p.tuple || !isSubType(t, declared, cx.constant))
         decline(
           op,
-          `an argument of ${e.operator} that is not ${typeToString(declared, p.tuple)}`,
+          `an argument of ${e.operator} that is not ${typeToString(declared, p.tuple ?? -1)}`,
           // A complex value at a real parameter of the same shape (not an
           // input with no type, which the complex mode reads as complex).
           t.lane === 'complex' &&
@@ -796,7 +796,7 @@ export function functionLowering(
       if (!isSubType(type(v), p))
         decline(
           e,
-          `the input ${fn.ir.paramNames[k]} that ${e.operator} reads is not ${typeToString(p)} here`
+          `the input ${fn.ir.paramNames[k]} that ${e.operator} reads is not ${typeToString(p, -1)} here`
         );
       return v;
     });

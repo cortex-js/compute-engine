@@ -298,11 +298,11 @@ export function elementType(t: IRType): IRType {
 export function typeToString(
   t: IRType,
   /** For a message to the user: the axis of the tuple mark of the value
-   *  (`tuple<real, real>`), and a run-time length without its value. */
-  axis: number | undefined | false = false
+   *  (`tuple<real, real>`) or -1, and a run-time length without its value. */
+  axis: number | false = false
 ): string {
   // The tuple mark's axis is the number of list axes outside the tuple.
-  const k = axis === false || axis === undefined ? -1 : axis;
+  const k = axis === false ? -1 : axis;
   return t.shape.reduceRight<string>(
     (s, n, i) =>
       i === k && typeof n === 'number'

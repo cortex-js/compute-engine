@@ -512,7 +512,9 @@ follow the paths of control flow to find a shape. The rule has six parts.
 code, as `freeSymbols` lists it. An input whose static type is `unknown` or
 `any` declines on every target, with the diagnostic code `'untyped-input'`
 and the name of the input in `unsupported`: with `m` undeclared,
-`If(m < 3, m, 0)` declines, and `unsupported` is `["m"]`. An input with no
+`If(m < 3, m, 0)` declines, and `unsupported` is `["m"]`. When the program
+declines for another reason, `unsupported` also names such inputs: with `u`
+undeclared, `u := If(x < 0, u, 0)` gives `["Assign", "u"]`. An input with no
 declared type has the type that the compiled expression requires of it
 (below). A declared union of
 shapes (`real | list<real>`) is a type, and compiles (R4). "An input with no

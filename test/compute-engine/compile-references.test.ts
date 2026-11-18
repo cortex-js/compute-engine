@@ -411,15 +411,15 @@ describe('COMPILE: `unsupported` of a program that defines a function', () => {
     });
   });
 
-  it('still reports a definition that the target declines', () => {
-    // A shader target does not bind a function as a value.
+  it('compiles a call of the function, and declines a block with no value', () => {
+    // A call of a function that the program defines is a call of a user
+    // function, on a shader target too (CE-1443).
     const shader = program('function f(t) { t + 1 }\nf(x)', 'glsl');
-    expect(shader.success).toBe(false);
-    expect(shader.unsupported).toEqual(['DefineFunction']);
+    expect(shader.success).toBe(true);
     // The last statement of a block gives the value of the block, and a
-    // definition has no value.
+    // definition or a declaration has no value.
     const last = program('let a = x\nfunction f(t) { t + 1 }', 'javascript');
     expect(last.success).toBe(false);
-    expect(last.unsupported).toEqual(['DefineFunction']);
+    expect(last.unsupported).toEqual(['Block']);
   });
 });

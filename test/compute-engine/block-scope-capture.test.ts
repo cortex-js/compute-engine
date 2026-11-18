@@ -667,7 +667,7 @@ describe('a lazy collection that leaves an Epsil block or function', () => {
     const src = 'function f(xs) { let h = (k) => k + 1; map(h, xs) }\nf([1, 2])';
     expect(run(src)).toBe('[2,3]');
     expect(() => compiled(src)).toThrow(
-      /DefineFunction is not supported by the compiler/
+      /the result of f is not a scalar \(collection<unknown>\)/
     );
   });
 

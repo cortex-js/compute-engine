@@ -765,7 +765,7 @@ export function lower(
           node,
           !r.threads && types.some((t) => t.shape.length > 0)
             ? `${r.head} of a list`
-            : `${r.head} of ${types.map(typeToString).join(', ')}${bigint ? ', whose value is not an integer (the bigint mode)' : ''}`,
+            : `${r.head} of ${types.map((t) => typeToString(t, -1)).join(', ')}${bigint ? ', whose value is not an integer (the bigint mode)' : ''}`,
           // A row off the integer lane: the bigint mode refuses it.
           bigint && signatureOf(r, types, complex, false) !== undefined
             ? BIGINT_LANE
@@ -2683,6 +2683,32 @@ export function lower(
             role: isSymbol(constant, 'True') ? 'constant' : 'local',
             exact: unwritten && isNumber(value) ? value : undefined,
           });
+        } else if (isFunction(s, 'DefineFunction')) {
+          // `f(x) = …` of a program: the canonical form installed the clause,
+          // and a call of `f` is a call of the user function of that binding.
+          // The statement writes nothing in compiled code when every call
+          // of `f` in the block binds a literal of the same form (not another
+          // clause; a recursive literal is canonicalized again); a
+          // recursive call in the literal is the function being lowered.
+          const [name, literal] = s.ops;
+          const calls = (x: Expression): Fn[] =>
+            isFunction(x) && x !== literal
+              ? [
+                  ...(isSymbol(name) && x.operator === name.symbol ? [x] : []),
+                  ...x.ops.flatMap(calls),
+                ]
+              : [];
+          if (
+            s.nops !== 2 ||
+            !isSymbol(name) ||
+            !isFunction(literal, 'Function') ||
+            calls(e).some((c) => !userBinding(c)?.literal.isSame(literal))
+          )
+            decline(
+              s,
+              'a function definition that is not the binding of its calls'
+            );
+          result = undefined;
         } else result = value(s, want && i === e.nops - 1);
       };
       // The statements after one that may leave the pass of a Loop (`loop()`)
@@ -2704,7 +2730,12 @@ export function lower(
       };
       statements(0);
       // A block that ends in a declaration or an assignment is `Nothing`.
-      if (want && ['Assign', 'Declare'].includes(e.ops[e.nops - 1].operator))
+      if (
+        want &&
+        ['Assign', 'Declare', 'DefineFunction'].includes(
+          e.ops[e.nops - 1].operator
+        )
+      )
         decline(e, 'a block that ends in an assignment (Nothing)');
       if (want && result === undefined) decline(e, 'a block with no value');
       return result;
