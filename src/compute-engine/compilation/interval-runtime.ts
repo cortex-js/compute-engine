@@ -23,6 +23,7 @@ import {
 import {
   isCancellationError,
   processInput,
+  processVars,
   freshIntervalValue,
   runIntervalLambda,
 } from '../interval/run-support.js';
@@ -180,7 +181,7 @@ export function createIntervalRuntime(): IntervalRuntime {
           runIntervalLambda(raw, args) as IntervalValue;
       return (vars: unknown): IntervalValue => {
         try {
-          return freshIntervalValue(raw(processInput(vars))) as IntervalValue;
+          return freshIntervalValue(raw(processVars(vars))) as IntervalValue;
         } catch (e) {
           // A `ReferenceError` (the code
           // names something that is not defined, for example a helper that

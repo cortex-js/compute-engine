@@ -87,6 +87,20 @@ export function processInput(input: unknown): unknown {
 }
 
 /**
+ * The variables object of a run, each entry converted by `processInput()`.
+ * The object itself is never read as an interval: the variables of
+ * `lo + 2 hi`, called with `{ lo: 5, hi: 6 }`, are two points, not the
+ * interval [5, 6].
+ */
+export function processVars(vars: unknown): unknown {
+  if (!isRecord(vars) || Array.isArray(vars)) return processInput(vars);
+  const result: Record<string, unknown> = Object.create(null);
+  for (const [key, value] of Object.entries(vars))
+    result[key] = processInput(value);
+  return result;
+}
+
+/**
  * A copy of a run result that shares no object with the constant table.
  *
  * The constant declarations are evaluated ONCE per artifact, so a constant

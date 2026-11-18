@@ -120,3 +120,52 @@ describe('a decline with an enclosure input on interval-js is a kind decline', (
     ).toThrow(KindDeclineError);
   });
 });
+
+describe('the variables object and the arguments of a function', () => {
+  test('variables named lo and hi are bound, on the fallback and the compiled route', () => {
+    const ceV = new ComputeEngine();
+    ceV.declare('lo', 'integer');
+    ceV.declare('hi', 'integer');
+    const fallback = compile(
+      ceV.box(['Add', ['Fibonacci', 'lo'], ['Fibonacci', 'hi']]),
+      { to: 'interval-js' }
+    ) as { success: boolean; run: (v: unknown) => unknown };
+    expect(fallback.success).toBe(false);
+    // The interpreter's value is Fibonacci(5) + Fibonacci(5) = 10.
+    expect(fallback.run({ lo: 5, hi: 5 })).toEqual(point(10));
+    const compiled = compile(ceV.box(['Add', 'lo', ['Multiply', 2, 'hi']]), {
+      to: 'interval-js',
+    }) as { success: boolean; run: (v: unknown) => unknown };
+    expect(compiled.success).toBe(true);
+    expect(compiled.run({ lo: 5, hi: 6 })).toEqual(point(17));
+    expect(compiled.run({ lo: { lo: 1, hi: 2 }, hi: 6 })).toEqual({
+      kind: 'interval',
+      value: { lo: 13, hi: 14 },
+    });
+  });
+
+  test('a declined Function literal reads its boolean parameter', () => {
+    const f = ce.box([
+      'Function',
+      ['Block', ['If', 'b', ['Fibonacci', 'x'], 0]],
+      ['Typed', 'b', "'boolean'"],
+      ['Typed', 'x', "'integer'"],
+    ]);
+    const r = compile(f, { to: 'interval-js' }) as {
+      success: boolean;
+      run: (...args: unknown[]) => unknown;
+    };
+    expect(r.success).toBe(false);
+    expect(r.run('true', 5)).toEqual(point(5));
+    expect(r.run('false', 5)).toEqual(point(0));
+    // `'maybe'` is either branch: the answer holds both 5 and 0.
+    const maybe = r.run('maybe', 5) as {
+      kind: string;
+      value?: { lo: number; hi: number };
+    };
+    if (maybe.kind !== 'entire') {
+      expect(maybe.value!.lo).toBeLessThanOrEqual(0);
+      expect(maybe.value!.hi).toBeGreaterThanOrEqual(5);
+    }
+  });
+});

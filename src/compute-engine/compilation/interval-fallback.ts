@@ -297,16 +297,27 @@ function collapseIntervalInput(value: unknown): unknown {
   // ELEMENTS collapse. The record branch below would turn it into an object
   // keyed "0", "1", …, which the interpreter reads as a dictionary.
   if (Array.isArray(value)) return value.map(collapseIntervalInput);
-  if (isRecord(value)) {
-    // Prototype-free: `out['__proto__'] = v` on an ordinary object invokes the
-    // inherited setter instead of creating an own key, so a variable named
-    // `__proto__` was dropped from the copy entirely and read as unsupplied.
-    const out: Record<string, unknown> = Object.create(null);
-    for (const [k, v] of Object.entries(value))
-      out[k] = collapseIntervalInput(v);
-    return out;
-  }
+  if (isRecord(value)) return collapseEntries(value);
   return value;
+}
+
+/** A copy of the record `value` with each entry collapsed
+ * (`collapseIntervalInput`). */
+function collapseEntries(value: Record<string, unknown>): unknown {
+  // Prototype-free: `out['__proto__'] = v` on an ordinary object invokes the
+  // inherited setter instead of creating an own key, so a variable named
+  // `__proto__` was dropped from the copy entirely and read as unsupplied.
+  const out: Record<string, unknown> = Object.create(null);
+  for (const [k, v] of Object.entries(value)) out[k] = collapseIntervalInput(v);
+  return out;
+}
+
+/** The entries of a variables object, or the value itself if it is not
+ * one. */
+function varsEntries(value: unknown): unknown {
+  return isRecord(value) && !Array.isArray(value)
+    ? Object.values(value)
+    : value;
 }
 
 /**
@@ -363,12 +374,12 @@ export function buildIntervalFallback(
       ),
       target: 'interval-js',
     }) as unknown as CompilationResult<'interval-js', IntervalValue>;
-  // A function-valued root that is not a `Function` literal (a block, a
-  // symbol, an `If`) has the `calling: 'lambda'` convention too, as on the
-  // compiled route (`functionValuedRoot`). The generic fallback gives that
-  // convention to a `Function` literal only
-  // (`buildIntervalLambdaFallback`).
-  if (functionValuedRoot(expr) && !isFunction(expr, 'Function'))
+  // A function-valued root (a `Function` literal, a block, a symbol, an
+  // `If`) has the `calling: 'lambda'` convention, as on the compiled route
+  // (`functionValuedRoot`). Its arguments are read here
+  // (`buildIntervalLambdaFallback`): a boolean parameter takes `'true'`,
+  // `'false'` and `'maybe'`, and an interval argument is collapsed.
+  if (functionValuedRoot(expr))
     return buildIntervalLambdaFallback(expr, fallbackOf(expr));
   const base = fallbackOf(expr);
   // `run` is guaranteed present for an executable target (interval-js).
@@ -398,11 +409,22 @@ export function buildIntervalFallback(
     ...args: unknown[]
   ): IntervalValue => {
     const { args: read, maybe } = booleanFallbackInputs(args, booleanNames);
-    const wide = maybe || read.some(hasWideIntervalInput);
+    // The first argument is the variables object: its entries are read,
+    // and the object itself is never an interval (`{ lo: 5, hi: 5 }` binds
+    // the variables `lo` and `hi`).
+    const wide =
+      maybe ||
+      read.some((a, i) => hasWideIntervalInput(i === 0 ? varsEntries(a) : a));
     exact = undefined;
     decided = false;
     wantExact = !wide && !draws && !givesFunction;
-    const value = interpreterRun(...read.map(collapseIntervalInput));
+    const value = interpreterRun(
+      ...read.map((a, i) =>
+        i === 0 && isRecord(a) && !Array.isArray(a)
+          ? collapseEntries(a)
+          : collapseIntervalInput(a)
+      )
+    );
     if (givesFunction) return { kind: 'entire' };
     if (wide && isBoolean) return 'maybe';
     if (draws) return isBoolean ? 'maybe' : { kind: 'entire' };
