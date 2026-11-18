@@ -2,6 +2,17 @@
 
 ### Resolved Issues
 
+- **A categorical palette is not interpolated.** `Colormap("tycho11", 0.05)`
+  was a mix of the first two colors of the palette; it is now the nearest
+  color of the palette, the color at index `round(t × (length − 1))`, so the
+  second color. `Colormap("tycho11", 3)` was the first, the middle and the
+  last colors; it is now the first three colors, and a count larger than the
+  palette repeats its colors from the start. This applies to the categorical
+  palettes (`tycho11` and its variants, `tableau10`, `kelly22`,
+  `mathematica10`, `cupertino10`, `cupertino-dark10`, `spectrum12`), in the
+  interpreter and in compiled JavaScript. The sequential and diverging
+  palettes are still interpolated.
+
 - **A unit written as a string is the target of a conversion.** In Epsil,
   `unitConvert(quantity(2, h), "min")` was unevaluated; it is now `120 min`.
   `UnitConvert`, `IsCompatibleUnit` and `UnitDimension` read a string unit

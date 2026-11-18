@@ -776,7 +776,13 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   },
 
   Colormap: {
-    description: 'Sample colors from a named palette',
+    description:
+      'Sample colors from a named palette. With no second argument, the colors of the palette. ' +
+      'With an integer n >= 2, a list of n colors. With a number t in [0, 1] (clamped), the color at position t. ' +
+      'A sequential or diverging palette is a gradient: n gives n evenly spaced samples, and t an interpolated color. ' +
+      'A categorical palette (such as "tycho11" or "tableau10") is a list of distinct colors and is never interpolated: ' +
+      'n gives its first n colors, repeated from the start past the length of the palette, and t the nearest color, ' +
+      'the color at index round(t × (length − 1))',
     complexity: 8000,
     signature: '(string, number?) -> color | list<color>',
     evaluate: (ops, { engine: ce }) => {
@@ -797,7 +803,13 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       const val = ops[1].re;
       if (!Number.isFinite(val)) return ce.error('expected-value');
 
-      // Variant 2: integer >= 2 -> resample to n colors
+      // A categorical palette is a list of distinct colors, not a gradient:
+      // it is indexed, never interpolated.
+      const categorical = name in CATEGORICAL_PALETTES;
+
+      // Variant 2: integer >= 2 -> n colors: the first n colors of a
+      // categorical palette (repeated from the start past its length), or n
+      // evenly spaced samples of a gradient
       if (Number.isInteger(val) && val >= 2) {
         const n = val;
         // One sample per requested color: the loop scales with the operand
@@ -805,12 +817,22 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
         if (n > MAX_COLORMAP_SAMPLES) return undefined;
         const colors: any[] = [];
         for (let i = 0; i < n; i++) {
-          colors.push(samplePalette(ce, palette, i / (n - 1)));
+          colors.push(
+            categorical
+              ? colorNumberToOklch(ce, parseColor(palette[i % palette.length]))
+              : samplePalette(ce, palette, i / (n - 1))
+          );
         }
         return ce.function('List', colors);
       }
 
-      // Variant 3: real in [0,1] -> sample at position
+      // Variant 3: real in [0,1] -> the color at that position: the nearest
+      // category of a categorical palette, an interpolated color of a gradient
+      if (categorical) {
+        const t = Math.max(0, Math.min(1, val));
+        const i = Math.round(t * (palette.length - 1));
+        return colorNumberToOklch(ce, parseColor(palette[i]));
+      }
       return samplePalette(ce, palette, val);
     },
   },

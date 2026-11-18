@@ -97,7 +97,7 @@ Convert a color to a string in the specified format: "hex" (the default), "rgb",
 
 MathJSON `Colormap` · `(string, number?) -> color | list<color>`
 
-Sample colors from a named palette
+Sample colors from a named palette. With no second argument, the colors of the palette. With an integer n &gt;= 2, a list of n colors. With a number t in [0, 1] (clamped), the color at position t. A sequential or diverging palette is a gradient: n gives n evenly spaced samples, and t an interpolated color. A categorical palette (such as "tycho11" or "tableau10") is a list of distinct colors and is never interpolated: n gives its first n colors, repeated from the start past the length of the palette, and t the nearest color, the color at index round(t × (length − 1))
 
 ### contrastingColor
 

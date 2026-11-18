@@ -1002,15 +1002,23 @@ const colorHelpers = {
     // No second arg → return full palette
     if (arg === undefined) return colors;
 
-    // Integer n >= 2 → resample to n evenly spaced colors. Past the cap the
-    // interpreter stays symbolic; the compiled spelling for that is NaN.
+    // A categorical palette is a list of distinct colors, not a gradient: it
+    // is indexed, never interpolated (the interpreter's rule).
+    const categorical = name in CATEGORICAL_PALETTES;
+    const copy = (c: CompiledColor): CompiledColor =>
+      mkColor(c.space, c.c0, c.c1, c.c2, c.alpha);
+
+    // Integer n >= 2 → n colors: the first n of a categorical palette
+    // (repeated from the start past its length), or n evenly spaced samples of
+    // a gradient. Past the cap the interpreter stays symbolic; the compiled
+    // spelling for that is NaN.
     if (Number.isInteger(arg) && arg >= 2) {
       const n = arg;
       if (n > MAX_COLORMAP_SAMPLES) return NaN;
       const result: CompiledColor[] = [];
       for (let i = 0; i < n; i++) {
-        const t = n === 1 ? 0 : i / (n - 1);
-        result.push(this._interpolatePalette(colors, t));
+        if (categorical) result.push(copy(colors[i % colors.length]));
+        else result.push(this._interpolatePalette(colors, i / (n - 1)));
       }
       return result;
     }
@@ -1022,8 +1030,10 @@ const colorHelpers = {
     // iterable" at run time. NaN-in/NaN-out, like compiled real arithmetic.
     if (!Number.isFinite(arg)) return nonFiniteColor(undefined);
 
-    // Float t in [0, 1] → interpolate at position t
+    // Float t in [0, 1] → the color at position t: the nearest category of a
+    // categorical palette, an interpolated color of a gradient
     const t = Math.max(0, Math.min(1, arg));
+    if (categorical) return copy(colors[Math.round(t * (colors.length - 1))]);
     return this._interpolatePalette(colors, t);
   },
 

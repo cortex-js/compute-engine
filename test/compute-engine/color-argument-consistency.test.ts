@@ -625,6 +625,26 @@ describe('Colormap samples agree between the interpreter and the compiled runtim
     for (let i = 0; i < 3; i++) expect(js[i]).toBeCloseTo(expected[i], 12);
   });
 
+  // CE-1416: a categorical palette is indexed on both routes.
+  test.each([0.05, 0.06, 0.5, 1])('tycho11 at %p', (t) => {
+    const expr = ['Colormap', "'tycho11'", t];
+    const expected = interp(expr).ops!.map((op) => op.re);
+    const js = runJSChannels(expr);
+    for (let i = 0; i < 3; i++) expect(js[i]).toBeCloseTo(expected[i], 12);
+  });
+
+  test('tycho11 with a count of 13', () => {
+    const expr = ['Colormap', "'tycho11'", 13];
+    const expected = interp(expr).ops!.map((c) => c.ops!.map((op) => op.re));
+    const js = runJS(expr) as { c0: number; c1: number; c2: number }[];
+    expect(js.length).toBe(13);
+    js.forEach((c, k) => {
+      expect(c.c0).toBeCloseTo(expected[k][0], 12);
+      expect(c.c1).toBeCloseTo(expected[k][1], 12);
+      expect(c.c2).toBeCloseTo(expected[k][2], 12);
+    });
+  });
+
   test('a sampled position agrees with ColorMix on the two stops it lies between', () => {
     // The palette's own stops, so the check does not hard-code its length.
     const stops = interp(['Colormap', "'viridis'"]).ops!;

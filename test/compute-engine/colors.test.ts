@@ -126,6 +126,32 @@ describe('Colormap', () => {
     expect(result.ops!.length).toBe(3);
   });
 
+  // CE-1416: a categorical palette is indexed, not interpolated.
+  describe('a categorical palette', () => {
+    const stops = () =>
+      ce.expr(['Colormap', "'tycho11'"]).evaluate().ops!.map((c) => c.json);
+
+    test('a position gives the nearest category', () => {
+      const s = stops();
+      const at = (t: number) =>
+        ce.expr(['Colormap', "'tycho11'", t]).evaluate().json;
+      expect(at(0.04)).toEqual(s[0]);
+      expect(at(0.06)).toEqual(s[1]);
+      expect(at(0.5)).toEqual(s[5]);
+      expect(at(1)).toEqual(s[10]);
+      expect(at(-1)).toEqual(s[0]);
+      expect(at(1.5)).toEqual(s[10]);
+    });
+
+    test('a count gives the first colors, repeated past the length', () => {
+      const s = stops();
+      const three = ce.expr(['Colormap', "'tycho11'", 3]).evaluate();
+      expect(three.ops!.map((c) => c.json)).toEqual(s.slice(0, 3));
+      const thirteen = ce.expr(['Colormap', "'tycho11'", 13]).evaluate();
+      expect(thirteen.ops!.map((c) => c.json)).toEqual([...s, s[0], s[1]]);
+    });
+  });
+
   test('unknown palette returns error', () => {
     const expr = ce.expr(['Colormap', "'nonexistent'"]);
     const result = expr.evaluate();
