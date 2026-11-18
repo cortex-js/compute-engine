@@ -28,7 +28,6 @@ import {
   estimatedFactorialDigits,
 } from '../numerics/special-functions.js';
 import { integerDigitCount } from '../numerics/bigint.js';
-import { isPrimeBigint } from '../numerics/primes.js';
 
 /**
  * Thrown by a bigint helper at a pole. `value` is the `number` that the
@@ -85,43 +84,6 @@ export function bfloorDiv(a: bigint, b: bigint): bigint {
   if (b === 0n) divisionByZero(a);
   const q = a / b;
   return a % b !== 0n && a < 0n !== b < 0n ? q - 1n : q;
-}
-
-/** `Ceil(a / b)`. */
-export function bceilDiv(a: bigint, b: bigint): bigint {
-  if (b === 0n) divisionByZero(a);
-  const q = a / b;
-  return a % b !== 0n && a < 0n === b < 0n ? q + 1n : q;
-}
-
-/** `Round(a / b)`, a half rounded away from zero (`Round(5/2) = 3`,
- * `Round(−5/2) = −3`), as the interpreter rounds. */
-export function broundDiv(a: bigint, b: bigint): bigint {
-  if (b === 0n) divisionByZero(a);
-  const m = abs(b);
-  const q = (2n * abs(a) + m) / (2n * m);
-  return a < 0n !== b < 0n ? -q : q;
-}
-
-/** `Truncate(a / b)`: the quotient rounded toward zero. */
-export function btruncDiv(a: bigint, b: bigint): bigint {
-  if (b === 0n) divisionByZero(a);
-  return a / b;
-}
-
-/**
- * `a / b` under an integer promise (an ascription `Typed(…, integer)`, a
- * function declared `-> integer`, an integer parameter): the quotient must
- * be an integer. A remainder throws a `RangeError`: the value is outside
- * the promised type, and the interpreter reports a type error there.
- */
-export function bexactDiv(a: bigint, b: bigint): bigint {
-  if (b === 0n) divisionByZero(a);
-  if (a % b !== 0n)
-    throw new RangeError(
-      `The quotient ${String(a)} / ${String(b)} is not an integer, but its value was promised to be an integer`
-    );
-  return a / b;
 }
 
 /** `Mod(a, b)`: the remainder with the sign of the divisor. */
@@ -181,57 +143,6 @@ export function bpow(a: bigint, e: bigint): bigint {
   if (!(digits <= MAX_EXACT_DIGITS))
     throw sizeLimitError(`Power(${String(a)}, ${String(e)})`, digits);
   return a ** e;
-}
-
-/** `(−1)^k`: `1n` for an even `k` and `−1n` for an odd `k`, also for a
- * negative `k`. */
-export function bnegOnePow(k: bigint): bigint {
-  return k % 2n === 0n ? 1n : -1n;
-}
-
-/**
- * The exact value of `a^e` for any integer `e`, as a quotient
- * `[numerator, denominator]` with a positive denominator: `[a^e, 1n]` for
- * `e ≥ 0`, and `[±1n, |a|^(−e)]` for `e < 0`. A division helper of this
- * module rounds it (`bfloorDiv(..._SYS.bpowRational(a, e))`). `0^e` with
- * `e < 0` is `[1n, 0n]`, which the division helper reads as a pole
- * carrying `Infinity`; `0^0` throws a pole carrying `NaN`. The size limit
- * of `bpow` applies to `|a|^|e|`.
- */
-export function bpowRational(a: bigint, e: bigint): [bigint, bigint] {
-  if (e >= 0n) return [bpow(a, e), 1n];
-  if (a === 0n) return [1n, 0n];
-  const d = bpow(a, -e);
-  return d < 0n ? [-1n, -d] : [1n, d];
-}
-
-/** The integer square root `⌊√t⌋` of `t ≥ 0`, by Newton's method. A
- * negative `t` is a pole carrying `NaN` (the interpreter gives an
- * `incompatible-type` error, which the double mode projects to `NaN`). */
-export function bisqrt(t: bigint): bigint {
-  if (t < 0n) throw new NonFiniteValue(NaN);
-  if (t < 2n) return t;
-  // A start above the root: 2^(⌈bits/2⌉), where `bits` is the bit length
-  // of `t`. Each step then decreases until it reaches the root.
-  let x = 1n << BigInt(Math.ceil(t.toString(2).length / 2));
-  for (;;) {
-    const y = (x + t / x) >> 1n;
-    if (y >= x) return x;
-    x = y;
-  }
-}
-
-/** `Ceil(√t)`: `k + 1` when `k² < t`, with `k = ⌊√t⌋`. */
-export function bceilSqrt(t: bigint): bigint {
-  const k = bisqrt(t);
-  return k * k < t ? k + 1n : k;
-}
-
-/** `Round(√t)`: `k + 1` when `t > k² + k`, with `k = ⌊√t⌋`. The square
- * root of an integer is never `k + 1/2`, so no tie is possible. */
-export function broundSqrt(t: bigint): bigint {
-  const k = bisqrt(t);
-  return t > k * k + k ? k + 1n : k;
 }
 
 // ---------------------------------------------------------------------------
@@ -314,22 +225,6 @@ export function bfactorial(n: bigint): bigint {
   return product(2n, n, 1n);
 }
 
-/** `n!!` for `n ≥ 0`: the product of the integers of the parity of `n`
- * from `n` down to 1 or 2. The lane analysis accepts only an operand typed
- * `integer<0..>`: the double factorial of a negative odd integer is a
- * rational (`(−5)!! = 1/3`), so a negative operand throws a `RangeError`. */
-export function bfactorial2(n: bigint): bigint {
-  if (n < 0n)
-    throw new RangeError(
-      `Factorial2(${String(n)}): the operand must be a non-negative integer`
-    );
-  // `n!!` is about the square root of `n!`.
-  const digits = estimatedFactorialDigits(Number(n)) / 2;
-  if (!(digits <= MAX_EXACT_DIGITS))
-    throw sizeLimitError(`Factorial2(${String(n)})`, digits);
-  return product(n % 2n === 0n ? 2n : 1n, n, 2n);
-}
-
 /**
  * `Binomial(n, k)`, extended to negative operands as the interpreter
  * extends it (`binomialBigint` in `library/combinatorics.ts`):
@@ -409,45 +304,6 @@ export function bat(list: ReadonlyArray<unknown>, i: bigint): unknown {
   return list[bindex(i, list.length)];
 }
 
-/** The count `c` of `Take` or `Drop` clamped to `[−length, length]`, as a
- * `number`: a count past the length is clipped, as the interpreter clips
- * it. */
-export function bcount(c: bigint, length: number): number {
-  const len = BigInt(length);
-  if (c > len) return length;
-  if (c < -len) return -length;
-  return Number(c);
-}
-
-/** `Take(list, c)`: the first `c` elements, or the last `−c` elements for a
- * negative `c`. `Take(list, 0)` is empty. */
-export function btake<T>(list: ReadonlyArray<T>, c: bigint): T[] {
-  const k = bcount(c, list.length);
-  return k < 0 ? list.slice(k) : list.slice(0, k);
-}
-
-/** `Drop(list, c)`: all but the first `c` elements, or all but the last
- * `−c` elements for a negative `c`. */
-export function bdrop<T>(list: ReadonlyArray<T>, c: bigint): T[] {
-  const k = bcount(c, list.length);
-  return k < 0 ? list.slice(0, k) : list.slice(k);
-}
-
-/** `ReplaceAt(list, i, v)`: a copy of the list with the element at the
- * 1-based index `i` replaced. An index that is not a position of the list
- * throws a `RangeError`, as the double mode throws (`listPosition` in
- * `javascript-runtime.ts`). */
-export function breplaceAt<T>(list: ReadonlyArray<T>, i: bigint, v: T): T[] {
-  const len = BigInt(list.length);
-  if (i === 0n || i > len || i < -len)
-    throw new RangeError(
-      `ReplaceAt: the index ${String(i)} is not a position of the list (1..${list.length} or -${list.length}..-1) at run time`
-    );
-  const out = list.slice();
-  out[i > 0n ? Number(i) - 1 : list.length + Number(i)] = v;
-  return out;
-}
-
 /** The element count of the range `lo..hi` by `step`: `0` for a zero step
  * or a step whose sign does not agree with the direction from `lo` to `hi`.
  * The `bigint` form of `rangeCount` (`numerics/range-count.ts`), which is
@@ -458,50 +314,16 @@ export function brangeCount(lo: bigint, hi: bigint, step: bigint): bigint {
   return q < 0n ? 0n : q + 1n;
 }
 
-/**
- * The elements of `Range(lo, hi, step)` as an array of `bigint`. With no
- * step, the range goes from `lo` toward `hi` by `1` or `−1`, as the
- * interpreter's `Range(a, b)` does (`Range(5, 1)` is `[5, 4, 3, 2, 1]`).
- * A count above the largest array length (`4294967295`) throws the
- * `RangeError` of the double mode.
- */
-export function brange(lo: bigint, hi: bigint, step?: bigint): bigint[] {
-  const s = step ?? (hi >= lo ? 1n : -1n);
-  const count = brangeCount(lo, hi, s);
-  if (count > 4294967295n) throw new RangeError('Invalid array length');
-  const n = Number(count);
-  const result = new Array<bigint>(n);
-  for (let i = 0; i < n; i++) result[i] = lo + BigInt(i) * s;
-  return result;
-}
-
 // ---------------------------------------------------------------------------
 // Predicates
 // ---------------------------------------------------------------------------
 
-/** Whether `x` is an integer value: a `bigint`, or a `number` that is an
- * integer. A type guard of the mode reads a value with this predicate,
- * since `Number.isInteger(5n)` is `false`. */
-export function isIntegerValue(x: unknown): boolean {
-  return typeof x === 'bigint' || Number.isInteger(x);
-}
-
 /** The helpers of the mode, as they are added to `_SYS`. */
 export const BIGINT_HELPERS = {
   NonFiniteValue,
-  bfloorDiv,
-  bceilDiv,
-  broundDiv,
-  btruncDiv,
-  bexactDiv,
   bfloorMod,
   bremainder,
   bpow,
-  bnegOnePow,
-  bpowRational,
-  bisqrt,
-  bceilSqrt,
-  broundSqrt,
   babs,
   bsign,
   bmin,
@@ -509,17 +331,8 @@ export const BIGINT_HELPERS = {
   bgcd,
   blcm,
   bfactorial,
-  bfactorial2,
   bbinomial,
   bfibonacci,
-  bindex,
   bat,
-  bcount,
-  btake,
-  bdrop,
-  breplaceAt,
   brangeCount,
-  brange,
-  isIntegerValue,
-  isPrimeBigint,
 };

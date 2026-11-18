@@ -27,7 +27,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { compileJetDerivative } from '../../src/compute-engine/compilation/jet-derivative';
 import { derivative } from '../../src/compute-engine/symbolic/derivative';
 import { BoxedFunction } from '../../src/compute-engine/boxed-expression/boxed-function';
 
@@ -250,34 +249,6 @@ describe('applied derivative: where the jet lowering declines', () => {
       expect(
         relative(asComplex(r.run({ x })), interpreted(ce, 2, x))
       ).toBeLessThan(1e-9);
-  });
-
-  test('an order whose factorial overflows keeps the symbolic route', () => {
-    // Reading the n-th derivative off a jet scales the last coefficient by
-    // `n!`, and `n!` is `Infinity` in double precision from 171 upward: an
-    // exactly zero coefficient would read as `0 · Infinity`, that is NaN,
-    // where the true derivative is zero.
-    //
-    // The emitter is called directly rather than through `compile`: a decline
-    // sends the application to the symbolic route, and differentiating a body
-    // 171 times is precisely the work this lowering exists to avoid.
-    const ce = new ComputeEngine();
-    const literal = ce.box([
-      'Function',
-      ce.parse('x^9+x^4+x^3+x^2+\\sin x+x'),
-      'x',
-    ]);
-    const emit = (order: number) =>
-      compileJetDerivative(
-        literal,
-        order,
-        ce.symbol('x'),
-        () => '_.x',
-        () => '_t',
-        () => false
-      );
-    expect(emit(170)).toContain(', 170)');
-    expect(emit(171)).toBeUndefined();
   });
 
   test('a jet result is NaN where the body has a pole, as the closed form is', () => {

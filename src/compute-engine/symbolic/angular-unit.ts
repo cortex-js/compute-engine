@@ -136,8 +136,7 @@ export function angularChainFactor(ce: Expression['engine']): Expression {
  * compiled `Cos` of the point `0.25` was strictly positive and excluded the
  * true value 0.
  *
- * The compilation reads it (`compilation/jet-derivative.ts`,
- * `compilation/derivative-closed-form.ts`).
+ * The compilation reads it (`compilation/derivative-closed-form.ts`).
  */
 export function rewriteAngularUnit(
   expr: Expression,
