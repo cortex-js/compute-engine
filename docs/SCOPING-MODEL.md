@@ -436,6 +436,25 @@ the evaluation in progress: two big operators that use the same index name
 can be evaluated at once (the asynchronous lane suspends one mid-loop), and
 each reads its own iteration.
 
+The variable of a formula is the exception to this rule. `D`, `Integrate`,
+`Limit` and `Series` work on a formula, and their variable is a variable of
+that formula, not an iteration index. Before they work, they read the value of
+each free symbol of their operand that holds a formula in their variable, and
+an occurrence of the variable's name in that value denotes the variable
+(`formulaValueOf()`, `library/calculus.ts`). With `G := sin(x)`, `D(G, x)` is
+`cos(x)`, `D(2G, x)` is `2cos(x)`, `∫ G dx` is `-cos(x)` and
+`lim_{x→0} G` is `0`; with `H := y·sin(x)`, `D(H, y)` is `sin(x)`. A symbol in
+such a value is read in the same way (`K := G + 1`, `D(K, x)` is `cos(x)`). A
+constant, a value that does not mention the variable (`a := 3`, which the
+evaluation of the result reads), a value that is a function literal and a
+value that reaches its own symbol again (`P := Q + x` with `Q := P`) are not
+read; a value that only holds such a symbol is (`K := sin(x) + P`, `D(K, x)`
+is `cos(x)`). A parameter of the running call whose value varies with the variable is
+read too: with `g(f) := D(f, x)`, `g(x^2)` is `2x`
+(`parameterValueVariesWith()`, `boxed-expression/binders.ts`). `Sum`,
+`Product`, the comprehensions and the other iteration binders keep the rule
+above: with `G := sin(x)`, `Σ_{x=1}^{3} G` is `3sin(x)`.
+
 A declaration in a pushed scope does not re-point an occurrence that was
 bound earlier; `ce.rebind(expr)` does. `D`, `Integrate`, `Limit` and `Solve`
 hide an assigned value of their variable with a value shield (see "Binders"

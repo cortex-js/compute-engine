@@ -2,6 +2,15 @@
 
 ### Behavior Changes
 
+- **`D`, `Integrate`, `Limit` and `Series` read the value of a symbol that
+  holds a formula in their variable.** With `G := sin(x)`, `D(G, x)` was `0`;
+  it is now `cos(x)`. `D(2G, x)` is `2cos(x)`, `Integrate(G, x)` was `G·x`
+  and is now `-cos(x)`, and `lim_{x→0} G` was `sin(x)` and is now `0`. In
+  Epsil, `let G = sin(x); D(G, x)` prints `cos(x)`. The name of the variable
+  in the value is the variable of the operator. `Sum`, `Product` and the
+  comprehensions do not read the value in this way: with `G := sin(x)`,
+  `Σ_{x=1}^{3} G` is still `3sin(x)`.
+
 - **The `incompatible-type` error of a color operator or of `UnitConvert`
   has a payload.** `Color("nosuchcolor")` was `Error("incompatible-type")`; it
   is now `Error(ErrorCode("incompatible-type", "color", "\"nosuchcolor\""))`,

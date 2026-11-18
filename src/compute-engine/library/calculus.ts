@@ -437,6 +437,91 @@ function independentParameterNames(
 }
 
 /**
+ * The value of `s`, a free symbol in the operand of `D`, `Integrate`,
+ * `Limit` or `Series`, when that value is a formula in one of `variables`:
+ * with `G := sin(x)`, `D(G, x)` differentiates `sin(x)`, and an occurrence
+ * of the variable's name in the value denotes the variable. A symbol in the
+ * value is read in the same way, so with `H := G + 1`, `D(H, x)` is
+ * `cos(x)`. Otherwise `undefined`: for a constant (`Pi`), a symbol with no
+ * value, a value that does not mention a variable (`a := 3`, which the
+ * evaluation of the result reads) and a value that is a function literal.
+ *
+ * A parameter of the running call is read when its value varies with a
+ * variable (`parameterValueVariesWith`): in `g(f) = D(f, x)`, the call
+ * `g(x^2)` gives `f` the value `x^2` (CE-157).
+ *
+ * The iteration binders (`Sum`, `Product`, the comprehensions) do not read
+ * a value in this way: their index does not capture the free names of a
+ * stored value (`docs/SCOPING-MODEL.md`, "the variable of a formula").
+ *
+ * A value that reaches its own symbol again (`P := Q + x` and `Q := P`) is
+ * not read, because its substitution would not end. A symbol whose value
+ * only holds such a symbol is still read: with `K := sin(x) + P`, `K` gives
+ * `sin(x) + P`.
+ */
+function formulaValueOf(
+  ce: ComputeEngine,
+  s: Expression & { symbol: string },
+  variables: readonly string[],
+  read: FormulaRead = { visiting: new Map(), cycleAt: Infinity }
+): Expression | undefined {
+  const name = s.symbol;
+  if (variables.length === 0 || variables.includes(name)) return undefined;
+  const reached = read.visiting.get(name);
+  if (reached !== undefined) {
+    read.cycleAt = Math.min(read.cycleAt, reached);
+    return undefined;
+  }
+  const param = parameterActivationValue(ce, s);
+  if (param !== undefined)
+    return variables.some((n) => parameterValueVariesWith(ce, param, n))
+      ? param
+      : undefined;
+  // A bare-symbol integrand is held unbound. It is bound only when its name
+  // has a definition: binding an unknown name would declare it.
+  if (!s.isCanonical && ce.lookupDefinition(name) === undefined)
+    return undefined;
+  const bound = s.canonical;
+  if (bound.isConstant) return undefined;
+  const value = bound.value;
+  if (value === undefined || isFunction(value, 'Function')) return undefined;
+  const depth = read.visiting.size;
+  read.visiting.set(name, depth);
+  try {
+    const result = withFormulaValues(ce, value, variables, read);
+    // The value reached this symbol, or a symbol whose value is being read
+    // inside this one: this symbol is part of the cycle.
+    if (read.cycleAt <= depth) {
+      if (read.cycleAt === depth) read.cycleAt = Infinity;
+      return undefined;
+    }
+    return variables.some((n) => result.has(n)) ? result : undefined;
+  } finally {
+    read.visiting.delete(name);
+  }
+}
+
+/** The symbols whose values `formulaValueOf` is reading, each with its depth
+ * in the read, and the smallest depth that a value reached again
+ * (`Infinity` when none did). */
+type FormulaRead = { visiting: Map<string, number>; cycleAt: number };
+
+/** `expr` with each free symbol whose value is a formula in one of
+ * `variables` replaced by that value (`formulaValueOf`). */
+function withFormulaValues(
+  ce: ComputeEngine,
+  expr: Expression,
+  variables: readonly string[],
+  read: FormulaRead = { visiting: new Map(), cycleAt: Infinity }
+): Expression {
+  return rewriteWithBinders(expr, (s, shadowed) =>
+    shadowed?.has(s.symbol)
+      ? s
+      : (formulaValueOf(ce, s, variables, read) ?? s)
+  );
+}
+
+/**
  * The call `app` of a parameter of the running function call that holds a
  * function, as an application of that function: `f(x)` becomes
  * `Apply(value, x)`, where `ops` are the operands of `app` after a rewrite.
@@ -7397,18 +7482,15 @@ volumes
               // `f` the value `x^2`, which `differentiate()` would not see
               // through the bare symbol and would take as 0 (CE-157).
               // A call of a parameter that holds a function is a call of
-              // its value (`callOfFunctionParameter`).
+              // its value (`callOfFunctionParameter`). A symbol that holds a
+              // formula in a differentiation variable is read the same way:
+              // with `G := sin(x)`, `D(G, x)` is `cos(x)` (`formulaValueOf`).
               const replaced = new Set<string>();
               f = rewriteWithBinders(
                 f,
                 (s, shadowed) => {
-                  if (shadowed?.has(s.symbol) || diffVars.includes(s.symbol))
-                    return s;
-                  const v = parameterActivationValue(ce, s);
-                  return v !== undefined &&
-                    diffVars.some((n) => parameterValueVariesWith(ce, v, n))
-                    ? v
-                    : s;
+                  if (shadowed?.has(s.symbol)) return s;
+                  return formulaValueOf(ce, s, diffVars) ?? s;
                 },
                 undefined,
                 false,
@@ -8120,7 +8202,9 @@ volumes
         // `g(f) = ∫ f dx`, the call `g(x^2)` gives `f` the value `x^2`, which
         // the integration would take for a constant (`x·x^2`) through the bare
         // symbol. Integrate the integrand with the value in its place
-        // (CE-157).
+        // (CE-157). A symbol that holds a formula in an integration variable
+        // is read the same way: with `G := sin(x)`, `∫ G dx` is `-cos(x)`
+        // (`formulaValueOf`).
         {
           const names = ops.slice(1).flatMap((l) => {
             const v = isFunction(l) ? sym(l.op1) : undefined;
@@ -8147,13 +8231,8 @@ volumes
             : rewriteWithBinders(
                 lifted,
                 (s, shadowed) => {
-                  if (shadowed?.has(s.symbol) || names.includes(s.symbol))
-                    return s;
-                  const v = parameterActivationValue(ce, s);
-                  return v !== undefined &&
-                    names.some((n) => parameterValueVariesWith(ce, v, n))
-                    ? v
-                    : s;
+                  if (shadowed?.has(s.symbol)) return s;
+                  return formulaValueOf(ce, s, names) ?? s;
                 },
                 undefined,
                 false,
@@ -10267,6 +10346,21 @@ volumes
         const refused = dataSymbolCallError(engine, expression);
         if (refused !== undefined) return refused;
 
+        // A symbol that holds a formula in the limit variable is read: with
+        // `G := sin(x)`, `lim_{x→0} G` is `0` (`formulaValueOf`).
+        // The body is read lifted out of the `Block` of the literal
+        // (`liftIntegrand`): the scope of that `Block` binds the names of the
+        // body, which would hide them from the read.
+        if (isFunction(f, 'Function') && f.nops === 2) {
+          const varName = sym(f.op2);
+          if (varName !== undefined) {
+            const lifted = liftIntegrand(f);
+            const body = withFormulaValues(engine, lifted, [varName]);
+            if (body !== lifted)
+              f = engine.function('Function', [body, f.op2]);
+          }
+        }
+
         // A user function called in the body reads a symbol with the name of
         // the limit variable: `lim_{k→1} g(k)` with `g := a ↦ a·k·x`. The
         // limit of the body with this variable renamed is computed instead
@@ -10461,11 +10555,14 @@ volumes
         let n = Math.floor(nExpr?.N().re ?? 5);
         if (!Number.isFinite(n)) n = 5;
         // A call of a parameter that holds a function is a call of its
-        // value (`callOfFunctionParameter`).
+        // value (`callOfFunctionParameter`). A symbol that holds a formula
+        // in the expansion variable is read: with `G := sin(x)`,
+        // `Series(G, x)` expands `sin(x)` (`formulaValueOf`).
         const replaced = new Set<string>();
         const operand = rewriteWithBinders(
           f,
-          (s) => s,
+          (s, shadowed) =>
+            shadowed?.has(s.symbol) ? s : (formulaValueOf(ce, s, [x]) ?? s),
           undefined,
           false,
           undefined,

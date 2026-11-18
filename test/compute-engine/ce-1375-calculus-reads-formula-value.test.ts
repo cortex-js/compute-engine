@@ -1,0 +1,151 @@
+import { ComputeEngine } from '../../src/compute-engine';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
+
+// `D`, `Integrate`, `Limit` and `Series` read the value of a free symbol
+// that holds a formula in their variable; an occurrence of the variable's
+// name in that value denotes the variable. The iteration binders keep the
+// lexical reading (`docs/SCOPING-MODEL.md`, "The variable of a formula").
+
+function engineWithG(): ComputeEngine {
+  const ce = new ComputeEngine();
+  ce.assign('G', ce.box(['Sin', 'x']));
+  return ce;
+}
+
+describe('A symbol that holds a formula in the variable', () => {
+  test('D reads the value', () => {
+    const ce = engineWithG();
+    expect(ce.box(['D', 'G', 'x']).evaluate().toString()).toBe('cos(x)');
+    expect(
+      ce.box(['D', ['Multiply', 2, 'G'], 'x']).evaluate().toString()
+    ).toBe('2cos(x)');
+    expect(
+      ce
+        .box(['D', ['Power', 'G', 2], 'x'])
+        .evaluate()
+        .isSame(ce.parse('2\\sin(x)\\cos(x)'))
+    ).toBe(true);
+  });
+
+  test('D with respect to another variable of the value', () => {
+    const ce = new ComputeEngine();
+    ce.assign('H', ce.box(['Multiply', 'y', ['Sin', 'x']]));
+    expect(ce.box(['D', 'H', 'y']).evaluate().toString()).toBe('sin(x)');
+  });
+
+  test('Integrate reads the value', () => {
+    const ce = engineWithG();
+    expect(ce.box(['Integrate', 'G', 'x']).evaluate().toString()).toBe(
+      '-cos(x)'
+    );
+    expect(
+      ce
+        .box(['Integrate', 'G', ['Limits', 'x', 0, 1]])
+        .evaluate()
+        .isSame(ce.parse('1-\\cos(1)'))
+    ).toBe(true);
+    expect(
+      ce.box(['Integrate', 'G', ['Limits', 'x', 0, 1]]).N().re
+    ).toBeCloseTo(1 - Math.cos(1), 12);
+  });
+
+  test('Limit reads the value', () => {
+    const ce = engineWithG();
+    expect(ce.parse('\\lim_{x\\to 0} G').evaluate().toString()).toBe('0');
+  });
+
+  test('Series reads the value', () => {
+    const ce = engineWithG();
+    expect(
+      ce.box(['Series', 'G', 'x', 0, 3]).evaluate().toString()
+    ).toBe('x - 1/6 * x^3 + BigO(x^5)');
+  });
+
+  test('a symbol in the value is read too', () => {
+    const ce = engineWithG();
+    ce.assign('K', ce.box(['Add', 'G', 1]));
+    expect(ce.box(['D', 'K', 'x']).evaluate().toString()).toBe('cos(x)');
+  });
+
+  test('an assigned value of the variable is not read', () => {
+    const ce = engineWithG();
+    ce.assign('x', 5);
+    expect(ce.box(['D', 'G', 'x']).evaluate().toString()).toBe('cos(x)');
+    expect(ce.box(['Integrate', 'G', 'x']).evaluate().toString()).toBe(
+      '-cos(x)'
+    );
+  });
+
+  test('a new value of the symbol gives a new derivative', () => {
+    const ce = engineWithG();
+    const d = ce.box(['D', 'G', 'x']);
+    expect(d.evaluate().toString()).toBe('cos(x)');
+    ce.assign('G', ce.box(['Power', 'x', 2]));
+    expect(d.evaluate().toString()).toBe('2x');
+  });
+
+  test('a value that reaches its own symbol again is not read', () => {
+    const ce = new ComputeEngine();
+    ce.assign('P', ce.box(['Add', 'Q', 'x']));
+    ce.assign('Q', ce.box('P'));
+    expect(ce.box(['Integrate', 'P', 'x']).evaluate().toString()).toBe(
+      'P * x'
+    );
+    expect(ce.box(['D', 'P', 'x']).evaluate().toString()).toBe('0');
+    // `K` is not in the cycle: its value is read, with `P` kept as a symbol.
+    ce.assign('K', ce.box(['Add', ['Sin', 'x'], 'P']));
+    expect(ce.box(['D', 'K', 'x']).evaluate().toString()).toBe('cos(x)');
+  });
+
+  test('Limit and Series read a parameter of the running call', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box([
+          'Apply',
+          ['Function', ['Limit', ['Function', 'f', 'x'], 0], 'f'],
+          ['Add', ['Cos', 'x'], 1],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('2');
+    expect(
+      ce
+        .box([
+          'Apply',
+          ['Function', ['Series', 'f', 'x', 0, 3], 'f'],
+          ['Sin', 'x'],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('x - 1/6 * x^3 + BigO(x^5)');
+  });
+
+  test('Sum keeps the lexical reading of its index', () => {
+    const ce = engineWithG();
+    expect(ce.parse('\\sum_{x=1}^{3} G').evaluate().toString()).toBe(
+      '3sin(x)'
+    );
+    ce.assign('a', ce.parse('n+1'));
+    expect(ce.parse('\\sum_{n=1}^{3} a').evaluate().toString()).toBe(
+      '3n + 3'
+    );
+  });
+
+  test('Epsil: the derivative of a variable that holds a formula', () => {
+    const run = (source: string) =>
+      executeEpsil(new ComputeEngine(), source).value?.toString();
+    expect(run('let G = sin(x); D(G, x)')).toBe('cos(x)');
+    expect(run('let G = sin(x); D(2*G, x)')).toBe('2cos(x)');
+    expect(run('let G = sin(x); integrate(G, x)')).toBe('-cos(x)');
+    expect(
+      executeEpsil(
+        new ComputeEngine(),
+        'let F = cdf(normalDistribution(0, 1), x); D(F, x)'
+      )
+        .value?.N()
+        .subs({ x: 0 })
+        .N().re
+    ).toBeCloseTo(1 / Math.sqrt(2 * Math.PI), 12);
+  });
+});
