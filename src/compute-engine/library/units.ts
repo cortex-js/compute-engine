@@ -23,7 +23,9 @@ import {
   getExpressionDimension,
   getExpressionScale,
   findNamedUnit,
-  getUnitDimension,
+  logarithmicExponent,
+  sameLogarithmicExponent,
+  unitCancellationKey,
   type DimensionVector,
   type UnitExpression,
 } from './unit-data.js';
@@ -427,7 +429,8 @@ export function cancelledUnitValue(
 /**
  * Whether the unit factors of `unit` cancel exactly, as the unit
  * cancellation of `cancelUnitFactors()` found with machine numbers. That
- * cancellation groups the unit symbols by dimension, and a group cancels when
+ * cancellation groups the unit symbols by dimension (`unitCancellationKey()`:
+ * a logarithmic unit is in a group of its own), and a group cancels when
  * the sum of its exponents is zero. The sum of two large exponents can round
  * to zero: `m^(6004799503160661/2) · m^(-9007199254740991/3)` is `m^(1/6)`,
  * but both exponents round to the machine number `3002399751580330.5`.
@@ -447,9 +450,8 @@ export function unitExactlyCancels(
   if (factors === null) return true;
   const sums = new Map<string, UnitExponent>();
   for (const [name, { exp }] of factors) {
-    const dim = getUnitDimension(name);
-    if (dim === null) return true;
-    const key = dim.join(',');
+    const key = unitCancellationKey(name);
+    if (key === null) return true;
     const prev = sums.get(key);
     const total = prev === undefined ? exp : addUnitExponents(prev, exp);
     if (total === null) return true;
@@ -765,6 +767,8 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       // Compute dimension vector of the compound unit
       const dim = getExpressionDimension(ue);
       if (!dim) return arg;
+      // A named unit is not logarithmic: `dB/s` is not `Hz`
+      if (logarithmicExponent(ue) !== 0) return arg;
 
       // Search named derived units for a matching dimension with scale=1
       const match = findNamedUnit(dim);
@@ -796,7 +800,8 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
   },
 
   IsCompatibleUnit: {
-    description: 'Check if two units have the same dimension',
+    description:
+      'Check if two units have the same dimension and convert into each other (`dB` and `Np` do, `dB` and `percent` do not)',
     complexity: 1200,
     lazy: true,
     signature: '(value, value) -> value',
@@ -816,7 +821,11 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       const db = getExpressionDimension(bUE);
       if (!da || !db) return undefined;
 
-      return ce.symbol(dimensionsEqual(da, db) ? 'True' : 'False');
+      return ce.symbol(
+        dimensionsEqual(da, db) && sameLogarithmicExponent(aUE, bUE)
+          ? 'True'
+          : 'False'
+      );
     },
   },
 

@@ -25,7 +25,7 @@ category.
 
 MathJSON `IsCompatibleUnit` · `(value, value) -> value`
 
-Check if two units have the same dimension
+Check if two units have the same dimension and convert into each other (`dB` and `Np` do, `dB` and `percent` do not)
 
 ### quantity
 

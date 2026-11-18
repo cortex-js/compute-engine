@@ -254,8 +254,11 @@ const UNIT_TABLE: Record<string, UnitEntry> = {
   'percent': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: 0.01 },
   'ppm': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: 1e-6 },
 
-  // Logarithmic (dimensionless, scale is nominal)
-  'dB': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: 1 },
+  // Logarithmic units (`LOGARITHMIC_UNITS`): the scale is relative to the
+  // neper. 1 dB = ln(10)/20 Np (ISO 80000-3), for a field level
+  // `20·lg(F/F₀) dB = ln(F/F₀) Np` and for a power level
+  // `10·lg(P/P₀) dB = ½·ln(P/P₀) Np` alike.
+  'dB': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: Math.LN10 / 20 },
   'Np': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: 1 },
 
   // ---- Common non-SI units ----
@@ -317,6 +320,64 @@ export function isDimensionless(dim: DimensionVector): boolean {
     dim[6] === 0 &&
     dim[7] === 0
   );
+}
+
+/**
+ * The logarithmic units of the table: the units of a level, the logarithm
+ * of a ratio. Their dimension is zero, as for `percent` or `rad`, but a
+ * level is not a ratio: `10 dB` is not the number `10`, nor `1000 percent`.
+ * So a value converts between two units only when they have the same
+ * logarithmic exponent (`logarithmicExponent()`), as well as the same
+ * dimension: `dB` and `Np` convert, `dB` and `percent` do not.
+ */
+const LOGARITHMIC_UNITS: ReadonlySet<string> = new Set(['dB', 'Np']);
+
+/**
+ * The sum of the exponents of the logarithmic units (`dB`, `Np`) in the
+ * unit expression `expr`: `1` for `dB` and for `dB/m`, `0` for `m` and for
+ * `dB/Np`, `2` for `dB·Np`. Two units convert into each other only when
+ * this number is the same for both (see `LOGARITHMIC_UNITS`). `null` for an
+ * expression that is not a unit expression.
+ */
+export function logarithmicExponent(expr: UnitExpression): number | null {
+  if (typeof expr === 'string') return LOGARITHMIC_UNITS.has(expr) ? 1 : 0;
+  if (!Array.isArray(expr) || expr.length < 2) return null;
+  const op = expr[0];
+  if (op === 'Multiply') {
+    let sum = 0;
+    for (let i = 1; i < expr.length; i++) {
+      const e = logarithmicExponent(expr[i]);
+      if (e === null) return null;
+      sum += e;
+    }
+    return sum;
+  }
+  if (op === 'Divide') {
+    if (expr.length !== 3) return null;
+    const a = logarithmicExponent(expr[1]);
+    const b = logarithmicExponent(expr[2]);
+    return a === null || b === null ? null : a - b;
+  }
+  if (op === 'Power') {
+    if (expr.length !== 3) return null;
+    const e = logarithmicExponent(expr[1]);
+    const n = unitExponentValue(expr[2]);
+    return e === null || n === null ? null : e * n;
+  }
+  return null;
+}
+
+/**
+ * True when the unit expressions `a` and `b` have the same logarithmic
+ * exponent (`logarithmicExponent()`), a condition of a conversion between
+ * them, in addition to the same dimension.
+ */
+export function sameLogarithmicExponent(
+  a: UnitExpression,
+  b: UnitExpression
+): boolean {
+  const ea = logarithmicExponent(a);
+  return ea !== null && ea === logarithmicExponent(b);
 }
 
 /**
@@ -414,14 +475,16 @@ export function getUnitScale(symbol: string): number | null {
 }
 
 /**
- * Return `true` when `a` and `b` share the same dimension vector
- * (i.e. they measure the same physical quantity and can be inter-converted).
+ * Return `true` when `a` and `b` share the same dimension vector and the
+ * same logarithmic exponent (i.e. they measure the same physical quantity
+ * and can be inter-converted): `dB` and `Np` are compatible, `dB` and
+ * `percent` are not.
  */
 export function areCompatibleUnits(a: string, b: string): boolean {
   const da = getUnitDimension(a);
   const db = getUnitDimension(b);
   if (!da || !db) return false;
-  return dimensionsEqual(da, db);
+  return dimensionsEqual(da, db) && sameLogarithmicExponent(a, b);
 }
 
 /**
@@ -471,7 +534,7 @@ export function findNamedUnit(dim: DimensionVector): string | null {
  * Convert a numeric `value` from `fromUnit` to `toUnit`.
  *
  * Returns the converted value, or `null` when the units are unknown or
- * dimensionally incompatible.
+ * incompatible (`areCompatibleUnits()`).
  *
  * Handles both linear conversions (most units) and affine conversions
  * (degC, degF) via the optional `offset` field.
@@ -487,6 +550,7 @@ export function convertUnit(
 
   // Dimensional compatibility check
   if (!dimensionsEqual(from.dimension, to.dimension)) return null;
+  if (!sameLogarithmicExponent(fromUnit, toUnit)) return null;
 
   // A conversion with an offset (a temperature) uses the exact affine map
   // `value → (A·value + B)/D`, so that it rounds only at the end.
@@ -514,7 +578,7 @@ export function convertUnit(
 /**
  * The factor and the offset of the affine map `x → factor·x + offset` that
  * converts a value from `fromUnit` to `toUnit`, or `null` when the units are
- * unknown or dimensionally incompatible.
+ * unknown or incompatible (`areCompatibleUnits()`).
  *
  * For a conversion with an offset (a temperature) the two coefficients are
  * computed from the exact data of the units and rounded once: `degC → degF`
@@ -529,6 +593,7 @@ export function unitConversionCoefficients(
   const to = resolveUnit(toUnit);
   if (!from || !to) return null;
   if (!dimensionsEqual(from.dimension, to.dimension)) return null;
+  if (!sameLogarithmicExponent(fromUnit, toUnit)) return null;
   if (from.offset !== undefined || to.offset !== undefined) {
     const map = exactAffineMap(from, to);
     if (map) return { factor: map.a / map.d, offset: map.b / map.d };
@@ -543,7 +608,8 @@ export function unitConversionCoefficients(
  * that the decimal of its machine number is not its value: the angle
  * units, whose scale is computed from `Math.PI` (`deg` is `π/180`). Their
  * exact scale is a rational multiple of π, given by their `piMultiple`
- * field, which only `exactUnitConversion()` reads.
+ * field, which only `exactUnitConversion()` reads. The scale of `dB` is
+ * `ln(10)/20`, an irrational number: it has no exact value.
  *
  * Every other scale of the table is written as an exact decimal number that
  * defines the unit (`in` is `0.0254 m`, `eV` is `1.602176634e-19 J`, and
@@ -552,7 +618,7 @@ export function unitConversionCoefficients(
  * scale that is computed must be added here.
  */
 const INEXACT_SCALE_UNITS: ReadonlySet<UnitEntry> = new Set(
-  ['deg', 'grad', 'turn', 'arcmin', 'arcsec'].map((u) => UNIT_TABLE[u])
+  ['deg', 'grad', 'turn', 'arcmin', 'arcsec', 'dB'].map((u) => UNIT_TABLE[u])
 );
 
 /**
@@ -883,7 +949,8 @@ function exactExpressionScale(expr: UnitExpression): ExactScale | null {
  * `piPower` an integer. The power of π is not `0` only for a conversion
  * between angle units whose scales have different powers of π: `rad` to
  * `deg` is `v → 180·π⁻¹·v`, and `deg` to `turn` is `v → (1/360)·v`. Returns
- * `null` when the units are unknown or have different dimensions, or when
+ * `null` when the units are unknown or incompatible (different dimensions
+ * or logarithmic exponents, `areCompatibleUnits()`), or when
  * the data of a unit are not exact (see `exactExpressionScale()`).
  *
  * The offsets of the temperature units apply only between two unit symbols,
@@ -901,6 +968,7 @@ export function exactUnitConversion(
   const fromDim = getExpressionDimension(fromUnit);
   const toDim = getExpressionDimension(toUnit);
   if (!fromDim || !toDim || !dimensionsEqual(fromDim, toDim)) return null;
+  if (!sameLogarithmicExponent(fromUnit, toUnit)) return null;
 
   // Two identical units: the conversion is the identity, whatever the data
   // of the unit (`in` to `in`, `Da` to `Da`, `m^(1/2)` to `m^(1/2)`). The
@@ -994,10 +1062,26 @@ export function flattenUnitFactors(
 }
 
 /**
+ * The key of the group of the unit symbol `sym` in a cancellation of unit
+ * factors: two symbols with the same key convert into each other
+ * (`areCompatibleUnits()`), so their factors cancel (`in/m`, `dB/Np`).
+ * `null` for a symbol that is not a known unit.
+ *
+ * @internal
+ */
+export function unitCancellationKey(sym: string): string | null {
+  const dim = getUnitDimension(sym);
+  if (!dim) return null;
+  const key = dim.join(',');
+  return LOGARITHMIC_UNITS.has(sym) ? `${key},log` : key;
+}
+
+/**
  * Cancel repeated unit factors that share a physical dimension.
  *
  * Zero-exponent entries are dropped.  The remaining symbols are grouped by
- * their dimension vector.  For each group with MIXED-SIGN exponents (genuine
+ * `unitCancellationKey()`: their dimension vector, and whether they are
+ * logarithmic (`dB` cancels with `Np`, not with `percent`).  For each group with MIXED-SIGN exponents (genuine
  * cancellation potential, e.g. `m` and `in` with `+1`/`−1`), the member with
  * the largest scale is chosen as the representative (same convention as
  * `quantityAdd`); every other member `s` with exponent `e` folds into the
@@ -1019,12 +1103,11 @@ export function cancelUnitFactors(
   const result = new Map<string, number>();
   for (const [sym, exp] of factors) if (exp !== 0) result.set(sym, exp);
 
-  // Group remaining symbols by dimension-vector key.
+  // Group remaining symbols by `unitCancellationKey()`.
   const groups = new Map<string, string[]>();
   for (const sym of result.keys()) {
-    const dim = getUnitDimension(sym);
-    if (!dim) return null;
-    const key = dim.join(',');
+    const key = unitCancellationKey(sym);
+    if (key === null) return null;
     const arr = groups.get(key);
     if (arr) arr.push(sym);
     else groups.set(key, [sym]);
@@ -1308,8 +1391,9 @@ export function parseUnitDSL(s: string): UnitExpression | null {
  * Convert a numeric `value` between two compound unit expressions.
  *
  * Both `fromUnit` and `toUnit` may be simple strings or MathJSON arrays.
- * Returns the converted value, or `null` on dimensional mismatch or
- * unknown units.
+ * Returns the converted value, or `null` on dimensional mismatch, on
+ * different logarithmic exponents (`logarithmicExponent()`) or unknown
+ * units.
  *
  * For simple string units, delegates to `convertUnit` so that affine
  * offsets (degC, degF) are handled correctly.
@@ -1328,6 +1412,7 @@ export function convertCompoundUnit(
   if (!fromDim || !toDim) return null;
 
   if (!dimensionsEqual(fromDim, toDim)) return null;
+  if (!sameLogarithmicExponent(fromUnit, toUnit)) return null;
 
   const fromScale = getExpressionScale(fromUnit);
   const toScale = getExpressionScale(toUnit);

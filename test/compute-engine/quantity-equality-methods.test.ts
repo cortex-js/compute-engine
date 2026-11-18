@@ -198,11 +198,30 @@ const ROWS: Row[] = [
     verdict: 'undecided',
   },
   {
+    // 1 dB = ln(10)/20 Np ≈ 0.1151 Np
     name: '1 dB vs 1 Np (two logarithmic units)',
     latex: ['1\\,\\mathrm{dB}', '1\\,\\mathrm{Np}'],
     json: [
       ['Quantity', 1, 'dB'],
       ['Quantity', 1, 'Np'],
+    ],
+    verdict: 'less',
+  },
+  {
+    name: '20 dB vs ln(10) Np (two logarithmic units)',
+    latex: ['20\\,\\mathrm{dB}', '2.302585092994046\\,\\mathrm{Np}'],
+    json: [
+      ['Quantity', 20, 'dB'],
+      ['Quantity', 2.302585092994046, 'Np'],
+    ],
+    verdict: 'equal',
+  },
+  {
+    name: '1 dB vs 1 percent (a logarithmic unit and a ratio)',
+    latex: ['1\\,\\mathrm{dB}', '1\\,\\mathrm{percent}'],
+    json: [
+      ['Quantity', 1, 'dB'],
+      ['Quantity', 1, 'percent'],
     ],
     verdict: 'undecided',
   },
@@ -910,7 +929,8 @@ describe('QUANTITIES OF DIFFERENT DIMENSIONS', () => {
     ).toBe('["True","True"]');
     // A quantity with a logarithmic unit and a number
     expect(evalStr(['Equal', Q(6, 'dB'), 6])).toBe('Equal');
-    expect(evalStr(['Equal', Q(1, 'dB'), Q(1, 'Np')])).toBe('Equal');
+    // A logarithmic unit and a ratio
+    expect(evalStr(['Equal', Q(1, 'dB'), Q(1, 'percent')])).toBe('Equal');
     expect(evalStr(['Equal', Q('Missing', 'm'), Q(6, 's')])).not.toBe('False');
   });
 
@@ -1049,7 +1069,8 @@ describe('A DIMENSIONLESS QUANTITY AND A NUMBER', () => {
 
   test('a logarithmic unit is not compared with a number', () => {
     expect(evalStr(['Max', Q(6, 'dB'), 5])).toBe('max(6 dB, 5)');
-    expect(q(1, 'dB').isEqual(q(1, 'Np'))).toBe(undefined);
+    expect(q(1, 'dB').isEqual(q(1, 'percent'))).toBe(undefined);
+    expect(q(1, 'dB').isLess(q(1, 'Np'))).toBe(true);
     expect(q(1, 'dB').isEqual(q(1, 'dB'))).toBe(true);
     expect(q(1, 'dB').isLess(q(2, 'dB'))).toBe(true);
   });

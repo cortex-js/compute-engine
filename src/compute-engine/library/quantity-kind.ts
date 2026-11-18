@@ -52,6 +52,7 @@ import {
   getExpressionDimension,
   getExpressionScale,
   parseUnitDSL,
+  sameLogarithmicExponent,
 } from './unit-data.js';
 import {
   boxedToUnitExpression,
@@ -74,7 +75,6 @@ import {
 import {
   compareQuantities,
   quantityDimensionsDiffer,
-  hasLogarithmicUnit,
 } from './quantity-compare.js';
 
 /**
@@ -432,13 +432,9 @@ function nonRealQuantityOperands(
   const xDim = getExpressionDimension(xUnit);
   const yDim = getExpressionDimension(yUnit);
   if (!xDim || !yDim || !dimensionsEqual(xDim, yDim)) return undefined;
-  // The order of two values with different units of which one has a
-  // nominal scale is not known (`compareQuantities()`)
-  if (
-    JSON.stringify(xUnit) !== JSON.stringify(yUnit) &&
-    (hasLogarithmicUnit(xUnit) || hasLogarithmicUnit(yUnit))
-  )
-    return undefined;
+  // A level and a ratio (`dB` and `percent`, `dB` and a number) do not
+  // convert into each other (`compareQuantities()`)
+  if (!sameLogarithmicExponent(xUnit, yUnit)) return undefined;
   const nonReal = (m: Expression): boolean =>
     isNumber(m) && m.im !== 0 && !Number.isNaN(m.im);
   if (!nonReal(xMag) && !nonReal(yMag)) return undefined;

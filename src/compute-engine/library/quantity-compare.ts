@@ -25,6 +25,8 @@ import {
   dimensionsEqual,
   isDimensionless,
   exactUnitConversion,
+  logarithmicExponent,
+  sameLogarithmicExponent,
 } from './unit-data.js';
 
 /** How `compareQuantities()` compares two quantities. */
@@ -86,6 +88,12 @@ export type QuantityCompareOptions = {
  * decimal number, an exact number), and the result is `undefined` when this
  * is not possible either.
  *
+ * Two exact magnitudes of logarithmic units with no exact conversion (`dB`
+ * and `Np`, whose factor `ln(10)/20` is irrational) are compared by their
+ * machine numbers with no tolerance, and a difference within the rounding
+ * of the conversion gives `undefined`: `20 dB` and
+ * `2302585092994046/10^15 Np` have no known order.
+ *
  * This function is the one comparison of quantities for every route: the
  * `compare` hook and the `eq` handler of the quantity kind
  * (`QUANTITY_ARITHMETIC` and `quantityEq()`, `quantity-kind.ts`) call it,
@@ -108,14 +116,10 @@ export function compareQuantities(
   const bDim = bUnit.dimension;
   if (!aDim || !bDim || !dimensionsEqual(aDim, bDim)) return undefined;
 
-  // The scale of a logarithmic unit (`dB`, `Np`) in the unit table is
-  // nominal: `1 Np` is not `1 dB`. Two quantities with different units of
-  // which one is logarithmic have no known order.
-  if (
-    aUnit.key !== bUnit.key &&
-    (hasLogarithmicUnit(aUE) || hasLogarithmicUnit(bUE))
-  )
-    return undefined;
+  // A level (`dB`, `Np`) and a ratio (`percent`) have the same dimension but
+  // do not convert into each other (`logarithmicExponent()`): they have no
+  // order. Two levels compare by value: `20 dB` is about `2.303 Np`.
+  if (!sameLogarithmicExponent(aUE, bUE)) return undefined;
 
   // A measured magnitude is compared by its nominal value, the first
   // operand of the `Measurement`, as the order of the measurement kind
@@ -150,7 +154,20 @@ export function compareQuantities(
   // Convert to the finer unit: the unit of `a` when it is the finer one.
   const toUnitOfA = aScale < bScale;
 
-  if (isExactMagnitude(aMag) && isExactMagnitude(bMag)) {
+  // Two exact levels whose units have no exact conversion (`dB` and `Np`:
+  // the factor `ln(10)/20` is irrational) are compared by their doubles,
+  // but with no tolerance, and a difference within the rounding of the
+  // conversion does not decide: `20 dB` is not equal to
+  // `2302585092994046/10^15 Np`, which is larger than `ln(10) Np`.
+  const exactPair = isExactMagnitude(aMag) && isExactMagnitude(bMag);
+  const inexactConversion =
+    exactPair &&
+    logarithmicExponent(aUE) !== 0 &&
+    exactUnitConversion(aUE, bUE) === null;
+  // The conversion of a level has no offset: `0 dB` is `0 Np`
+  if (inexactConversion && aMag.is(0) && bMag.is(0)) return 0;
+
+  if (exactPair) {
     const order = orderByConversion(
       aMag,
       aUE,
@@ -197,9 +214,9 @@ export function compareQuantities(
       options.tolerance
     );
     if (order !== undefined) return order;
-    if (!Number.isFinite(d)) return undefined;
+    if (!Number.isFinite(d) || inexactConversion) return undefined;
   }
-  if (Math.abs(d) <= options.tolerance) return 0;
+  if (!inexactConversion && Math.abs(d) <= options.tolerance) return 0;
   return d < 0 ? -1 : 1;
 }
 
@@ -267,23 +284,6 @@ export function quantityDimensionsDiffer(
  */
 const SCALE_ONE_UNIT: DecodedUnit = describeUnit('rad');
 
-/** The units of the unit table whose scale is nominal: a quantity with
- * such a unit is not compared with a number, nor with a quantity that has
- * another unit. */
-const LOGARITHMIC_UNITS = new Set(['dB', 'Np']);
-
-/** True when the unit expression `unit` has a logarithmic unit
- * (`LOGARITHMIC_UNITS`) in it, at any depth. */
-export function hasLogarithmicUnit(unit: UnitExpression): boolean {
-  if (typeof unit === 'string') return LOGARITHMIC_UNITS.has(unit);
-  return unit.some(
-    (part, i) =>
-      i > 0 &&
-      (typeof part === 'string' || Array.isArray(part)) &&
-      hasLogarithmicUnit(part as UnitExpression)
-  );
-}
-
 /**
  * The magnitudes and the decoded units of the two operands of
  * `compareQuantities()`: `[aMagnitude, aUnit, bMagnitude, bUnit]`, or
@@ -320,7 +320,8 @@ function quantityOperands(
   )
     return undefined;
   const unit = decodedUnit(q.op2);
-  if (!unit.unit || hasLogarithmicUnit(unit.unit)) return undefined;
+  // A level (`6 dB`) is not a number (`logarithmicExponent()`)
+  if (!unit.unit || logarithmicExponent(unit.unit) !== 0) return undefined;
   const dim = unit.dimension;
   if (!dim || !isDimensionless(dim)) return undefined;
   return aQuantity

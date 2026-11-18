@@ -1782,3 +1782,134 @@ describe('REPEATED UNIT FACTORS IN A PRODUCT', () => {
     ).toEqual(['Quantity', 2, 'Hz']);
   });
 });
+// CE-1411: a level in dB converts to Np by the factor ln(10)/20
+// (ISO 80000-3), and a level does not convert to a ratio or a number.
+describe('LOGARITHMIC UNITS (dB, Np)', () => {
+  const ce = new ComputeEngine();
+  const ev = (expr: MathJsonExpression) => ce.box(expr).evaluate();
+  const magnitude = (expr: MathJsonExpression) => ev(expr).op1.re;
+
+  test('dB converts to Np and back', () => {
+    expect(
+      magnitude(['UnitConvert', ['Quantity', 10, 'dB'], 'Np'])
+    ).toBeCloseTo(1.151292546497023, 15);
+    expect(magnitude(['UnitConvert', ['Quantity', 1, 'Np'], 'dB'])).toBeCloseTo(
+      20 / Math.LN10,
+      13
+    );
+    expect(
+      magnitude(['UnitConvert', ['Quantity', 20, 'dB'], 'Np'])
+    ).toBeCloseTo(Math.LN10, 15);
+    expect(convertUnit(10, 'dB', 'Np')).toBeCloseTo(1.151292546497023, 15);
+    expect(ev(['UnitConvert', ['Quantity', 10, 'dB'], 'Np']).op2.symbol).toBe(
+      'Np'
+    );
+  });
+
+  test('a compound unit with dB converts to one with Np', () => {
+    // 3 dB/m = 3000 dB/km = 3000·ln(10)/20 Np/km
+    expect(
+      magnitude([
+        'UnitConvert',
+        ['Quantity', 3, ['Divide', 'dB', 'm']],
+        ['Divide', 'Np', 'km'],
+      ])
+    ).toBeCloseTo((3000 * Math.LN10) / 20, 10);
+  });
+
+  test('a level does not convert to a ratio or a number', () => {
+    for (const target of ['percent', 'rad', 'ppm'])
+      expect(
+        ev(['UnitConvert', ['Quantity', 10, 'dB'], target]).toString()
+      ).toBe('Error("incompatible-type")');
+    expect(
+      ev(['UnitConvert', ['Quantity', 10, 'percent'], 'Np']).toString()
+    ).toBe('Error("incompatible-type")');
+    expect(
+      ev([
+        'UnitConvert',
+        ['Quantity', 3, ['Divide', 'dB', 'm']],
+        ['Power', 'm', -1],
+      ]).toString()
+    ).toBe('Error("incompatible-type")');
+    expect(convertUnit(1, 'Np', 'rad')).toBeNull();
+    expect(
+      convertCompoundUnit(1, ['Divide', 'dB', 'm'], ['Divide', 'percent', 'm'])
+    ).toBeNull();
+    expect(areCompatibleUnits('dB', 'Np')).toBe(true);
+    expect(areCompatibleUnits('dB', 'percent')).toBe(false);
+    expect(ev(['IsCompatibleUnit', 'dB', 'Np']).symbol).toBe('True');
+    expect(ev(['IsCompatibleUnit', 'dB', 'percent']).symbol).toBe('False');
+  });
+
+  test('arithmetic converts between dB and Np', () => {
+    // 3 dB + 1 Np: the sum is in Np, 3·ln(10)/20 + 1
+    const sum = ev(['Add', ['Quantity', 3, 'dB'], ['Quantity', 1, 'Np']]);
+    expect(sum.op2.symbol).toBe('Np');
+    expect(sum.op1.re).toBeCloseTo(1 + (3 * Math.LN10) / 20, 15);
+    expect(
+      ev(['Divide', ['Quantity', 3, 'dB'], ['Quantity', 1, 'Np']]).re
+    ).toBeCloseTo((3 * Math.LN10) / 20, 15);
+    expect(
+      ev(['Divide', ['Quantity', 3, 'dB'], ['Quantity', 1, 'dB']]).re
+    ).toBe(3);
+  });
+
+  test('two exact levels within the rounding of ln(10)/20 are not decided', () => {
+    // 20 dB is ln(10) Np = 2.30258509299404568… Np, less than this rational
+    const near = ['Rational', 2302585092994046, 1e15] as MathJsonExpression;
+    for (const op of ['Equal', 'Less'])
+      expect(
+        ev([op, ['Quantity', 20, 'dB'], ['Quantity', near, 'Np']]).operator
+      ).toBe(op);
+    // Far apart: decided, with no tolerance
+    expect(
+      ev(['Less', ['Quantity', 20, 'dB'], ['Quantity', 3, 'Np']]).symbol
+    ).toBe('True');
+    // A float magnitude compares within the tolerance
+    expect(
+      ev([
+        'Equal',
+        ['Quantity', 20, 'dB'],
+        ['Quantity', 2.302585092994046, 'Np'],
+      ]).symbol
+    ).toBe('True');
+    // Two exact zeros are equal: the conversion has no offset
+    expect(
+      ev(['Equal', ['Quantity', 0, 'dB'], ['Quantity', 0, 'Np']]).symbol
+    ).toBe('True');
+    // Another unit with no exact conversion keeps the tolerance
+    expect(
+      ev([
+        'Equal',
+        ['Quantity', 1, ['Power', 'm', ['Rational', 1, 2]]],
+        ['Quantity', 10, ['Power', 'cm', ['Rational', 1, 2]]],
+      ]).symbol
+    ).toBe('True');
+  });
+
+  test('a level stays a level in arithmetic', () => {
+    // (3 dB/m)·(2 m) is 6 dB, not the number 6
+    expect(
+      ev([
+        'Multiply',
+        ['Quantity', 3, ['Divide', 'dB', 'm']],
+        ['Quantity', 2, 'm'],
+      ]).toString()
+    ).toBe('6 dB');
+    expect(
+      ev([
+        'Divide',
+        ['Quantity', 3, 'dB'],
+        ['Quantity', 1, 'percent'],
+      ]).toString()
+    ).toBe('3 dB/percent');
+    expect(
+      ev(['Add', ['Quantity', 3, 'dB'], ['Quantity', 1, 'percent']]).operator
+    ).toBe('Add');
+    // `dB/s` is not `Hz`
+    expect(
+      ev(['UnitSimplify', ['Quantity', 3, ['Divide', 'dB', 's']]]).toString()
+    ).toBe('3 dB/s');
+  });
+});

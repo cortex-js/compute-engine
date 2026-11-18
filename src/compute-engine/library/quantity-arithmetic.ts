@@ -36,6 +36,8 @@ import {
   convertCompoundUnit,
   dimensionsEqual,
   isDimensionless,
+  logarithmicExponent,
+  sameLogarithmicExponent,
   getExpressionScale,
   getExpressionDimension,
   exactUnitConversion,
@@ -562,7 +564,13 @@ export function quantityDivide(
     if (numUnit.unit && denUnit.unit) {
       const numDim = numUnit.dimension;
       const denDim = denUnit.dimension;
-      if (numDim && denDim && dimensionsEqual(numDim, denDim)) {
+      // A level and a ratio (`dB/percent`) do not cancel
+      if (
+        numDim &&
+        denDim &&
+        dimensionsEqual(numDim, denDim) &&
+        sameLogarithmicExponent(numUnit.unit, denUnit.unit)
+      ) {
         // Same dimension — convert to common scale and return scalar
         const numScale = numUnit.scale;
         const denScale = denUnit.scale;
@@ -624,7 +632,12 @@ function quantityDivideMeasurement(
     if (numUnit.unit && denUnit.unit) {
       const numDim = numUnit.dimension;
       const denDim = denUnit.dimension;
-      if (numDim && denDim && dimensionsEqual(numDim, denDim)) {
+      if (
+        numDim &&
+        denDim &&
+        dimensionsEqual(numDim, denDim) &&
+        sameLogarithmicExponent(numUnit.unit, denUnit.unit)
+      ) {
         const numScale = numUnit.scale;
         const denScale = denUnit.scale;
         if (numScale !== null && denScale !== null && denScale !== 0) {
@@ -784,8 +797,9 @@ function simplifyQuantityUnit(
   if (ue) {
     const dim = getExpressionDimension(ue);
     if (dim) {
-      // Dimensionless result (all exponents zero) → plain scalar
-      if (isDimensionless(dim)) {
+      // Dimensionless result (all exponents zero) → plain scalar. A level
+      // (`dB`, `dB·m/m`) is not a number: it stays a quantity.
+      if (isDimensionless(dim) && logarithmicExponent(ue) === 0) {
         const scale = getExpressionScale(ue);
         if (scale !== null) return float(mag * scale);
       }
@@ -834,8 +848,9 @@ function simplifyQuantityUnitMeasurement(
   if (ue) {
     const dim = getExpressionDimension(ue);
     if (dim) {
-      // Dimensionless result (all exponents zero) → plain (unitless) magnitude
-      if (isDimensionless(dim)) {
+      // Dimensionless result (all exponents zero) → plain (unitless)
+      // magnitude. A level (`dB`, `dB·m/m`) stays a quantity.
+      if (isDimensionless(dim) && logarithmicExponent(ue) === 0) {
         const scale = getExpressionScale(ue);
         if (scale !== null) return scaleMagnitude(ce, mag, scale);
       }
