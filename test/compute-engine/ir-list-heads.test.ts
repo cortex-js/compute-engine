@@ -11,8 +11,10 @@
  * shaders give the interpreter's values in WebGL2 (the headless Chromium of
  * `scripts/glsl-check/glsl-driver.ts`; without the browser, that test is
  * skipped). The declines: a list of a run-time length on GLSL, `Median`,
- * `Sort`, `Ordering` and `Unique` on GLSL, the operators that make a list
- * and the statistics in the interval mode.
+ * `Sort`, `Ordering` and `Unique` on GLSL and in the interval mode, a
+ * built list of a run-time length in the interval mode. In the interval
+ * mode each element encloses the interpreter's value at the ends and the
+ * middle of the input boxes.
  */
 
 import { existsSync } from 'node:fs';
@@ -174,14 +176,110 @@ const DECLINES: [label: string, json: Json, to: string, cause: string][] = [
   ['Median on GLSL', ['Median', 'L3'], 'glsl', 'median'],
   ['Sort on GLSL', ['Sort', 'L3'], 'glsl', 'sort'],
   ['Unique on GLSL', ['Unique', 'L3'], 'glsl', 'filter'],
-  ['Rest on interval-js', ['Rest', 'L3'], 'interval-js', 'Rest on interval-js'],
-  ['Mean on interval-js', ['Mean', 'L3'], 'interval-js', 'Mean on interval-js'],
+  ['Median on interval-js', ['Median', 'L3'], 'interval-js', 'Median on interval-js'],
+  ['Unique on interval-js', ['Unique', 'L3'], 'interval-js', 'Unique on interval-js'],
+  ['Rest of a run-time length on interval-js', ['Rest', 'L'], 'interval-js', 'not one number'],
+  ['Take of a run-time length on interval-js', ['Take', 'L', 2], 'interval-js', 'not one number'],
+  ['Take of a run-time count on interval-js', ['Take', 'L3', 'n'], 'interval-js', 'not one number'],
   ['a real count of Take', ['Take', 'L', 'x'], 'javascript', 'a count that is not an integer'],
   ['Dot of two lengths', ['Dot', ['Tuple', 1, 2], ['Tuple', 3, 4, 5]], 'javascript', 'Dot of vectors of two lengths'],
   ['Norm of order 3', ['Norm', 'L', 3], 'javascript', 'an order other than 1, 2 and Infinity'],
   ['Sort with an order', ['Sort', 'L', 'Greater'], 'javascript', 'Sort of 2 operands is not supported'],
   ['Rest of a list with an effect', ['Rest', ['Map', ['Function', ['Add', 't', ['Random']], 't'], 'L']], 'javascript', 'with an effect'],
 ];
+
+type Box = { lo: number; hi: number };
+type IntervalPoint = Record<string, number | Box | (number | Box)[]>;
+
+/** The points of `p` for the interpreter: each box at its two ends and
+ *  its middle (every box at the same place in it). */
+function samples(p: IntervalPoint): Point[] {
+  const at = (v: number | Box, t: number) =>
+    typeof v === 'number' ? v : v.lo + t * (v.hi - v.lo);
+  return [0, 0.5, 1].map((t) =>
+    Object.fromEntries(
+      Object.entries(p).map(([k, v]) => [
+        k,
+        Array.isArray(v) ? v.map((x) => at(x, t)) : at(v, t),
+      ])
+    )
+  ) as Point[];
+}
+
+/** `got` (the value of `run()`) encloses `want`: an interval that holds
+ *  the number, element by element for a list; an empty list for `[]`. */
+function encloses(got: unknown, want: unknown): boolean {
+  if (Array.isArray(want))
+    return (
+      Array.isArray(got) &&
+      got.length === want.length &&
+      want.every((w, k) => encloses(got[k], w))
+    );
+  const g = got as { kind: string; value?: Box };
+  if (typeof want !== 'number') return false;
+  if (Number.isNaN(want)) return g.kind === 'empty';
+  return (
+    (g.kind === 'interval' || g.kind === 'singular') &&
+    g.value !== undefined &&
+    g.value.lo <= want &&
+    want <= g.value.hi
+  );
+}
+
+const B = { lo: 2, hi: 3 };
+// prettier-ignore
+const ENCLOSURES: [label: string, json: Json, points: IntervalPoint[]][] = [
+  ['Rest(L3)', ['Rest', 'L3'], [{ L3: [1, B, -4] }]],
+  ['Most(L3)', ['Most', 'L3'], [{ L3: [1, B, -4] }]],
+  ['Reverse(L3)', ['Reverse', 'L3'], [{ L3: [1, B, -4] }]],
+  ['Reverse(L)', ['Reverse', 'L'], [{ L: [1, B, -4, 0.5] }, { L: [] }]],
+  ['Reverse of a tuple', ['Reverse', ['Tuple', 'x', 2]], [{ x: B }]],
+  ['Take(L3, -2)', ['Take', 'L3', -2], [{ L3: [1, B, -4] }]],
+  ['Take(L3, 5)', ['Take', 'L3', 5], [{ L3: [1, B, -4] }]],
+  ['Drop(L3, 1)', ['Drop', 'L3', 1], [{ L3: [1, B, -4] }]],
+  ['Drop(L3, -1)', ['Drop', 'L3', -1], [{ L3: [1, B, -4] }]],
+  ['RotateLeft(L)', ['RotateLeft', 'L'], [{ L: [1, B, -4] }, { L: [] }]],
+  ['RotateLeft(L, n)', ['RotateLeft', 'L', 'n'], [-1, 2, 7].map((n) => ({ L: [1, B, -4, 0.5], n }))],
+  ['RotateRight(L3, n)', ['RotateRight', 'L3', 'n'], [-4, 1].map((n) => ({ L3: [1, B, -4], n }))],
+  ['Sum(Rest(L3))', ['Sum', ['Rest', 'L3']], [{ L3: [1, B, -4] }]],
+  ['Mean(L)', ['Mean', 'L'], [{ L: [1, B, -4] }, { L: [0.1, 0.2, 0.3] }, { L: [] }]],
+  ['Mean(x, L)', ['Mean', 'x', 'L'], [{ x: B, L: [1, { lo: -1, hi: 5 }] }]],
+  ['Mean of a list of expressions', ['Mean', ['List', 1, ['Sin', 'x'], 3]], [{ x: { lo: 0.5, hi: 1 } }]],
+];
+
+describe('IR list operators on interval-js', () => {
+  test.each(ENCLOSURES)(
+    '%s encloses the interpreter',
+    (_label, json, points) => {
+      const r = compile(box(json), {
+        to: 'interval-js',
+        profile: 'ir',
+        fallback: false,
+      } as never) as unknown as { run: (p: IntervalPoint) => unknown };
+      for (const p of points) {
+        const got = r.run(p);
+        for (const q of samples(p)) {
+          const want = interpret(json, q);
+          if (!encloses(got, want))
+            throw new Error(
+              `at ${JSON.stringify(q)}: ${JSON.stringify(got)} vs ${JSON.stringify(want)}`
+            );
+        }
+      }
+    }
+  );
+
+  test('a count that is a box of several integers has no bound', () => {
+    const r = compile(box(['RotateLeft', 'L3', 'n']), {
+      to: 'interval-js',
+      profile: 'ir',
+      fallback: false,
+    } as never) as unknown as { run: (p: IntervalPoint) => unknown };
+    expect(r.run({ L3: [1, 2, 3], n: { lo: 1, hi: 2 } })).toEqual({
+      kind: 'entire',
+    });
+  });
+});
 
 describe('IR list operators: declines', () => {
   test.each(DECLINES)('%s declines', (_label, json, to, cause) => {

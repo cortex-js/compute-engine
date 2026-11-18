@@ -1813,10 +1813,10 @@ describe('INTERVAL JS - COLLECTIONS: kernels fail closed, roots and fallbacks ar
   });
 
   test('the interpreter fallback maps a collection result to an array of point intervals', () => {
-    // `Reverse` has no interval lowering; with `fallback: true` the interpreter
+    // `Unique` has no interval lowering; with `fallback: true` the interpreter
     // evaluates it and its list is handed back element by element, not
     // collapsed to `entire`.
-    const fn = compile(ceC.box(['Reverse', ['List', 1, 2, 3]]), {
+    const fn = compile(ceC.box(['Unique', ['List', 3, 2, 1, 2]]), {
       to: 'interval-js',
       fallback: true,
     });

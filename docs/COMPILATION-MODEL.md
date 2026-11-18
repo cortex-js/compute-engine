@@ -194,6 +194,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `javascript` (crafted), `x: real`: `Zeta(x)` at
   `x = -171.5` gives `Infinity` (the machine kernel overflows below about
   `-171`); the interpreter at the default precision gives `4.739e172`.
+- `javascript`, `interval-js` (crafted): a sum that overflows the double
+  range is `Infinity` (on `interval-js`, once one end is `∞` the interval
+  `add` rounds the other end to `∞` too), also inside `Mean`, which sums
+  before it divides: at `L = [1e308, 1e308, 1e308]`, `Sum(L)` gives
+  `Infinity` (`[∞, ∞]`) and `Mean(L)` gives `Infinity` (`[∞, ∞]`); the
+  interpreter gives `3e308` and `1e308`.
 - `javascript` (crafted): an intermediate product overflows
   or underflows where the value is finite. With `p`, `q: tuple<real, real>`,
   `Abs(p)` and `Distance(p, q)` are `Math.sqrt(x*x + y*y)`, which squares

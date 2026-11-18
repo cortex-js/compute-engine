@@ -1364,12 +1364,17 @@ above, with the interpreter's value for every length, also 0:
   `Infinity` their `Max` from 0. Another order (an order that is not a
   positive number also for a scalar), a matrix and complex elements decline.
 
-In the interval mode `Count`, `IsEmpty`, `First`, `Second`, `Third`,
-`Last`, `Dot` and `Norm` compile (they read a length or an element, or sum
-and compare the elements); the others decline with
-`<head> on interval-js`: the indices of a build that reorders a list, the
-quotient of a sum by a count, and the operations `sort`, `ordering` and
-`median` have no spelling of the mode.
+In the interval mode every list operator above compiles except `Median`,
+`Sort`, `Ordering` and `Unique`, which decline with `<head> on interval-js`
+(the operations `sort`, `ordering` and `median`, and an equality test of
+two elements, have no spelling of the mode). The indices of a build that
+reorders a list are machine integers (`_IA.number` of the count), and a
+built list needs one length, so `Rest`, `Most`, `Take` and `Drop` compile
+for an input of a stated length (`list<real^3>`) and a constant count only;
+of a list of a run-time length (also a `Range`), and of a run-time count of
+`Take` and `Drop`, they decline (`a list whose length is not one
+number`); a count that is a box with more than one integer gives
+`{ kind: 'entire' }`. `Mean` is the interval sum divided by the count.
 
 `Binomial(n, k)` and `Choose(n, k)` of integers are `_SYS.binomial` on
 JavaScript (exact below 2^53, the interpreter's value for every pair of

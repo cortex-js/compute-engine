@@ -896,7 +896,7 @@ export function listLowering(cx: Lowering) {
       decline(e, `${h} of ${e.nops} operands is not supported by the compiler`);
     if (h === 'Dot') return dot(e);
     if (h === 'Norm') return norm(e);
-    if (cx.interval && h !== 'Count' && h !== 'IsEmpty')
+    if (cx.interval && ['Median', 'Sort', 'Ordering', 'Unique'].includes(h))
       decline(e, `${h} on interval-js`);
     if (h === 'Median') return cx.apply(e, op('median'), [reals(e)]);
     if (h === 'Sort') {
