@@ -10894,6 +10894,16 @@ export class BoxedFunction
               this.operator,
               roles
             );
+        // The base of a matrix power that `squareMatrixPower()` reads
+        // through its value (a symbol, a call) is evaluated here, with
+        // `evaluateAsync()`, so that an entry with only an asynchronous
+        // handler gets its value.
+        const isMatrixPowerHead =
+          this.operator === 'Power' && this._isBoundToLibraryDefinition();
+        const matrixPowerBase =
+          isMatrixPowerHead && matrixPowerReadsBaseValue(bops, this._ops![1])
+            ? await bops[0].evaluateAsync(operandOptions(options))
+            : undefined;
         // The rest of this step runs synchronously after the `await` above,
         // when the engine no longer has the context stack of this evaluation
         // installed. It reads the operands in that stack: a lazy operand
@@ -10908,15 +10918,13 @@ export class BoxedFunction
             const liftError = this._liftedOperandError(bops);
             if (liftError !== undefined) return liftError;
             // The matrix power of a square matrix (mirrors the sync path).
-            if (
-              this.operator === 'Power' &&
-              this._isBoundToLibraryDefinition()
-            ) {
+            if (isMatrixPowerHead) {
               const matrixPower = squareMatrixPower(
                 this.engine,
                 bops,
                 options,
-                this._ops![1]
+                this._ops![1],
+                matrixPowerBase
               );
               if (matrixPower !== undefined)
                 return finishMatrixPowerAsync(matrixPower, options);
@@ -13077,14 +13085,70 @@ async function finishMatrixPowerAsync(
   options: Partial<EvaluateOptions> | undefined
 ): Promise<Expression> {
   if (evaluate === true) return result.evaluateAsync(options);
-  // The base of a symbol or a call was read with `evaluate()`, which leaves
-  // an entry with only an asynchronous handler as it is: it is evaluated
-  // again here, as a literal base is.
-  if (!isFunction(result, 'Power')) return result;
+  if (evaluate === false || !isFunction(result)) return result;
   return result.engine._fn('Power', [
     await result.op1.evaluateAsync(operandOptions(options)),
     result.op2,
   ]);
+}
+
+/**
+ * The kind of the exponent of `Power(base, exponent)` for
+ * `squareMatrixPower()`: a number literal that is an integer, or an
+ * expression that may be an integer (`integer` when it is known to be one).
+ * `undefined` when the element-wise broadcast applies whatever the base.
+ */
+function matrixPowerExponentKind(
+  exponent: Expression,
+  written: Expression | undefined
+): { literal: boolean; integer: boolean } | undefined {
+  // The exponent is already evaluated. A number literal that is not an
+  // integer is an element-wise power; an exponent that is not a number
+  // literal is read below, and a collection exponent is broadcast over.
+  const literal = isNumber(exponent);
+  if (literal && exponent.isInteger !== true) return undefined;
+  if (!literal && isBroadcastParticipant(exponent)) return undefined;
+  // An exponent that is not a literal is an integer when its written form
+  // or its value says so. Otherwise it is a non-integer when it is known
+  // not to be an integer, or when it has no unknowns: an exact constant
+  // that the evaluation leaves as it is (`π`, `ln(3)`) is not an integer.
+  const integer =
+    !literal &&
+    (integerExponentOf(written ?? exponent) === true ||
+      exponent.isInteger === true);
+  if (
+    !literal &&
+    !integer &&
+    (exponent.isInteger === false || exponent.unknowns.length === 0)
+  )
+    return undefined;
+  return { literal, integer };
+}
+
+/** True when `squareMatrixPower()` reads the base `base` through its value:
+ * a symbol, or a function expression other than a `List` whose type is a
+ * matrix. */
+function readsMatrixPowerBase(base: Expression): boolean {
+  return (
+    isSymbol(base) ||
+    (isFunction(base) &&
+      base.operator !== 'List' &&
+      base.type.type !== 'never' &&
+      base.type.matches('matrix'))
+  );
+}
+
+/** True when `squareMatrixPower(ce, ops, …, written)` evaluates the base
+ * `ops[0]`. */
+function matrixPowerReadsBaseValue(
+  ops: ReadonlyArray<Expression>,
+  written: Expression | undefined
+): boolean {
+  return (
+    ops.length === 2 &&
+    matrixPowerExponentKind(ops[1], written) !== undefined &&
+    readsMatrixPowerBase(ops[0])
+  );
 }
 
 /**
@@ -13148,43 +13212,26 @@ async function finishMatrixPowerAsync(
  * `ops` are the operands of the `Power` as the broadcast sees them. A base
  * that is a symbol is read through its value. A base that is a function
  * expression other than a `List` is evaluated only when its type is a
- * matrix. The broadcast after the evaluation of the operands calls this
- * function with operands that are already evaluated.
+ * matrix (`matrixPowerReadsBaseValue()`); `baseValue` is its value when the
+ * caller has evaluated it (the asynchronous path). The broadcast after the
+ * evaluation of the operands calls this function with operands that are
+ * already evaluated.
  */
 function squareMatrixPower(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
   options: Partial<EvaluateOptions> | undefined,
-  written: Expression | undefined
+  written: Expression | undefined,
+  baseValue?: Expression
 ): MatrixPowerResult | undefined {
   if (ops.length !== 2) return undefined;
   const [base, exponent] = ops;
-  // The exponent is already evaluated. A number literal that is not an
-  // integer is an element-wise power; an exponent that is not a number
-  // literal is read below, and a collection exponent is broadcast over.
-  const literal = isNumber(exponent);
-  if (literal && exponent.isInteger !== true) return undefined;
-  if (!literal && isBroadcastParticipant(exponent)) return undefined;
-  // An exponent that is not a literal is an integer when its written form
-  // or its value says so. Otherwise it is a non-integer when it is known
-  // not to be an integer, or when it has no unknowns: an exact constant
-  // that the evaluation leaves as it is (`π`, `ln(3)`) is not an integer.
-  const integer =
-    !literal &&
-    (integerExponentOf(written ?? exponent) === true ||
-      exponent.isInteger === true);
-  if (
-    !literal &&
-    !integer &&
-    (exponent.isInteger === false || exponent.unknowns.length === 0)
-  )
-    return undefined;
-  const isMatrixValue = (x: Expression): boolean =>
-    x.type.type !== 'never' && x.type.matches('matrix');
-  const readValue =
-    isSymbol(base) ||
-    (isFunction(base) && base.operator !== 'List' && isMatrixValue(base));
-  const value = readValue ? base.evaluate(operandOptions(options)) : base;
+  const kind = matrixPowerExponentKind(exponent, written);
+  if (kind === undefined) return undefined;
+  const { literal, integer } = kind;
+  const value = readsMatrixPowerBase(base)
+    ? (baseValue ?? base.evaluate(operandOptions(options)))
+    : base;
   if (!isFunction(value, 'List')) return undefined;
   // The shape is read before the exponent: a base that is not a matrix (a
   // vector) has no matrix power, whatever the exponent. The type of a
