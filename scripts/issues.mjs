@@ -1126,6 +1126,10 @@ export function recordDecision(id, text) {
       'flags',
       `[${flags.filter((x) => x !== 'needs-review').join(', ')}]`,
     ]);
+  // The decision answers the question of a `needs-decision` item, so the item
+  // returns to `open` and its `ask` is cleared; otherwise the backlog, which
+  // leaves out an item that waits for the board, never offers it.
+  if (f.state === 'needs-decision') pairs.push(['state', 'open'], ['ask', '']);
   return [...messages, ...writeFields(id, pairs)];
 }
 

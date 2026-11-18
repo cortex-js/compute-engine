@@ -401,7 +401,7 @@ write at once:
 | Confirm P0        | `confirmed: today`, which removes `needs-review` (shown on a proposed P0)                                                |
 | Mark reviewed     | `reviewed: today` (shown when the item has no `reviewed` date or has `needs-review`)                                    |
 | Release, Ask      | the field, when the text field loses the focus or on Enter                                                               |
-| Record decision   | appends `User decision <today>: <text>` to the `## Decision` section (or adds the section), writes `reviewed: today` and removes `needs-review` |
+| Record decision   | appends `User decision <today>: <text>` to the `## Decision` section (or adds the section), writes `reviewed: today`, removes `needs-review`, and returns a `needs-decision` item to `open` with its `ask` cleared |
 | Close all (Board) | `close --all`, after a confirmation that lists the ids                                                                   |
 
 Each control runs the checks of `set` and `flag`, so the page refuses what the
