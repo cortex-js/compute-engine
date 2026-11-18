@@ -7191,16 +7191,22 @@ function heldArgumentValue(
  * With `binderVariables`, the variable of a running binder (the index of a
  * `Sum`, a comprehension or a `Loop`) is replaced by its current value too,
  * when it has one: `Same` reads it this way (CE-1381).
+ *
+ * With `callHeads`, a call whose head is such a parameter, and whose
+ * argument is a function, is replaced by the call of that function:
+ * `f(t)` with `f` bound to `Sin` is `Sin(t)`, and with `f` bound to a
+ * literal it is `Apply(literal, t)`.
  */
 export function inlineCallParameters(
   ce: ComputeEngine,
   expr: Expression,
-  options?: { keepWildcards?: boolean; binderVariables?: boolean }
+  options?: {
+    keepWildcards?: boolean;
+    binderVariables?: boolean;
+    callHeads?: boolean;
+  }
 ): Expression {
-  return rewriteWithBinders(expr, (sym, shadowed) => {
-    const name = sym.symbol;
-    if (shadowed?.has(name)) return sym;
-    if (options?.keepWildcards && name.startsWith('_')) return sym;
+  const liveDefinition = (name: string): BoxedValueDefinition | undefined => {
     let live: BoxedValueDefinition | undefined;
     for (
       let s: Scope | null | undefined = ce.context.lexicalScope;
@@ -7219,15 +7225,47 @@ export function inlineCallParameters(
         (options?.binderVariables === true && isBinderVariable(live))
       )
     )
-      return sym;
-    // A free name (`isFreeName()`, `binding-unit.ts`) carries no binding,
-    // but it is not a raw operand: it was boxed outside the function
-    // literal, so it never denotes a parameter.
-    if (isFreeName(sym)) return sym;
-    const own = sym.valueDefinition;
-    if (own !== undefined && !sameBindingDef(own, live)) return sym;
-    return live.storedValue ?? sym;
-  });
+      return undefined;
+    return live;
+  };
+  return rewriteWithBinders(
+    expr,
+    (sym, shadowed) => {
+      const name = sym.symbol;
+      if (shadowed?.has(name)) return sym;
+      if (options?.keepWildcards && name.startsWith('_')) return sym;
+      const live = liveDefinition(name);
+      if (live === undefined) return sym;
+      // A free name (`isFreeName()`, `binding-unit.ts`) carries no binding,
+      // but it is not a raw operand: it was boxed outside the function
+      // literal, so it never denotes a parameter.
+      if (isFreeName(sym)) return sym;
+      const own = sym.valueDefinition;
+      if (own !== undefined && !sameBindingDef(own, live)) return sym;
+      return live.storedValue ?? sym;
+    },
+    undefined,
+    false,
+    new Map(),
+    options?.callHeads !== true
+      ? undefined
+      : (app, ops, shadowed) => {
+          const name = app.operator;
+          if (shadowed?.has(name)) return undefined;
+          const live = liveDefinition(name);
+          if (live === undefined || isFreeCallHead(app)) return undefined;
+          const own = app.valueDefinition;
+          if (own !== undefined && !sameBindingDef(own, live)) return undefined;
+          const value = live.storedValue;
+          if (value === undefined || !value.type.matches('function'))
+            return undefined;
+          const form = app.isCanonical ? 'canonical' : 'raw';
+          return isSymbol(value) &&
+            isOperatorDef(ce.lookupDefinition(value.symbol))
+            ? ce.function(value.symbol, [...ops], { form })
+            : applyFunctionValue(value, app, ops);
+        }
+  );
 }
 
 /**

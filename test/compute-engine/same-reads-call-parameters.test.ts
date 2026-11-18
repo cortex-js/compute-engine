@@ -37,6 +37,10 @@ describe('A predicate written with === reads the parameter', () => {
     ['let k = (e) => [1, e] === [1, 2]; k(2)', '"True"'],
     ['let m = 0; for x in [1, 2, 3] { if x === 2 { m = m + 1 } }; m', '1'],
     ['[k === 2 for k in 1..3]', '["False","True","False"]'],
+    // A call of a parameter that holds a function is a call of the argument
+    ['let g = (f) => f(t) === sin(t); g(sin)', '"True"'],
+    ['let g = (f) => isSame(f(t), sin(t)); g(sin)', '"True"'],
+    ['let g = (f) => f(t) === cos(t); g(sin)', '"False"'],
   ])('%s', (source, expected) => expect(run(source)).toBe(expected));
 });
 
@@ -99,6 +103,23 @@ describe('MathJSON', () => {
         ['Limits', 'k', 1, 3],
       ],
       '0',
+    ],
+    // ... and a parameter beside it is still replaced
+    [
+      [
+        'Apply',
+        [
+          'Function',
+          [
+            'IsSame',
+            ['List', 'x', ['Sum', 'k', ['Limits', 'k', 1, 2]]],
+            ['List', 2, ['Sum', 'k', ['Limits', 'k', 1, 2]]],
+          ],
+          'x',
+        ],
+        2,
+      ],
+      '"True"',
     ],
   ])('%j', (json, expected) => expect(evaluate(json)).toBe(expected));
 });
