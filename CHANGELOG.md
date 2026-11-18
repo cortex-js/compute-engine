@@ -369,6 +369,23 @@
 
 ### Performance
 
+- **Compiled code is smaller, compiles faster and runs faster with the single
+  compiler.** Measured against 0.186.0 on a corpus of 9,974 JavaScript, 3,992
+  GLSL and 5,155 interval programs:
+  - Compiled JavaScript runs faster: the median time per call is 0.72 of
+    0.186.0's, and 1% of the programs are more than 10% slower.
+  - Compilation is faster. The median time is 0.92 of 0.186.0's on JavaScript,
+    0.29 on GLSL and 0.60 on interval. The total time for the corpus fell from
+    12.9 s to 6.9 s on JavaScript, from 3.2 s to 0.8 s on GLSL and from 3.7 s
+    to 3.4 s on interval.
+  - The compiler's source is 82% smaller (166,419 lines to 30,668), and the
+    minified code the engine loads is 17% smaller (5.9 MB to 4.9 MB; gzip 1.8
+    MB to 1.5 MB).
+  - The number of programs that compile is about the same: 9,351 on JavaScript
+    (9,491 in 0.186.0), 3,858 on GLSL (3,832) and 4,859 on interval (4,835). A
+    program the compiler declines runs in the interpreter. No program throws an
+    error during compilation; 0.186.0 threw on 484 of them.
+
 - **A `Map` or `Filter` callback that reads one element of a list expression
   evaluates that list expression once per walk, not once per element.** In
   `Map(j ↦ Which(At(c, j), At(v, j), True, NaN), Range(1, n))`, where `c` and
