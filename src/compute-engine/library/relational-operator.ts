@@ -2844,7 +2844,10 @@ function holdsScopedOperator(expr: Expression): boolean {
  * The raw operand `expr` of `IsSame` with each name bound by a running call
  * or binder replaced by its argument (`inlineCallParameters`), except in an
  * application of a scoped operator, which is kept as written: the walk of a
- * raw operand cannot see the names that it binds again.
+ * raw operand cannot see the names that it binds again. A function literal
+ * that holds such an application is kept as written too: its operands are
+ * not walked one by one, which would lose the names that its parameters
+ * bind.
  */
 function inlineOutsideScoped(expr: Expression): Expression {
   const ce = expr.engine;
@@ -2853,7 +2856,12 @@ function inlineOutsideScoped(expr: Expression): Expression {
       binderVariables: true,
       callHeads: true,
     });
-  if (isScopedApplication(expr) || !isFunction(expr)) return expr;
+  if (
+    !isFunction(expr) ||
+    isScopedApplication(expr) ||
+    expr.operator === 'Function'
+  )
+    return expr;
   const ops = expr.ops.map(inlineOutsideScoped);
   if (ops.every((op, i) => op === expr.ops[i])) return expr;
   return ce.function(expr.operator, ops, { form: 'raw' });

@@ -121,6 +121,27 @@ describe('MathJSON', () => {
       ],
       '"True"',
     ],
+    // ... but not the parameter of a function literal that holds it
+    [
+      [
+        'Apply',
+        [
+          'Function',
+          [
+            'IsSame',
+            [
+              'Function',
+              ['List', 'x', ['Sum', 'k', ['Limits', 'k', 1, 2]]],
+              'x',
+            ],
+            ['Function', ['List', 2, ['Sum', 'k', ['Limits', 'k', 1, 2]]], 'x'],
+          ],
+          'x',
+        ],
+        2,
+      ],
+      '"False"',
+    ],
   ])('%j', (json, expected) => expect(evaluate(json)).toBe(expected));
 });
 
