@@ -59,6 +59,7 @@ import {
   gcd as scalarGcd,
   lcm as scalarLcm,
   chop as scalarChop,
+  DEFAULT_TOLERANCE,
   nextDown,
   nextUp,
   roundToInteger,
@@ -2294,7 +2295,9 @@ function lcmRaw(
 /**
  * Chop: replace small values with zero.
  * Monotonic (identity except near zero), so endpoint evaluation yields the
- * exact hull of the pointwise image and containment is preserved.
+ * exact hull of the pointwise image and containment is preserved. A box that
+ * crosses an edge of the band `[-tolerance, tolerance]` is a jump, `singular`
+ * with that hull.
  * `tolerance` is baked in by the compile target (the engine's configured
  * `ce.tolerance`, matching the interpreter's `Chop`); it defaults to the
  * scalar chop's static default.
@@ -2306,10 +2309,15 @@ function chopRaw(
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
-  return ok({
-    lo: scalarChop(xVal.lo, tolerance),
-    hi: scalarChop(xVal.hi, tolerance),
-  });
+  const t = tolerance ?? DEFAULT_TOLERANCE;
+  const value = { lo: scalarChop(xVal.lo, t), hi: scalarChop(xVal.hi, t) };
+  // A jump at each edge of the band when `t > 0`: at `-t`, continuous from
+  // the right (`chop(-t)` is 0), at `t` from the left. The box crosses one
+  // when it holds a point outside the band and the edge's value 0; the
+  // first one is reported, as `floor` reports the first integer.
+  if (t > 0 && xVal.lo < -t && xVal.hi >= -t) return jump(-t, 'right', value);
+  if (t > 0 && xVal.lo <= t && xVal.hi > t) return jump(t, 'left', value);
+  return ok(value);
 }
 
 /**

@@ -266,6 +266,8 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('LCM',          'variadic', [[[I], I, 'lcm']],             list),
   row('Factorial2',   1,          [[[R], R, 'factorial2']],      { fold: F.factorial2 }),
   row('Zeta',         1,          [[[R], R, 'zeta']],            { fold: F.zeta }),
+  // `Chop(x, tol)`; `Chop(x)` takes the engine's tolerance (`lower.ts`).
+  row('Chop',         2,          [[[R, R], R, 'chop']],         { fold: F.chop }),
   // `Max` of a list is its largest element: a reduction, not threaded.
   row('Max',          'variadic', arith('max', 1),               { fold: Math.max, ...list }),
   row('Min',          'variadic', arith('min', 1),               { fold: Math.min, ...list }),

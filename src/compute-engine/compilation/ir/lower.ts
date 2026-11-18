@@ -1281,6 +1281,23 @@ export function lower(
           [x, base].map((v) => apply(e, 'Ln', [v]))
         );
       }
+      case 'Chop': {
+        // `Chop(x)` is `Chop(x, tol)` at the engine's tolerance at the
+        // compilation, which the interpreter's `ce.chop()` reads. A constant
+        // tolerance is the double that the interpreter compares with, a
+        // point in the interval mode, whose kernel reads it as a number
+        // (`_IA.chop(x, tol)`): another tolerance declines there.
+        if (e.nops > 2) break;
+        const x = value(e.ops[0])!;
+        const stated = e.nops === 2 ? value(e.ops[1])! : undefined;
+        const tol = stated === undefined ? ce.tolerance : constant(stated);
+        if (tol === undefined && interval)
+          decline(e, 'Chop with a tolerance that is not a constant');
+        return apply(e, 'Chop', [
+          x,
+          tol === undefined ? stated! : b.constant(tol, 'real'),
+        ]);
+      }
       case 'Length':
         return lists.source(e.ops[0], false, true).length;
       case 'Range': {
@@ -2124,7 +2141,10 @@ export function lower(
     // where the name had another declaration) declines.
     if (
       known?.binding.role === 'input' &&
-      !sameInput(type(known.binding.v), e.type.type)
+      !sameInput(
+        type(known.binding.v),
+        readAs(e.type.type, resolvedValueDefinition(e))
+      )
     )
       decline(
         e,
@@ -2185,7 +2205,12 @@ export function lower(
         `the function ${cx.inFunction} reads ${name}, which is not a parameter (a capture)`
       );
     note(name, e.type.type);
-    return fns.capture(e, name, e.type.type);
+    return fns.capture(
+      e,
+      name,
+      e.type.type,
+      readAs(e.type.type, resolvedValueDefinition(e))
+    );
   };
 
   /** The input `name` of the type `t`, which a function that `e` calls
@@ -2220,7 +2245,7 @@ export function lower(
     // parameter.
     return cx.inFunction === undefined
       ? input(e, name, held(name)?.definition.type.type ?? t)
-      : fns.capture(e, name, t);
+      : fns.capture(e, name, t, readAs(t, held(name)?.definition));
   };
 
   /** The IR type of an input of the engine type `t`; a tuple is the list of
@@ -2229,6 +2254,19 @@ export function lower(
   const inputIR = (t: Type) =>
     (interval ? enclosureInput(t) : undefined) ??
     tupleOrInputType(isUntyped(t) ? 'unknown' : t, cx.wide);
+
+  /** The type that the interval mode reads an input as, whose binding
+   *  `def` declares no type: `real` when the inferred type `t` is a number
+   *  type that is not read as a real or an integer (`complex | infinity`,
+   *  which the signature of `Gamma` gives `x`). Every value that a host
+   *  passes is a real interval, which is within `t`. A declared type, and
+   *  every type on another target, is `t`. */
+  const readAs = (t: Type, def: BoxedValueDefinition | undefined): Type => {
+    if (!interval || def?.inferredType === false) return t;
+    if (isUntyped(t) || !isSubtype(t, 'number')) return t;
+    const lane = inputIR(t)?.lane;
+    return lane === 'real' || lane === 'integer' ? t : 'real';
+  };
 
   /** `ir`, the type of an input, is the IR type of the engine type `t`. */
   const sameInput = (ir: IRType, t: Type): boolean => {
@@ -2254,17 +2292,20 @@ export function lower(
     t: Parameters<typeof inputType>[0],
     positional = false
   ): V => {
+    // The binding of the occurrence, or, for a read in a function that `e`
+    // calls, of the name in the scope of the compilation (`free()`).
+    const def = positional
+      ? undefined
+      : isSymbol(e)
+        ? resolvedValueDefinition(e)
+        : held(name)?.definition;
     if (!positional) {
-      // The binding of the occurrence, or, for a read in a function that
-      // `e` calls, of the name in the scope of the compilation (`free()`).
-      note(
-        name,
-        t,
-        isSymbol(e) ? resolvedValueDefinition(e) : held(name)?.definition
-      );
+      note(name, t, def);
       given(name, t);
     }
-    const ir = positional ? tupleOrInputType(t, cx.wide) : inputIR(t);
+    const ir = positional
+      ? tupleOrInputType(t, cx.wide)
+      : inputIR(readAs(t, def));
     if (ir === undefined && interval && isEnclosureCollection(t))
       decline(e, COLLECTION);
     if (!positional && interval && enclosureInput(t) !== undefined)

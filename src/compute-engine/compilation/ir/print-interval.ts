@@ -57,7 +57,7 @@ const UNARY = ['sqrt', 'square', 'abs', 'exp', 'ln', 'log10', 'log2', 'sin',
   'asin', 'acos', 'atan', 'acot', 'asec', 'acsc', 'asinh', 'acosh', 'atanh',
   'coth', 'acoth', 'asech', 'acsch', 'floor', 'ceil', 'round', 'trunc',
   'fract', 'sign', 'erf', 'erfc', 'gamma', 'gammaln', 'factorial',
-  'factorial2', 'not'];
+  'factorial2', 'not', 'sinc'];
 
 // prettier-ignore
 const BINARY: Record<string, string> = { add: 'add', sub: 'sub', mul: 'mul',
@@ -142,6 +142,8 @@ export const JS_INTERVAL: Syntax = Object.freeze({
     'pow.branch': '_IA.powRealBranch($0, $1.lo, true)',
     'pow.branch.even': '_IA.powRealBranch($0, $1.lo, false)',
     'pow.principal': '_IA.pow($0, $1.lo)',
+    // The tolerance is a constant point (`lower.ts`): its double.
+    'chop': '_IA.chop($0, $1.lo)',
     // A run-time exponent over a base whose enclosure is `>= 0`.
     'pow.interval': '_IA.powInterval($0, $1)',
     'root': '_IA.nthRootInterval($0, $1)',

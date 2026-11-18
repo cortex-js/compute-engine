@@ -157,6 +157,7 @@ export const GLSL: Syntax = deepFreeze({
     // `Arctan2(y, x)`; the interpreter's value at (0, 0) is 0.
     'atan2': '($0 == 0.0 && $1 == 0.0 ? 0.0 : atan($0, $1))',
     'hypot': 'length(vec2($0, $1))',
+    'chop': '(abs($0) <= $1 ? 0.0 : $0)',
     'root': { text: '_gpu_ir_root($0, $1)', helpers: ['_gpu_ir_root'] },
     // A real operand declines (no `factorial` spelling): `Gamma(x + 1)`.
     'factorial.int': {

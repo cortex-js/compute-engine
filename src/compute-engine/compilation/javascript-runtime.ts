@@ -7148,6 +7148,8 @@ export const REAL_FUNCTIONS = Object.freeze({
   factorial2: (x: number): number =>
     Number.isInteger(x) && x < 0 && x % 2 === 0 ? Infinity : factorial2(x),
   zeta: (x: number): number => zeta(x),
+  // `Chop(x, tol)`: the interpreter's test on a double.
+  chop: (x: number, tol: number): number => (Math.abs(x) <= tol ? 0 : x),
   // The interpreter has no -0: `Arctan2(-0, -1)` is π.
   atan2: (y: number, x: number): number => Math.atan2(y + 0, x + 0),
   // The interpreter's `Arccot` is in (0, π).

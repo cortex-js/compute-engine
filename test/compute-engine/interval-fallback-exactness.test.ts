@@ -12,7 +12,10 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { KindDeclineError } from '../../src/compute-engine/compilation/diagnostics';
 
 const ce = new ComputeEngine();
-const at = (v: number) => ({ x: { lo: v, hi: v } });
+// `Gamma` of an undeclared input compiles (it is read as a real): a
+// declared `complex` input declines.
+ce.declare('z', 'complex');
+const at = (v: number) => ({ x: { lo: v, hi: v }, z: { lo: v, hi: v } });
 const point = (v: number) => ({ kind: 'interval', value: { lo: v, hi: v } });
 
 let warn: jest.SpyInstance;
@@ -21,7 +24,8 @@ beforeAll(() => {
 });
 afterAll(() => warn.mockRestore());
 
-/** A declined compilation of `json` (the input `x` is not declared). */
+/** A declined compilation of `json` (the input `x` is not declared, `z`
+ *  is a complex). */
 function declined(json: unknown) {
   const r = compile(ce.box(json as never), { to: 'interval-js' }) as {
     success: boolean;
@@ -33,7 +37,7 @@ function declined(json: unknown) {
 
 describe('the interval fallback at a point box', () => {
   test('Gamma(0.3): no double is the value, so the answer is entire', () => {
-    expect(declined(['Gamma', 'x']).run(at(0.3))).toEqual({ kind: 'entire' });
+    expect(declined(['Gamma', 'z']).run(at(0.3))).toEqual({ kind: 'entire' });
   });
 
   test('a quadrature: entire', () => {
@@ -46,7 +50,7 @@ describe('the interval fallback at a point box', () => {
   });
 
   test('an integer is a point', () => {
-    expect(declined(['Gamma', 'x']).run(at(3))).toEqual(point(2));
+    expect(declined(['Gamma', 'z']).run(at(3))).toEqual(point(2));
     expect(declined(['Fibonacci', 'x']).run(at(10))).toEqual(point(55));
   });
 
@@ -74,9 +78,9 @@ describe('the interval fallback at a point box', () => {
     // The interpreter compares with a tolerance: these read as equal, and
     // `Less` and `Greater` both as `False`.
     for (const json of [
-      ['Less', ['Gamma', 'x'], 2.991568987687591],
-      ['Greater', ['Gamma', 'x'], 2.991568987687591],
-      ['Equal', ['Gamma', 'x'], 2.9915689876875],
+      ['Less', ['Gamma', 'z'], 2.991568987687591],
+      ['Greater', ['Gamma', 'z'], 2.991568987687591],
+      ['Equal', ['Gamma', 'z'], 2.9915689876875],
     ])
       expect(declined(json).run(at(0.3))).toBe('maybe');
   });

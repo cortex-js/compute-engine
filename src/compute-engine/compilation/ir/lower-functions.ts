@@ -879,9 +879,9 @@ export function functionLowering(
   };
 
   /** The input `name` of the engine type `t` that the body of the function
-   *  being lowered reads: a parameter after its own, which each call
-   *  passes. */
-  const capture = (e: Expression, name: string, t: Type): V => {
+   *  being lowered reads, as the type `read` (`readAs()` of `lower.ts`): a
+   *  parameter after its own, which each call passes. */
+  const capture = (e: Expression, name: string, t: Type, read = t): V => {
     const fn = pending.get(cx.inFunction!)!;
     if (fn.called)
       decline(
@@ -890,7 +890,7 @@ export function functionLowering(
       );
     // A scalar, or a list or a tuple (a point) of reals or integers of a
     // stated length.
-    const ir = tupleOrInputType(isUntyped(t) ? 'unknown' : t, cx.wide);
+    const ir = tupleOrInputType(isUntyped(read) ? 'unknown' : read, cx.wide);
     if (
       ir === undefined ||
       ir.shape.length > 1 ||

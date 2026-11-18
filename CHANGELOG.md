@@ -100,18 +100,23 @@
   text is not compiled in the mode, also beside an enclosure.
 
   The interval mode compiles fewer programs than the deleted target did.
-  `Sinc(x)`, `Chop(x)`, `\arg(x+iy)` (a complex value) and an `Integrate`
-  whose integrand reads a `vars` entry decline; `Gamma(x)`, `Erf(x)` and
-  `At(L, k)` decline when the input `x` or `k` is not declared, and compile
-  when it is (`ce.declare('x', 'real')`, `ce.declare('k', 'integer')`).
-  With the default `fallback`, such a program gives `success: false` and a
-  `run` that evaluates with the interpreter: over an input wider than a
-  point it answers `entire` (`'maybe'` for a boolean), and at a point it
-  gives a point only when the interpreter's value is exactly a double (an
-  integer, `1/4`), otherwise `entire`, and decides a boolean only when the
-  numbers it is computed from are exact, otherwise `'maybe'`. Code that imported
-  `IntervalJavaScriptTarget`, or built a target with
-  `new IntervalJavaScriptTarget()`, calls
+  `\arg(x+iy)` (a complex value) and an `Integrate` whose integrand reads a
+  `vars` entry decline; `At(L, k)` declines when the input `k` is not
+  declared, and compiles when it is (`ce.declare('k', 'integer')`). With the
+  default `fallback`, such a program gives `success: false` and a `run` that
+  evaluates with the interpreter: over an input wider than a point it answers
+  `entire` (`'maybe'` for a boolean), and at a point it gives a point only
+  when the interpreter's value is exactly a double (an integer, `1/4`),
+  otherwise `entire`, and decides a boolean only when the numbers it is
+  computed from are exact, otherwise `'maybe'`. `Sinc(x)` and `Chop(x)`
+  compile, also `Chop(x, 0.01)` (a constant tolerance; `Chop(x)` takes the
+  engine's tolerance at compile time, and `Chop` compiles on JavaScript and
+  GLSL too). An input with no declaration whose inferred type is a number
+  type is read as a real interval, as every value a host passes is one: `x`
+  in `Gamma(x)` (`complex | infinity`), `Erf(x)` and `Sinc(x)`
+  (`complex | signed_infinity`) compiles undeclared; a declared `complex`
+  input still declines. Code that imported `IntervalJavaScriptTarget`, or
+  built a target with `new IntervalJavaScriptTarget()`, calls
   `compile(expr, { to: 'interval-js' })` instead.
 
 ### Behavior Changes

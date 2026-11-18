@@ -977,7 +977,10 @@ function sincRaw(x: Interval | IntervalResult): IntervalResult {
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
 
-  const sincVal = (t: number): number => (t === 0 ? 1 : Math.sin(t) / t);
+  // At ±∞ the limit 0 (`Math.sin(±∞)` is NaN); the bound beyond the last
+  // extremum (below) covers the values near it.
+  const sincVal = (t: number): number =>
+    t === 0 ? 1 : Math.abs(t) === Infinity ? 0 : Math.sin(t) / t;
 
   // Collect candidate values at endpoints
   let lo = sincVal(xVal.lo);

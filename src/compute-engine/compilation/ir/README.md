@@ -585,7 +585,15 @@ takes and gives the kinds `empty`, `entire`, `singular` and `partial`, so the
 code never reads the kind of a value: the marks of a jump and of a clipped
 domain travel through every operation. The lanes are `real`, `integer` and
 `boolean`, a list or a tuple is a JavaScript array of such values (of arrays for
-rank 2). In a function on a cycle of calls an `if` runs one arm
+rank 2). An input of no declaration whose inferred type is a number type that is
+not read as a real or an integer (the signature of `Gamma` gives `x` in
+`Gamma(x)` the type `complex | infinity`, that of `Erf` and `Sinc` the type
+`complex | signed_infinity`) is read as a real, also where a user function reads
+it (`readAs()` of `lower.ts`): every value that a host passes is a real
+interval, which is within that type. Its entry of `freeSymbolTypes` keeps the
+inferred type, with `provenance: 'inferred'` and `lowered: 'interval'`. A
+declared `complex` or `imaginary` input declines, and on JavaScript and GLSL the
+rule does not apply. In a function on a cycle of calls an `if` runs one arm
 (`verdictIf.decided`, `_IA.decided(c)`): an undecided verdict throws the mode's
 undecided error, so that a recursion ends where both arms would recurse; the
 `if`s of the entry and of a function not on a cycle, also one that a recursive
@@ -639,22 +647,24 @@ is `_IA.powReal`; a power by the exact constant 2 is `_IA.square`, the operation
 trigonometric and hyperbolic functions and their inverses (also the reciprocal
 ones), `Arctan2`, `Hypot`, `Degrees` (the product by an enclosure of π, then the
 quotient by 180), `Floor`, `Ceil`, `Round`, `Truncate`, `Fract`, `Sign`, `Mod`,
-`Max`, `Min`, `Erf`, `Erfc`, `Gamma`, `GammaLn`, `Factorial`, `Factorial2`,
-`Binomial` and `Choose` (also of real operands, `binomial.real`, a row of the
-mode), `GCD`, `LCM`, the comparisons, `And`, `Or`, `Not` (Kleene logic on
-verdicts), `If`, `Which`, a `Block` with locals, user functions, `Sum` and
-`Product` with `Limits`, `Random()` and `WithRandomSeed` of a number seed, a
-root function literal, and the lists below, and integrals (below). `Haversine`,
-`Zeta`, `FresnelC`, `FresnelS` (the kernel `_IA.fresnelS` misses S(1.5) by 4
-ulps, more than its outward ulp), `Sinc` (`_IA.sinc` misses the extremum on [4,
-5] by 3e-14, CE-1436) and the complex and colour operations have no spelling and
-decline (a cause of the mode ends with "on interval-js"). A `Loop` is lowered as
-on JavaScript ("Loops and the runtime"): its carried values are intervals, a
-local assigned in an undecided `If` of a pass holds the hull of both arms (the
-earlier interval target answers `entire` there), and one whose values are not
-read is removed; a `Break` and a `Continue` compile, and a pass whose flag of a
-`Break` is undecided throws the error of `_IA.decided()` (the whole range); a
-`Return` declines in the slice. A string seed and `Random` of a domain decline
+`Max`, `Min`, `Erf`, `Erfc`, `Gamma`, `GammaLn`, `Sinc`, `Factorial`,
+`Factorial2`, `Chop` (`_IA.chop(x, tol)`, which reads the tolerance as a number:
+of a constant tolerance only, `Chop(x)` at the engine's tolerance at compile
+time; another tolerance declines), `Binomial` and `Choose` (also of real
+operands, `binomial.real`, a row of the mode), `GCD`, `LCM`, the comparisons,
+`And`, `Or`, `Not` (Kleene logic on verdicts), `If`, `Which`, a `Block` with
+locals, user functions, `Sum` and `Product` with `Limits`, `Random()` and
+`WithRandomSeed` of a number seed, a root function literal, and the lists below,
+and integrals (below). `Haversine`, `Zeta`, `FresnelC`, `FresnelS` (the kernel
+`_IA.fresnelS` misses S(1.5) by 4 ulps, more than its outward ulp) and the
+complex and colour operations have no spelling and decline (a cause of the mode
+ends with "on interval-js"). A `Loop` is lowered as on JavaScript ("Loops and
+the runtime"): its carried values are intervals, a local assigned in an
+undecided `If` of a pass holds the hull of both arms (the earlier interval
+target answers `entire` there), and one whose values are not read is removed; a
+`Break` and a `Continue` compile, and a pass whose flag of a `Break` is
+undecided throws the error of `_IA.decided()` (the whole range); a `Return`
+declines in the slice. A string seed and `Random` of a domain decline
 in the lowering.
 
 Lists. What the lowering makes of a list (sections "Lists" and "Tuples") is
