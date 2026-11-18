@@ -333,6 +333,93 @@ describe('UNIT CONVERT', () => {
   });
 });
 
+// The scales of most units are exact decimal numbers (`in` is 0.0254 m, `ft`
+// is 0.3048 m). A conversion between two such units uses the exact factor
+// and rounds once: the machine scales give 12·0.0254/0.3048 =
+// 0.9999999999999998.
+describe('A CONVERSION BETWEEN UNITS WITH EXACT SCALES ROUNDS ONCE', () => {
+  const convert = (q: MathJsonExpression, unit: MathJsonExpression) =>
+    engine.box(['UnitConvert', q, unit]).evaluate();
+
+  test.each([
+    [12, 'in', 'ft', 1],
+    [3, 'ft', 'yd', 1],
+    [36, 'in', 'yd', 1],
+    [5280, 'ft', 'mi', 1],
+    [3, 'mi', 'km', 4.828032],
+    [1, 'cm', 'm', 0.01],
+    [0.1, 'in', 'ft', 0.1 / 12],
+  ])('%p %s is %p %s', (mag, from, to, expected) => {
+    const r = convert(['Quantity', mag, from], to);
+    expect(r.operator).toBe('Quantity');
+    expect(r.op1.re).toBe(expected);
+    expect(r.op2.symbol).toBe(to);
+  });
+
+  test('a compound unit: 1 m/s is 3.6 km/h', () => {
+    const r = convert(
+      ['Quantity', 1, ['Divide', 'm', 's']],
+      ['Divide', 'km', 'h']
+    );
+    expect(r.op1.re).toBe(3.6);
+  });
+
+  test('a negative power: 1 in^-1 is 12 ft^-1', () => {
+    const r = convert(
+      ['Quantity', 1, ['Power', 'in', -1]],
+      ['Power', 'ft', -1]
+    );
+    expect(r.op1.re).toBe(12);
+  });
+
+  test('the sum of two lengths in in and ft', () => {
+    const r = engine
+      .box(['Add', ['Quantity', 1, 'ft'], ['Quantity', 12, 'in']])
+      .evaluate();
+    expect(r.op1.re).toBe(2);
+    expect(r.op2.symbol).toBe('ft');
+  });
+
+  test('convertUnit() and convertCompoundUnit() give the same value', () => {
+    expect(convertUnit(12, 'in', 'ft')).toBe(1);
+    expect(convertCompoundUnit(12, 'in', 'ft')).toBe(1);
+    expect(
+      convertCompoundUnit(1, ['Divide', 'm', 's'], ['Divide', 'km', 'h'])
+    ).toBe(3.6);
+  });
+
+  test('an integer factor keeps an exact magnitude exact', () => {
+    // The machine scales gave ft → in a factor of 12.000000000000002.
+    expect(convert(['Quantity', 1, 'ft'], 'in').json).toEqual([
+      'Quantity',
+      12,
+      'in',
+    ]);
+    expect(convert(['Quantity', 'Pi', 'ft'], 'in').json).toEqual([
+      'Quantity',
+      ['Multiply', 12, 'Pi'],
+      'in',
+    ]);
+  });
+
+  test('a linear conversion keeps the sign of a zero', () => {
+    expect(Object.is(convertUnit(-0, 'in', 'ft'), -0)).toBe(true);
+  });
+
+  test('a product that overflows takes the quotient first', () => {
+    // 1e308·1143 overflows; the value is 9.144e307 m.
+    expect(convertUnit(1e308, 'yd', 'm')).toBe(1e308 * 0.9144);
+    expect(convertUnit(Infinity, 'yd', 'm')).toBe(Infinity);
+  });
+
+  test('a unit whose scale is not exact uses its machine scale', () => {
+    // The scale of `deg` is π/180; the denominator of `eV → J` is 10^28, not
+    // a safe integer.
+    expect(convertUnit(180, 'deg', 'rad')).toBe(Math.PI);
+    expect(convertUnit(1, 'eV', 'J')).toBe(1.602176634e-19);
+  });
+});
+
 describe('A COMPLEX MAGNITUDE KEEPS ITS IMAGINARY PART', () => {
   const ev = (x: MathJsonExpression) => engine.expr(x).evaluate().toString();
   const z: MathJsonExpression = ['Complex', 1, 1];
@@ -362,7 +449,7 @@ describe('A COMPLEX MAGNITUDE KEEPS ITS IMAGINARY PART', () => {
         ['Quantity', z, ['Divide', 'm', 's']],
         ['Divide', 'km', 'h'],
       ])
-    ).toBe('(3.5999999999999996 + 3.5999999999999996i) km/h');
+    ).toBe('(3.6 + 3.6i) km/h');
   });
 
   test('UnitSimplify by a float scale', () => {

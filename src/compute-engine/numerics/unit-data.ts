@@ -537,7 +537,10 @@ export function findNamedUnit(dim: DimensionVector): string | null {
  * incompatible (`areCompatibleUnits()`).
  *
  * Handles both linear conversions (most units) and affine conversions
- * (degC, degF) via the optional `offset` field.
+ * (degC, degF) via the optional `offset` field. When the data of both units
+ * are exact, the conversion uses the exact map of the conversion
+ * (`exactlyConverted()`): `12 in` is `1 ft`. Otherwise it uses the machine
+ * scales.
  */
 export function convertUnit(
   value: number,
@@ -552,19 +555,8 @@ export function convertUnit(
   if (!dimensionsEqual(from.dimension, to.dimension)) return null;
   if (!sameLogarithmicExponent(fromUnit, toUnit)) return null;
 
-  // A conversion with an offset (a temperature) uses the exact affine map
-  // `value → (A·value + B)/D`, so that it rounds only at the end.
-  if (from.offset !== undefined || to.offset !== undefined) {
-    const map = exactAffineMap(from, to);
-    if (map) {
-      const result = (value * map.a + map.b) / map.d;
-      // Near the largest float, `value·A` can overflow although the result
-      // is finite (`1e308 degF` is about `5.56e307 degC`): the quotients are
-      // then taken first.
-      if (Number.isFinite(result) || !Number.isFinite(value)) return result;
-      return value * (map.a / map.d) + map.b / map.d;
-    }
-  }
+  const exact = exactlyConverted(value, fromUnit, toUnit);
+  if (exact !== null) return exact;
 
   // Affine conversion: SI_value = (value + offset) * scale
   // Then: result = SI_value / to.scale - to.offset
@@ -580,10 +572,11 @@ export function convertUnit(
  * converts a value from `fromUnit` to `toUnit`, or `null` when the units are
  * unknown or incompatible (`areCompatibleUnits()`).
  *
- * For a conversion with an offset (a temperature) the two coefficients are
- * computed from the exact data of the units and rounded once: `degC → degF`
- * is `x → 1.8x + 32`. The difference `convertUnit(1) − convertUnit(0)` of two
- * rounded values loses digits (`1.7999999999999972`).
+ * When the data of both units are exact, the two coefficients are computed
+ * from them and rounded once: `degC → degF` is `x → 1.8x + 32`, and
+ * `in → ft` is `x → x/12` rounded to a machine number. The difference
+ * `convertUnit(1) − convertUnit(0)` of two rounded values loses digits
+ * (`1.7999999999999972`).
  */
 export function unitConversionCoefficients(
   fromUnit: string,
@@ -594,10 +587,8 @@ export function unitConversionCoefficients(
   if (!from || !to) return null;
   if (!dimensionsEqual(from.dimension, to.dimension)) return null;
   if (!sameLogarithmicExponent(fromUnit, toUnit)) return null;
-  if (from.offset !== undefined || to.offset !== undefined) {
-    const map = exactAffineMap(from, to);
-    if (map) return { factor: map.a / map.d, offset: map.b / map.d };
-  }
+  const map = exactIntegerMap(fromUnit, toUnit);
+  if (map) return { factor: map.a / map.d, offset: map.b / map.d };
   const c0 = convertUnit(0, fromUnit, toUnit)!;
   const c1 = convertUnit(1, fromUnit, toUnit)!;
   return { factor: c1 - c0, offset: c0 };
@@ -668,37 +659,49 @@ function exactScaleAndOffset(
 }
 
 /**
- * The exact affine map of the conversion from `from` to `to`, as three
- * integers `a`, `b`, `d` such that the converted value is `(a·x + b)/d`.
- * Returns `null` when the data of a unit are not exact, or when an integer is
- * too large to be a safe machine integer.
+ * The exact affine map of the conversion from `fromUnit` to `toUnit`, as
+ * three integers `a`, `b`, `d` such that the converted value is
+ * `(a·x + b)/d` (`exactUnitConversion()`). Returns `null` when the units
+ * are unknown or incompatible, when the data of a unit are not exact or the
+ * factor has a power of π (`rad` to `deg`), or when an integer is too large
+ * to be a safe machine integer (`eV` to `J`, whose denominator is `10²⁸`).
  *
- * The value in the coherent SI unit is `(x + o₁)·s₁`, and the value in the
- * target unit is that divided by `s₂`, minus `o₂`. So the factor is
- * `k = s₁/s₂` and the constant is `c = o₁·k − o₂`.
+ * The unit table does not change, so the map of a pair of units is kept in
+ * `EXACT_INTEGER_MAPS`: one conversion reads it several times (`convert(0)`,
+ * `convert(1)` and the magnitude).
  */
-function exactAffineMap(
-  from: UnitEntry,
-  to: UnitEntry
-): { a: number; b: number; d: number } | null {
-  const f = exactScaleAndOffset(from);
-  const t = exactScaleAndOffset(to);
-  if (!f || !t) return null;
-  // k = kn/kd
-  const kn = f.scale[0] * t.scale[1];
-  const kd = f.scale[1] * t.scale[0];
-  // c = (o₁n·kn·o₂d − o₂n·o₁d·kd) / (o₁d·kd·o₂d)
-  const cn = f.offset[0] * kn * t.offset[1] - t.offset[0] * f.offset[1] * kd;
-  const cd = f.offset[1] * kd * t.offset[1];
-  // Common denominator: k = (kn·cd)/(kd·cd) and c = (cn·kd)/(kd·cd)
+function exactIntegerMap(
+  fromUnit: UnitExpression,
+  toUnit: UnitExpression
+): ExactIntegerMap | null {
+  const key = JSON.stringify([fromUnit, toUnit]);
+  let result = EXACT_INTEGER_MAPS.get(key);
+  if (result === undefined) {
+    result = computeExactIntegerMap(fromUnit, toUnit);
+    // A compound unit can be any expression: the cache is bounded.
+    if (EXACT_INTEGER_MAPS.size >= 1000) EXACT_INTEGER_MAPS.clear();
+    EXACT_INTEGER_MAPS.set(key, result);
+  }
+  return result;
+}
+
+type ExactIntegerMap = { a: number; b: number; d: number };
+
+const EXACT_INTEGER_MAPS = new Map<string, ExactIntegerMap | null>();
+
+function computeExactIntegerMap(
+  fromUnit: UnitExpression,
+  toUnit: UnitExpression
+): ExactIntegerMap | null {
+  const map = exactUnitConversion(fromUnit, toUnit);
+  if (map === null || map.piPower !== 0) return null;
+  const [kn, kd] = map.factor;
+  const [cn, cd] = map.offset;
+  // Common denominator: k = (kn·cd)/(kd·cd) and c = (cn·kd)/(kd·cd). Both
+  // denominators are positive.
   let a = kn * cd;
   let b = cn * kd;
   let d = kd * cd;
-  if (d < 0n) {
-    a = -a;
-    b = -b;
-    d = -d;
-  }
   const g = gcd(gcd(a, b), d);
   if (g > 1n) {
     a /= g;
@@ -714,6 +717,35 @@ function exactAffineMap(
   )
     return null;
   return result;
+}
+
+/**
+ * The value `value` converted from `fromUnit` to `toUnit` with the exact
+ * map of the conversion (`exactIntegerMap()`), or `null` when the map is
+ * not known exactly. The map is applied as `(a·value + b)/d`. For an
+ * integer magnitude whose `a·value + b` is a safe integer, this rounds once:
+ * `12 in` is `1 ft` (the machine scales give
+ * `12·0.0254/0.3048 = 0.9999999999999998`), and `20 degC` is `68 degF`,
+ * not `67.99999999999994 degF`. Another magnitude rounds at each operation,
+ * with exact coefficients.
+ *
+ * A map with no offset adds no `b`: `-0 + 0` is `+0`, and a linear
+ * conversion keeps the sign of a zero (`-0 in` is `-0 ft`).
+ */
+function exactlyConverted(
+  value: number,
+  fromUnit: UnitExpression,
+  toUnit: UnitExpression
+): number | null {
+  const map = exactIntegerMap(fromUnit, toUnit);
+  if (map === null) return null;
+  const { a, b, d } = map;
+  const result = (b === 0 ? value * a : value * a + b) / d;
+  // Near the largest float, `value·a` can overflow although the result is
+  // finite (`1e308 degF` is about `5.56e307 degC`, and `1e308 yd` is
+  // `9.144e307 m`, with `a = 1143`): the quotients are then taken first.
+  if (Number.isFinite(result) || !Number.isFinite(value)) return result;
+  return b === 0 ? value * (a / d) : value * (a / d) + b / d;
 }
 
 // ---------------------------------------------------------------------------
@@ -1396,7 +1428,10 @@ export function parseUnitDSL(s: string): UnitExpression | null {
  * units.
  *
  * For simple string units, delegates to `convertUnit` so that affine
- * offsets (degC, degF) are handled correctly.
+ * offsets (degC, degF) are handled correctly. When the scales of both
+ * compound units are exact, the conversion uses the exact map of the
+ * conversion (`exactlyConverted()`): `1 m/s` is `3.6 km/h`, not
+ * `3.5999999999999996 km/h`.
  */
 export function convertCompoundUnit(
   value: number,
@@ -1413,6 +1448,9 @@ export function convertCompoundUnit(
 
   if (!dimensionsEqual(fromDim, toDim)) return null;
   if (!sameLogarithmicExponent(fromUnit, toUnit)) return null;
+
+  const exact = exactlyConverted(value, fromUnit, toUnit);
+  if (exact !== null) return exact;
 
   const fromScale = getExpressionScale(fromUnit);
   const toScale = getExpressionScale(toUnit);

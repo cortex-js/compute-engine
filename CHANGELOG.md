@@ -78,6 +78,16 @@
 
 ### Resolved Issues
 
+- **A unit conversion between units with exact scales rounds once.**
+  `UnitConvert(Quantity(12, "in"), "ft")` was `0.9999999999999998 ft` and is
+  now `1 ft`; `1 m/s` in `km/h` was `3.5999999999999996` and is now `3.6`, and
+  `Quantity(1, "ft") + Quantity(12, "in")` is `2 ft`. The conversion now uses
+  the exact scales of the units (`in` is `0.0254 m`, `ft` is `0.3048 m`), as
+  it did for the temperature units only. The result is still a float when
+  the factor is not an integer. When the factor is an integer, an exact
+  magnitude now stays exact: `Quantity(Pi, "ft")` in `in` is `12π in` (the
+  factor was `12.000000000000002`, and the result a float). A unit whose
+  scale is not exact (`deg`, `dB`) converts as before.
 - **A `Series` at a kink, a jump or a branch point of a root no longer gives
   a series that holds on one side only.** `Series(Abs(x), x, 0, 3)` was
   `O(x⁴)`, `Series(Floor(x), x, 1, 3)` was `1` (the floor is `0` for

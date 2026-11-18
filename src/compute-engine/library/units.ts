@@ -576,11 +576,13 @@ export function usesExpressionArithmetic(
 /**
  * True when the unit conversion `x → c1·x + c0` (with `c0 = convert(0)` and
  * `c1 = convert(1)`) keeps an exact magnitude exact: the conversion has no
- * offset and its factor is an integer (`m → cm` is `x → 100x`). The
- * conversion data are machine numbers, so another factor (`cm → m` is
- * `x → 0.01x`, `m/s → km/h` is `x → 3.5999999999999996x`) gives a float
- * result whatever the magnitude, and an offset (a temperature) also gives a
- * float. Then the conversion is numeric, as for a float magnitude.
+ * offset and its factor is an integer (`m → cm` is `x → 100x`, `ft → in` is
+ * `x → 12x`). Another factor (`cm → m` is `x → 0.01x`, `in → ft` is
+ * `x → x/12`) gives a float result whatever the magnitude, computed from the
+ * exact data of the units when they are exact (`12 in` is the float
+ * `1 ft`), and an offset (a
+ * temperature) also gives a float. Then the conversion is numeric, as for a
+ * float magnitude.
  */
 export function isExactConversion(
   c0: number | null,
