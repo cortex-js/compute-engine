@@ -1806,9 +1806,11 @@ once at compile time, and an integrand that holds an integral. A closed form
 that does not lower (an operator with no row), that is not real, or that holds a
 loop or a call is not used (`closedRegion()`). The closed form is computed in
 doubles: `∫ t dt` from `a` = 1e8 to `b` = 1e8 + 1 is `b²/2 − a²/2`, 100000000
-for 100000000.5; and it is NaN at a bound where the integrand has an integrable
-singularity (`∫ ln(t) dt` from `a` = 0 to 2 is `a − a·ln(a) − 2 + 2·ln(2)`, NaN
-at a = 0, where the quadrature gives −0.6137). Its error is therefore absolute,
+for 100000000.5. Where the closed form is NaN, at a bound where the integrand
+has an integrable singularity (`∫ ln(t) dt` from `a` = 0 to 2 is
+`a − a·ln(a) − 2 + 2·ln(2)`, NaN at a = 0), the code runs the quadrature
+(−0.6137); an integral whose quadrature does not lower keeps the closed form
+alone. Its error is therefore absolute,
 about one unit in the last place of the larger value of the antiderivative, and
 where the integral is much smaller than that value its relative error is large:
 `∫ sin(t) dt` from 0 to 1e-4 is 5.2e-9 off in relative terms, and the Gaussian

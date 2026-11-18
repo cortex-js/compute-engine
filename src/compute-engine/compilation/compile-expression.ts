@@ -33,6 +33,7 @@ import { compileWithIrProfile, type IR_OPTIONS } from './ir/adapter.js';
 import { compileWithIrProfileGlsl } from './ir/adapter-glsl.js';
 import { compileWithIrProfileInterval } from './ir/adapter-interval.js';
 import { BUILT_IN_TARGETS } from './targets.js';
+import { isLibraryOperator } from '../library-shadowing.js';
 
 /** The answer of `canCompile()`. A positive answer also carries the
  *  `shippable` field of the result that `compile()` gives
@@ -176,7 +177,9 @@ export function compile<
   const ce = expr.engine;
   // A compiled Program owns its emitted locals, exactly as a Block does:
   // it is compiled as that Block.
-  if (isFunction(expr, 'Program')) expr = ce._fn('Block', expr.ops);
+  // A user function named `Program` is a user call.
+  if (isFunction(expr, 'Program') && isLibraryOperator(expr))
+    expr = ce._fn('Block', expr.ops);
   return compileExpression(expr, options);
 }
 

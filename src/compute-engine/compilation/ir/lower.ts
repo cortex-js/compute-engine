@@ -3093,6 +3093,9 @@ export function lower(
     }
     return known;
   };
+  /** The integrals lowered as their quadrature, the arm taken when their
+   *  closed form is NaN. */
+  const quadratureOnly = new WeakSet<Expression>();
   /** `Integrate(f, Limits(t, a, b))` or `NIntegrate(f, a, b)`, of real
    *  bounds and a real integrand (a function literal of one parameter, or
    *  a body in the name of the `Limits`): the region `integrate`, whose
@@ -3183,6 +3186,7 @@ export function lower(
       options.javascript &&
       e.operator === 'Integrate' &&
       e.isPure &&
+      !quadratureOnly.has(e) &&
       !bounds.some((x) => isSymbol(x, 'Nothing'))
     ) {
       const [vars, captures] = [options.varsTexts ?? {}, [...b.captures]];
@@ -3208,7 +3212,19 @@ export function lower(
         const effects = b.effects;
         c.body.forEach((i) => b.emit(i));
         b.effects = effects + c.effects;
-        return c.yields[0];
+        const v = c.yields[0];
+        // The closed form is NaN at a bound where the integrand has an
+        // integrable singularity (`∫ ln(t) dt` from `a` = 0 is
+        // `a − a·ln(a) − …`): there the quadrature runs. An integral whose
+        // quadrature does not lower keeps the closed form alone.
+        quadratureOnly.add(e);
+        try {
+          if (trial(() => integral(e)) === undefined) return v;
+          const nan = apply(e, ofOp('isnan'), [v]);
+          return branch(e, nan, () => integral(e), () => v, true)!;
+        } finally {
+          quadratureOnly.delete(e);
+        }
       }
       b.captures.clear();
       captures.forEach((n) => b.captures.add(n));

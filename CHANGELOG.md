@@ -231,6 +231,14 @@
   representable value.** `Binomial(128, 64)` compiled to GLSL gave `Infinity`
   (it is about 2.4e37), and `BesselJ(40, 10)` gave 0 (it is about 6e-21).
 
+- **A compiled integral whose closed form is NaN at a bound runs the
+  quadrature there.** `∫ ln(t) dt` from an input `a` to 2 gave NaN at
+  `a = 0`; it now gives −0.6137, as the interpreter does.
+
+- **A user function named `Program` compiles as a call of that function.**
+  The compiler rewrote every `Program` call to a `Block`, so a user
+  `Program(x) := x + 1` compiled to `x`.
+
 - **The special functions compile to JavaScript again.** Since 0.194.0 they
   declined and fell back to the interpreter: `Heaviside`, `Remainder`,
   `Smoothstep`, `InverseHaversine`, `ErfInv`, `Erfi`, `Beta`,
