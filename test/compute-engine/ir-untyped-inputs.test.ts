@@ -372,7 +372,7 @@ describe('IR profile: an input with no type', () => {
         for (const type of ['any', 'value'])
           expect(
             compiled(literal(op, type), { ...ir, to }).diagnostic?.message
-          ).toMatch(`Typed(p, "${type}"): the input p of type ${type}`);
+          ).toMatch(`p: the input p of type ${type}`);
       // A parameter declared `any` in the signature of a user function.
       expect(compiled(['fa', 'x'], { ...ir, to }).diagnostic).toMatchObject({
         code: 'unsettled-shape',
@@ -384,7 +384,7 @@ describe('IR profile: an input with no type', () => {
           ...ir,
           to,
         }).diagnostic?.message
-      ).toMatch('Typed(a, "any"): the input a of type any');
+      ).toMatch('a: the input a of type any');
     }
     // A parameter declared `unknown` is a real.
     expect(compiled(literal('Add', 'unknown'), ir).run?.(1, 2)).toBe(3);

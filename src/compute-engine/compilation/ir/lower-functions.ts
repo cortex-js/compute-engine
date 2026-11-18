@@ -713,6 +713,11 @@ export function functionLowering(
           op,
           `an argument of ${e.operator} of another length than at its first call: the list parameter ${p.taken} has the length ${p.shape[0]} of that call (${typeof t.shape[0] === 'number' ? typeToString(t) : 'a list of no stated length'} here${cx.runtimeLengths ? '' : '; a target without run-time lengths'})`
         );
+      if (p.shape.length > 0 && t.shape.length === 0)
+        decline(
+          op,
+          `a scalar argument of ${e.operator} for the parameter ${i + 1}, a list or a point`
+        );
       // A list parameter of a run-time length reads the argument's length.
       const n = t.shape[0];
       const length =

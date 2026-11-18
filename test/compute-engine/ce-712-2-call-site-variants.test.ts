@@ -149,7 +149,7 @@ describe('CE-712.2: an argument with no settled shape declines (R3)', () => {
     );
     const r = compile(expr);
     expect(r.success).toBe(false);
-    expect(r.unsupported).toContain('Typed(a, "any")');
+    expect(r.unsupported).toContain('a');
   });
 
   test('a block-local call over a parameter declared `any`', () => {
@@ -161,7 +161,7 @@ describe('CE-712.2: an argument with no settled shape declines (R3)', () => {
     ]);
     const r = compile(expr);
     expect(r.success).toBe(false);
-    expect(r.unsupported).toContain('Typed(a, "any")');
+    expect(r.unsupported).toContain('a');
   });
 });
 

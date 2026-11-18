@@ -175,7 +175,7 @@ function expectUnsettledDecline(
   const r = compile(fn, { to: 'javascript' } as never);
   expect(r.success).toBe(false);
   expect(r.diagnostic?.code).toBe('unsettled-shape');
-  expect(r.unsupported).toContain(`Typed(${symbol}, "any")`);
+  expect(r.unsupported).toContain(symbol);
 }
 
 /** Expect the compilation of `expr` to decline with `unsettled-shape`: the

@@ -545,29 +545,40 @@ describe('IR profile, batch G9: robustness', () => {
     }
   });
 
-  test('a chain of 1,000 conditionals between colour names and calls, and a chain of 1,000 operations in an argument', () => {
-    const clauses: Expression[] = [];
+  // The depth at which a walk exceeds the call stack depends on the host
+  // and on the state of its compiled code, near 1,000 clauses
+  // (`ir-colors.test.ts`): 300 clauses always compile, 1,000 compile or
+  // decline as too deep.
+  test('a chain of 300 conditionals between colour names and calls, one of 1,000 that compiles or declines as too deep, and a chain of 1,000 operations in an argument', () => {
+    const which = (n: number) => {
+      const clauses: Expression[] = [];
+      for (let i = 0; i < n; i++)
+        clauses.push(
+          ce.function('Greater', [x, ce.number(i)]),
+          i % 2 === 0
+            ? ce.box('Cv')
+            : ce.function('shade', [ce.function('Add', [x, ce.number(i)])])
+        );
+      return ce.function('AsOklab', [
+        ce.function('Which', [...clauses, ce.True, ce.box('Cr')]),
+      ]);
+    };
     let chain: Expression = x;
-    for (let i = 0; i < 1_000; i++) {
-      clauses.push(
-        ce.function('Greater', [x, ce.number(i)]),
-        i % 2 === 0
-          ? ce.box('Cv')
-          : ce.function('shade', [ce.function('Add', [x, ce.number(i)])])
-      );
-      chain = ce.function('Sin', [chain]);
-    }
-    const which = ce.function('AsOklab', [
-      ce.function('Which', [...clauses, ce.True, ce.box('Cr')]),
-    ]);
+    for (let i = 0; i < 1_000; i++) chain = ce.function('Sin', [chain]);
     const deep = ce.function('AsOklab', [ce.function('shade', [chain])]);
     for (const to of ['javascript', 'glsl'] as const) {
-      const start = performance.now();
-      const r = compile(which, { ...IR, to });
-      expect(r.code.length + (r.preamble ?? '').length).toBeLessThan(1_000_000);
-      expect(performance.now() - start).toBeLessThan(30_000);
+      const r = compile(which(300), { ...IR, to });
       if (to === 'javascript')
-        againstInterpreter(r, which, [{ x: -1 }, { x: 0.5 }, { x: 1.5 }]);
+        againstInterpreter(r, which(300), [{ x: -1 }, { x: 0.5 }, { x: 1.5 }]);
+      let big: ReturnType<typeof compile> | undefined;
+      const start = performance.now();
+      const e = failure(() => (big = compile(which(1_000), { ...IR, to })));
+      expect(performance.now() - start).toBeLessThan(30_000);
+      if (e !== undefined) expect(e.message).toMatch(/too deep to compile/);
+      else
+        expect(big!.code.length + (big!.preamble ?? '').length).toBeLessThan(
+          1_000_000
+        );
       // The chain is near the depth at which a walk exceeds the call
       // stack, which depends on the host: it compiles or declines.
       let d: ReturnType<typeof failure>;

@@ -156,6 +156,25 @@
 
 ### Resolved Issues
 
+- **A compilation refused for a parameter declared `any` or `value` names the
+  parameter.** `compile(['Function', ['Multiply', 2, 't'], ['Typed', 't',
+  "'any'"]])` has `unsupported` equal to `['t']`, and `diagnostic.value` is
+  `'t'`; they were `['Typed', 'Typed(t, "any")']` and `'Typed(t, "any")'`.
+- **A compiled call of a function that takes a list, with a number argument,
+  declines with a message that names the argument.** With `fallback: false`,
+  `compile(f(x))` for `f` assigned `(p: list<real>) -> Sum(p)` and `x`
+  declared `real` threw `internal error: Cannot read properties of
+  undefined`; it now throws `x: a scalar argument of f for the parameter 1, a
+  list or a point`.
+- **A function declared to return an `integer` that counts in a loop
+  compiles.** With `f(B: list<integer>, k: integer) -> integer` whose body is
+  `let n = 0; for j in 1..k { n = n + B[j] }; n`, `compile(f(L, 3))` declined
+  (`a body of f that is not integer`): a local declared with no type, such as
+  `let n = 0`, was a real in compiled code. It is now an integer when its
+  value is an integer and its type after every write is `integer`, so a call
+  of `f`, and a condition on it such as `if f(L, 3) > 0`, compile. A block
+  that holds a power (`n = n + j^2`) keeps such locals real: the compiled
+  power is a real.
 - **A unit conversion between units with exact scales rounds once.**
   `UnitConvert(Quantity(12, "in"), "ft")` was `0.9999999999999998 ft` and is
   now `1 ft`; `1 m/s` in `km/h` was `3.5999999999999996` and is now `3.6`, and

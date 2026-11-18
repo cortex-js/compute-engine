@@ -54,7 +54,7 @@ describe('a nested call inside a scalar-parameter definition is direct', () => {
       ['Typed', 'u', "'any'"],
     ]);
     expect(any.success).toBe(false);
-    expect(any.unsupported).toContain('Typed(u, "any")');
+    expect(any.unsupported).toContain('u');
   });
 });
 

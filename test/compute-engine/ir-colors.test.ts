@@ -381,27 +381,53 @@ describe('IR profile, colours: robustness', () => {
   // took 12 to 33 s and gave 6 MB of text before the operation index of
   // `rowOfOp()`, the region memo of `effects()` and the cap on the
   // printer's indentation.)
-  test('a chain of 1,000 conditionals compiles, and a chain of 1,000 conversions compiles on JavaScript and declines as too deep on GLSL', () => {
+  // The depth at which a walk of the pipeline exceeds the call stack
+  // depends on the host and on the state of its compiled code (about 1,070
+  // clauses on JavaScript and 1,200 on GLSL under Jest, 1,300 under tsx,
+  // lower in some runs of the full suite), so 1,000 clauses compile or
+  // decline as too deep; 300 always compile, and 20,000 always decline.
+  test('a chain of 300 conditionals compiles, one of 1,000 compiles or declines as too deep within the bounds, one of 20,000 declines; a chain of 1,000 conversions compiles or declines as too deep', () => {
     const x = ce.box('x');
     const base = ce.function('Oklch', [x, ce.number(0.1), ce.number(250)]);
-    const clauses: Expression[] = [];
+    const which = (n: number) => {
+      const clauses: Expression[] = [];
+      for (let i = 0; i < n; i++)
+        clauses.push(
+          ce.function('Greater', [x, ce.number(i)]),
+          ce.function('Rgb', [x, ce.number(i / 1000), ce.number(0)])
+        );
+      return ce.function('AsOklab', [
+        ce.function('Which', [...clauses, ce.True, base]),
+      ]);
+    };
     let conversions: Expression = base;
-    for (let i = 0; i < 1_000; i++) {
-      clauses.push(
-        ce.function('Greater', [x, ce.number(i)]),
-        ce.function('Rgb', [x, ce.number(i / 1000), ce.number(0)])
-      );
+    for (let i = 0; i < 1_000; i++)
       conversions = ce.function('AsOklch', [conversions]);
-    }
-    const which = ce.function('AsOklab', [
-      ce.function('Which', [...clauses, ce.True, base]),
-    ]);
     const chain = ce.function('AsOklab', [conversions]);
     for (const to of ['javascript', 'glsl'] as const) {
+      const r = compile(which(300), { ...IR, to });
+      for (const p of to === 'javascript' ? [-1, 150.5] : []) {
+        const v = r.run!({ x: p } as never) as unknown as Record<
+          string,
+          number
+        >;
+        const want = interpreted(which(300).json, { x: p }, 'oklab');
+        [v.c0, v.c1, v.c2].forEach((c, k) =>
+          expect(near(c, want[k], 1e-12)).toBe(true)
+        );
+      }
+      let big: ReturnType<typeof compile> | undefined;
       const start = performance.now();
-      const r = compile(which, { ...IR, to });
-      expect(r.code.length + (r.preamble ?? '').length).toBeLessThan(1_000_000);
+      const d = failure(() => (big = compile(which(1_000), { ...IR, to })));
       expect(performance.now() - start).toBeLessThan(30_000);
+      if (d !== undefined) expect(d.message).toMatch(/too deep to compile/);
+      else
+        expect(big!.code.length + (big!.preamble ?? '').length).toBeLessThan(
+          1_000_000
+        );
+      expect(
+        failure(() => compile(which(20_000), { ...IR, to }))?.message
+      ).toMatch(/too deep to compile/);
     }
     // The chain of 1,000 conversions is near the depth at which a walk of
     // the pipeline exceeds the call stack, which depends on the host (under

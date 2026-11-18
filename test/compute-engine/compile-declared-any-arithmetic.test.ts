@@ -72,7 +72,7 @@ function bothRoutes(
   expect(result.success).toBe(false);
   expect(result.diagnostic?.code).toBe('unsettled-shape');
   expect(result.unsupported).toEqual(
-    expect.arrayContaining([expect.stringMatching(/^Typed\([pq], "any"\)$/)])
+    expect.arrayContaining([expect.stringMatching(/^[pq]$/)])
   );
   const compiled = (result.run as unknown as (...args: unknown[]) => unknown)(
     p,
@@ -167,7 +167,7 @@ describe('CE-366: arithmetic over symbols declared any declines', () => {
       ] as any)
     );
     expect(result.success).toBe(false);
-    expect(result.unsupported).toContain('Typed(p, "value")');
+    expect(result.unsupported).toContain('p');
     const run = result.run as unknown as (p: unknown) => unknown;
     expect(run([1, 2])).toEqual([2, 4]);
     expect(run(3)).toBe(6);
@@ -348,7 +348,7 @@ describe('CE-214.2: the coordinate of a number', () => {
       const ce = setup();
       const result = compiledWith(ce, [head, ['At', ['g', 'x'], 1]], 'any');
       expect(result.success).toBe(false);
-      expect(result.unsupported).toContain('Typed(x, "any")');
+      expect(result.unsupported).toContain('x');
     });
   }
 

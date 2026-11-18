@@ -41,6 +41,7 @@
 
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import type { Type } from '../../../common/type/types.js';
+import { isSubtype } from '../../../common/type/subtype.js';
 import type { BoxedValueDefinition, Expression } from '../../global-types.js';
 import type { NumericValue } from '../../numeric-value/types.js';
 import { BigNumericValue } from '../../numeric-value/big-numeric-value.js';
@@ -2268,10 +2269,12 @@ export function lower(
       decline(e, COLLECTION);
     if (!positional && interval && enclosureInput(t) !== undefined)
       enclosure = true;
+    // Named by the input, not by its declaration `Typed(…)`.
     if (ir === undefined)
-      decline(
-        e,
+      throw new Decline(
+        name,
         `the input ${name} of type ${engineTypeToString(t)}`,
+        undefined,
         hasUnsettledShape(t) ? UNSETTLED_SHAPE : undefined
       );
     const shape = ir.shape.map((n) => {
@@ -2592,6 +2595,18 @@ export function lower(
     return widen(v, lane);
   };
 
+  /** The engine type of the first read of `name` in `xs` that has one, or
+   *  `real` when `xs` holds a `Power`, which lowers to a real where the
+   *  engine type is `integer` (`i^2`). */
+  const readType = (xs: readonly Expression[], name: string): Type => {
+    let t: Type = 'unknown';
+    const power = (x: Expression): boolean => {
+      if (t === 'unknown' && isSymbol(x, name)) t = x.type.type;
+      return isFunction(x) && (x.operator === 'Power' || x.ops.some(power));
+    };
+    return xs.some(power) ? 'real' : t;
+  };
+
   const block = (e: Fn, want: boolean): V | undefined =>
     withFrame(false, (frame) => {
       let result: V | undefined;
@@ -2645,12 +2660,17 @@ export function lower(
             return void (result = v);
           }
           // With no type, a number is a real: a later write of a real to
-          // `let t = 0` is valid.
-          // In the bigint mode a real write declines: an integer stays one.
+          // `let t = 0` is valid. An integer stays one in the bigint mode,
+          // and where a later read has an integer engine type (its type
+          // after every write) and no `Power` follows (`readType()`): a
+          // write that is not an integer then declines (`local()`).
           const lane: Lane =
             typeName !== 'unknown'
               ? (typeName as Lane)
-              : bigint || !isSubLane(type(v).lane, 'real')
+              : bigint ||
+                  !isSubLane(type(v).lane, 'real') ||
+                  (type(v).lane === 'integer' &&
+                    isSubtype(readType(e.ops.slice(i), name.symbol), 'integer'))
                 ? type(v).lane
                 : 'real';
           result = local(s, v, lane);

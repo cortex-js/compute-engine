@@ -504,4 +504,24 @@ describe('CE-1422: A CALL OF A USER FUNCTION MAPS OR BINDS AS THE INTERPRETER', 
       /a list argument of g that the parameter 1, a list or a point, would take whole \(the interpreter maps the function over the list\)/
     );
   });
+
+  // The interpreter gives an `incompatible-type` error; the decline names
+  // the argument (CE-1423).
+  test.each(['javascript', 'glsl', 'interval-js'])(
+    'a number at a list parameter declines on %s, naming the argument',
+    (to) => {
+      const ce = new ComputeEngine();
+      ce.declare('x', 'real');
+      ce.declare('f', '(unknown) -> unknown');
+      ce.assign(
+        'f',
+        ce.box(['Function', ['Sum', 'p'], ['Typed', 'p', "'list<real>'"]])
+      );
+      expect(() =>
+        compile(ce.box(['f', 'x']), { to, fallback: false } as never)
+      ).toThrow(
+        'x: a scalar argument of f for the parameter 1, a list or a point'
+      );
+    }
+  );
 });

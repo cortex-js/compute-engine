@@ -95,7 +95,7 @@ function expectUnsettledDecline(body: unknown, type: string, expected: unknown) 
   const c = compile(lambda(new ComputeEngine(), body, type));
   expect(c.success).toBe(false);
   expect(c.diagnostic?.code).toBe('unsettled-shape');
-  expect(c.unsupported).toContain(`Typed(w, "${type}")`);
+  expect(c.unsupported).toContain('w');
   expect((c.run as (v: unknown) => unknown)([3, 1, 2])).toEqual(expected);
 }
 

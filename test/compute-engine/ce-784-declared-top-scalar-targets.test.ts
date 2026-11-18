@@ -45,8 +45,7 @@ describe('A SYMBOL DECLARED ANY OR VALUE ON THE SCALAR TARGETS', () => {
       const result = compileTo(ce, ['Function', body, typed('t', 'any')], to);
       expect(result.success).toBe(false);
       expect(result.diagnostic?.code).toBe('unsettled-shape');
-      // The pipeline names the declaration, not the parameter (CE-1431).
-      expect(result.unsupported).toContain(`Typed(${name}, "any")`);
+      expect(result.unsupported).toEqual([name]);
     });
 
     test('a parameter declared value declines', () => {
@@ -58,8 +57,7 @@ describe('A SYMBOL DECLARED ANY OR VALUE ON THE SCALAR TARGETS', () => {
       );
       expect(result.success).toBe(false);
       expect(result.diagnostic?.code).toBe('unsettled-shape');
-      // The pipeline names the declaration, not the parameter (CE-1431).
-      expect(result.unsupported).toContain('Typed(t, "value")');
+      expect(result.unsupported).toEqual(['t']);
     });
 
     test('two parameters declared any decline, and the first is named', () => {
@@ -71,8 +69,7 @@ describe('A SYMBOL DECLARED ANY OR VALUE ON THE SCALAR TARGETS', () => {
       );
       expect(result.success).toBe(false);
       expect(result.diagnostic?.code).toBe('unsettled-shape');
-      // The pipeline names the declaration, not the parameter (CE-1431).
-      expect(result.unsupported).toContain('Typed(p, "any")');
+      expect(result.unsupported).toEqual(['p']);
     });
 
     test('an input declared value declines', () => {
