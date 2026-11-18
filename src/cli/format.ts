@@ -1,9 +1,13 @@
 import { serializeEpsil } from '../epsil.js';
 import { DISPLAY_MATERIALIZATION } from '../compute-engine/boxed-expression/abstract-boxed-expression.js';
-import { toAsciiMath } from '../compute-engine/boxed-expression/ascii-math.js';
+import {
+  toAsciiMath,
+  type AsciiMathSerializer,
+} from '../compute-engine/boxed-expression/ascii-math.js';
 import {
   isDictionary,
   isFunction,
+  isNumber,
   isObject,
   isSymbol,
 } from '../compute-engine/boxed-expression/type-guards.js';
@@ -98,6 +102,46 @@ const LITERAL_WORDS: Readonly<Record<string, string>> = {
 const CALL_FORM_FUNCTIONS = ['Abs', 'Norm', 'Root'] as const;
 
 /**
+ * The text of a number literal with an explicit product where the textual
+ * form writes an implicit one that Epsil does not read back: `3/2 * sqrt(2)`,
+ * `sqrt(3)/2 * i`, `2sqrt(2) * i`, `(1 - 3/2 * i)`. Epsil reads `3/2sqrt(2)`
+ * and `sqrt(3)/2i` as `3/(2sqrt(2))` and `sqrt(3)/(2i)`, because an implicit
+ * product binds tighter than `/`, and does not read `sqrt(2)i`. For another
+ * number the result is `undefined`, and the number keeps the default form
+ * (`2i`, `(1 + 2.5i)`, `2sqrt(3)`).
+ */
+function explicitProductText(
+  expr: Expression,
+  serialize: AsciiMathSerializer
+): string | undefined {
+  const json = expr.json;
+  if (!Array.isArray(json) || json[0] !== 'Complex' || json.length !== 3) {
+    // A real exact number is `rational · sqrt(radical)`, written
+    // `p/qsqrt(r)` when the rational is not an integer and its numerator is
+    // not ±1. A part of the rational can have an exponent (`5e+24/7`).
+    if (!isNumber(expr) || !expr.isExact) return undefined;
+    const num = expr.numericValue;
+    if (typeof num === 'number') return undefined;
+    const text = num.toString();
+    const explicit = text.replace(
+      /^(-?\d+(?:e\+\d+)?\/\d+(?:e\+\d+)?)(sqrt\()/,
+      '$1 * $2'
+    );
+    return explicit === text ? undefined : explicit;
+  }
+  const ce = expr.engine;
+  const im = serialize(ce.box(json[2]));
+  // An integer or a decimal before `i` reads back: `2i`, `-2.5i`, `i`.
+  if (/^-?\d+(\.\d+)?$/.test(im)) return undefined;
+  const imText = `${im} * i`;
+  const re = ce.box(json[1]);
+  if (re.isSame(0)) return imText;
+  if (imText.startsWith('-'))
+    return `(${serialize(re)} - ${imText.slice(1)})`;
+  return `(${serialize(re)} + ${imText})`;
+}
+
+/**
  * The text of a value in the human-facing value mode: the engine's textual
  * form (`toString()`), with the symbols written as Epsil writes them. The
  * textual form puts a symbol of more than one character in quotes, so `True`
@@ -107,8 +151,10 @@ const CALL_FORM_FUNCTIONS = ['Abs', 'Norm', 'Root'] as const;
  * quote (`x`, `pi`) keeps its form, and so does the name of a function,
  * which the textual form does not quote (`QuotientRing(integers, 3)`). An
  * absolute value, a norm and a root are calls (`abs(a)`, `norm(M, 3)`,
- * `root(2, 3)`), not the `|a|` and `||M||` of the textual form. A lazy
- * collection shows the same preview as `toString()`.
+ * `root(2, 3)`), not the `|a|` and `||M||` of the textual form. A number
+ * has an explicit product where Epsil does not read the implicit one back
+ * (`sqrt(3)/2 * i` and `3/2 * sqrt(2)`, not `sqrt(3)/2i` and `3/2sqrt(2)`).
+ * A lazy collection shows the same preview as `toString()`.
  */
 export function epsilValueText(value: Expression): string {
   try {
@@ -149,7 +195,11 @@ export function epsilValueText(value: Expression): string {
     const functions: Record<string, string> = {};
     for (const name of CALL_FORM_FUNCTIONS)
       functions[name] = serializeEpsil(name, spelling);
-    return toAsciiMath(shown, { symbols, functions });
+    return toAsciiMath(shown, {
+      symbols,
+      functions,
+      numbers: explicitProductText,
+    });
   } catch {
     // `toString()` never throws and turns a failure into a message.
     return value.toString();

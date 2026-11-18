@@ -456,7 +456,7 @@ cos(π/3) = 1/2 and sin(π/3) = √3/2, without ever numericizing:
 
 ```epsil
 $e^{i\pi/3}$
-// ➔ 1/2 + sqrt(3)/2i
+// ➔ 1/2 + sqrt(3)/2 * i
 ```
 
 **A product of complex numbers** taken over a mapped `Range` keeps its

@@ -213,6 +213,13 @@ export type AsciiMathOptions = {
   >;
   /** Controls how many digits numbers are displayed with. See `DisplayDigits`. */
   digits?: DisplayDigits;
+  /** Writes a number literal, or returns `undefined` to keep the default
+   * form. The result is put in parentheses where a product would be:
+   * `x / (3/2 * i)`. */
+  numbers?: (
+    expr: Expression,
+    serialize: AsciiMathSerializer
+  ) => string | undefined;
 };
 
 /**
@@ -1185,6 +1192,8 @@ export function toAsciiMath(
   //
   if (isNumber(expr)) {
     const num = expr.numericValue;
+    const custom = options.numbers?.(expr, serialize);
+    if (custom !== undefined) return wrap(custom, precedence, 12);
     if (expr.isNaN) return serializeSymbol('NaN', options);
     if (expr.isFinite === false) {
       if (expr.isNegative !== true && expr.isPositive !== true)

@@ -136,7 +136,7 @@ dirichletCharacter(5, 2, 2)
 
 ```epsil
 dirichletCharacter(7, 3, 3)
-// ➔ e^(2/3i * pi)
+// ➔ e^(2/3 * i * pi)
 ```
 
 ### dirichletL
@@ -157,7 +157,7 @@ dirichletL(3, 2, -2)
 
 ```epsil
 dirichletL(5, 2, 0)
-// ➔ (3/5 + 1/5i)
+// ➔ (3/5 + 1/5 * i)
 ```
 
 ### divides

@@ -153,20 +153,59 @@ describe('Epsil CLI value output', () => {
     ['norm([[1, 2], [3, 4]], 3)', 'norm([[1,2],[3,4]], 3)'],
     ['root(2, 3)', 'root(2, 3)'],
     ['let abs = 3; Abs(a)', 'Abs(a)'],
+    // An imaginary number with a fractional part has an explicit product:
+    // Epsil reads `sqrt(3)/2i` as `sqrt(3)/(2i)`.
+    ['sqrt(3)/2 * i', 'sqrt(3)/2 * i'],
+    ['0 - sqrt(3)/2 * i', '-sqrt(3)/2 * i'],
+    ['x/2 * i', '1/2 * i * x'],
+    ['1 - 3/2 * i', '(1 - 3/2 * i)'],
+    ['x^(3/2 * i)', 'x^(3/2 * i)'],
+    ['exp(i * pi / 3)', '1/2 + sqrt(3)/2 * i'],
+    ['1 + 2*i', '(1 + 2i)'],
+    ['1.5 * i', '1.5i'],
+    // The same for a fraction before a radical: Epsil reads `3/2sqrt(2)` as
+    // `3/(2sqrt(2))`.
+    ['3/sqrt(2)', '3/2 * sqrt(2)'],
+    ['3/sqrt(2) * i', '3/2 * sqrt(2) * i'],
+    ['x / (sqrt(3)/2 * i)', '-2/3 * sqrt(3) * i * x'],
+    ['2*sqrt(3)', '2sqrt(3)'],
+    // Epsil does not read `sqrt(2)i`.
+    ['2*sqrt(-2)', '2sqrt(2) * i'],
+    ['1 + sqrt(-2)', '1 + sqrt(2) * i'],
+    ['10000000000000000000000000/7*sqrt(2)', '1e+25/7 * sqrt(2)'],
+    ['i', 'i'],
+    ['1 + 2.5*i', '(1 + 2.5i)'],
   ])('%s', async (source, expected) => {
     const { io, stdout } = makeIo();
     expect(await main(['-e', source], io)).toBe(0);
     expect(stdout()).toBe(`${expected}\n`);
   });
 
-  // The printed text of an absolute value, a norm and a root reads back as the
-  // same value.
+  // The printed text of an absolute value, a norm, a root and an imaginary
+  // number reads back as the same value.
   test.each([
     'abs(a)',
     'abs(x + y*i)',
     'norm([a, b])',
     'norm([[1, 2], [3, 4]], 3)',
     'root(2, 3)',
+    'sqrt(3)/2 * i',
+    '-sqrt(3)/2 * i',
+    'x/2 * i',
+    '1 - 3/2 * i',
+    '3/2 * i - 1',
+    'x^(3/2 * i)',
+    '[1/2 * i, 1]',
+    'exp(i * pi / 3)',
+    '3/sqrt(2)',
+    '0 - 3/sqrt(2)',
+    '3/sqrt(2) * i',
+    '1 + 3/sqrt(2) * i',
+    'x / (sqrt(3)/2 * i)',
+    'x^(3/sqrt(2))',
+    '2*sqrt(-2)',
+    '1 + sqrt(-2)',
+    '10000000000000000000000000/7*sqrt(2)',
   ])('%s reads back', (source) => {
     const session = makeEpsilSession(0);
     const value = session.evaluate(source).value;

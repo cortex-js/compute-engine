@@ -549,7 +549,7 @@ complexRoots(1, 4)
 
 ```epsil
 complexRoots(8, 3)
-// ➔ [2,-1 + sqrt(3)i,-1 - sqrt(3)i]
+// ➔ [2,-1 + sqrt(3) * i,-1 - sqrt(3) * i]
 ```
 
 ### conjugate
@@ -1386,7 +1386,7 @@ Sign of a number: -1, 0, or 1 for a real; `z/|z|`, the point of the unit circle 
 
 ```epsil
 [sign(-3), sign(0), sign(3 + 4i)]
-// ➔ [-1,0,(3/5 + 4/5i)]
+// ➔ [-1,0,(3/5 + 4/5 * i)]
 ```
 
 ### smoothstep
