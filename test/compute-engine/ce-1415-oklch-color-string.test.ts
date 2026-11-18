@@ -70,4 +70,27 @@ describe('parseOkColorString', () => {
     expect(parseOkColorString('oklch(0.5 0.1 30 / 1)')!.alpha).toBeUndefined();
     expect(parseOkColorString('oklch(0.5 0.1 30 / 1e999)')).toBeNull();
   });
+
+  test('an opacity suffix replaces the alpha and keeps the channels', () => {
+    expect(parseOkColorString('oklch(50% 0.3 240)/100')).toEqual({
+      space: 'oklch',
+      c0: 0.5,
+      c1: 0.3,
+      c2: 240,
+    });
+    expect(parseOkColorString('oklch(50% 0.3 240 / 0.5)/25%')).toEqual({
+      space: 'oklch',
+      c0: 0.5,
+      c1: 0.3,
+      c2: 240,
+      alpha: 0.25,
+    });
+    expect(parseOkColorString('oklch(50% 0.3)/50')).toBeNull();
+    expect(
+      ce
+        .box(['Color', { str: 'oklch(50% 0.3 240)/50' }])
+        .evaluate()
+        .toString()
+    ).toBe('Oklch(0.5, 0.3, 240, 0.5)');
+  });
 });

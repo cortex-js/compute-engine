@@ -122,15 +122,21 @@ const PARSE_COLOR_FUNCTION =
   /^(?:rgba?|hsla?|oklch|oklab)\s*\(\s*([^)]+)\s*\)$/;
 
 /**
- * The spelling `s` without a trailing opacity suffix (`red/50` is `red`),
- * split off as `parseColor()` splits it.
+ * The spelling `s` and its trailing opacity suffix, a percentage
+ * (`red/50` is `red` with opacity 50), split as `parseColor()` splits them.
  */
-function withoutOpacitySuffix(s: string): string {
+function splitOpacitySuffix(s: string): { base: string; opacity?: number } {
   const slash = s.lastIndexOf('/');
-  if (slash < 0) return s;
-  if (!/^\d+(?:\.\d+)?%?$/.test(s.slice(slash + 1).trim())) return s;
+  if (slash < 0) return { base: s };
+  const tail = s.slice(slash + 1).trim();
+  if (!/^\d+(?:\.\d+)?%?$/.test(tail)) return { base: s };
   const base = s.slice(0, slash).trim();
-  return base === '' ? s : base;
+  return base === '' ? { base: s } : { base, opacity: parseFloat(tail) };
+}
+
+/** The spelling `s` without a trailing opacity suffix (`red/50` is `red`). */
+function withoutOpacitySuffix(s: string): string {
+  return splitOpacitySuffix(s).base;
 }
 
 /**
@@ -147,9 +153,9 @@ function withoutOpacitySuffix(s: string): string {
  */
 export function isParseColorSpelling(s: string): boolean {
   const spelling = s.trim().toLowerCase();
-  if (OK_COLOR_FORM.test(spelling))
-    return parseOkColorString(spelling) !== null;
   const base = withoutOpacitySuffix(spelling);
+  if (OK_COLOR_FORM.test(spelling) || OK_COLOR_FORM.test(base))
+    return parseOkColorString(spelling) !== null;
   if (base.startsWith('#')) return true;
   const fn = PARSE_COLOR_FUNCTION.exec(base);
   if (fn !== null)
@@ -190,11 +196,21 @@ export function isParseColorSpelling(s: string): boolean {
  *   `turn`), reduced into `[0, 360)`.
  * - The alpha is a number or a percentage, clamped into `[0, 1]`. A number
  *   above 1 is on the 0-255 scale, as `parseColor()` reads it.
+ * - An opacity suffix after the closing parenthesis (`oklch(…)/50`), a
+ *   percentage clamped into `[0, 100]`, replaces the alpha, as
+ *   `parseColor()` applies it.
  */
 export function parseOkColorString(
   s: string
 ): OkColorChannels | null | undefined {
-  const match = OK_COLOR_FORM.exec(s.trim().toLowerCase());
+  const spelling = s.trim().toLowerCase();
+  let match = OK_COLOR_FORM.exec(spelling);
+  let opacity: number | undefined;
+  if (match === null) {
+    const split = splitOpacitySuffix(spelling);
+    match = OK_COLOR_FORM.exec(split.base);
+    opacity = split.opacity;
+  }
   if (match === null) return undefined;
   const space = match[1] as 'oklch' | 'oklab';
   const args = match[2].trim().split(/\s*[\s,/]\s*/);
@@ -233,7 +249,11 @@ export function parseOkColorString(
       values.push(space === 'oklch' ? Math.max(0, v) : v);
     }
   }
-  const [c0, c1, c2, alpha] = values;
+  const [c0, c1, c2] = values;
+  const alpha =
+    opacity !== undefined
+      ? Math.max(0, Math.min(100, opacity)) / 100
+      : values[3];
   if (alpha === undefined || Math.abs(alpha - 1) < 1e-9)
     return { space, c0, c1, c2 };
   return { space, c0, c1, c2, alpha };
