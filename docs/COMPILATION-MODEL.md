@@ -1491,8 +1491,10 @@ time"). The
 engine-bound helpers take their state as options: `random` (draws outside a
 `WithRandomSeed` frame and the integrals' Monte-Carlo samples; `null` denies),
 `frame` (the enclosing frame, set with `setFrame()` and read back from
-`runtime.frame.next`),
-`iterationLimit` (`Infinity` when 0 or less) and `deadline`. A denied draw
+`runtime.frame.next`) and `deadline`. The option and the property
+`iterationLimit` are deprecated and have no effect: `ce.iterationLimit` applies
+to the interpreter only, and the passes of compiled code are bounded by the
+compile option `iterationBudget` ("A limit on `Loop` passes"). A denied draw
 throws a `CapabilityDeniedError`, a different class in each bundle: test
 `e.name`, not `instanceof`. Tolerance, angular unit and the digits a negative
 base's float exponent is read to (`reconstructionDigits`, 15 to 17 by the

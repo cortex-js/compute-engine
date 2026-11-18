@@ -180,6 +180,12 @@
 
 ### Behavior Changes
 
+- **`ce.iterationLimit` applies to the interpreter only.** Compiled code does
+  not read it; a compiled loop is bounded by the compile option
+  `iterationBudget`. The `iterationLimit` option and property of
+  `createJavaScriptRuntime()` are deprecated and have no effect: since 0.194.0
+  no compiled code read them.
+
 - **A sum of quantities of two dimensions is an error.** `5 m + 3 s` was
   left unevaluated; it now evaluates to an `incompatible-type` error that
   names the two units (`Error(ErrorCode("incompatible-type", "m", "s"))`),
@@ -219,6 +225,10 @@
   color, as `"rgb()"` is.
 
 ### Resolved Issues
+
+- **Two GLSL helpers no longer overflow or underflow on the way to a
+  representable value.** `Binomial(128, 64)` compiled to GLSL gave `Infinity`
+  (it is about 2.4e37), and `BesselJ(40, 10)` gave 0 (it is about 6e-21).
 
 - **The special functions compile to JavaScript again.** Since 0.194.0 they
   declined and fell back to the interpreter: `Heaviside`, `Remainder`,

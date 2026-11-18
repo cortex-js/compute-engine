@@ -13,7 +13,6 @@ describe('the helper bundle of a compiled function', () => {
   test('inherits the shared helpers and holds its own', () => {
     const sys = makeSysHelpers({
       random: Math.random,
-      iterationLimit: () => 1000,
       frame: () => undefined,
       setFrame: () => {},
       deadline: () => undefined,
@@ -21,7 +20,6 @@ describe('the helper bundle of a compiled function', () => {
     expect(Object.getPrototypeOf(sys)).toBe(SYS_HELPERS);
     for (const name of [
       'drawNextRandomNumber',
-      'filterIter',
       'countLoopPass',
       'resetLoopPasses',
       'integrate',

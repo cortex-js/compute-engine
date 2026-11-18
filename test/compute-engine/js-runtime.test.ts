@@ -129,28 +129,7 @@ describe('random outside a frame', () => {
 });
 
 describe('limits are options of the runtime', () => {
-  const endless = function* (): Generator<number> {
-    for (let i = 0; ; i++) yield i;
-  };
-
-  test('the iteration limit caps the lazy-stream walks', () => {
-    const rt = createSysRuntime({ iterationLimit: 50 });
-    expect(() =>
-      rt.takeIter(
-        rt.filterIter(endless(), () => false),
-        1
-      )
-    ).toThrow('Iteration limit of 50 exceeded while evaluating Filter()');
-    expect(() => rt.takeWhileIter(endless(), () => true)).toThrow(
-      'Iteration limit of 50'
-    );
-    rt.iterationLimit = 0; // no cap
-    expect(rt.iterationLimit).toBe(Infinity);
-    expect(
-      rt.takeWhileIter(endless(), (x) => (x as number) < 5000)
-    ).toHaveLength(5000);
-  });
-
+  // `iterationLimit` is deprecated and has no effect; it reads back.
   test('the default iteration limit is the engine default', () => {
     expect(createJavaScriptRuntime().iterationLimit).toBe(ce.iterationLimit);
   });

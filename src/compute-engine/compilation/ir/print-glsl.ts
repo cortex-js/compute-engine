@@ -495,7 +495,9 @@ export const GLSL: Syntax = deepFreeze({
   for (int i = 1; i <= 130; i++) {
     if (float(i) > j) break;
     float p = r * (n - j + float(i));
-    r = p < 16777216.0 ? floor(p / float(i) + 0.5) : p / float(i);
+    r = p < 16777216.0
+      ? floor(p / float(i) + 0.5)
+      : r * ((n - j + float(i)) / float(i));
   }
   return s * r;
 }`,
@@ -844,14 +846,14 @@ export const GLSL: Syntax = deepFreeze({
   if (x * x < 4.0 * float(n + 1)) {
     float negQ = -(x * x) / 4.0;
     float term = 1.0;
-    for (int i = 1; i <= n; i++) term /= float(i);
+    for (int i = 1; i <= n; i++) term *= (x / 2.0) / float(i);
     float s = term;
     for (int k = 1; k <= 60; k++) {
       term *= negQ / (float(k) * float(n + k));
       s += term;
       if (abs(term) < abs(s) * 1e-7) break;
     }
-    return sgn * s * pow(x / 2.0, float(n));
+    return sgn * s;
   }
   float jp1 = 0.0;
   float jk = 1.0;

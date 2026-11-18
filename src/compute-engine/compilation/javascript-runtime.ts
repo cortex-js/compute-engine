@@ -1545,21 +1545,8 @@ export type RandomSysHelpers = {
 };
 
 /** The `_SYS` bundle injected into a compiled JavaScript function. */
-export type LazyStreamSysHelpers = {
-  filterIter: (
-    it: Iterable<unknown>,
-    p: (x: unknown) => unknown
-  ) => Generator<unknown>;
-  takeIter: (it: Iterable<unknown>, n: number) => unknown[];
-  takeWhileIter: (
-    it: Iterable<unknown>,
-    p: (x: unknown) => unknown
-  ) => unknown[];
-};
-
 export type SysHelpers = typeof SYS_HELPERS &
   RandomSysHelpers &
-  LazyStreamSysHelpers &
   ReturnType<typeof makeLoopPassCounter> & {
     /** The functions of the profile `ir` (`IR_FUNCTIONS`). */
     ir: typeof IR_FUNCTIONS;
@@ -1571,7 +1558,7 @@ export type SysHelpers = typeof SYS_HELPERS &
 /**
  * The state the engine-bound helpers of `_SYS` read each time they run, never
  * when the code is compiled. The engine passes its own (`ce._liveRandom`,
- * `ce._randomFrame`, `ce.iterationLimit`, `ce._deadlineFrame`);
+ * `ce._randomFrame`, `ce._deadlineFrame`);
  * `createJavaScriptRuntime` builds one from plain options. This module imports
  * no engine code, so that a host can run compiled code without the engine.
  */
@@ -1588,8 +1575,6 @@ export type RuntimeSource = {
   frame: () => RandomSeedFrame | undefined;
   /** Install (or, with `undefined`, clear) the active frame. */
   setFrame: (frame: RandomSeedFrame | undefined) => void;
-  /** The cap on the walks of the lazy-stream helpers. */
-  iterationLimit: () => number;
   /** The deadline the shuffle/choice loops check, if any. */
   deadline: () => DeadlineFrame | number | undefined;
 };
@@ -1597,8 +1582,7 @@ export type RuntimeSource = {
 /**
  * What the engine-bound helpers of `_SYS` read from `ce` each time they run:
  * the same helpers as a standalone runtime (`createJavaScriptRuntime`), over
- * the engine's own random frame, entropy handler, iteration limit and
- * deadline.
+ * the engine's own random frame, entropy handler and deadline.
  */
 export function engineRuntimeSource(ce: IComputeEngine): RuntimeSource {
   return {
@@ -1608,7 +1592,6 @@ export function engineRuntimeSource(ce: IComputeEngine): RuntimeSource {
     setFrame: (frame) => {
       ce._randomFrame = frame;
     },
-    iterationLimit: () => ce.iterationLimit,
     deadline: () => ce._deadlineFrame,
   };
 }
@@ -1743,122 +1726,6 @@ export function makeRandomHelpers(source: RuntimeSource): RandomSysHelpers {
         [l[i], l[j]] = [l[j], l[i]];
       }
       return l;
-    },
-  };
-}
-
-/**
- * The four SCANNING lazy-stream helpers, bound to a `RuntimeSource` so each
- * source walk is capped at its `iterationLimit()` (read at call time, so later
- * assignments apply; the engine's is `ce.iterationLimit`). The interpreter enforces the same
- * guard on the corresponding walks — the `Filter`/`TakeWhile` iterators in
- * `library/collections.ts` throw `iteration-limit-exceeded` — and without it
- * a predicate that never matches on an infinite source
- * (`Take(Filter(1..∞, x → False), 1)`) would lock the caller's thread.
- */
-export function makeLazyStreamHelpers(
-  source: RuntimeSource
-): LazyStreamSysHelpers {
-  // The interpreter's integer-count contract (`toInteger`,
-  // `boxed-expression/numerics.ts`): round to the nearest integer; a
-  // non-finite count, or one outside the safe-integer range (|n| > 2^53), does
-  // NOT resolve. An unresolved count is a PRESENT-but-invalid parameter, which
-  // the interpreter's collection handlers route to their indeterminate
-  // channel — an EMPTY walk (`integerParam`, `library/collections.ts`) — never
-  // to a substituted default. So `Take(1..∞, NaN)` is `[]` because the walk is
-  // indeterminate, `Drop(1..∞, NaN)` under a `Take` contributes NO elements
-  // (not "drops nothing"), and a count like `1e100` yields the empty walk
-  // instead of a loop that can never finish over an infinite source.
-  const intCount = (n: number): number | null => {
-    if (!Number.isFinite(n)) return null;
-    const k = Math.round(n);
-    return Number.isSafeInteger(k) ? k : null;
-  };
-  const exceeded = (op: string): Error =>
-    new Error(
-      `Iteration limit of ${source.iterationLimit()} exceeded while evaluating ${op}()`
-    );
-  const negativeCountOverStream = (op: string): Error =>
-    new Error(
-      `${op}(): a negative count counts from the end, and an infinite collection has no end`
-    );
-  // Which helpers get the iteration cap, and what it counts.
-  //
-  // The cap exists to turn a walk that can NEVER FINISH into the interpreter's
-  // iteration-limit error instead of a hang. That danger is a property of the
-  // helper, not of the source being infinite, and it comes in two shapes:
-  //
-  //  - A helper that can spin WITHOUT EMITTING. `filterIter` advances its
-  //    source until the predicate matches, so an infinite source with a
-  //    predicate that never matches loops inside `filterIter` forever. Capped
-  //    — but on pulls SINCE THE LAST YIELD, not on pulls in total: a filter
-  //    that keeps yielding has proved it is not stuck, and is bounded by
-  //    whatever consumes it. Counting productive pulls made
-  //    `Take(Filter(1..∞, _ > 0), 1025)` throw at the default limit of 1024
-  //    for a walk that rejects nothing.
-  //  - A helper that MATERIALIZES an unbounded result. `takeWhileIter` builds
-  //    an array and stops only when the predicate turns false, so a predicate
-  //    that never does yields forever into memory. Nothing else bounds it —
-  //    unlike `takeIter` it has no count — so it is capped on TOTAL pulls, and
-  //    that total is what limits the size of the result it returns.
-  //  - `takeIter` pulls at most `k` elements. `k` is a resolved SAFE INTEGER
-  //    (`intCount` above has already rejected non-finite and out-of-range
-  //    counts, which return the empty walk), so the loop provably
-  //    terminates. NOT capped: `k` is the
-  //    caller's explicit, finite request, and the interpreter honours it in
-  //    full — `Sum(Take(Map(_ ↦ _², 1..∞), 100000))` answers 333338333350000
-  //    there, where a capped `takeIter` threw at the default limit of 1024.
-  //    An unbounded stage UPSTREAM of it still fails as it should, because
-  //    that stage carries its own cap.
-  return {
-    // Predicate TRUTHINESS, matching the eager `Filter` lowering
-    // (`.filter((_x) => _f(_x))`).
-    filterIter: function* (it, p) {
-      // Counted since the last element was YIELDED, not in total — see the
-      // note above `intCount`. Only an unbroken run of rejections is a walk
-      // that can never finish; a filter that keeps yielding is bounded by its
-      // consumer, and counting its productive pulls made
-      // `Take(Filter(1..∞, _ > 0), 1025)` throw at the default limit of 1024
-      // for a walk that rejects nothing. Mirrors the interpreter's `Filter`
-      // iterator (`library/collections.ts`).
-      let sinceYield = 0;
-      for (const x of it) {
-        if (p(x)) {
-          sinceYield = 0;
-          yield x;
-        } else if (++sinceYield > source.iterationLimit())
-          throw exceeded('Filter');
-      }
-    },
-    // Materialize the first k elements of a (possibly infinite) stream — one
-    // of the two points where a lazy pipeline becomes an array. An invalid
-    // count yields []. A negative count takes the LAST elements, which an
-    // infinite stream does not have, so it throws (the interpreter leaves
-    // `Take(1..∞, -2)` unevaluated).
-    takeIter: (it, n) => {
-      const k = intCount(n);
-      if (k === null || k === 0) return [];
-      if (k < 0) throw negativeCountOverStream('Take');
-      const out: unknown[] = [];
-      for (const x of it) {
-        out.push(x);
-        if (out.length >= k) break;
-      }
-      return out;
-    },
-    // Longest satisfying prefix of a (possibly infinite) stream. A predicate
-    // that never turns false does not produce a prefix; the iteration cap
-    // turns that into the interpreter's iteration-limit error instead of a
-    // hang.
-    takeWhileIter: (it, p) => {
-      const out: unknown[] = [];
-      let pulls = 0;
-      for (const x of it) {
-        if (++pulls > source.iterationLimit()) throw exceeded('TakeWhile');
-        if (!p(x)) break;
-        out.push(x);
-      }
-      return out;
     },
   };
 }
@@ -2193,7 +2060,6 @@ export function makeSysHelpers(source: RuntimeSource): SysHelpers {
   let ticks = 0;
   const own: Partial<SysHelpers> = {
     ...makeRandomHelpers(source),
-    ...makeLazyStreamHelpers(source),
     ...makeLoopPassCounter(),
     ir: IR_FUNCTIONS,
     // `n` passes of a loop or a build of the profile `ir` (one when not
@@ -2912,8 +2778,9 @@ export type JavaScriptRuntimeOptions = {
   /** The frame active when the code is called: set it when the code is called
    * from inside an interpreted `WithRandomSeed`. */
   frame?: RuntimeFrameInput;
-  /** The cap on lazy-stream walks. Default 1024, the engine's default;
-   * a value of 0 or less means no cap. */
+  /** @deprecated No effect: `ce.iterationLimit` applies to the interpreter
+   * only, and compiled code is bounded by the compile option
+   * `iterationBudget`. */
   iterationLimit?: number;
   /** The time, in ms since the epoch (`Date.now()`), after which the
    * shuffle/choice loops throw. Off when unset. */
@@ -2982,7 +2849,8 @@ export interface JavaScriptRuntime {
   readonly frame: RandomSeedFrame | undefined;
   /** Set the active frame, from a folded frame or a seed (`undefined` clears). */
   setFrame(f: RuntimeFrameInput | undefined): void;
-  /** The cap on lazy-stream walks: `Infinity` when set to 0 or less. */
+  /** @deprecated No effect on the code the runtime runs (see the option
+   * `iterationLimit`). Reads back the value set: `Infinity` when 0 or less. */
   iterationLimit: number;
   deadline: number | undefined;
   /** The function the stored code denotes: `(vars?) => value` for code
@@ -3089,7 +2957,6 @@ export function createSysRuntime(
     setFrame: (f) => {
       frame = f;
     },
-    iterationLimit: limit,
     deadline: () => deadline,
   }) as SysRuntime;
 
