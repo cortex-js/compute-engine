@@ -44,8 +44,6 @@ import {
   div as _div,
   negDiv as _negDiv,
   negate as _negate,
-  scale as _scale,
-  scaleDiv as _scaleDiv,
 } from './arithmetic.js';
 import {
   sqrt as _sqrt,
@@ -133,7 +131,6 @@ import {
   undecided as _undecided,
   piecewise as _piecewise,
   hull as _hull,
-  elseArm as _elseArm,
   asResult as _asResult,
   restrict as _restrict,
   asValueResult as _asValueResult,
@@ -143,19 +140,8 @@ import {
 } from './comparison.js';
 import {
   at as _at,
-  length as _length,
-  component as _component,
-  pointComponent as _pointComponent,
-  bcast as _bcast,
-  mapFn as _mapFn,
-  bcastProduct as _bcastProduct,
-  bcastPoint as _bcastPoint,
-  pointList as _pointList,
-  map as _map,
   points as _points,
-  range as _range,
   rangeCountOf as _rangeCountOf,
-  seededChoice as _seededChoice,
 } from './collections.js';
 
 // Types
@@ -185,17 +171,7 @@ export {
 } from './util.js';
 
 // Arithmetic operations
-export {
-  add,
-  sub,
-  mul,
-  div,
-  negDiv,
-  negate,
-  scale,
-  scaleDiv,
-  _mul,
-} from './arithmetic.js';
+export { add, sub, mul, div, negDiv, negate, _mul } from './arithmetic.js';
 
 // Elementary functions
 export {
@@ -283,7 +259,6 @@ export {
   undecided,
   piecewise,
   hull,
-  elseArm,
   hullValues,
   type IntervalModelValue,
   asResult,
@@ -303,26 +278,9 @@ export {
   INTERVAL_QUADRATURE_GUARD_SUBDIVISIONS,
 } from './integrate.js';
 
-// Collection access (`At`, `Length`, point coordinates) and the run-time
-// collection values (element-wise broadcast, `Map`, `Range`, a seeded
-// `RandomChoice` draw)
-export {
-  at,
-  length,
-  component,
-  pointComponent,
-  bcast,
-  mapFn,
-  bcastProduct,
-  bcastPoint,
-  pointList,
-  map,
-  points,
-  range,
-  rangeCountOf,
-  seededChoice,
-} from './collections.js';
-export type { SeededChoiceDomain } from './collections.js';
+// Collection access (`At`), the point intervals of a constant list, and the
+// count of a `Range`
+export { at, points, rangeCountOf } from './collections.js';
 
 // The version of the interval library that compiled `interval-js` code calls
 // as `_IA` (`common/runtime-versions.ts`).
@@ -371,8 +329,6 @@ export const IntervalArithmetic = {
   div: _div,
   negDiv: _negDiv,
   negate: _negate,
-  scale: _scale,
-  scaleDiv: _scaleDiv,
 
   // Elementary
   sqrt: _sqrt,
@@ -415,21 +371,10 @@ export const IntervalArithmetic = {
 
   // Collection access
   at: _at,
-  length: _length,
-  component: _component,
-  pointComponent: _pointComponent,
-  bcast: _bcast,
-  mapFn: _mapFn,
-  bcastProduct: _bcastProduct,
-  bcastPoint: _bcastPoint,
-  pointList: _pointList,
-  map: _map,
   points: _points,
-  range: _range,
   // The count of a `Range` of numbers, for the interval mode of the IR
   // pipeline.
   rangeCount: _rangeCountOf,
-  seededChoice: _seededChoice,
 
   // Trigonometric
   sin: _sin,
@@ -483,10 +428,6 @@ export const IntervalArithmetic = {
   undecided: _undecided,
   piecewise: _piecewise,
   hull: _hull,
-  // The second arm, or the hull of both arms, of a conditional whose
-  // condition is not `'true'`: the compiled conditional writes the text of
-  // its second arm once.
-  elseArm: _elseArm,
   // `res` wraps an enclosure and passes an array or a verdict through: the
   // compiled conditional spells it around an arm it did not build.
   res: _asValueResult,

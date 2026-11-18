@@ -56,9 +56,9 @@ export const RANGE_COUNT_TOLERANCE_CAP = 1e-3;
  *
  * The JavaScript compile target calls this function at run time as the
  * helper `_SYS.rangeCount` (`compilation/javascript-runtime.ts`), and the
- * interval target's run-time range `_IA.range` (`interval/collections.ts`)
- * calls it directly. `RANGE_COUNT_JS_SOURCE` (below) is a copy. Keep the
- * three in agreement.
+ * interval mode calls it as `_IA.rangeCount` (`rangeCountOf` in
+ * `interval/collections.ts`). `RANGE_COUNT_JS_SOURCE` (below) is a copy. Keep
+ * the two in agreement.
  */
 export function rangeCount(lower: number, upper: number, step: number): number {
   if (step === 0) return 0;

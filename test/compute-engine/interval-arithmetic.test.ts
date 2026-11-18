@@ -12,11 +12,7 @@ import {
   integrate as integrateEnclosure,
   integrateClosed,
 } from '../../src/compute-engine/interval/integrate';
-import {
-  at as atCollection,
-  length as lengthOfCollection,
-  component as pointComponent,
-} from '../../src/compute-engine/interval/collections';
+import { at as atCollection } from '../../src/compute-engine/interval/collections';
 import {
   // Utilities
   ok,
@@ -1289,41 +1285,6 @@ describe('INTERVAL COLLECTIONS', () => {
     test('empty collection selects nothing', () => {
       expectNothingSelected(atCollection([], point(1)));
       expectNothingSelected(atCollection([], { lo: -5, hi: 5 }));
-    });
-  });
-
-  describe('length', () => {
-    test('element count as a point interval', () => {
-      expectInterval(lengthOfCollection(L), 3, 3);
-      expectInterval(lengthOfCollection([]), 0, 0);
-    });
-
-    test('non-array has no length', () => {
-      expectAbsent(lengthOfCollection(point(5)));
-      expectAbsent(lengthOfCollection('abc'));
-      expectAbsent(lengthOfCollection(undefined));
-    });
-  });
-
-  describe('component', () => {
-    test('0-based coordinate of a point', () => {
-      expectInterval(pointComponent([point(1), point(2)], 0), 1, 1);
-      expectInterval(pointComponent([point(1), point(2)], 1), 2, 2);
-      expectInterval(pointComponent([1, 2, 3], 2), 3, 3);
-    });
-
-    test('coordinate past the end selects nothing', () => {
-      expectAbsent(pointComponent([point(1), point(2)], 2));
-      expectAbsent(pointComponent([point(1), point(2)], -1));
-    });
-
-    test('non-array operand selects nothing', () => {
-      expectAbsent(pointComponent(point(5), 0));
-      expectAbsent(pointComponent(undefined, 0));
-    });
-
-    test('a collection coordinate cannot be bounded', () => {
-      expect(pointComponent([[point(1), point(2)]], 0).kind).toBe('entire');
     });
   });
 });

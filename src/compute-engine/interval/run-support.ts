@@ -59,8 +59,8 @@ export function processInput(input: unknown): unknown {
     return input;
   }
 
-  // A COLLECTION input stays an array: the accessors (`_IA.at`, `_IA.length`,
-  // `_IA.component`) dispatch on `Array.isArray` and read `.length`. The
+  // A COLLECTION input stays an array: the accessor `_IA.at` dispatches on
+  // `Array.isArray` and reads `.length`. The
   // generic record branch below would copy it into a null-prototype object
   // keyed "0", "1", … — silently losing both the length and the positional
   // access, so every collection access would answer absence.
@@ -148,7 +148,7 @@ export function freshIntervalValue(value: unknown): unknown {
  * on the arguments `args`, and give the value of that function.
  *
  * The code of such a result is an expression whose value is a JavaScript
- * function over enclosures, for example `((x) => _IA.scale(_k1, x))`. `raw`
+ * function over enclosures, for example `((x) => _IA.mul(_k1, x))`. `raw`
  * runs that code with an empty vars object: the compilation declines a
  * function-valued root that reads a free symbol, so the code reads nothing
  * from the vars object. Each argument is converted as a variable of a vars

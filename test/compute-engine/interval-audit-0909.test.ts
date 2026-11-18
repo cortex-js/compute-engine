@@ -22,7 +22,6 @@ import {
   compileDiagnosticOf,
   isCompileDeclineError,
 } from '../../src/compute-engine/compilation/diagnostics';
-import { IntervalArithmetic as IA } from '../../src/compute-engine/interval';
 
 type Enclosure = { lo: number; hi: number };
 type IntervalRun = {
@@ -114,39 +113,6 @@ describe('interval-js: a constant point factor scales instead of multiplying', (
     expect(compileInterval(ce.parse('\\pi \\sin(x)')).code).toContain(
       '_IA.mul('
     );
-  });
-
-  test('the kernels answer exactly what mul and div answer', () => {
-    const values = [
-      0, -0, 1, -1, 0.5, -0.5, 3, 49, 1e308, 5e-324, Infinity, -Infinity,
-      Math.PI,
-    ];
-    for (const c of values) {
-      for (const lo of values) {
-        for (const hi of values) {
-          if (!(lo <= hi)) continue;
-          const p = point(c);
-          const b = { lo, hi };
-          expect(IA.scale(p, b)).toEqual(IA.mul(p, b));
-          expect(IA.scaleDiv(b, p)).toEqual(IA.div(b, p));
-        }
-      }
-    }
-  });
-
-  test('an operand that is not a point falls back to the general kernel', () => {
-    const wide = { lo: -1, hi: 2 };
-    expect(IA.scale(wide, { lo: 3, hi: 4 })).toEqual(
-      IA.mul(wide, { lo: 3, hi: 4 })
-    );
-    // A zero or zero-straddling divisor keeps every answer of the general
-    // division: `empty`, `singular`, `partial` and `entire`.
-    expect(IA.scaleDiv({ lo: 1, hi: 2 }, { lo: 0, hi: 0 })).toEqual({
-      kind: 'empty',
-    });
-    expect(IA.scaleDiv({ lo: 1, hi: 2 }, { lo: -1, hi: 1 })).toEqual({
-      kind: 'singular',
-    });
   });
 
   test('the scaled quotient is still exact at a multiple of the divisor', () => {

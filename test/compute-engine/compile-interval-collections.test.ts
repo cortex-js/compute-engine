@@ -36,7 +36,6 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { IntervalArithmetic } from '../../src/compute-engine/interval/index';
 import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 
 function engine(): ComputeEngine {
@@ -567,9 +566,7 @@ describe('Interval target — the indexed Sum loop over a wide bound', () => {
 // A coordinate accessor (`PointX`/`PointY`/`PointZ`) over a LIST of points
 // broadcasts the coordinate over the list, as the interpreter and the
 // JavaScript target do, and answers a collection value: the array of the
-// coordinates. Over a point-OR-point-list union (the parameter a helper reads
-// with `PointX(v)`), the run-time `_IA.pointComponent` decides at the value.
-// The result feeds the same consumers as any collection value: an accessor,
+// coordinates. The result feeds the same consumers as any collection value: an accessor,
 // a reduction, the element-wise broadcast of a kernel, the root.
 describe('Interval target — a coordinate accessor over a list of points', () => {
   const POINTS = [
@@ -736,7 +733,7 @@ describe('Interval target — a coordinate accessor over a list of points', () =
 // A `PointList` whose components are list-typed SYMBOLS is a list of points:
 // the interpreter and the JavaScript target zip the sources to the length of
 // the SHORTEST one, and reuse a scalar component at every point. The interval
-// target builds the same list at run time (`_IA.pointList`). Every value is
+// target builds the same list. Every value is
 // compared with the interpreter's, evaluated on a separate engine so that no
 // symbol of the compiling engine holds a value (a symbol with a value is
 // folded into the code at compile time).
@@ -804,8 +801,7 @@ describe('Interval target — a PointList of list-typed symbols', () => {
 // scalar × point, point / scalar, the negation of a point. A point beside a
 // LIST is not a zip — the interpreter answers one point per element of the
 // list — and the run-time value cannot tell a point from a list of two
-// numbers, so the lowering is `_IA.bcastPoint`, which is told which arguments
-// are point-valued (`'p'`) and which are number-valued (`'s'`). The heads
+// numbers, so the static types tell which arguments are points. The heads
 // that read a point whole (`Abs`, the norm) and the elementary functions keep
 // the scalar gate.
 describe('Interval target — point arithmetic', () => {
@@ -883,31 +879,6 @@ describe('Interval target — point arithmetic', () => {
     ]);
     const x = value(ce, ['PointX', ['Add', 'P', 'Q']], INPUTS);
     expect(x.out).toEqual([11, 11]);
-  });
-
-  test('the run-time kinds: one point, a point or a list of points, a number', () => {
-    const add = (a: unknown, b: unknown) =>
-      IntervalArithmetic.add(a as never, b as never);
-    // `'p'` is exactly one point and is never inspected: a coordinate that is
-    // itself an array (the value of a `broadcastable<number>` coordinate) is
-    // zipped like any nested array, and the point is not read as a list.
-    expect(
-      bands(
-        IntervalArithmetic.bcastPoint(add, 'pp', [[1, 2], pt(5)], [pt(1), pt(2)])
-      )
-    ).toEqual([
-      [
-        [2, 2],
-        [3, 3],
-      ],
-      [7, 7],
-    ]);
-    // `'q'` is decided at the value; an empty list beside a non-empty one has
-    // no value.
-    const absent = IntervalArithmetic.bcastPoint(add, 'qq', [], [[1, 2]]) as {
-      lo: number;
-    };
-    expect(Number.isNaN(absent.lo)).toBe(true);
   });
 
   test('the elementary functions map over a point, and Abs is its norm', () => {

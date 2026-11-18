@@ -10343,10 +10343,9 @@ function readsEmptyRowsAsPointRows(t: Type): boolean {
 // was read as a list of two points and answered `[Missing, (1, 2)]`, where
 // its type `list<list<number>>` asks for `[[], [1, 3]]`. A list of rows
 // whose first non-empty row is a numeric row keeps the reading the empty
-// row gave: both are coordinate rows. The run-time dispatch of the compile
-// targets skips empty rows in the same way (`_SYS.pointComponent` in
-// `compilation/javascript-runtime.ts`, `pointComponent` in
-// `interval/collections.ts`).
+// row gave: both are coordinate rows. The run-time dispatch of the
+// JavaScript target skips empty rows in the same way (`_SYS.pointComponent`
+// in `compilation/javascript-runtime.ts`).
 function firstDecidingElement(xs: Expression): Expression | undefined {
   const first = firstPresentElement(xs);
   if (first === undefined || !isEmptyRow(unrestricted(first))) return first;

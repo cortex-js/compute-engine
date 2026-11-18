@@ -125,6 +125,15 @@
   built a target with `new IntervalJavaScriptTarget()`, calls
   `compile(expr, { to: 'interval-js' })` instead.
 
+- **Fourteen members of `IntervalArithmetic` are removed** (the object
+  exported by `@cortex-js/compute-engine/interval`): `scale`, `scaleDiv`,
+  `length`, `component`, `pointComponent`, `bcast`, `bcastProduct`,
+  `bcastPoint`, `mapFn`, `map`, `pointList`, `range`, `seededChoice` and
+  `elseArm`. They were helpers of the code that the deleted interval target
+  generated, and the code of `compile(expr, { to: 'interval-js' })` does not
+  call them. A program that called `scale` or `scaleDiv` calls `mul` or `div`,
+  which give the same results.
+
 ### Behavior Changes
 
 - **A sum of quantities of two dimensions is an error.** `5 m + 3 s` was
