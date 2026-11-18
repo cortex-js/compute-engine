@@ -142,6 +142,27 @@ describe('MathJSON', () => {
       ],
       '"False"',
     ],
+    // ... and an outer parameter in the body of such a literal is replaced
+    [
+      [
+        'Apply',
+        [
+          'Function',
+          [
+            'IsSame',
+            [
+              'Function',
+              ['List', 'x', ['Sum', 'k', ['Limits', 'k', 1, 2]]],
+              'y',
+            ],
+            ['Function', ['List', 2, ['Sum', 'k', ['Limits', 'k', 1, 2]]], 'y'],
+          ],
+          'x',
+        ],
+        2,
+      ],
+      '"True"',
+    ],
   ])('%j', (json, expected) => expect(evaluate(json)).toBe(expected));
 });
 

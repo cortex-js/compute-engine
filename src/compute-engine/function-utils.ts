@@ -7196,6 +7196,9 @@ function heldArgumentValue(
  * argument is a function, is replaced by the call of that function:
  * `f(t)` with `f` bound to `Sin` is `Sin(t)`, and with `f` bound to a
  * literal it is `Apply(literal, t)`.
+ *
+ * `shadowed` holds the names that an enclosing node, which the caller
+ * walked, binds: they are left alone.
  */
 export function inlineCallParameters(
   ce: ComputeEngine,
@@ -7204,6 +7207,7 @@ export function inlineCallParameters(
     keepWildcards?: boolean;
     binderVariables?: boolean;
     callHeads?: boolean;
+    shadowed?: ReadonlySet<string>;
   }
 ): Expression {
   const liveDefinition = (name: string): BoxedValueDefinition | undefined => {
@@ -7244,7 +7248,7 @@ export function inlineCallParameters(
       if (own !== undefined && !sameBindingDef(own, live)) return sym;
       return live.storedValue ?? sym;
     },
-    undefined,
+    options?.shadowed,
     false,
     new Map(),
     options?.callHeads !== true

@@ -2844,25 +2844,38 @@ function holdsScopedOperator(expr: Expression): boolean {
  * The raw operand `expr` of `IsSame` with each name bound by a running call
  * or binder replaced by its argument (`inlineCallParameters`), except in an
  * application of a scoped operator, which is kept as written: the walk of a
- * raw operand cannot see the names that it binds again. A function literal
- * that holds such an application is kept as written too: its operands are
- * not walked one by one, which would lose the names that its parameters
- * bind.
+ * raw operand cannot see the names that it binds again. The parameters of a
+ * function literal that holds such an application are added to `shadowed`
+ * for the walk of its body.
  */
-function inlineOutsideScoped(expr: Expression): Expression {
+function inlineOutsideScoped(
+  expr: Expression,
+  shadowed?: ReadonlySet<string>
+): Expression {
   const ce = expr.engine;
   if (!holdsScopedOperator(expr))
     return inlineCallParameters(ce, expr, {
       binderVariables: true,
       callHeads: true,
+      shadowed,
     });
-  if (
-    !isFunction(expr) ||
-    isScopedApplication(expr) ||
-    expr.operator === 'Function'
-  )
-    return expr;
-  const ops = expr.ops.map(inlineOutsideScoped);
+  if (!isFunction(expr) || isScopedApplication(expr)) return expr;
+  if (expr.operator === 'Function') {
+    const [body, ...params] = expr.ops;
+    // A parameter written with a type, or in another form, is not read
+    // here: the literal is kept as written.
+    const names = params.map((param) =>
+      isSymbol(param) ? param.symbol : undefined
+    );
+    if (body === undefined || names.some((name) => name === undefined))
+      return expr;
+    const inner = new Set(shadowed);
+    for (const name of names) inner.add(name!);
+    const newBody = inlineOutsideScoped(body, inner);
+    if (newBody === body) return expr;
+    return ce.function('Function', [newBody, ...params], { form: 'raw' });
+  }
+  const ops = expr.ops.map((op) => inlineOutsideScoped(op, shadowed));
   if (ops.every((op, i) => op === expr.ops[i])) return expr;
   return ce.function(expr.operator, ops, { form: 'raw' });
 }
