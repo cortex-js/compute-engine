@@ -52,6 +52,9 @@ uses `-w 4` and holds the box lock
 (`node ~/.claude/scripts/box-lock.mjs acquire {{NAME}} <minutes> "<what>" --wait`,
 then `release`), because the default 12 workers of several sessions at once
 exhaust the memory of the box (`docs/COMPUTE-ENGINE-BOX-SPECIFICS.md` §2).
+Release the lock only after the harness's completion notice of the run or the
+exit code in its log, never on a line you wrote yourself, because a run that
+is still going without the lock competes with the next holder.
 
 ## Steps
 
