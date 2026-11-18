@@ -42,6 +42,7 @@
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import type { Type } from '../../../common/type/types.js';
 import { isSubtype } from '../../../common/type/subtype.js';
+import { typesOverlap } from '../../../common/type/reduce.js';
 import type { BoxedValueDefinition, Expression } from '../../global-types.js';
 import type { NumericValue } from '../../numeric-value/types.js';
 import { BigNumericValue } from '../../numeric-value/big-numeric-value.js';
@@ -996,6 +997,11 @@ export function lower(
           e.ops.map((op) => value(op)!)
         );
       case 'Tuple': {
+        // A point of NaN coordinates is the absent point: the written
+        // `Missing` as a coordinate is not (`IsMissing(Tuple(Missing,
+        // Missing))` is False).
+        if (e.ops.some((op) => isSymbol(op, 'Missing')))
+          decline(e, 'Missing as a coordinate of a tuple');
         const parts = e.ops.map((op) => value(op)!);
         const t = parts.map(type);
         // A root `Tuple` (or the last operand of a root `Block`) of tuples
@@ -1566,6 +1572,15 @@ export function lower(
           return value(f.ops[0], want);
         });
       }
+      // The discharges (`absent()`).
+      case 'IsMissing':
+        if (e.nops !== 1) break;
+        return absent(e, e.ops[0], value(e.ops[0])!);
+      case 'Coalesce':
+        return coalesce(e, 0);
+      case 'AssertPresent':
+        if (e.nops !== 1) break;
+        return present(e, value(e.ops[0])!);
       case 'Declare':
         decline(e, 'Declare outside a block');
       case 'Function':
@@ -2181,6 +2196,13 @@ export function lower(
     }
     if (name === 'True' || name === 'False')
       return b.constant(name === 'True', 'boolean');
+    // The written absent value: NaN, as a selection that takes no arm
+    // (`Coalesce(Missing, 3)` is 3).
+    if (name === 'Missing') {
+      if (isShadowedSymbol(e as never) || held(name)?.library !== true)
+        decline(e, 'Missing is not the library symbol here');
+      return b.constant(NaN, 'real');
+    }
     const c = CONSTANTS.get(name);
     if (c !== undefined) {
       // The symbol's binding, and the innermost binding of its name.
@@ -2557,6 +2579,97 @@ export function lower(
       () => (first = value(then, want)),
       () => conditional(node, rest, otherwise, want, first),
       want
+    );
+  };
+
+  /** Whether `v` is absent, the test of the discharges (`IsMissing`,
+   *  `Coalesce`, `AssertPresent`), chosen from its static type as the
+   *  producers spell an absent value (`docs/COMPILATION-MODEL.md`): NaN for
+   *  a number (a complex number with a NaN part), a point whose
+   *  coordinates are all NaN, `undefined` for a boolean on JavaScript. No
+   *  compiled value of another kind is absent (a list, a colour, a boolean
+   *  on GLSL: each producer of one declines), so its test is `false`.
+   *  A NaN on the real lane is also a complex value of the interpreter
+   *  (`Sqrt(x)` at `x = -4`), which is not absent: the test of an
+   *  `operand` whose engine type admits a value that is not real declines,
+   *  where its value is on the real lane. An input is not tested: a value
+   *  that is not real there is outside its type in `strict` (a `number`
+   *  input must be real). */
+  const absent = (node: Expression, operand: Expression, v: V): V => {
+    const t = type(v);
+    const nan = (x: V) => apply(node, ofOp('isnan'), [x]);
+    if (
+      isSubLane(t.lane, 'real') &&
+      !(
+        isSymbol(operand) &&
+        frames[0].names.get(operand.symbol) === lookup(operand.symbol)?.binding
+      )
+    ) {
+      const ot = operand.type.type;
+      const kinds =
+        typeof ot === 'object' && ot.kind === 'tuple'
+          ? ot.elements.map((x) => x.type)
+          : [ot];
+      if (kinds.some((k) => typesOverlap(k, 'imaginary')))
+        decline(
+          node,
+          `${node.operator} of a value of type ${operand.type.toString()} on the real lane`
+        );
+    }
+    if (t.shape.length === 0 && isSubLane(t.lane, 'real')) return nan(v);
+    if (t.shape.length === 0 && t.lane === 'complex')
+      return apply(node, 'Or', [
+        nan(apply(node, ofOp('cre'), [v])),
+        nan(apply(node, ofOp('cim'), [v])),
+      ]);
+    if (tuples.get(v) === 0 && t.shape.length === 1) {
+      const n = t.shape[0];
+      if (t.lane === 'complex' || typeof n !== 'number')
+        decline(node, `${node.operator} of a point of complex numbers`);
+      if (isSubLane(t.lane, 'real'))
+        return Array.from({ length: n }, (_, k) =>
+          nan(apply(node, 'At', [v, b.constant(k + 1, 'integer')]))
+        ).reduce((x, y) => apply(node, 'And', [x, y]));
+    }
+    if (t.shape.length === 0 && t.lane === 'boolean' && options.javascript)
+      return apply(node, ofOp('isundef'), [v]);
+    return b.constant(false, 'boolean');
+  };
+
+  /** `Coalesce(a, b, …)`: the first operand that is not absent, or the
+   *  last; each operand after the first is lowered in an arm, only when
+   *  the operands before it are absent. Arms of two shapes decline. */
+  const coalesce = (e: Fn, i: number): V => {
+    const v = value(e.ops[i])!;
+    if (i === e.nops - 1) return v;
+    return branch(
+      e,
+      absent(e, e.ops[i], v),
+      () => coalesce(e, i + 1),
+      () => v,
+      true
+    )!;
+  };
+
+  /** `AssertPresent(v)`: `v`, or on JavaScript a throw where `v` is
+   *  absent (the interpreter gives the error `expected-present`); a value
+   *  that can be absent declines on the other targets. */
+  const present = (e: Fn, v: V): V => {
+    const m = absent(e, e.ops[0], v);
+    if (b.constants.get(m) === false) return v;
+    if (!options.javascript)
+      decline(e, 'AssertPresent of a value that can be absent');
+    const t = type(v);
+    if (t.shape.length === 0) return apply(e, ofOp('present'), [m, v]);
+    // A point: each coordinate.
+    return tuple(
+      e,
+      Array.from({ length: t.shape[0] as number }, (_, k) =>
+        apply(e, ofOp('present'), [
+          m,
+          apply(e, 'At', [v, b.constant(k + 1, 'integer')]),
+        ])
+      )
     );
   };
 

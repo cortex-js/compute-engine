@@ -425,7 +425,7 @@ describe('IR profile, batch G29: JavaScript', () => {
   // prettier-ignore
   test.each([
     ['a Which with no default', ['At', 'A', ['Map', fn(['Which', gt('k', 2), 'True'], 'k'), 'A']], /arms of two types/],
-    ['a literal Missing member', ['At', 'A', ['List', 'True', 'Missing', 'True']], /the input Missing/],
+    ['a literal Missing member', ['At', 'A', ['List', 'True', 'Missing', 'True']], /elements of two types/],
     ['a literal NaN member', ['At', 'A', ['List', 'True', 'NaN', gt('x', 1)]], /elements of two types/],
   ])('an undefined member, %s: the existing compiler’s value is the interpreter’s; the profile declines', (_, json, cause) => {
     for (const p of POINTS)

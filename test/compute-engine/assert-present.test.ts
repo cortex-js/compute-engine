@@ -160,6 +160,8 @@ describe('AssertPresent — compiled', () => {
     ce.declare('w', 'integer | nothing');
     const r = compile(ce.box(['AssertPresent', 'w']), { to: 'javascript' });
     expect(r.success).toBe(false);
-    expect(r.error ?? '').toContain('AssertPresent');
+    expect(r.error ?? '').toContain(
+      'the input w of type integer | nothing'
+    );
   });
 });

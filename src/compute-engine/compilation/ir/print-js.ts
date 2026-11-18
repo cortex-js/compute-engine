@@ -187,6 +187,14 @@ export const JS: Syntax = deepFreeze({
     at: { text: '_at($0, $1)', helpers: ['_at'] },
     atu: { text: '_atu($0, $1)', helpers: ['_atu'] },
     atp: { text: '_atp($0, $1, $2)', helpers: ['_atp'] },
+    isnan: 'Number.isNaN($0)',
+    isundef: '($0 === undefined)',
+    ...Object.fromEntries(
+      ['present.int', 'present', 'cpresent', 'present.bool'].map((op) => [
+        op,
+        { text: '_present($0, $1)', helpers: ['_present'] },
+      ])
+    ),
     draw: '_SYS.drawNextRandomNumber()',
     shuffle: '_SYS.shuffle($0)',
     binomial: '_SYS.binomial($0, $1)',
@@ -250,6 +258,10 @@ export const JS: Syntax = deepFreeze({
     _at: 'const _at = (l, i) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : NaN; };',
     _atu: 'const _atu = (l, i) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : undefined; };',
     _atp: 'const _atp = (l, i, n) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : new Array(n).fill(NaN); };',
+    // `AssertPresent`: the interpreter's value is the error
+    // `expected-present`.
+    _present:
+      "const _present = (m, x) => { if (m) throw new Error('expected-present: AssertPresent of an absent value'); return x; };",
   },
   // A `bigint` literal is made in the bigint mode only (`JS_BIGINT`).
   constant: ({ value: x }) =>

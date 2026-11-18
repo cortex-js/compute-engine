@@ -33,9 +33,16 @@ import type { CompileDiagnostic } from '../../src/compute-engine/compilation/typ
  * stayed `NaN` on JavaScript and took the shape of the other
  * value on the shader targets.
  *
- * The compiler declines a written `Missing` on JavaScript and GLSL ("the
- * input Missing of type missing"): the interpreter fallback gives its value.
+ * The written `Missing` compiles to NaN on JavaScript and GLSL. On GLSL,
+ * beside a point or a list the arms have two types and the compilation
+ * declines ("arms of two types"): the interpreter fallback gives its value.
+ * Beside a complex value it is the complex value with a NaN part, and beside
+ * a scalar the scalar NaN (`NaN` where the interpreter gives `Missing`, within
+ * the caveats of `docs/COMPILATION-MODEL.md`).
  */
+
+import { existsSync } from 'node:fs';
+import { GlslDriver } from '../../scripts/glsl-check/glsl-driver';
 
 /** Expect the compilation of `json` on `to` to decline because the shape of
  * its value is known only at run time. */
@@ -176,16 +183,19 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
     ).toThrow(message);
   };
 
-  it.each(CASES)('$label', ({ json, nan }) => {
+  it.each(CASES)('$label', ({ json, nan, shape }) => {
     if (nan) return expectUnsettled(json, to);
-    expectDeclined(json, /the input Missing of type missing/);
+    // A complex value compiles: its value is checked in WebGL2 below.
+    if (shape === 'complex')
+      return expect(
+        compile(engine().box(json as never), { to, fallback: false } as never)
+          .success
+      ).toBe(true);
+    expectDeclined(json, /arms of two types/);
   });
 
   it('Which(c, (x, y), d, Missing) with d false selects no value', () => {
-    expectDeclined(
-      ['Which', 'c', POINT, 'd', 'Missing'],
-      /the input Missing of type missing/
-    );
+    expectDeclined(['Which', 'c', POINT, 'd', 'Missing'], /arms of two types/);
   });
 
   // A value that is itself a selection that may be absent, typed
@@ -220,7 +230,7 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
   ] as [string, unknown, [boolean, boolean]][])(
     'a nested selection: %s',
     (_label, json) => {
-      expectDeclined(json, /the input Missing of type missing/);
+      expectDeclined(json, /arms of two types/);
     }
   );
 
@@ -253,7 +263,7 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
       ],
     ],
   ] as [string, unknown][])('the statement form: %s', (_label, json) => {
-    expectDeclined(json, /the input Missing of type missing/);
+    expectDeclined(json, /arms of two types/);
   });
 
   it('the emitted code', () => {
@@ -261,9 +271,8 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
       ['If', 'c', POINT, 'Missing'],
       ['If', 'c', 'Missing', POINT],
       ['If', 'c', LIST, 'Missing'],
-      ['If', 'c', COMPLEX, 'Missing'],
     ])
-      expectDeclined(json, /the input Missing of type missing/);
+      expectDeclined(json, /arms of two types/);
   });
 
   it('a list of five numbers beside Missing still declines', () => {
@@ -277,9 +286,116 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
   });
 
   it('a scalar value beside Missing keeps the scalar NaN', () => {
-    expectDeclined(['If', 'c', 'x', 'Missing'], /the input Missing of type missing/);
+    const r = compile(engine().box(['If', 'c', 'x', 'Missing'] as never), {
+      to,
+      fallback: false,
+    } as never);
+    expect(r.code).toMatch(/uintBitsToFloat\(0x7fc00000u\)/);
   });
 });
+
+function chromiumAvailable(): boolean {
+  try {
+    const { chromium } = require('playwright-core');
+    return existsSync(chromium.executablePath());
+  } catch {
+    return false;
+  }
+}
+
+/** A fragment shader that writes the component `part` (`''` for a scalar)
+ *  of the value of the compiled `code` at the inputs `c`, `x`, `y`. */
+function shader(
+  code: string,
+  preamble: string | undefined,
+  result: 'float' | 'vec2',
+  part: string
+): string {
+  return [
+    '#version 300 es',
+    'precision highp float;',
+    'precision highp int;',
+    'uniform float u_x;',
+    'uniform float u_y;',
+    'uniform float u_c;',
+    'out vec4 fragColor;',
+    preamble ?? '',
+    `${result} userFn(bool c, float x, float y) {`,
+    code.includes(';') ? code : `return ${code};`,
+    '}',
+    'void main() {',
+    `  fragColor = vec4(userFn(u_c != 0.0, u_x, u_y)${part}, 0.0, 0.0, 0.0);`,
+    '}',
+  ].join('\n');
+}
+
+(chromiumAvailable() ? describe : describe.skip)(
+  'CE-588 — glsl values in WebGL2',
+  () => {
+    let driver: GlslDriver;
+    beforeAll(async () => {
+      driver = await GlslDriver.start();
+    }, 60_000);
+    afterAll(async () => driver?.stop());
+
+    // Each selection that compiles on GLSL, at each value of `c`: the
+    // interpreter's value where it selects the present value, NaN (the real
+    // part of a complex value) where it gives `Missing`.
+    it('each value is the interpreter value, or NaN for Missing', async () => {
+      const ce = engine();
+      const items: {
+        name: string;
+        source: string;
+        uniforms: Record<string, number>;
+        expected: number;
+      }[] = [];
+      for (const json of [
+        ['If', 'c', COMPLEX, 'Missing'],
+        ['If', 'c', 'Missing', COMPLEX],
+        ['If', 'c', 'x', 'Missing'],
+      ]) {
+        const r = compile(ce.box(json as never), {
+          to: 'glsl',
+          fallback: false,
+        } as never);
+        const complex = json.includes(COMPLEX);
+        for (const c of [true, false]) {
+          const v = interpret(ce, json, c);
+          const missing = v.symbol === 'Missing';
+          const parts: [string, number][] = !complex
+            ? [['', v.re]]
+            : missing
+              ? [['.x', NaN]]
+              : [
+                  ['.x', v.re],
+                  ['.y', v.im],
+                ];
+          for (const [part, expected] of parts)
+            items.push({
+              name: `${JSON.stringify(json)} at c = ${c}${part}`,
+              source: shader(
+                r.code,
+                r.preamble,
+                complex ? 'vec2' : 'float',
+                part
+              ),
+              uniforms: { u_x: X, u_y: Y, u_c: c ? 1 : 0 },
+              expected: missing ? NaN : expected,
+            });
+        }
+      }
+      const values = await driver.evaluate(items);
+      const failures: string[] = [];
+      values.forEach((v, k) => {
+        const { name, expected } = items[k];
+        if (!v.ok) return failures.push(`${name}: ${v.log}`);
+        if (!Object.is(v.value, expected))
+          failures.push(`${name}: ${v.value} vs ${expected}`);
+      });
+      expect(failures).toEqual([]);
+    }, 120_000);
+  }
+);
 
 describe('CE-588 — interval-js', () => {
   type Result = unknown;

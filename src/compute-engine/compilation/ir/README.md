@@ -1391,6 +1391,38 @@ is a point; on JavaScript another index is `atp`, a point of NaN out of range as
 the interpreter's tuple of NaN, and GLSL and the interval mode decline it. A
 list of tuples of other elements, or of tuples of two lengths, declines.
 
+## The discharges
+
+`IsMissing`, `Coalesce` and `AssertPresent` read an absent value as its
+producers spell it (`docs/COMPILATION-MODEL.md`, "Everything computed from an
+absent value, except at a discharge"). The test (`absent()` of `lower.ts`) is
+chosen from the static type, with no test of a type at run time: `isnan` of a
+real or an integer; of a complex value, `isnan` of its real part or of its
+imaginary part; of a point (a tuple of reals of a stated length), `isnan` of
+every coordinate; on JavaScript, `isundef` (`=== undefined`) of a boolean, which
+`atu` gives out of range. No compiled list, colour, boolean on GLSL or tuple of
+booleans is absent (each producer of one declines), so its test is `false`. A
+point of complex numbers declines. The written symbol `Missing` (of the library)
+is the constant NaN, as a selection that takes no arm; a `Tuple` with it as a
+coordinate declines (the point of NaN coordinates is absent; the interpreter's
+tuple of `Missing` is not). A NaN on the real lane is also the value of an
+operation whose exact value is complex (`Sqrt(x)` at `x = -4`), which is not
+absent: the test of an operand on the real lane whose engine type overlaps
+`imaginary` (`complex`, `number`) declines, except an input of the program,
+which is real by its type in `strict`. In `mode: 'bigint'` `isnan` and
+`isundef` have no spelling, so the discharges decline there.
+
+`Coalesce(a, b, …)` is a chain of `if`: an operand after the first is lowered in
+an arm, only when the operands before it are absent; the last is the value when
+all the others are. Operands of two shapes (`Coalesce(At(P, i), 0)` of a list of
+points `P`) decline. `AssertPresent(a)` is `a` when its test is the constant
+`false`; otherwise on JavaScript it is `present` (`present.int`, `cpresent`,
+`present.bool`; per coordinate of a point) of the test and `a`, a `may-fail`
+operation that throws an `Error` whose message starts with `expected-present`
+where the test is true (the interpreter gives that error), and on the other
+targets it declines. The interval mode has no spelling of `isnan`, so
+`IsMissing` and `Coalesce` of an operand that can be absent decline there.
+
 ## Effects
 
 `pure` (merged, removed, moved, folded, evaluated where it was not written),

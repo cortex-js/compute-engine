@@ -56,6 +56,7 @@ describe('IR slice: GLSL text', () => {
     // prettier-ignore
     const jsOnly = new Set(['draw', 'shuffle', 'rangecount', 'ashsl', 'ashsv', 'atu', 'atp',
       'rbinomial', 'rgcd', 'rlcm', 'fibonacci.int',
+      'isundef', 'present.int', 'present', 'cpresent', 'present.bool',
       ...Object.keys(REAL_FUNCTIONS).filter((f) => !['fract', 'atan2', 'root', 'coth', 'gcd', 'fresnelc', 'fresnels', 'sinc', 'chop',
         'acot', 'asec', 'acsc', 'hav', 'acoth', 'asech', 'acsch', 'erf', 'erfc', 'gamma', 'gammaln', 'factorial',
         'factorial2', 'zeta', 'lcm', 'heaviside', 'remainder', 'smoothstep', 'invhav', 'erfinv', 'beta', 'digamma',

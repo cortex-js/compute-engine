@@ -36,7 +36,21 @@ when it compiles. A difference that this list does not name is a defect.
   interpreter's value for an absent operand of any spelling (`Missing`,
   `NaN`, `undefined`). A parameter default is not a discharge: it
   fills only an argument that the call leaves out (see "Function values").
-  A point (a tuple of numbers, `tuple<real,
+  The discharges compile on `javascript` (`AssertPresent` of an absent
+  value throws an `Error` whose message starts with `expected-present`) and
+  on `glsl`, except `AssertPresent` of a value that can be absent, which
+  declines there; on `interval-js` they decline for an operand that can be
+  absent, and in `mode: 'bigint'` they decline. A discharge declines when
+  its operand is computed on the real lane and its static type admits a
+  complex value: `Coalesce(Sqrt(x), 0)` with `x: real` declines, because
+  the `NaN` of `Sqrt(-4)` there (the caveat "`NaN` for a complex value on
+  the real lane") is the interpreter's `2i`, not an absent value. An input
+  is not checked (a `number` input must be real in `strict`). The written
+  `Missing` is `NaN`; as a coordinate of a tuple it declines
+  (`IsMissing(Tuple(Missing, Missing))` is `False` in the interpreter, and
+  a point of `NaN` coordinates is absent). No compiled list or colour is
+  absent, nor a boolean on `glsl` (their producers decline): a discharge
+  reads such a value as present. A point (a tuple of numbers, `tuple<real,
   real>` included) is tested at a discharge with the point
   test, which also reads the point of `NaN` coordinates as absent: no point
   is proved present by its type, as no `real` is, because a read out of

@@ -351,6 +351,13 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('At',           3,          [[['list', R, I], 'element', 'atp']], list),
   // An element from 0, at an index in range where the lowering puts it.
   row(undefined,      2,          [[['list', I], 'element', 'elem']], list),
+  // The discharges (`absent()` of `lower.ts`): the test of an absent
+  // number (NaN) and, on JavaScript, of an absent boolean (`undefined`);
+  // `AssertPresent` of the test and the value, which fails where the test
+  // is true.
+  row(undefined,      1,          [[[R], B, 'isnan']],           { ...list, fold: Number.isNaN }),
+  row(undefined,      1,          [[[B], B, 'isundef']],         list),
+  row(undefined,      2,          [[[B, I], I, 'present.int'], [[B, R], R, 'present'], [[B, C], C, 'cpresent'], [[B, B], B, 'present.bool']], { ...list, effect: 'may-fail' }),
   // A draw of the active `WithRandomSeed` frame, or a live draw outside one.
   row('Random',       0,          [[[], R, 'draw']],             { ...list, effect: 'effectful' }),
   // A shuffled copy of a list of numbers (`lower.ts` declines another

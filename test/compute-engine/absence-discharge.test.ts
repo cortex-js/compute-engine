@@ -274,7 +274,7 @@ describe('compiled numeric absence', () => {
     ]) {
       const compiled = compile(expression, { to: 'javascript' });
       expect(compiled.success).toBe(false);
-      expect(compiled.diagnostic?.code).toBe('outside-profile');
+      expect(compiled.diagnostic?.code).toBe('untyped-input');
     }
   });
 });

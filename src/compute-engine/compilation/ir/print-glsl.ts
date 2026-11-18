@@ -300,6 +300,7 @@ export const GLSL: Syntax = deepFreeze({
     'ne': '($0 != $1)',
     ...LOGIC,
     'elem': '$0[int($1)]',
+    'isnan': 'isnan($0)',
     // `At`: from 1, from the end when negative, NaN for an index that is 0,
     // not an integer or out of range; the arm that reads is taken only in
     // range. `$#0` is the length of the list (an `int` literal). The index

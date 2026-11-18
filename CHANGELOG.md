@@ -134,6 +134,20 @@
   call them. A program that called `scale` or `scaleDiv` calls `mul` or `div`,
   which give the same results.
 
+### Improvements
+
+- **`IsMissing`, `Coalesce` and `AssertPresent` compile on `javascript`, and
+  `IsMissing` and `Coalesce` on `glsl`.** They declined before. Each gives the
+  interpreter's value for an absent operand: `Coalesce(At(L, i), 0)` is `0` for
+  an index out of range, and `AssertPresent(At(L, i))` throws an `Error` whose
+  message starts with `expected-present` on `javascript`. `AssertPresent` of a
+  value that can be absent declines on `glsl`, the three decline on
+  `interval-js` for an operand that can be absent, and in `mode: 'bigint'`.
+  A discharge of a computed value on the real lane whose type admits a complex
+  value declines (`Coalesce(Sqrt(x), 0)` with `x: real`: the `NaN` of
+  `Sqrt(-4)` there is the interpreter's `2i`, not an absent value), as does a
+  tuple with the written `Missing` as a coordinate.
+
 ### Behavior Changes
 
 - **A sum of quantities of two dimensions is an error.** `5 m + 3 s` was

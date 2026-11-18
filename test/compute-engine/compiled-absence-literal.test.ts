@@ -51,11 +51,9 @@ describe('an absent list cell stays distinct from a NaN cell', () => {
 });
 
 describe('the targets with no object absence axis', () => {
-
-  test('GLSL still declines to DISCHARGE absence', () => {
-    // `fallback` is left at its default, so the decline is REPORTED rather
-    // than thrown.
+  test('GLSL discharges the numeric marker', () => {
     const r = compile(ce.box(['IsMissing', 'Missing']), { to: 'glsl' } as any);
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('true');
   });
 });
