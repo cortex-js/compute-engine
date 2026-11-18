@@ -2931,6 +2931,12 @@ Landed on 2026-11-16, night:
   newly declined; 0 defects of the profile among the 122 value differences
   (most inputs outside their declared types); the GLSL render slowdown is
   `_gpu_ir_pow` (fix above); compile time of `1a9de333a1` (fixed above).
+- Decision of the user, 2026-11-17 (`9a8723f91`): on GLSL a power of a base
+  known >= 0 is the built-in `pow()`, exact to a few float32 ulps (`10^3` is
+  999.99994), not the exact product of an integer exponent; the loop shaders
+  of Tycho's trial render at 1.13 times the existing compiler (1.54 with the
+  exact product). Neither extension (a range of the exponent, the fact
+  carried into called functions) is done unless Tycho reports a case.
 - Left for the deletion commit itself: `compile()` calls the pipeline only
   (the `_getCompilationTarget('javascript')` lookup before the branch goes);
   delete the 110 modules of the inventory (`delC.txt`), the registry, the
