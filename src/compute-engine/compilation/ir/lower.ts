@@ -180,6 +180,27 @@ const CONSTRUCTS = new Set([
   'PointList',
   'Comprehension',
   'Repeat',
+  // The list operators (`lists.collection()`, and `At` of `First`, ...).
+  'First',
+  'Second',
+  'Third',
+  'Last',
+  'Count',
+  'IsEmpty',
+  'Rest',
+  'Most',
+  'Reverse',
+  'Take',
+  'Drop',
+  'RotateLeft',
+  'RotateRight',
+  'Mean',
+  'Median',
+  'Sort',
+  'Ordering',
+  'Unique',
+  'Dot',
+  'Norm',
 ]);
 const LOOPS = new Set([
   'Map',
@@ -863,6 +884,49 @@ export function lower(
     )[0];
   };
 
+  /** `At(l, i)` of a list or a tuple `l` and a scalar index `i`. */
+  const at = (e: Expression, l: V, i: V): V => {
+    const t = type(l);
+    const [n, k] = [t.shape[0], constant(i)];
+    const flat = t.shape.length === 1 && !tuples.has(l);
+    const points = tuples.get(l) === 1 && t.shape.length === 2;
+    // Out of range, the interpreter gives NaN for a number or a complex
+    // value, a point of NaN for a point and `Missing` for a boolean or a
+    // list. On JavaScript, of booleans `atu` gives `undefined` and of real
+    // points `atp` a point of NaN, the absent values of
+    // `docs/COMPILATION-MODEL.md`; the other kinds decline (a read of an
+    // absent row must not fail, and no program of Tycho's corpus reads
+    // one), as do GLSL, the interval mode and the bigint mode. The `fold`
+    // pass makes a constant index in range an element (of colours,
+    // `admits()` declines the rest).
+    if (
+      (t.lane === 'boolean' || t.lane === 'complex' || t.shape.length > 1) &&
+      !(
+        typeof n === 'number' &&
+        k !== undefined &&
+        Number.isInteger(k) &&
+        k !== 0 &&
+        Math.abs(k) <= n
+      )
+    ) {
+      const reals = points && isSubLane(t.lane, 'real');
+      const booleans = flat && t.lane === 'boolean';
+      if (!options.javascript || bigint || !(reals || booleans))
+        decline(
+          e,
+          'an index that can be out of range, of a list of booleans, of complex numbers or of lists'
+        );
+      if (reals)
+        return apply(e, ofOp('atp'), [
+          l,
+          i,
+          b.constant(t.shape[1] as number, 'integer'),
+        ]);
+      return apply(e, ofOp('atu'), [l, i]);
+    }
+    return apply(e, 'At', [l, i]);
+  };
+
   /** Lower `e`. With `want` false its value is not used (a statement). */
   const value = (e: Expression, want = true): V | undefined => {
     // The root `Tuple` is lowered where it is (`rootParts`).
@@ -1075,7 +1139,7 @@ export function lower(
         if (e.nops !== 2) decline(e, 'At with an index for each level');
         const effects = b.effects;
         const [l, i] = [value(e.ops[0])!, value(e.ops[1])!];
-        const [t, k] = [type(l), constant(i)];
+        const t = type(l);
         // A list of indexes into a list of numbers: the list of the `At` of
         // each index, as the interpreter's.
         const flat = (v: V) => type(v).shape.length === 1 && !tuples.has(v);
@@ -1109,44 +1173,19 @@ export function lower(
           );
         if (type(i).shape.length > 0)
           decline(e.ops[1], 'a list where a scalar is required');
-        const n = t.shape[0];
-        // Out of range, the interpreter gives NaN for a number or a complex
-        // value, a point of NaN for a point and `Missing` for a boolean or
-        // a list. On JavaScript, of booleans `atu` gives `undefined` and of
-        // real points `atp` a point of NaN, the absent values of
-        // `docs/COMPILATION-MODEL.md`; the other kinds decline (a read of an
-        // absent row must not fail, and no program of Tycho's corpus reads
-        // one), as do GLSL, the interval mode and the bigint mode. The
-        // `fold` pass makes a constant index in range an element (of
-        // colours, `admits()` declines the rest).
-        if (
-          (t.lane === 'boolean' ||
-            t.lane === 'complex' ||
-            t.shape.length > 1) &&
-          !(
-            typeof n === 'number' &&
-            k !== undefined &&
-            Number.isInteger(k) &&
-            k !== 0 &&
-            Math.abs(k) <= n
-          )
-        ) {
-          const reals = points && isSubLane(t.lane, 'real');
-          const booleans = flat(l) && t.lane === 'boolean';
-          if (!options.javascript || bigint || !(reals || booleans))
-            decline(
-              e,
-              'an index that can be out of range, of a list of booleans, of complex numbers or of lists'
-            );
-          if (reals)
-            return apply(e, ofOp('atp'), [
-              l,
-              i,
-              b.constant(t.shape[1] as number, 'integer'),
-            ]);
-          return apply(e, ofOp('atu'), [l, i]);
-        }
-        return apply(e, 'At', [l, i]);
+        return at(e, l, i);
+      }
+      // `First(L)` is `At(L, 1)`, `Second` and `Third` the indices 2 and 3,
+      // `Last` the index -1: the interpreter's value of those reads, also
+      // of a tuple, and the absent value of `At` out of range (`Missing` of
+      // an empty list, NaN for a number on JavaScript).
+      case 'First':
+      case 'Second':
+      case 'Third':
+      case 'Last': {
+        if (e.nops !== 1) break;
+        const k = { First: 1, Second: 2, Third: 3, Last: -1 }[e.operator]!;
+        return at(e, value(e.ops[0])!, b.constant(k, 'integer'));
       }
       case 'PointX':
       case 'PointY':
@@ -1306,6 +1345,23 @@ export function lower(
       }
       case 'Length':
         return lists.source(e.ops[0], false, true).length;
+      case 'Count':
+      case 'IsEmpty':
+      case 'Rest':
+      case 'Most':
+      case 'Reverse':
+      case 'Take':
+      case 'Drop':
+      case 'RotateLeft':
+      case 'RotateRight':
+      case 'Mean':
+      case 'Median':
+      case 'Sort':
+      case 'Ordering':
+      case 'Unique':
+      case 'Dot':
+      case 'Norm':
+        return lists.collection(e);
       case 'Range': {
         const effects = b.effects;
         const s = lists.source(e);

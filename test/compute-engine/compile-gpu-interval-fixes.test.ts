@@ -111,9 +111,9 @@ describe('GPU: the real-only shader lowerings', () => {
         expect(() => run(ce, to, expr)).toThrow(/Could not compile/);
   });
 
-  test('Mean has no shader lowering', () => {
+  test('Mean of a complex operand fails closed', () => {
     const ce = engine();
-    expect(() => run(ce, 'glsl', ['Mean', ['List', 't', 1]])).toThrow(
+    expect(() => run(ce, 'glsl', ['Mean', ['List', 'z', 1]])).toThrow(
       /Could not compile/
     );
   });

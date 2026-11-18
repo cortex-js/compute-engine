@@ -286,12 +286,12 @@ describe('compiled JavaScript matches the interpreter', () => {
     // A constant count fails at compile time.
     expect(() =>
       compile(ce.box(['Take', inf, -2]), { fallback: false })
-    ).toThrow(/the operator Take is not supported by the compiler/);
+    ).toThrow(/a Range of an operand that is a constant infinity or NaN/);
     // A constant negative drop count keeps the pipeline off the lazy-stream
     // lowering, so the infinite source fails closed.
     expect(() =>
       compile(ce.box(['Take', ['Drop', inf, -2], 3]), { fallback: false })
-    ).toThrow(/the operator Take is not supported by the compiler/);
+    ).toThrow(/a Range of an operand that is a constant infinity or NaN/);
   });
 
 });

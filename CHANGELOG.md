@@ -163,6 +163,21 @@
   `Sqrt(-4)` there is the interpreter's `2i`, not an absent value), as does a
   tuple with the written `Missing` as a coordinate.
 
+- **The common list operators compile.** `First`, `Second`, `Third`, `Last`,
+  `Count`, `IsEmpty`, `Rest`, `Most`, `Reverse`, `Take`, `Drop`,
+  `RotateLeft`, `RotateRight`, `Mean`, `Median`, `Sort`, `Ordering`,
+  `Unique`, `Dot` and `Norm` declined before. On `javascript` each gives the
+  interpreter's value, also for an empty list and a count out of range
+  (`Take(L, -2)` is the last two elements, `Drop(L, 5)` of three elements is
+  `[]`, `Mean([])` is `NaN`). On `glsl` they compile for a list of a stated
+  length (`Reverse(L)` of `L: list<real^4>` is a `vec4`), except `Median`,
+  `Sort`, `Ordering` and `Unique`. On `interval-js` `First`, `Second`,
+  `Third`, `Last`, `Count`, `IsEmpty`, `Dot` and `Norm` compile; the others
+  decline. `Dot` of a list of points and a point is the list of the inner
+  products, as the interpreter gives it. A count of `Take`, `Drop` or a
+  rotation that is not an integer, `Sort` with an order, and `Norm` of an
+  order other than 1, 2 and `Infinity` decline.
+
 ### Behavior Changes
 
 - **A sum of quantities of two dimensions is an error.** `5 m + 3 s` was

@@ -68,7 +68,7 @@ describe('Issue #373: predicate consumers over a finite Range compile to a count
     it('an infinite range still fails closed', () => {
       expect(() =>
         compileJs(['Count', ['Filter', ['Range', 1, 'PositiveInfinity'], DIV3]])
-      ).toThrow(/the operator Count is not supported by the compiler/);
+      ).toThrow(/a Range of an operand that is a constant infinity or NaN/);
     });
   });
 
@@ -141,7 +141,7 @@ describe('Count with a predicate that does not return a boolean', () => {
     const expr = e.box(['Count', src, ['Function', 1, 'x']] as any);
     expect(() =>
       compile(expr, { to: 'javascript', fallback: false } as any)
-    ).toThrow(/the operator Count is not supported by the compiler/);
+    ).toThrow(/a predicate that is not a boolean/);
     e.assign('xs', e.box(['List', 1, 2]));
     e.assign('n', 2);
     expect(() => expr.evaluate()).toThrow(/predicate/);

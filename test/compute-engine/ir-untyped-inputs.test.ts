@@ -200,10 +200,9 @@ describe('IR profile: an input with no type', () => {
       expect(
         unsupported(['Assign', 'u', ['If', ['Less', 'x', 0], 'u', 0]])
       ).toEqual(['Assign', 'u']);
-      expect(unsupported(['Add', ['Sort', ['List', 'x', 'w']], 'v'])).toEqual([
-        'Sort',
-        'w',
-      ]);
+      expect(
+        unsupported(['Add', ['Flatten', ['List', 'x', 'w']], 'v'])
+      ).toEqual(['Flatten', 'w']);
     }
   );
 

@@ -68,10 +68,11 @@ export type Arity = 0 | 1 | 2 | 3 | 4 | 'variadic' | 'chain';
 export type Operand = Lane | 'list';
 
 /** The operands (one for every operand of a `variadic` or `chain` row), the
- *  result (a lane, or the element of the list operand), the IR operation. */
+ *  result (a lane, the element of the list operand, or a real of the shape
+ *  of that element), the IR operation. */
 export type Signature = readonly [
   args: readonly Operand[],
-  result: Lane | 'element',
+  result: Lane | 'element' | 'real-element',
   op: string,
 ];
 
@@ -363,6 +364,14 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // A shuffled copy of a list of numbers (`lower.ts` declines another
   // list), drawn as the interpreter draws (`_SYS.shuffle`).
   row('RandomShuffle', 1,         [[['list'], R, 'shuffle']],    { ...list, effect: 'effectful' }),
+  // A sorted copy of a list of numbers, NaN last (`Sort`), the indices from
+  // 1 that sort it, stable (`Ordering`), and the median of a list of
+  // numbers, NaN when an element is (`Median`): the interpreter's
+  // `median()` of `numerics/statistics.ts`.
+  row(undefined,      1,          [[['list'], I, 'sort.int']],   list),
+  row(undefined,      1,          [[['list'], R, 'sort']],       list),
+  row(undefined,      1,          [[['list'], I, 'ordering']],   list),
+  row(undefined,      1,          [[['list'], 'real-element', 'median']], list),
   // The number of elements of `Range(a, b, step)`: the engine's `rangeCount`
   // (of reals: `Range(1, 3.5)` is `[1, 2, 3]`); 0 for a count that is NaN
   // (a bound with no value), as the JavaScript spelling.
@@ -612,6 +621,8 @@ export function resultType(
 ): IRType | undefined {
   const [args, result] = signature;
   if (result === 'element') return elementType(types[args.indexOf('list')]);
+  if (result === 'real-element')
+    return { ...elementType(types[args.indexOf('list')]), lane: R };
   const lists = types.filter((t) => t.shape.length > 0);
   const shape = lists[0]?.shape ?? [];
   // Rank 1: a run-time length fits any length, and the result has the

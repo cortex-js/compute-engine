@@ -178,7 +178,7 @@ describe('COMPILE lazy infinite collections', () => {
           ),
           { fallback: false }
         )
-      ).toThrow(/the operator Reverse is not supported by the compiler/);
+      ).toThrow(/a Range of an operand that is a constant infinity or NaN/);
     });
 
     it('a bare infinite Range does not compile', () => {

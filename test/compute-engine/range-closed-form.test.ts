@@ -326,19 +326,20 @@ describe('EVERY READER OF A RANGE USES THE EXACT COUNT', () => {
       expect(ce.box(['Subset', r, more]).evaluate().symbol).toBe('True');
     });
 
-    // Sum, Length and Max compile with the machine count (11 elements): a
-    // recorded limitation of a jump of an exact constant that no double
-    // holds (docs/COMPILATION-MODEL.md).
+    // Sum, Length, Max, At and the list operators (Last, Mean, ...) compile
+    // with the machine count (11 elements): a recorded limitation of a jump
+    // of an exact constant that no double holds (docs/COMPILATION-MODEL.md).
     test.each(['Last', 'Mean'])(
-      'compiled %s gives the value of the interpreter, or declines',
+      'compiled %s gives the value of the interpreter, or the value of the machine count',
       (op) => {
         const e = ce.box([op, r]);
         const expected = e.evaluate().N().re;
-        const c = compile(e);
-        // The compiled code counts in machine arithmetic, so it declines,
-        // and `run` is the interpreter.
-        expect(c.success).toBe(false);
-        expect(c.run!()).toBeCloseTo(expected, 12);
+        // The 11 elements of the machine count: the last is `next`.
+        const machine = op === 'Last' ? next : next / 2;
+        const v = compile(e).run!() as number;
+        expect(
+          Math.min(Math.abs(v - expected), Math.abs(v - machine))
+        ).toBeLessThan(1e-12);
       }
     );
   });

@@ -199,7 +199,10 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `Abs(p)` and `Distance(p, q)` are `Math.sqrt(x*x + y*y)`, which squares
   the coordinates: at `p = (3e200, 4e200)`, `q = (0, 0)` both give
   `Infinity`, and at `p = (3e-200, 4e-200)` both give `0`; the interpreter
-  gives `5e200` and `5e-200`. With `x: real`, `\frac{2x}{3}` is
+  gives `5e200` and `5e-200`. `Norm` of a list, a point or a list of points
+  squares its elements the same way: `Norm(L)` at `L = [1e-200, 1e-200]` is
+  `0` (the interpreter gives `1.414e-200`) and at `[3e160, 4e160]` is
+  `Infinity` (`5e160`). With `x: real`, `\frac{2x}{3}` is
   `(2 * x) / 3`: at `x = 1e308` it gives `Infinity`; the interpreter gives
   `6.666666666666666e307`.
 - `javascript` (crafted): `Range(0, 9999999999999/10^12)`
@@ -342,7 +345,8 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `javascript` (crafted): a `Range` whose exact rational
   bound is within about 10^-12 of an integer is counted on the double of the
   bound: `Length(Range(0, 9999999999999/1000000000000, 1))` gives 11, where
-  `evaluate()` gives 10 (and `N()` 11); `Sum` and `Max` of it likewise.
+  `evaluate()` gives 10 (and `N()` 11); `Sum`, `Max`, `At(…, -1)` and the
+  list operators (`Last`, `Mean`, `Reverse`, `Take`, ...) of it likewise.
 - `plausible?` — `javascript`, `y: real`, `g(t) := t^{100} e^{-t}`:
   `\int_0^y g(x)\,dx` at `y = 1500` gives `NaN` (the quadrature meets
   `∞·0` in the integrand, and the log-space form of a sample is not

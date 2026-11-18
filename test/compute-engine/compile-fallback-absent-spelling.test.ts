@@ -125,7 +125,8 @@ describe('Compilation fallback: the spelling of an absent value', () => {
  * `{ lo: NaN, hi: NaN }`). A present number from the fallback is the interval
  * result `{ kind: 'interval', value: { lo, hi } }`, as a computed number of the
  * compiled code is (it was the bare `{ lo, hi }`). The fallback is forced by
- * `First`, which the interval target does not lower: `First([v])` is `v`.
+ * `Reverse`, which the interval target does not lower: `At(Reverse([v]), 1)`
+ * is `v`.
  */
 describe('Interval fallback: the spelling of an absent value', () => {
   let warn: jest.SpyInstance;
@@ -158,7 +159,10 @@ describe('Interval fallback: the spelling of an absent value', () => {
       success: boolean;
       value: unknown;
     };
-    const fallback = intervalRun(['First', ['List', json]], 0) as {
+    const fallback = intervalRun(
+      ['At', ['Reverse', ['List', json]], 1],
+      0
+    ) as {
       success: boolean;
       value: unknown;
     };
@@ -169,7 +173,7 @@ describe('Interval fallback: the spelling of an absent value', () => {
 
   test('an absent number is empty, not a NaN interval', () => {
     const { value } = intervalRun(
-      ['First', ['List', gated(['Add', 't', 1])]],
+      ['At', ['Reverse', ['List', gated(['Add', 't', 1])]], 1],
       0
     ) as { value: unknown };
     expect(value).toEqual({ kind: 'empty' });
@@ -177,7 +181,7 @@ describe('Interval fallback: the spelling of an absent value', () => {
 
   test('a present number from the fallback is an interval result', () => {
     const { success, value } = intervalRun(
-      ['First', ['List', ['Add', 't', 1]]],
+      ['At', ['Reverse', ['List', ['Add', 't', 1]]], 1],
       2
     ) as { success: boolean; value: unknown };
     expect(success).toBe(false);

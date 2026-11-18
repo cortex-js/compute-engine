@@ -630,10 +630,6 @@ const KNOWN_DECLINES = new Map<string, string>([
   // README of `compilation/ir/`: a library constant whose value is not a
   // number declines.
   ['golden', 'GoldenRatio, a library constant whose value is not a number'],
-  ['first-tuple', 'First has no row'],
-  ['second-tuple', 'Second has no row'],
-  ['mean-const', 'Mean has no row'],
-  ['median-const', 'Median has no row'],
 ]);
 
 // Previously: a Sum with a negative index and a Negate summand unrolled to

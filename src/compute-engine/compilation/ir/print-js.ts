@@ -197,6 +197,9 @@ export const JS: Syntax = deepFreeze({
     ),
     draw: '_SYS.drawNextRandomNumber()',
     shuffle: '_SYS.shuffle($0)',
+    sort: { text: '_sort($0)', helpers: ['_sort'] },
+    ordering: { text: '_ordering($0)', helpers: ['_ordering'] },
+    median: { text: '_median($0)', helpers: ['_median'] },
     binomial: '_SYS.binomial($0, $1)',
     // A count that is NaN (a bound with no value) is an empty list.
     rangecount: '(_SYS.rangeCount($0, $1, $2) || 0)',
@@ -258,6 +261,16 @@ export const JS: Syntax = deepFreeze({
     _at: 'const _at = (l, i) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : NaN; };',
     _atu: 'const _atu = (l, i) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : undefined; };',
     _atp: 'const _atp = (l, i, n) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : new Array(n).fill(NaN); };',
+    // A sorted copy, NaN last, as the interpreter's `Sort`; the indices
+    // from 1 of that order, stable, as its `Ordering`.
+    _sort:
+      'const _sort = (l) => [...l].sort((a, b) => (a < b ? -1 : a > b ? 1 : Number.isNaN(a) - Number.isNaN(b)));',
+    _ordering:
+      'const _ordering = (l) => Array.from(l, (_, i) => i).sort((i, j) => (l[i] < l[j] ? -1 : l[i] > l[j] ? 1 : Number.isNaN(l[i]) - Number.isNaN(l[j]))).map((i) => i + 1);',
+    // The interpreter's `median()` (`numerics/statistics.ts`): NaN when an
+    // element is NaN, and of no element.
+    _median:
+      'const _median = (l) => { if (l.some(Number.isNaN)) return NaN; const s = [...l].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 === 0 ? (s[m - 1] + s[m]) / 2 : s[m]; };',
     // `AssertPresent`: the interpreter's value is the error
     // `expected-present`.
     _present:

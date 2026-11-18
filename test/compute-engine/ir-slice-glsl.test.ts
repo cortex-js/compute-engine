@@ -52,9 +52,10 @@ const PINNED: [rule: string, program: unknown][] = [
 ];
 
 describe('IR slice: GLSL text', () => {
-  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a run-time index of a list of booleans or of points, a real function with no GLSL form, an integer row of reals, the Fibonacci number of an integer, a complex function with no GLSL form, and the conversions to HSL and HSV)', () => {
+  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a run-time index of a list of booleans or of points, a real function with no GLSL form, an integer row of reals, the Fibonacci number of an integer, a complex function with no GLSL form, the conversions to HSL and HSV, and a sort, an ordering and a median)', () => {
     // prettier-ignore
     const jsOnly = new Set(['draw', 'shuffle', 'rangecount', 'ashsl', 'ashsv', 'atu', 'atp',
+      'sort', 'sort.int', 'ordering', 'median',
       'rbinomial', 'rgcd', 'rlcm', 'fibonacci.int',
       'isundef', 'present.int', 'present', 'cpresent', 'present.bool',
       ...Object.keys(REAL_FUNCTIONS).filter((f) => !['fract', 'atan2', 'root', 'coth', 'gcd', 'fresnelc', 'fresnels', 'sinc', 'chop',

@@ -23,7 +23,7 @@ list literal.
 | ------------------------------ | ------------------------------------------------------------------------------ | ---------------------------------------- |
 | `operators.ts`                 | One row per operator (arity, signatures, effect, fold); region rows            | Name a target                            |
 | `lower.ts`                     | The one walk: the head's binding, the constructs, scopes and arms              | Optimize; spell                          |
-| `lower-lists.ts`               | List sources (an input, a `Range`, a build), reductions, `Max` and `Min`       |                                          |
+| `lower-lists.ts`               | List sources (an input, a `Range`, a build), reductions, `Max` and `Min`, the list operators |                             |
 | `lower-functions.ts`           | User functions by definition, signatures, the fixed point of their effects     |                                          |
 | `lower-context.ts`             | The types the three lowering files share; `Decline`                            |                                          |
 | `ir.ts`                        | Types, instructions, functions, the builder, the def-use index                 | Know a target                            |
@@ -77,8 +77,8 @@ library's everywhere. The standard handler of `PointList` is not such a handler
 (the identity of the function in the library table). Then a sub-expression that
 the slice would lower and that has no free name, no name bound by the walk, no
 effectful operation and no loop is evaluated once with `N()` and becomes a
-literal (`Mod(1, 1/10)` is exactly 0). A closed `Median(List(1, 2, 4))` is not
-folded, because `Median` is not in the slice. A sub-expression whose static type is
+literal (`Mod(1, 1/10)` is exactly 0). A closed `Mode(List(1, 2, 4))` is not
+folded, because `Mode` is not in the slice. A sub-expression whose static type is
 `error` declines (`Sin(Tuple(w))` of a vector `w`, `2·Tuple(L, L)`). A throw of
 `N()` means "not folded": the node is lowered as written, except a
 `CancellationError`, which propagates. A row that depends on an engine setting
@@ -1316,6 +1316,60 @@ one in 0..10^6 after `Math.round()` throws there; the interpreter gives an
 error). Each is one draw site ("Effects"). `RandomChoice` of another domain, and
 `RandomShuffle` of a tuple, of a list of points or of booleans, decline; GLSL
 has neither.
+
+The list operators (`lists.collection()` of `lower-lists.ts`; `First`,
+`Second`, `Third` and `Last` in `lower.ts`) are built from the operations
+above, with the interpreter's value for every length, also 0:
+
+- `First(L)`, `Second(L)`, `Third(L)` and `Last(L)` are `At(L, 1)`,
+  `At(L, 2)`, `At(L, 3)` and `At(L, -1)`, also of a tuple, under the rule of
+  `At` (NaN out of range on JavaScript, where the interpreter gives `Missing`
+  for an empty list; a point of NaN of a list of points). `Count(L)` is the
+  length, `Count(L, f)` the count of a `filter`, `IsEmpty(L)` the test of a
+  length 0.
+- `Rest`, `Most`, `Reverse`, `Take(L, m)`, `Drop(L, m)`, `RotateLeft(L, m)`
+  and `RotateRight(L, m)` (`m` 1 by default) are a build of the elements of
+  `L` at the indices they keep (`Take(L, -2)` the last two, `Take(L, 7)` of
+  three elements all three, `Drop(L, 5)` none, a rotation modulo the
+  length), of a list of numbers, of points, or of the elements of a tuple
+  (the interpreter's value is a list). A count `m` that is not an integer
+  declines (the interpreter rounds it for `Take` and `Drop`, and refuses it
+  for a rotation), and so does a list with an effect (the interpreter reads
+  the elements it keeps only). A constant length and constant indices write
+  a short list out, so GLSL compiles them for an input of a stated length
+  (`Reverse(L)` of `L: list<real^4>` is a `vec4`); a run-time length
+  declines there, and a run-time count of a rotation is a modulo of the
+  index (`RotateLeft(L, n)` of `L: list<real^3>`).
+- `Mean(L1, …)` is the sum from 0, in order, of the elements and the
+  scalars, divided by their count: the interpreter's `mean()`, NaN of no
+  element; of complex numbers it declines. `Median(L)`, `Sort(L)` and
+  `Ordering(L)` of one list of real or integer numbers are the operations
+  `median`, `sort` and `ordering`, the JavaScript helpers `_median` (the
+  interpreter's `median()`, NaN when an element is NaN), `_sort` and
+  `_ordering` (NaN last, stable, as the interpreter's); `Sort` with an
+  order, of a tuple or of several operands declines. `Unique(L)` is a
+  `filter` of the elements that no earlier element equals (NaN equals NaN,
+  as in the interpreter): a loop over the elements before, quadratic in the
+  length. GLSL has none of these four operations.
+- `Dot(u, v)` of two lists of real numbers or points of one length is the
+  sum from 0 of the products of their elements (of two stated lengths that
+  differ it declines); of a list of points and a point, or of two lists of
+  points pair by pair, the list of those sums, as the interpreter
+  broadcasts. `Norm(x)` of a real scalar is `Abs(x)`; of a point or a list
+  of points, `Abs` (the Euclidean norm); of a list of real numbers, of the
+  order 2 (by default) the square root of the sum of the squares (the
+  interpreter's sum of squares; it scales a vector whose squares would
+  overflow or underflow, which the compiled code does not: a known
+  limitation), of the order 1 the sum of the absolute values, of the order
+  `Infinity` their `Max` from 0. Another order (an order that is not a
+  positive number also for a scalar), a matrix and complex elements decline.
+
+In the interval mode `Count`, `IsEmpty`, `First`, `Second`, `Third`,
+`Last`, `Dot` and `Norm` compile (they read a length or an element, or sum
+and compare the elements); the others decline with
+`<head> on interval-js`: the indices of a build that reorders a list, the
+quotient of a sum by a count, and the operations `sort`, `ordering` and
+`median` have no spelling of the mode.
 
 `Binomial(n, k)` and `Choose(n, k)` of integers are `_SYS.binomial` on
 JavaScript (exact below 2^53, the interpreter's value for every pair of

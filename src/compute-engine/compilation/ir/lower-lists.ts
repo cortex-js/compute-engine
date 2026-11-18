@@ -14,6 +14,7 @@ import {
 import type { Expression } from '../../global-types.js';
 import {
   elementType,
+  isSubLane,
   lengthValues,
   outsOf,
   recursiveFunctions,
@@ -84,6 +85,26 @@ export function operatorLiteral(
  *  `cx.value()`, which lowers a host handler's answer). */
 export const literalList = (cx: Lowering, l: Expression): l is Fn =>
   isFunction(l, 'List') && cx.isLibrary(l);
+
+/** The numbers of operands of the list operators that compile
+ *  (`collection()`); `Mean` takes any number but 0. */
+const ARITY: Readonly<Record<string, readonly number[]>> = Object.freeze({
+  Count: [1, 2],
+  IsEmpty: [1],
+  Rest: [1],
+  Most: [1],
+  Reverse: [1],
+  Take: [2],
+  Drop: [2],
+  RotateLeft: [1, 2],
+  RotateRight: [1, 2],
+  Median: [1],
+  Sort: [1],
+  Ordering: [1],
+  Unique: [1],
+  Dot: [2],
+  Norm: [1, 2],
+});
 
 export function listLowering(cx: Lowering) {
   const { b, type } = cx;
@@ -702,7 +723,297 @@ export function listLowering(cx: Lowering) {
     return built(e, ends[ends.length - 1], (k) => at(k, 0));
   };
 
+  /** The integer `head` (`Add`, `Subtract`, `Min`, `Max`, `Mod`) of the
+   *  integers `x` and `y`: a constant when both are (a constant length and
+   *  constant indices write a short list out, and GLSL reads no other). */
+  const int = (e: Fn, head: string, x: V, y: V): V => {
+    const [p, q] = [cx.constant(x), cx.constant(y)];
+    if (
+      p !== undefined &&
+      q !== undefined &&
+      type(x).lane === 'integer' &&
+      type(y).lane === 'integer' &&
+      (head !== 'Mod' || q > 0)
+    ) {
+      const f: Record<string, number> = {
+        Add: p + q,
+        Subtract: p - q,
+        Min: Math.min(p, q),
+        Max: Math.max(p, q),
+        Mod: ((p % q) + q) % q,
+      };
+      if (head in f) return integer(f[head]);
+    }
+    return cx.apply(e, head, [x, y]);
+  };
+
+  /** The list of `length` elements whose element at `k` is the element of
+   *  `s` at `index(k)`, from 0. */
+  const reindexed = (e: Fn, s: Source, length: V, index: (k: V) => V): V =>
+    over(e, { length, at: (k) => s.at(index(k)) }, '', (x) => x, false, e);
+
+  /** The count of `Take`, `Drop`, `RotateLeft` and `RotateRight`: an
+   *  integer (the interpreter rounds a real count of `Take` and `Drop` and
+   *  refuses one of a rotation; a real count declines). */
+  const count = (x: Expression): V => {
+    const v = cx.scalar(x);
+    if (type(v).lane !== 'integer')
+      decline(x, 'a count that is not an integer');
+    return v;
+  };
+
+  /** The value of a real list `x` for `Median` and `Sort`: one list of
+   *  real or integer numbers, not a tuple. */
+  const reals = (e: Fn): V => {
+    const l = cx.value(e.ops[0])!;
+    if (
+      cx.tuples.has(l) ||
+      type(l).shape.length !== 1 ||
+      !isSubLane(type(l).lane, 'real')
+    )
+      decline(e, `${e.operator} of other than one list of real numbers`);
+    return l;
+  };
+
+  /** The sum from 0 of `f` at each index of the length `n`. */
+  const sumOf = (e: Fn, n: V, f: (k: V) => V): V =>
+    reduce(e, rowOfHead(cx.rows, 'Add')!, [{ length: n, at: f }], integer(0));
+
+  /** `Dot(u, v)` of two vectors of real numbers (lists of numbers or
+   *  points): the sum from 0 of the products of the elements. A list of
+   *  points with a point, or two lists of points pair by pair, is the list
+   *  of those sums, as the interpreter broadcasts it. */
+  const dot = (e: Fn): V => {
+    const [u, v] = e.ops.map((x) => cx.value(x)!);
+    const kind = (w: V) => {
+      const t = type(w);
+      if (!isSubLane(t.lane, 'real')) return undefined;
+      if (t.shape.length === 1) return 'vector';
+      return t.shape.length === 2 && cx.tuples.get(w) === 1
+        ? 'points'
+        : undefined;
+    };
+    const [ku, kv] = [kind(u), kind(v)];
+    if (ku === undefined || kv === undefined)
+      decline(
+        e,
+        'Dot of other than vectors, points or lists of points of real numbers'
+      );
+    const inner = (a: V, c: V): V => {
+      const [sa, sc] = [listSource(a), listSource(c)];
+      const [na, nc] = [cx.constant(sa.length), cx.constant(sc.length)];
+      if (na !== undefined && nc !== undefined && na !== nc)
+        decline(e, 'Dot of vectors of two lengths');
+      return sumOf(e, sa.length, (k) =>
+        cx.apply(e, 'Multiply', [sa.at(k), sc.at(k)])
+      );
+    };
+    if (ku === 'vector' && kv === 'vector') return inner(u, v);
+    // A list of points with a list of numbers (a vector or a row of a
+    // matrix) has no value in the interpreter.
+    if (
+      (ku === 'vector' && !cx.tuples.has(u)) ||
+      (kv === 'vector' && !cx.tuples.has(v))
+    )
+      decline(e, 'Dot of a list of points and a value that is not a point');
+    const [su, sv] = [listSource(u), listSource(v)];
+    if (ku === 'points' && kv === 'points') {
+      const [nu, nv] = [cx.constant(su.length), cx.constant(sv.length)];
+      if (nu !== undefined && nv !== undefined && nu !== nv)
+        decline(e, 'Dot of lists of points of two lengths');
+    }
+    const s = ku === 'points' ? su : sv;
+    return over(
+      e,
+      { length: s.length, at: (k) => k },
+      '',
+      (_x, k) =>
+        inner(ku === 'points' ? su.at(k) : u, kv === 'points' ? sv.at(k) : v),
+      false,
+      e
+    );
+  };
+
+  /** `Norm(x)` and `Norm(x, p)`: of a real scalar its `Abs`; of a point
+   *  or a list of points (order 2) the Euclidean norm of `Abs`; of a list of
+   *  real numbers, the order 1 (the sum of the absolute values), 2 (the
+   *  square root of the sum of the squares) or `Infinity` (the largest
+   *  absolute value, from 0). */
+  const norm = (e: Fn): V => {
+    const x = cx.value(e.ops[0])!;
+    const t = type(x);
+    const o = e.ops[1];
+    const p =
+      o === undefined
+        ? 2
+        : isSymbol(o, 'PositiveInfinity')
+          ? Infinity
+          : isNumber(o) && o.im === 0
+            ? o.re
+            : NaN;
+    if (!isSubLane(t.lane, 'real'))
+      decline(e, 'Norm of a value that is not real');
+    // An order that is not a positive number (a symbol, 0, -1) has no
+    // value in the interpreter, or one this code does not compute.
+    if (!(p > 0)) decline(e, 'Norm of an order that is not a positive number');
+    if (t.shape.length === 0 || (cx.tuples.has(x) && p === 2))
+      return cx.apply(e, 'Abs', [x]);
+    if (
+      t.shape.length !== 1 ||
+      cx.tuples.has(x) ||
+      ![1, 2, Infinity].includes(p)
+    )
+      decline(
+        e,
+        'Norm of a matrix, of a point with an order other than 2, or of an order other than 1, 2 and Infinity'
+      );
+    const s = listSource(x);
+    const abs = (k: V) => cx.apply(e, 'Abs', [s.at(k)]);
+    if (p === 1) return sumOf(e, s.length, abs);
+    if (p === Infinity)
+      return reduce(
+        e,
+        rowOfHead(cx.rows, 'Max')!,
+        [{ length: s.length, at: abs }],
+        integer(0)
+      );
+    return cx.apply(e, 'Sqrt', [
+      sumOf(e, s.length, (k) => {
+        // A square, not a product of two reads: the interval mode encloses
+        // a square of a box that crosses 0 from 0, with no domain mark.
+        return cx.apply(e, 'Power', [s.at(k), integer(2)]);
+      }),
+    ]);
+  };
+
+  /** The heads of a list that `lower.ts` hands over (`README.md`,
+   *  "Lists", the list operators). */
+  const collection = (e: Fn): V => {
+    const h = e.operator;
+    // The forms that compile (`Mean` takes any number of operands).
+    const arity = ARITY[h] ?? [e.nops || 1];
+    if (!arity.includes(e.nops))
+      decline(e, `${h} of ${e.nops} operands is not supported by the compiler`);
+    if (h === 'Dot') return dot(e);
+    if (h === 'Norm') return norm(e);
+    if (cx.interval && h !== 'Count' && h !== 'IsEmpty')
+      decline(e, `${h} on interval-js`);
+    if (h === 'Median') return cx.apply(e, op('median'), [reals(e)]);
+    if (h === 'Sort') {
+      const l = reals(e);
+      const lane = type(l).lane === 'integer' ? 'sort.int' : 'sort';
+      return cx.apply(e, op(lane), [l]);
+    }
+    if (h === 'Ordering') return cx.apply(e, op('ordering'), [reals(e)]);
+    if (h === 'Unique') {
+      // The elements that no earlier element equals (NaN equals NaN, as
+      // the interpreter's), in order: a filter whose test is a loop over
+      // the elements before.
+      const s = listSource(reals(e));
+      const or = rowOfHead(cx.rows, 'Or')!;
+      const nan = op('isnan');
+      return over(
+        e,
+        s,
+        '',
+        (x, k) => {
+          const seen = accumulate(
+            e,
+            or,
+            b.constant(false, 'boolean'),
+            integer(0),
+            cx.apply(e, 'Subtract', [k, integer(1)]),
+            (j) => {
+              const y = s.at(j);
+              return cx.apply(e, or, [
+                cx.apply(e, 'Equal', [y, x]),
+                cx.apply(e, 'And', [
+                  cx.apply(e, nan, [y]),
+                  cx.apply(e, nan, [x]),
+                ]),
+              ]);
+            }
+          );
+          return cx.apply(e, 'Not', [seen]);
+        },
+        true,
+        e
+      );
+    }
+    if (h === 'Mean') {
+      // The sum from 0, in order, over the count of the elements and of
+      // the scalars: the interpreter's `mean()` (NaN of no element).
+      const items = e.ops.map((x) => source(x, true, true));
+      const sum = reduce(e, rowOfHead(cx.rows, 'Add')!, items, integer(0));
+      if (type(sum).lane === 'complex') decline(e, 'Mean of complex numbers');
+      const n = items
+        .map((x) => (typeof x === 'number' ? integer(1) : x.length))
+        .reduce((a, c) => int(e, 'Add', a, c));
+      return cx.apply(e, 'Divide', [sum, n]);
+    }
+    if (h === 'Count' && e.nops === 2)
+      return listSource(build(e, e.ops[0], e.ops[1], true)).length;
+    const effects = b.effects;
+    const s = source(e.ops[0], false, true);
+    const n = s.length;
+    if (h === 'Count' || h === 'IsEmpty')
+      return h === 'Count' ? n : cx.apply(e, 'Equal', [n, integer(0)]);
+    // The interpreter's list is lazy: it reads the elements kept only.
+    if (b.effects > effects) decline(e, `${h} of a list with an effect`);
+    const [zero, one] = [integer(0), integer(1)];
+    if (h === 'Rest' || h === 'Most') {
+      const length = int(e, 'Max', int(e, 'Subtract', n, one), zero);
+      return reindexed(e, s, length, (k) =>
+        h === 'Rest' ? int(e, 'Add', k, one) : k
+      );
+    }
+    if (h === 'Reverse')
+      return reindexed(e, s, n, (k) =>
+        int(e, 'Subtract', int(e, 'Subtract', n, one), k)
+      );
+    if (h === 'Take' || h === 'Drop') {
+      // `Take(L, m)` keeps the first `m` elements, the last `-m` for a
+      // negative `m`; `Drop(L, m)` keeps the others; at most the length.
+      const m = count(e.ops[1]);
+      const c = cx.constant(m);
+      const size =
+        c === undefined ? cx.apply(e, 'Abs', [m]) : integer(Math.abs(c));
+      const length =
+        h === 'Take'
+          ? int(e, 'Min', size, n)
+          : int(e, 'Max', int(e, 'Subtract', n, size), zero);
+      // The first element kept: past the others for a negative count of
+      // `Take` and a nonnegative count of `Drop`.
+      const tail = int(e, 'Subtract', n, length);
+      const late = h === 'Take' ? 'Less' : 'GreaterEqual';
+      const start =
+        c === undefined
+          ? cx.branch(
+              e,
+              cx.apply(e, late, [m, zero]),
+              () => tail,
+              () => zero,
+              true
+            )!
+          : (h === 'Take' ? c < 0 : c >= 0)
+            ? tail
+            : zero;
+      return reindexed(e, s, length, (k) => int(e, 'Add', start, k));
+    }
+    if (h === 'RotateLeft' || h === 'RotateRight') {
+      // The element at `k` is the element at `k + m`, modulo the length
+      // (`RotateLeft(L)` is `RotateLeft(L, 1)`; a negative `m` rotates the
+      // other way).
+      const m = e.nops === 2 ? count(e.ops[1]) : one;
+      return reindexed(e, s, n, (k) =>
+        int(e, 'Mod', int(e, h === 'RotateLeft' ? 'Add' : 'Subtract', k, m), n)
+      );
+    }
+    decline(e, `the operator ${h} is not supported by the compiler`);
+  };
+
   return {
+    collection,
     source,
     listSource,
     built,

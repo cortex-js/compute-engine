@@ -90,9 +90,7 @@ describe('Filter and Nothing', () => {
     ce.declare('xs', 'list<integer | nothing>');
     const result = compile(ce.box(['Count', 'xs', ['Function', 'True', 'x']]));
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(
-      /the operator Count is not supported by the compiler/
-    );
+    expect(result.error).toMatch(/the input xs of type/);
   });
 
   test('positive indexing scans only through the requested survivor', () => {
@@ -226,7 +224,7 @@ describe('Filter and Nothing', () => {
       const result = compile(ce.box(['Take', source, 'n']));
       expect(result.success).toBe(false);
       expect(result.error).toMatch(
-        /the operator Take is not supported by the compiler/
+        /Map of a function that is not a literal|a Range of an operand that is a constant infinity/
       );
     }
   });
